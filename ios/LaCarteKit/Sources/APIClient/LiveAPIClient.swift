@@ -7,12 +7,16 @@ extension APIClient: DependencyKey {
 
   /// Launch environment (set by UI tests, or in the Xcode scheme):
   /// - `LA_CARTE_API=mock`      → in-memory deck seeded with `[Card].fixtures` (deterministic screenshots)
+  /// - `LA_CARTE_API=mock-notes` → in-memory deck seeded with `[Note].fixtures` (several directions, a person)
   /// - `LA_CARTE_API_URL=…`     → base URL of the API, wins over the one entered in Settings (no default)
   /// - `LA_CARTE_API_TOKEN=…`   → bearer token, wins over the one entered in Settings
   public static var liveValue: APIClient {
     let environment = ProcessInfo.processInfo.environment
     if environment["LA_CARTE_API"] == "mock" {
       return .inMemory(cards: .fixtures)
+    }
+    if environment["LA_CARTE_API"] == "mock-notes" {
+      return .inMemory(notes: .fixtures)
     }
     return .live(
       baseURL: {
@@ -50,12 +54,15 @@ extension APIClient: DependencyKey {
   }
 
   /// `baseURL` and `token` are read on every request and every `isConfigured` check,
-  /// so Settings changes apply without a relaunch.
+  /// so Settings changes apply without a relaunch. Tests replace `load` to capture requests.
   public static func live(
     baseURL: @escaping @Sendable () -> URL?,
-    token: @escaping @Sendable () -> String?
+    token: @escaping @Sendable () -> String?,
+    load: @escaping @Sendable (URLRequest) async throws -> (Data, URLResponse) = {
+      try await URLSession.shared.data(for: $0)
+    }
   ) -> APIClient {
-    let http = HTTP(baseURL: baseURL, token: token)
+    let http = HTTP(baseURL: baseURL, token: token, load: load)
     return APIClient(
       cards: { query in
         // 500 is the API max: the deck list must not be silently cut at the default 100.
@@ -81,6 +88,20 @@ extension APIClient: DependencyKey {
       stats: {
         try await http.send("GET", "stats")
       },
+      notes: { query in
+        var parameters = ["limit": "500"]
+        parameters["query"] = query
+        return try await http.send("GET", "notes", query: parameters)
+      },
+      addNote: { draft in
+        try await http.send("POST", "notes", body: draft)
+      },
+      updateNote: { id, draft in
+        try await http.send("PATCH", "notes/\(id)", body: NoteUpdate(draft))
+      },
+      deleteNote: { id in
+        _ = try await http.data("DELETE", "notes/\(id)")
+      },
       isConfigured: {
         baseURL() != nil && token() != nil
       }
@@ -96,15 +117,28 @@ public struct APIError: Error, Equatable {
   public var isUnauthorized: Bool { statusCode == 401 || statusCode == 403 }
 }
 
+/// `PATCH /notes/{id}` body: the type is fixed at creation, and fields are merged key by key on the server,
+/// so every field of the type is sent for a cleared one to be cleared.
+private struct NoteUpdate: Encodable {
+  var fields: [String: String]
+  var directions: [Direction]
+
+  init(_ draft: NoteDraft) {
+    fields = Dictionary(uniqueKeysWithValues: draft.type.fields.map { ($0, draft.fields[$0] ?? "") })
+    directions = draft.directions
+  }
+}
+
 private struct HTTP: Sendable {
   let baseURL: @Sendable () -> URL?
   let token: @Sendable () -> String?
+  let load: @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
   func send<Response: Decodable>(
     _ method: String,
     _ path: String,
     query: [String: String] = [:],
-    body: [String: String]? = nil
+    body: (any Encodable)? = nil
   ) async throws -> Response {
     let data = try await data(method, path, query: query, body: body)
     return try JSONDecoder.api.decode(Response.self, from: data)
@@ -114,7 +148,7 @@ private struct HTTP: Sendable {
     _ method: String,
     _ path: String,
     query: [String: String] = [:],
-    body: [String: String]? = nil
+    body: (any Encodable)? = nil
   ) async throws -> Data {
     guard var url = baseURL()?.appending(path: path) else { throw URLError(.unsupportedURL) }
     if !query.isEmpty {
@@ -130,7 +164,7 @@ private struct HTTP: Sendable {
       request.httpBody = try JSONEncoder().encode(body)
     }
 
-    let (data, response) = try await URLSession.shared.data(for: request)
+    let (data, response) = try await load(request)
     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
     guard (200..<300).contains(statusCode) else {
       throw APIError(statusCode: statusCode, message: String(decoding: data, as: UTF8.self))
