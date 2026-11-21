@@ -32,8 +32,10 @@ reports: it fixes the note, drops the card, or asks the user first.
 
 ## Model (shared)
 - **Report** = `{id, card_id, note_id, reason, comment, status, resolution, created_at, updated_at, resolved_at}`.
-  - `reason`: `wrong | drop | doubt | rephrase | other`.
-  - `comment`: required (trimmed, 1–500 chars) when the reason is `other`, otherwise optional.
+  - `reason`: `wrong | drop | doubt | rephrase | other | broken_photo`. *Amended 2026-11-21 (user):* `broken_photo` is
+    filed only by the app, automatically, and is never offered in the menu.
+  - `comment`: required (trimmed, 1–500 chars) when the reason is `other`, otherwise optional. For `broken_photo`
+    the app may send the failing URL as the comment (over 500 chars: truncate on the app side).
   - `status`: `open | waiting_user | resolved | dismissed`.
   - `resolution`: the agent's last note (its question, or what it did).
   - `card_id` and `note_id` have **no foreign keys**, like `ReviewLog`, so a report outlives its card.
@@ -66,6 +68,8 @@ or comment returns 422 `{"detail": …}`.
   | `deleted` | `resolved` | deleted with `delete_card` semantics. If the card is already gone, this just closes the report |
 
   These calls raise a `ToolError`: an unknown report, or a report that's already `resolved` / `dismissed`.
+- *Amended 2026-11-21 (user):* `POST /cards/{id}/report` is **idempotent per card and reason** for `broken_photo`: if
+  the card already has an active (`open` / `waiting_user`) `broken_photo` report, return it (200, no new row).
 - Add this paragraph to `INSTRUCTIONS`, as written:
   ```
   Reports. While studying, the user flags cards; a reported card is out of study until its report is
@@ -76,6 +80,9 @@ or comment returns 422 `{"detail": …}`.
     or `kept`.
   - rephrase: ask the user how they want it; change nothing before they answer; then `fixed`.
   - other: read `comment`; ask the user if unclear.
+  - broken_photo: the app filed it because a photo failed to load (`comment` may hold the URL). Check the URL.
+    Look for a working public URL only if the user gave a source; otherwise ask the user for a new photo URL,
+    or remove the photo direction. Then `update_note` and close it with `fixed`.
   When you ask the user, first set `waiting_user` with your question as `note`.
   ```
 
@@ -93,6 +100,9 @@ or comment returns 422 `{"detail": …}`.
 | 9 | Two active reports on one card: the card stays held until both are closed |
 | 10 | `INSTRUCTIONS` contains the reports paragraph. Tool docstrings say what each outcome does to the card |
 | 11 | `docs/architecture.md`: the REST table row, the `report` table, the "held" rule and the two MCP tools |
+| 12 | *Amended 2026-11-21 (user).* `POST /cards/{id}/report {"reason": "broken_photo"}` (comment optional, may be a URL) → 201, `status` `open`; the card is held like any report |
+| 13 | *Amended.* A second `broken_photo` POST on a card with an active `broken_photo` report returns the existing report (200, same `id`), creates no row. After it's closed (`fixed`), a new POST creates a new report |
+| 14 | *Amended.* `INSTRUCTIONS` contains the `broken_photo` line. `broken_photo` never needs a comment (no 422). Other reasons are not deduplicated |
 
 ---
 
@@ -115,6 +125,9 @@ at normalized (0.08, 0.08), clear of the text.
 | 9 | When the report fails (stub 500, or offline): the card stays revealed, the buttons are enabled, `study.reportNotice` reads "Couldn't send the report", and the phase stays `.studying`. The next rating, edit or report clears it | unit + UI (stub) |
 | 10 | A reported card doesn't come back on pull-to-refresh (`InMemoryAPIClient` holds it like the API). Refresh and foreground reloads are skipped while a report is in flight | unit + UI (mock) |
 | 11 | `APIClient.reportCard` encodes the body as in #5 / #7 and accepts a 201 with the `Report` JSON (the body is ignored) | unit (`APIClientTests`) |
+| 13 | *Amended 2026-11-21 (user).* Prompt-side photo fails (image error, or no load within 10 s): the app sends `POST /cards/{id}/report` with `broken_photo` (comment = the URL or omitted) silently, removes the card from the session and shows the next card. No dialog, notice or broken card is ever shown. If it was the last card: "All caught up" | unit (`TestClock`) + UI (stub, bad URL) |
+| 14 | *Amended.* Answer-side only photo fails: the card shows normally with the failure placeholder and text fields, and the app sends the same `broken_photo` report once. The report holds the card (API rule), so after the user rates it the card is not served again until restored; the session is not interrupted | unit + UI (stub) |
+| 15 | *Amended.* At most one `broken_photo` report per card per session is sent (a re-render or retry doesn't resend). A failed send is silent and not retried until the card shows again. The menu never lists `broken_photo` (#1 unchanged) | unit |
 | 12 | Live (`scripts/e2e.sh`, runs last): the runner adds a card with `POST /cards`, the app refreshes, reveals it and reports "I don't want this card", then `GET /cards/due` from the runner doesn't include it | UI (`_liveAPI`) |
 
 ### Screens & states
@@ -130,7 +143,8 @@ visible), `study-report-failed` (light), `study-report-live` (light, e2e).
 ### TCA shape
 No new module. `StudyFeature` + `StudyView`, `APIClient`.
 - `APIClient`: `reportCard: @Sendable (_ id: Card.ID, _ reason: ReportReason, _ comment: String?) async throws -> Void`.
-  `ReportReason: String, Codable, CaseIterable` (`wrong, drop, doubt, rephrase, other`) goes in `Models.swift`. The
+  `ReportReason: String, Codable, CaseIterable` (`wrong, drop, doubt, rephrase, other, broken_photo`; the menu iterates
+  the first five only) goes in `Models.swift`. The
   in-memory client keeps a set of reported ids and leaves them out of `dueCards` and `stats.due`.
 - State (new):
   ```swift
@@ -172,6 +186,15 @@ No new module. `StudyFeature` + `StudyView`, `APIClient`.
     tests are deferred).
   - Vanilla SwiftUI presentation, not `ConfirmationDialogState`, so the buttons can carry ids and the alert can hold
     a text field.
+
+*Amended 2026-11-21 (user), broken photo.* Decision: answer-side reports **hold the card too**, since siblings share
+the note's photo field and one rule is simpler. Siblings are each reported only when reached (no fan-out). The photo
+view reports a load failure (error or 10 s timeout) to `StudyFeature` as `photoLoadFailed(cardID:, url:, side:)`.
+- Prompt side: if `canReport`-style guards allow (card still current), send `report(.broken_photo, url)` without
+  setting `isReportMenuShown` or `reportNotice`, then remove the card as in `reportResponse` success, with no notice.
+  The report runs outside `isReviewing` guards for the prompt case since the card isn't revealed.
+- Answer side: send the report in the background, keep the card, no notice, no state change.
+- Dedup: `reportedBrokenPhotos: Set<Card.ID>` in state; skip if present. The API is idempotent too.
 
 ### Accessibility identifiers
 New: `study.report.wrong`, `study.report.drop`, `study.report.doubt`, `study.report.rephrase`, `study.report.other`
