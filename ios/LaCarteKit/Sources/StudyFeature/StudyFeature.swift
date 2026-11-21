@@ -27,6 +27,20 @@ public struct StudyFeature {
       phase == .studying && isRevealed && editing == nil && !isReviewing
     }
 
+    /// Inline edit (010) needs one text field on each side; photo and multi-field cards use the deck editor (014d).
+    var canEditInline: Bool {
+      guard let card = cards.first else { return false }
+      return card.prompt.count == 1 && card.answer.count == 1 && !card.prompt.contains(Card.photoField)
+        && !card.answer.contains(Card.photoField)
+    }
+
+    /// What a person card asks to recall, from its answer labels: "Name and description?". Nil for basic cards.
+    var answerHint: String? {
+      guard let card = cards.first, card.type == .person else { return nil }
+      let list = card.shown(card.answer).formatted(.list(type: .and).locale(Locale(identifier: "en_US")))
+      return list.prefix(1).uppercased() + list.dropFirst() + "?"
+    }
+
     public init() {}
 
     /// The side of the revealed card being edited in place (spec 010).
@@ -132,10 +146,10 @@ public struct StudyFeature {
 
       case let .textDoubleTapped(field):
         guard state.isRevealed, state.editing == nil, !state.isSavingEdit, state.phase == .studying,
-          let card = state.cards.first
+          state.canEditInline, let card = state.cards.first
         else { return .none }
         state.editing = field
-        state.draft = field == .front ? card.front : card.back
+        state.draft = card.text(field)
         state.editFailed = false
         return .cancel(id: CancelID.load)
 
@@ -244,16 +258,13 @@ public struct StudyFeature {
     state.editing = nil
     let text = state.draft.trimmingCharacters(in: .whitespacesAndNewlines)
     var card = previous
-    switch field {
-    case .front: card.front = text
-    case .back: card.back = text
-    }
+    card.setText(text, for: field)
     guard !text.isEmpty, card != previous else { return .none }
     state.cards[id: card.id] = card
     state.isSavingEdit = true
     return .run { [apiClient, card] send in
       await send(
-        .editSaveResponse(Result { try await apiClient.updateCard(card.id, card.front, card.back) }, previous: previous)
+        .editSaveResponse(Result { try await apiClient.updateCard(card.id, card.text(.front), card.text(.back)) }, previous: previous)
       )
     }
   }
@@ -271,5 +282,32 @@ public struct StudyFeature {
       await send(.cardsResponse(Result { try await apiClient.dueCards(100) }))
     }
     .cancellable(id: CancelID.load, cancelInFlight: true)
+  }
+}
+
+extension Card {
+  static let photoField = "photo"
+
+  /// The fields of `names` that have a value: an empty field isn't on the card.
+  func shown(_ names: [String]) -> [String] {
+    names.filter { fields[$0]?.isEmpty == false }
+  }
+
+  /// The prompt (`.front`) or answer (`.back`) text of a card with one text field per side (`canEditInline`).
+  func text(_ side: StudyFeature.State.Field) -> String {
+    fields[fieldName(side)] ?? ""
+  }
+
+  /// Updates the note's field and the card's rendered side together, as the server would.
+  mutating func setText(_ text: String, for side: StudyFeature.State.Field) {
+    fields[fieldName(side)] = text
+    switch side {
+    case .front: front = text
+    case .back: back = text
+    }
+  }
+
+  private func fieldName(_ side: StudyFeature.State.Field) -> String {
+    side == .front ? prompt[0] : answer[0]
   }
 }

@@ -171,10 +171,8 @@ public struct StudyView: View {
       ScrollViewReader { proxy in
         ScrollView {
           VStack(spacing: Theme.Spacing.m) {
-            side(.front, text: card.front, font: .cardFace, color: Theme.ink)
-            side(.back, text: card.back, font: .body, color: Theme.secondaryInk)
-              .opacity(store.isRevealed ? 1 : 0)
-              .accessibilityHidden(!store.isRevealed)
+            prompt(card)
+            answerSlot(card)
           }
           .multilineTextAlignment(.center)
           .frame(maxWidth: .infinity)
@@ -283,13 +281,82 @@ public struct StudyView: View {
           if canEdit {
             Button("Edit") { store.send(.textDoubleTapped(field)) }
           }
-          if store.canRate {
-            ForEach(Rating.allCases, id: \.self) { rating in
-              Button(Self.title(rating)) { store.send(.ratingTapped(rating)) }
-            }
-          }
+          ratingActions
         }
         .accessibilityIdentifier("study.\(name)")
+    }
+  }
+
+  @ViewBuilder private var ratingActions: some View {
+    if store.canRate {
+      ForEach(Rating.allCases, id: \.self) { rating in
+        Button(Self.title(rating)) { store.send(.ratingTapped(rating)) }
+      }
+    }
+  }
+
+  /// The prompt fields (spec 014d): a photo replaces the centered word; the first text field is the card face.
+  @ViewBuilder private func prompt(_ card: Card) -> some View {
+    if store.canEditInline {
+      side(.front, text: card.text(.front), font: .cardFace, color: Theme.ink)
+    } else {
+      let firstText = card.shown(card.prompt).first { $0 != Card.photoField }
+      VStack(spacing: Theme.Spacing.s) {
+        ForEach(card.shown(card.prompt), id: \.self) { name in
+          field(
+            name, of: card, font: name == firstText ? .cardFace : .body,
+            color: name == firstText ? Theme.ink : Theme.secondaryInk
+          )
+        }
+      }
+      .accessibilityElement(children: .contain)
+      .accessibilityActions { ratingActions }
+      .accessibilityIdentifier("study.front")
+    }
+  }
+
+  /// The answer and, before reveal, a person card's hint share one slot, so the prompt never moves.
+  private func answerSlot(_ card: Card) -> some View {
+    ZStack {
+      if let hint = store.answerHint {
+        Text(hint)
+          .font(.meta)
+          .foregroundStyle(Theme.secondaryInk)
+          .opacity(store.isRevealed ? 0 : 1)
+          .accessibilityHidden(store.isRevealed)
+          .accessibilityIdentifier("study.answerHint")
+      }
+      answer(card)
+        .opacity(store.isRevealed ? 1 : 0)
+        .accessibilityHidden(!store.isRevealed)
+    }
+  }
+
+  @ViewBuilder private func answer(_ card: Card) -> some View {
+    if store.canEditInline {
+      side(.back, text: card.text(.back), font: .body, color: Theme.secondaryInk)
+    } else {
+      VStack(spacing: Theme.Spacing.xs) {
+        ForEach(card.shown(card.answer), id: \.self) { name in
+          field(name, of: card, font: .body, color: Theme.secondaryInk)
+        }
+      }
+      .accessibilityElement(children: .contain)
+      .accessibilityActions { ratingActions }
+      .accessibilityIdentifier("study.back")
+    }
+  }
+
+  /// A photo field shows the image at its public URL, never the URL text.
+  @ViewBuilder
+  private func field(_ name: String, of card: Card, font: Font, color: ThemeColor) -> some View {
+    if name == Card.photoField {
+      CardPhoto(url: card.fields[name].flatMap(URL.init(string:)), style: .card)
+        .accessibilityIdentifier("study.photo")
+    } else {
+      Text(card.fields[name] ?? "")
+        .font(font)
+        .foregroundStyle(color)
     }
   }
 
@@ -398,6 +465,12 @@ public struct StudyView: View {
 #Preview("Not set up") {
   StudyView(store: Store(initialState: StudyFeature.State()) { StudyFeature() } withDependencies: {
     $0.apiClient.isConfigured = { false }
+  })
+}
+
+#Preview("Person photo") {
+  StudyView(store: Store(initialState: StudyFeature.State()) { StudyFeature() } withDependencies: {
+    $0.apiClient = .inMemory(notes: .fixtures)
   })
 }
 

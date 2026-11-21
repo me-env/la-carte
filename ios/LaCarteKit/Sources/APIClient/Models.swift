@@ -80,7 +80,7 @@ public enum NoteType: String, Codable, CaseIterable, Sendable {
   public var fields: [String] {
     switch self {
     case .basic: ["front", "back"]
-    case .person: ["photo", "name", "role", "context"]
+    case .person: ["photo", "name", "description"]
     }
   }
 }

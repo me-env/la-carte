@@ -593,7 +593,7 @@ struct StudyFeatureTests {
     let updates = LockIsolated<[(Card.ID, String, String)]>([])
     let (responses, respond) = AsyncStream.makeStream(of: Card.self)
     var saved = cards[0]
-    saved.back = "a happy accident"
+    saved.setText("a happy accident", for: .back)
     let store = TestStore(initialState: revealed(cards)) {
       StudyFeature()
     } withDependencies: {
@@ -613,7 +613,7 @@ struct StudyFeatureTests {
     }
     await store.send(.editEnded) {
       $0.editing = nil
-      $0.cards[0].back = "a happy accident"
+      $0.cards[0].setText("a happy accident", for: .back)
       $0.isSavingEdit = true
     }
     respond.yield(saved)
@@ -634,7 +634,7 @@ struct StudyFeatureTests {
     } withDependencies: { [cards] in
       $0.apiClient.updateCard = { _, _, back in
         var card = cards[0]
-        card.back = back
+        card.setText(back, for: .back)
         return card
       }
     }
@@ -642,7 +642,7 @@ struct StudyFeatureTests {
     await store.send(.draftChanged("a happy accident\n")) {
       $0.draft = "a happy accident"
       $0.editing = nil
-      $0.cards[0].back = "a happy accident"
+      $0.cards[0].setText("a happy accident", for: .back)
       $0.isSavingEdit = true
     }
     await store.receive(\.editSaveResponse) {
@@ -659,7 +659,7 @@ struct StudyFeatureTests {
     } withDependencies: { [cards] in
       $0.apiClient.updateCard = { _, _, back in
         var card = cards[0]
-        card.back = back
+        card.setText(back, for: .back)
         return card
       }
     }
@@ -667,7 +667,7 @@ struct StudyFeatureTests {
     await store.send(.draftChanged("a happy\n accident")) {
       $0.draft = "a happy accident"
       $0.editing = nil
-      $0.cards[0].back = "a happy accident"
+      $0.cards[0].setText("a happy accident", for: .back)
       $0.isSavingEdit = true
     }
     await store.receive(\.editSaveResponse) {
@@ -692,14 +692,14 @@ struct StudyFeatureTests {
       $0.apiClient.updateCard = { _, _, back in
         updates.withValue { $0 += 1 }
         var card = cards[0]
-        card.back = back
+        card.setText(back, for: .back)
         return card
       }
     }
 
     await store.send(.addButtonTapped) {
       $0.editing = nil
-      $0.cards[0].back = "a happy accident"
+      $0.cards[0].setText("a happy accident", for: .back)
       $0.isSavingEdit = true
     }
     await store.receive(\.delegate.addCardRequested)
@@ -756,14 +756,14 @@ struct StudyFeatureTests {
       $0.apiClient.updateCard = { _, _, back in
         sent.setValue(back)
         var card = cards[0]
-        card.back = back
+        card.setText(back, for: .back)
         return card
       }
     }
 
     await store.send(.editEnded) {
       $0.editing = nil
-      $0.cards[0].back = "a happy accident"
+      $0.cards[0].setText("a happy accident", for: .back)
       $0.isSavingEdit = true
     }
     await store.receive(\.editSaveResponse) {
@@ -785,12 +785,12 @@ struct StudyFeatureTests {
 
     await store.send(.editEnded) {
       $0.editing = nil
-      $0.cards[0].back = "a happy accident"
+      $0.cards[0].setText("a happy accident", for: .back)
       $0.isSavingEdit = true
     }
     await store.receive(\.editSaveResponse) {
       $0.isSavingEdit = false
-      $0.cards[0].back = self.cards[0].back
+      $0.cards[0] = self.cards[0]
       $0.editFailed = true
     }
     await store.send(.textDoubleTapped(.front)) {
@@ -803,12 +803,12 @@ struct StudyFeatureTests {
     }
     await store.send(.editEnded) {
       $0.editing = nil
-      $0.cards[0].front = "serendipitous"
+      $0.cards[0].setText("serendipitous", for: .front)
       $0.isSavingEdit = true
     }
     await store.receive(\.editSaveResponse) {
       $0.isSavingEdit = false
-      $0.cards[0].front = "serendipity"
+      $0.cards[0].setText("serendipity", for: .front)
       $0.editFailed = true
     }
     await store.send(.ratingTapped(.good)) {
@@ -869,14 +869,14 @@ struct StudyFeatureTests {
 
     await store.send(.editEnded) {
       $0.editing = nil
-      $0.cards[0].back = "a happy accident"
+      $0.cards[0].setText("a happy accident", for: .back)
       $0.isSavingEdit = true
     }
     await store.send(.textDoubleTapped(.front))
     await store.send(.pulledToRefresh)
     await store.send(.scenePhaseChanged(.active))
     var saved = cards[0]
-    saved.back = "a happy accident"
+    saved.setText("a happy accident", for: .back)
     respond.yield(saved)
     await store.receive(\.editSaveResponse) {
       $0.isSavingEdit = false
@@ -901,7 +901,7 @@ struct StudyFeatureTests {
 
     await store.send(.editEnded) {
       $0.editing = nil
-      $0.cards[0].back = "a happy accident"
+      $0.cards[0].setText("a happy accident", for: .back)
       $0.isSavingEdit = true
     }
     await store.send(.ratingTapped(.good)) {
@@ -913,7 +913,7 @@ struct StudyFeatureTests {
       $0.cards.removeFirst()
     }
     var saved = cards[0]
-    saved.back = "a happy accident"
+    saved.setText("a happy accident", for: .back)
     respondToSave.yield(saved)
     await store.receive(\.editSaveResponse) {
       $0.isSavingEdit = false

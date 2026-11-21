@@ -55,15 +55,15 @@ struct InMemoryAPIClientTests {
     #expect(try await client.stats().due == 3)
   }
 
-  @Test func mockNotesDeckHasFourNotesAndSixCards() async throws {
+  @Test func mockNotesDeckHasFourNotesAndSevenCards() async throws {
     let client = APIClient.inMemory(notes: .fixtures, now: now)
     let notes = try await client.notes(nil)
-    let ids = (11...14).map { UUID(uuidString: "00000000-0000-0000-0000-0000000000\($0)")! }
+    let ids = (11...15).map { UUID(uuidString: "00000000-0000-0000-0000-0000000000\($0)")! }
 
     #expect(notes.count == 4)
-    #expect(try await client.cards(nil).count == 6)
+    #expect(try await client.cards(nil).count == 7)
     #expect(notes[0].id == ids[0])
-    #expect(notes[0].cards.map(\.id) == [ids[1], ids[2]])
+    #expect(notes[0].cards.map(\.id) == [ids[1], ids[2], ids[4]])
     #expect(notes[2].cards.map(\.id) == [[Card].fixtures[1].id, ids[3]])
     #expect(notes[2].cards[1].direction == Direction(prompt: ["back"], answer: ["front"]))
     #expect(notes[0].fields["photo"]?.hasPrefix("data:image/png;base64,") == true)
@@ -77,9 +77,9 @@ struct InMemoryAPIClientTests {
 
     let updated = try await client.updateNote(
       person.id,
-      NoteDraft(type: .person, fields: ["role": ""], directions: [person.cards[0].direction])
+      NoteDraft(type: .person, fields: ["description": ""], directions: [person.cards[0].direction])
     )
-    #expect(updated.fields["role"] == nil)
+    #expect(updated.fields["description"] == nil)
     #expect(updated.cards.map(\.id) == [person.cards[0].id])
     #expect(updated.cards[0].lastReview == now)
   }
