@@ -43,6 +43,7 @@ account or installing on the iPhone. No CodeGraph in this repo: don't offer to i
 | `qa-validator` | **Independent** E2E: `ios/LaCarteUITests/**`, `qa/**`, screenshots, verdict | Edits app or API code |
 | `release-engineer` | CI, signing, Ad Hoc builds, installing on the iPhone (`ci/`, `.github/`) | Changes features; touches the Apple account/repo without the user's OK |
 | `design-lead` | Design system + brand: native feel (Apple components first), `docs/design-system.md`, `DesignSystem` module, dynamic SwiftUI logo, app icon, brand kit (`docs/design/brand*`) for marketing | Edits feature code (writes design notes into specs instead) |
+| `design-critic` | Independent judge of design-lead's visuals (logo, icon, screens) against the reference app (Vyst) and Apple apps; feedback to design-lead until it's good enough to show the user | Designs or edits files |
 | `instructions-keeper` | Sanity of all agent instructions (`CLAUDE.md`s, `.claude/agents/`, skills, docs agents read): correct, useful, not duplicated, no slop | Touches product code; weakens safety rules |
 | `secrets-guard` | Read-only check that no credentials or private data reach the public repo (tree + history) | Edits files; prints secret values |
 | `marketing` | Demo deck content, demo videos (app + widget, agent-adds-cards via MCP), README visuals (`docs/marketing/`, `marketing/`) | Touches app/API code; shows real URLs, tokens or personal data |
