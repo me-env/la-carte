@@ -24,6 +24,7 @@ then run. Never poll `pgrep xcodebuild`, never `sleep` in a loop, never call `xc
 | `build-LaCarteKit-<checkout>` | `ios/LaCarteKit` DerivedData (a different folder from the app's) | `ios-test.sh` |
 | `sim-<SIMULATOR>-<OS>` | UI pool slot 1 (`iPhone 17 Pro`) | `ios-ui-test.sh` **test phase only** (via `_sim-pool.sh`; older scripts take it directly) |
 | `sim-la-carte-ui-<n>-<OS>` | UI pool slots 2..5 (`la-carte-ui-2` … `-5`) | `ios-ui-test.sh` test phase via `SIM_POOL=ui _sim-pool.sh` |
+| (several UI slots at once) | one run sharded over the free UI slots | `ios-ui-test.sh --split` (`ios-ui-test-split.sh`): builds once, then one shard per free slot |
 | `sim-<UNIT_SIMULATOR>-<OS>` | unit-test pool slot 1 (`iPhone 17`) | `ios-test.sh` (via `_sim-pool.sh`; older scripts take it directly) |
 | `sim-la-carte-unit-<n>-<OS>` | unit-test pool slots 2..3 (`la-carte-unit-2`, `-3`) | `ios-test.sh` via `_sim-pool.sh` |
 

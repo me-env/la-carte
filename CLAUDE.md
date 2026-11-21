@@ -21,6 +21,7 @@ scripts/api-dev.sh           # API on :8000 (REST + /mcp), auto-reload
 scripts/ios-build.sh         # build app for simulator
 scripts/ios-test.sh          # LaCarteKit unit tests (TestStore)
 scripts/ios-ui-test.sh <run> # XCUITest (mock API) → qa/screenshots/<run>/
+scripts/ios-ui-test.sh --split [N] <run> [-only-testing:…]  # same, sharded over free pool simulators (docs/testing.md)
 scripts/e2e.sh <run>         # fresh API + seeded deck → live UI tests → qa/screenshots/<run>/
 uv run scripts/design-review.py <render> --home  # measured logo/visual review (design-critic gates on it)
 scripts/ios-adhoc.sh         # signed Ad Hoc .ipa (same steps as CI)
@@ -55,7 +56,7 @@ account or installing on the iPhone. No CodeGraph in this repo: don't offer to i
 | `secrets-guard` | Read-only check that no credentials or private data reach the public repo (tree + history) | Edits files; prints secret values |
 | `marketing` | Demo deck content, demo videos (app + widget, agent-adds-cards via MCP), README visuals (`docs/marketing/`, `marketing/`) | Touches app/API code; shows real URLs, tokens or personal data |
 
-`scripts/` owners: dev-velocity `_ios-env.sh` `_lock.sh` `ios-build.sh` `ios-test.sh` · qa-validator `ios-ui-test.sh`
+`scripts/` owners: dev-velocity `_ios-env.sh` `_lock.sh` `ios-build.sh` `ios-test.sh` · qa-validator `ios-ui-test.sh` `ios-ui-test-split.sh`
 `e2e.sh` (lock/scratch mechanics agreed with dev-velocity) · api-engineer `api-*.sh` · release-engineer `ios-adhoc.sh`
 `ios-install-device.sh` · tooling-lead `design-review.py` `brandkit.py` (render methods agreed with design-lead) ·
 design-lead `fetch-design-refs.sh`.
