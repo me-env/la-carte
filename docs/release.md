@@ -10,7 +10,9 @@ You need a paid Apple Developer account. Locally, no tracked file needs editing:
 
 1. `cp ios/Config/Signing.local.xcconfig.example ios/Config/Signing.local.xcconfig` (gitignored) and set
    `DEVELOPMENT_TEAM` (your team ID) and `LA_CARTE_BUNDLE_ID_PREFIX` (a reverse-DNS name you own). The app
-   becomes `<prefix>.app`, the UI tests `<prefix>.app.uitests`.
+   becomes `<prefix>.app`, the widget `<prefix>.app.widget`, the UI tests `<prefix>.app.uitests`, and the
+   App Group shared by the app and the widget (settings, cached stats, and the token's keychain access group)
+   `group.<prefix>.app`. The same prefix drives all four, so nothing else to rename.
 2. Follow "One-time setup" and "First run" below with your team ID and your iPhone's UDID.
 3. For CI on your fork: the `prod` environment secret `AC_API_KEY_BASE64` (your key), and the variables
    `ASC_KEY_ID` / `ASC_ISSUER_ID` (`gh variable set ASC_KEY_ID --env prod --body <KEY_ID>`). CI checks out
@@ -22,7 +24,7 @@ Where each value comes from:
 | Value | Source | Used by |
 |---|---|---|
 | Team ID | `ios/Config/Signing.xcconfig`, overridden by `Signing.local.xcconfig` | Xcode targets (base configuration), `ci/_env.sh` → `ci/archive.sh`, `teamID` added to ExportOptions by `ci/export-ipa.sh` |
-| Bundle ID prefix | same files, `LA_CARTE_BUNDLE_ID_PREFIX` | `PRODUCT_BUNDLE_IDENTIFIER` of both targets; `scripts/ios-install-device.sh` reads the bundle ID from the .ipa |
+| Bundle ID prefix | same files, `LA_CARTE_BUNDLE_ID_PREFIX` | `PRODUCT_BUNDLE_IDENTIFIER` of every target, the App Group in `ios/Config/*.entitlements` (Xcode expands build settings there); `ci/verify-ipa.sh` checks the bundle IDs and the group against it; `scripts/ios-install-device.sh` reads the bundle ID from the .ipa |
 | API key ID / issuer | env `ASC_KEY_ID` / `ASC_ISSUER_ID` (CI: GitHub variables), defaults in `ci/_env.sh` are this project's key | `auth_flags` in `ci/_env.sh` |
 
 Simulator builds and tests (`scripts/ios-build.sh`, `ios-test.sh`, `ios-ui-test.sh`, CI) don't need an Apple
@@ -44,6 +46,36 @@ capability). Automatic signing with `-allowProvisioningUpdates` should register 
 and both profiles; if the API key can't create the App Group, create it once at developer.apple.com
 (Identifiers → App Groups) and enable it on both App IDs.
 
+### Widget signing (spec 007): register the App Group once
+
+What automatic signing does and doesn't do, from Apple's docs (checked 2026-11-21):
+
+- `xcodebuild -allowProvisioningUpdates`: "For automatically signed targets, xcodebuild will create and update
+  profiles, app IDs, and certificates" (`xcodebuild -help`). So the widget App ID `<prefix>.app.widget` and its
+  Ad Hoc profile are created on the first signed build. ExportOptions needs nothing per target
+  (`provisioningProfiles` is for manual signing only).
+- App Groups on iOS "need to be registered" ([Configuring app groups](https://developer.apple.com/documentation/xcode/configuring-app-groups)),
+  and [registering one](https://developer.apple.com/help/account/identifiers/register-an-app-group) requires
+  **Account Holder or Admin**, in the portal or with the + of the App Groups capability in Xcode. Apple doesn't
+  document xcodebuild registering a group that only appears in an `.entitlements` file, and the App Store
+  Connect API has no app-group resource at all (`bundleIdCapabilities` can switch on `APP_GROUPS`, not
+  register or assign a group). So **neither the Mac build nor CI's key can be relied on to create the group.**
+
+One-time, per team (a fork does the same with its own prefix), before the first signed widget build:
+
+1. developer.apple.com → Certificates, Identifiers & Profiles → Identifiers → + → **App Groups** →
+   description "la carte", identifier `group.fr.lacarte.app` (`group.<prefix>.app` for a fork).
+   (Equivalent: open the project in Xcode, LaCarte target → Signing & Capabilities → App Groups → +, same name.)
+2. Run `scripts/ios-adhoc.sh` on the Mac (Xcode account, Admin). It creates the widget App ID and the two Ad Hoc
+   profiles; `ci/verify-ipa.sh` fails with "profile doesn't include App Group" if the group isn't assigned to
+   an App ID. If so, in Identifiers → `fr.lacarte.app` and `fr.lacarte.app.widget` → App Groups → Configure,
+   tick the group, save, and re-run.
+3. CI: the key already needs Admin for cloud signing (one-time setup step 3). Per Apple's
+   [roles](https://developer.apple.com/help/account/access/roles/), registering App IDs and creating
+   distribution profiles also need Admin (or App Manager with Certificates, Identifiers & Profiles access).
+   A Developer-role key can't create Ad Hoc profiles; expect the same export failure as for the app on
+   2026-11-21 ("No profiles for '<bundle ID>' were found"), now for the widget too.
+
 ## How it works
 
 ```
@@ -53,7 +85,8 @@ git tag v0.1.0 && git push --tags
 GitHub Actions "iOS Ad Hoc" (.github/workflows/adhoc.yml, macos-26, environment: prod)
   ci/archive.sh     xcodebuild archive, automatic signing via the App Store Connect API key
   ci/export-ipa.sh  export method release-testing (= Ad Hoc) → build/export/LaCarte.ipa
-  ci/verify-ipa.sh  codesign OK, Ad Hoc profile, lists the device UDIDs it can install on
+  ci/verify-ipa.sh  for the app and the widget .appex: codesign OK, Ad Hoc profile for the right bundle ID,
+                    same device UDIDs in both profiles, App Group signed + in both profiles
         │  artifact "la-carte-ipa" + GitHub Release asset
         ▼
 scripts/ios-install-device.sh   downloads the latest .ipa (gh) → xcrun devicectl install → launch
@@ -109,8 +142,9 @@ Apple account, so no agent runs them for you. This is what worked on 2026-11-21.
    ```bash
    scripts/ios-adhoc.sh
    ```
-   It should end with `✓ Ad Hoc profile '…' for N device(s):`, followed by your iPhone's UDID. If the UDID
-   is missing, the phone isn't registered: register it and re-run.
+   It should print one `✓ <bundle> (<bundle ID>): Ad Hoc profile '…'` line per target (app, widget), then
+   `✓ installs on:` followed by your iPhone's UDID. If the UDID is missing, the phone isn't registered:
+   register it and re-run.
 4. Install and launch it:
    ```bash
    scripts/ios-install-device.sh build/export/LaCarte.ipa
