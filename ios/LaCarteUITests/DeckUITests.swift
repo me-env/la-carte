@@ -35,8 +35,8 @@ final class DeckUITests: XCTestCase {
       snapshot("deck", appearance: appearance)
 
       // #12: swipe down closes the sheet, back to study.
-      swipeSheetDown(app, from: el(app, "deck.title"))
-      waitForAbsence(el(app, "deck.title"), "deck sheet still open after swiping down")
+      swipeSheetDown(app, from: deckTitle(app))
+      waitForAbsence(deckTitle(app), "deck sheet still open after swiping down")
       waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
       app.terminate()
     }
@@ -85,7 +85,7 @@ final class DeckUITests: XCTestCase {
       let app = launch(api: .mock)
       openDeck(app)
       waitForRows(app, Self.ids)
-      let search = el(app, "deck.search")
+      let search = deckSearch(app)
       search.tap()
       search.typeText("ser")
       waitForRows(app, [Self.ids[0]])
@@ -105,7 +105,7 @@ final class DeckUITests: XCTestCase {
     let app = launch(api: .live(server.url))
     openDeck(app)
     waitForRows(app, stubOrder)
-    let search = el(app, "deck.search")
+    let search = deckSearch(app)
     search.tap()
     let typed = Date()
     search.typeText("ser")
@@ -128,20 +128,6 @@ final class DeckUITests: XCTestCase {
   }
 
   // MARK: - #3 messages
-
-  /// #3: a search with no results → "No matches", no rows.
-  @MainActor
-  func testDeck_noMatches() {
-    XCUIDevice.shared.appearance = .light
-    let app = launch(api: .mock)
-    openDeck(app)
-    waitForRows(app, Self.ids)
-    el(app, "deck.search").tap()
-    el(app, "deck.search").typeText("zzz")
-    waitForLabel(el(app, "deck.message"), "No matches")
-    waitForRows(app, [])
-    snapshot("deck-no-matches", appearance: .light)
-  }
 
   /// #3: empty deck → "No cards yet".
   @MainActor
@@ -193,8 +179,8 @@ final class DeckUITests: XCTestCase {
     snapshot("deck-swipe", appearance: .light)
     delete.tap()
     waitForRows(app, [Self.ids[0], Self.ids[2]], timeout: 1.5)
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"))
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app))
     openDeck(app)
     waitForRows(app, [Self.ids[0], Self.ids[2]])
   }
@@ -238,7 +224,7 @@ final class DeckUITests: XCTestCase {
     let app = launch(api: .live(server.url))
     openDeck(app)
     waitForRows(app, stubOrder)
-    let search = el(app, "deck.search")
+    let search = deckSearch(app)
     search.tap()
     search.typeText("a")  // "la carte" and "ephemeral" match, "serendipity" doesn't
     waitForRows(app, [Self.ids[1], Self.ids[2]])
@@ -498,8 +484,8 @@ final class DeckUITests: XCTestCase {
     waitForRows(app, Self.ids)
     swipeAndDelete(app, Self.ids[0])
     waitForRows(app, Array(Self.ids.dropFirst()))
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"))
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app))
     waitForLabel(el(app, "study.front"), Self.fixtures[1].front)
     waitForLabel(el(app, "study.remaining"), "2 to review")
     snapshot("study-after-delete", appearance: .light)
@@ -512,8 +498,8 @@ final class DeckUITests: XCTestCase {
     replaceText(app, "editor.front", with: "la carta")
     el(app, "editor.save").tap()
     waitForAbsence(el(app, "editor.title"))
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"))
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app))
     waitForLabel(el(app, "study.front"), "la carta")
 
     // Add from the deck.
@@ -525,8 +511,8 @@ final class DeckUITests: XCTestCase {
     el(app, "editor.back").typeText("cat")
     el(app, "editor.save").tap()
     waitForAbsence(el(app, "editor.title"))
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"))
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app))
     waitForLabel(el(app, "study.remaining"), "3 to review")
   }
 
@@ -549,8 +535,9 @@ final class DeckUITests: XCTestCase {
     XCTAssertGreaterThan(row(app, Self.ids[0]).frame.height, baseHeight * 1.3, "rows did not scale with Dynamic Type")
     assertTextsReadable(in: app, ignoring: ["study."])
     let window = app.windows.firstMatch.frame
-    for id in ["deck.title", "deck.add", "deck.search"] {
-      XCTAssertTrue(window.contains(el(app, id).frame), "\(id) outside the window at XL: \(el(app, id).frame)")
+    for (id, e) in [("Cards title", deckTitleText(app)), ("deck.add", el(app, "deck.add")),
+                    ("deck.settings", el(app, "deck.settings")), ("search field", deckSearch(app))] {
+      XCTAssertTrue(window.contains(e.frame), "\(id) outside the window at XL: \(e.frame)")
     }
     let first = row(app, Self.ids[0])
     for id in ["\(Self.ids[0]).due", "\(Self.ids[0]).state"] {
@@ -611,13 +598,324 @@ final class DeckUITests: XCTestCase {
 
     swipeAndDelete(app, felineID)
     waitForAbsence(row(app, felineID), "feline row still shown after delete")
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"))
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app))
     openDeck(app)
     waitUntil("2 rows after reopening") { self.rowIDs(app).count == 2 }
     XCTAssertFalse(row(app, felineID).exists, "feline row back after reopening the deck")
     snapshot("deck-live-after-delete", appearance: .light)
     XCTAssertFalse(try liveCards(url).contains { $0["front"] as? String == "feline" }, "feline still in the API")
+  }
+
+  // MARK: - Spec 009a: native deck
+
+  /// Launch argument pair forcing Dynamic Type to AX5 (the largest accessibility size).
+  static let ax5Arguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+  /// (theme argument, device appearance, screenshot suffix): light, dark, forest.
+  static let looks: [(theme: String, appearance: XCUIDevice.Appearance, name: String)] = [
+    ("system", .light, ""), ("system", .dark, ""), ("forest", .light, "-forest"),
+  ]
+
+  /// 009a #1: a large "Cards" navigation title on the left that collapses to an inline, centered title when the
+  /// list scrolls (light, dark, forest).
+  @MainActor
+  func testDeck_largeTitleCollapsesOnScroll() throws {
+    let base = Date(timeIntervalSince1970: 1_767_225_600)
+    let deck = StubDeck((1...24).map { i in
+      .init(id: String(format: "bbbbbbbb-0000-0000-0000-%012d", i), front: "word \(i)", back: "answer \(i)",
+            createdAt: base.addingTimeInterval(-Double(i) * 60))
+    })
+    let server = StubAPIServer(handler: deck.handle)
+    try server.start()
+    for look in Self.looks {
+      XCUIDevice.shared.appearance = look.appearance
+      let app = launch(api: .live(server.url), theme: look.theme)
+      openDeck(app)
+      waitUntil("rows loaded") { self.rowIDs(app).count >= 5 }
+      let window = app.windows.firstMatch.frame
+      let large = deckTitleText(app).frame
+      XCTAssertLessThan(large.minX, 30, "large title not on the left: \(large)")
+      XCTAssertGreaterThanOrEqual(large.height, 34, "title not large before scrolling: \(large)")
+      snapshot("deck-large-title\(look.name)", appearance: look.appearance)
+      let start = row(app, rowIDs(app)[2]).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+      start.press(forDuration: 0.05, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)))
+      waitUntil("title collapsed to inline") {
+        let f = self.deckTitleText(app).frame
+        return f.height < 30 && abs(f.midX - window.midX) < 20
+      }
+      XCTAssertTrue(deckTitle(app).exists, "navigation bar gone after scrolling")
+      snapshot("deck-collapsed\(look.name)", appearance: look.appearance)
+      app.terminate()
+    }
+    server.stop()
+  }
+
+  /// 009a #2: `deck.settings` (gearshape) and `deck.add` (plus) are toolbar buttons tinted ink, never pink; they open
+  /// Settings and the "New card" editor.
+  @MainActor
+  func testDeck_toolbarButtons() {
+    for look in Self.looks {
+      XCUIDevice.shared.appearance = look.appearance
+      let app = launch(api: .mock, theme: look.theme)
+      openDeck(app)
+      waitForRows(app, Self.ids)
+      assertDeckChrome(app)
+      let ink = Self.ink(look.theme == "forest" ? "forest" : look.appearance == .dark ? "dark" : "light")
+      let pixels = Pixels(XCUIScreen.main.screenshot(), pointWidth: app.windows.firstMatch.frame.width)
+      for id in ["deck.settings", "deck.add"] {
+        let f = el(app, id).frame
+        XCTAssertTrue(pinkPoints(pixels, in: f, theme: look.theme, appearance: look.appearance).isEmpty, "\(id) is pink")
+        let glyph = inkiest(pixels, in: f.insetBy(dx: f.width * 0.25, dy: f.height * 0.25), ink: ink)
+        XCTAssertLessThan(glyph, 60, "\(id) glyph not ink \(ink) (closest distance \(glyph))")
+      }
+      el(app, "deck.settings").tap()
+      XCTAssertTrue(el(app, "settings.title").waitForExistence(timeout: 5), "deck.settings did not open Settings")
+      snapshot("deck-settings-open\(look.name)", appearance: look.appearance)
+      el(app, "settings.close").tap()
+      waitForAbsence(el(app, "settings.title"))
+      el(app, "deck.add").tap()
+      waitForLabel(el(app, "editor.title"), "New card")
+      el(app, "editor.close").tap()
+      waitForAbsence(el(app, "editor.title"))
+      app.terminate()
+    }
+  }
+
+  /// 009a #3: the system search field filters ("ser" → serendipity) and its clear button brings every row back.
+  @MainActor
+  func testDeck_searchClearButton() {
+    for appearance in Self.appearances {
+      XCUIDevice.shared.appearance = appearance
+      let app = launch(api: .mock)
+      openDeck(app)
+      waitForRows(app, Self.ids)
+      let search = deckSearch(app)
+      XCTAssertEqual(search.placeholderValue, "Search", "search prompt")
+      search.tap()
+      search.typeText("ser")
+      waitForRows(app, [Self.ids[0]])
+      let clear = search.buttons.firstMatch
+      XCTAssertTrue(clear.waitForExistence(timeout: 3), "no clear button in the search field")
+      clear.tap()
+      waitForRows(app, Self.ids)
+      snapshot("deck-search-cleared", appearance: appearance)
+      app.terminate()
+    }
+  }
+
+  /// 009a #4: no matches → the system search empty state (`ContentUnavailableView.search`), light, dark, forest.
+  @MainActor
+  func testDeck_noMatchesSystemSearchState() {
+    for look in Self.looks {
+      XCUIDevice.shared.appearance = look.appearance
+      let app = launch(api: .mock, theme: look.theme)
+      openDeck(app)
+      waitForRows(app, Self.ids)
+      deckSearch(app).tap()
+      deckSearch(app).typeText("zzz")
+      waitForRows(app, [])
+      // The system view has no identifier of ours: its title is "No Results for “zzz”".
+      let title = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'zzz'")).firstMatch
+      XCTAssertTrue(title.waitForExistence(timeout: 5), "no ContentUnavailableView.search title mentioning the query")
+      snapshot("deck-no-matches\(look.name)", appearance: look.appearance)
+      app.terminate()
+    }
+  }
+
+  /// 009a #5: "No cards yet" / "Can't reach your deck" are ContentUnavailableViews, also in forest.
+  @MainActor
+  func testDeck_messagesForest() throws {
+    XCUIDevice.shared.appearance = .light
+    let deck = StubDeck([])
+    let server = StubAPIServer(handler: deck.handle)
+    try server.start()
+    var app = launch(api: .live(server.url), theme: "forest")
+    openDeck(app)
+    waitForLabel(el(app, "deck.message"), "No cards yet")
+    snapshot("deck-empty-forest", appearance: .light)
+    app.terminate()
+    server.stop()
+    app = launch(api: .live(unreachableAPIURL), theme: "forest")
+    openDeck(app)
+    waitForLabel(el(app, "deck.message"), "Can't reach your deck", timeout: 20)
+    snapshot("deck-offline-forest", appearance: .light)
+  }
+
+  /// 009a #6: long-press → "Edit" (`deck.row.<id>.edit`) opens the editor for that card, "Delete"
+  /// (`deck.row.<id>.contextDelete`) removes the row.
+  @MainActor
+  func testDeck_contextMenu() {
+    for appearance in Self.appearances {
+      XCUIDevice.shared.appearance = appearance
+      let app = launch(api: .mock)
+      openDeck(app)
+      waitForRows(app, Self.ids)
+      row(app, Self.ids[2]).press(forDuration: 1)
+      let edit = el(app, "deck.row.\(Self.ids[2].uppercased()).edit")
+      let delete = el(app, "deck.row.\(Self.ids[2].uppercased()).contextDelete")
+      XCTAssertTrue(edit.waitForExistence(timeout: 3), "no deck.row.<id>.edit after a long press")
+      XCTAssertTrue(delete.exists, "no deck.row.<id>.contextDelete after a long press")
+      XCTAssertEqual(edit.label, "Edit")
+      XCTAssertEqual(delete.label, "Delete")
+      XCTAssertLessThan(edit.frame.midY, delete.frame.midY, "Edit not above Delete")
+      snapshot("deck-context-menu", appearance: appearance)
+      edit.tap()
+      waitForLabel(el(app, "editor.title"), "Edit card")
+      XCTAssertEqual(fieldText(app, "editor.front"), Self.fixtures[2].front)
+      el(app, "editor.close").tap()
+      waitForAbsence(el(app, "editor.title"))
+
+      row(app, Self.ids[1]).press(forDuration: 1)
+      let delete1 = el(app, "deck.row.\(Self.ids[1].uppercased()).contextDelete")
+      XCTAssertTrue(delete1.waitForExistence(timeout: 3), "no contextDelete on the second long press")
+      delete1.tap()
+      waitForRows(app, [Self.ids[0], Self.ids[2]], timeout: 3)
+      app.terminate()
+    }
+  }
+
+  /// 009a #8 + design-system accent rule: with the search field focused and text typed, pink shows only inside the
+  /// search field (cursor); toolbar, rows and the system Cancel button stay un-pinked. Light, dark, forest.
+  @MainActor
+  func testDeck_searchAccentOnly() {
+    for look in Self.looks {
+      XCUIDevice.shared.appearance = look.appearance
+      let app = launch(api: .mock, theme: look.theme)
+      openDeck(app)
+      waitForRows(app, Self.ids)
+      let search = deckSearch(app)
+      search.tap()
+      search.typeText("ser")
+      waitForRows(app, [Self.ids[0]])
+      Thread.sleep(forTimeInterval: 0.6)  // cursor blink: take the shot while it's drawn (checked below)
+      var pink: [CGPoint] = []
+      var field = CGRect.zero
+      // The cursor blinks: retry until it's drawn once, so "no pink at all" can't pass by accident.
+      for _ in 0..<8 {
+        let pixels = Pixels(XCUIScreen.main.screenshot(), pointWidth: app.windows.firstMatch.frame.width)
+        field = search.frame
+        pink = pinkPoints(pixels, in: app.windows.firstMatch.frame, theme: look.theme, appearance: look.appearance)
+        if pink.contains(where: { field.contains($0) }) { break }
+        Thread.sleep(forTimeInterval: 0.25)
+      }
+      snapshot("deck-search-focused\(look.name)", appearance: look.appearance)
+      XCTAssertTrue(pink.contains { field.contains($0) }, "search cursor is not Theme.accent (no pink inside \(field))")
+      let outside = pink.filter { !field.insetBy(dx: -2, dy: -2).contains($0) }
+      if let box = outside.first.map({ p in outside.reduce(CGRect(origin: p, size: .zero)) { $0.union(CGRect(origin: $1, size: .zero)) } }) {
+        XCTFail("pink outside the search field (\(outside.count) pt) in \(box), look \(look.theme)/\(look.appearance)")
+      }
+      app.terminate()
+    }
+  }
+
+  /// 009a #9: at AX5, long rows don't clip (one line, truncated inside the row), the title and toolbar stay in the
+  /// window, every interactive element keeps its id. Empty state too.
+  @MainActor
+  func testDeck_ax5LongRows() throws {
+    XCUIDevice.shared.appearance = .light
+    let long = "an extraordinarily long front that will never fit on a single line at the largest text size"
+    let deck = StubDeck([
+      .init(id: "cccccccc-0000-0000-0000-000000000001", front: long, back: long + " (back)", state: "review",
+            due: Date().addingTimeInterval(3 * 86_400 + 3_600)),
+      .init(id: "cccccccc-0000-0000-0000-000000000002", front: "cat", back: "feline",
+            createdAt: Date(timeIntervalSince1970: 1_767_225_000)),
+    ])
+    let server = StubAPIServer(handler: deck.handle)
+    try server.start()
+    let app = launch(api: .live(server.url), arguments: Self.ax5Arguments)
+    openDeck(app)
+    let ids = ["CCCCCCCC-0000-0000-0000-000000000001", "CCCCCCCC-0000-0000-0000-000000000002"]
+    waitForRows(app, ids)
+    snapshot("deck-ax5", appearance: .light)
+    let window = app.windows.firstMatch.frame
+    for (name, e) in [("Cards title", deckTitleText(app)), ("deck.add", el(app, "deck.add")),
+                      ("deck.settings", el(app, "deck.settings")), ("search field", deckSearch(app))] {
+      XCTAssertTrue(e.exists, "\(name) missing at AX5")
+      XCTAssertTrue(window.contains(e.frame), "\(name) outside the window at AX5: \(e.frame)")
+    }
+    XCTAssertFalse(deckTitleText(app).frame.intersects(el(app, "deck.add").frame), "title overlaps deck.add at AX5")
+    assertTextsReadable(in: app, ignoring: ["study."])
+    for id in ids {
+      let r = row(app, id).frame
+      XCTAssertTrue(window.insetBy(dx: -0.5, dy: 0).contains(CGRect(x: r.minX, y: window.midY, width: r.width, height: 1)),
+                    "row \(id) wider than the window at AX5: \(r)")
+      for suffix in ["due", "state"] {
+        let e = el(app, "deck.row.\(id).\(suffix)")
+        if e.frame.maxY < window.maxY {  // on screen
+          XCTAssertTrue(r.insetBy(dx: -0.5, dy: -0.5).contains(e.frame), "deck.row.\(id).\(suffix) outside its row at AX5")
+        }
+      }
+      for t in row(app, id).staticTexts.allElementsBoundByIndex where t.frame.maxY < window.maxY {
+        XCTAssertTrue(r.insetBy(dx: -0.5, dy: -0.5).contains(t.frame), "'\(t.label)' \(t.frame) outside its row \(r) at AX5")
+      }
+    }
+    // Context menu ids survive AX5.
+    row(app, ids[1]).press(forDuration: 1)
+    XCTAssertTrue(el(app, "deck.row.\(ids[1]).edit").waitForExistence(timeout: 3), "no edit id in the menu at AX5")
+    XCTAssertTrue(el(app, "deck.row.\(ids[1]).contextDelete").exists, "no contextDelete id in the menu at AX5")
+    snapshot("deck-context-menu-ax5", appearance: .light)
+    app.terminate()
+
+    // Empty state at AX5.
+    let empty = StubAPIServer(handler: StubDeck([]).handle)
+    try empty.start()
+    let app2 = launch(api: .live(empty.url), arguments: Self.ax5Arguments)
+    openDeck(app2)
+    waitForLabel(el(app2, "deck.message"), "No cards yet")
+    XCTAssertTrue(window.contains(el(app2, "deck.message").frame), "deck.message clipped at AX5")
+    snapshot("deck-empty-ax5", appearance: .light)
+    empty.stop()
+    server.stop()
+  }
+
+  // MARK: 009a pixel helpers
+
+  static func ink(_ look: String) -> (Int, Int, Int) {
+    switch look {
+    case "dark": (242, 242, 240)
+    case "forest": (238, 242, 236)
+    default: (28, 28, 28)
+    }
+  }
+
+  /// Points (1pt grid) whose color is `Theme.accent` (#B8325A light, #ED6E8C dark/forest) within 45 per channel.
+  @MainActor
+  private func pinkPoints(_ pixels: Pixels, in rect: CGRect, theme: String,
+                          appearance: XCUIDevice.Appearance) -> [CGPoint] {
+    let accent = (theme == "forest" || appearance == .dark) ? (237, 110, 140) : (184, 50, 90)
+    var out: [CGPoint] = []
+    var y = rect.minY.rounded(.up)
+    while y < rect.maxY {
+      var x = rect.minX.rounded(.up)
+      while x < rect.maxX {
+        for dx in [0.0, 0.34, 0.67] {  // the cursor is ~2pt wide: sample at sub-point steps horizontally
+          let c = pixels.color(at: CGPoint(x: x + dx, y: y))
+          if abs(c.0 - accent.0) < 45, abs(c.1 - accent.1) < 45, abs(c.2 - accent.2) < 45, c.0 > c.1 + 60 {
+            out.append(CGPoint(x: x, y: y)); break
+          }
+        }
+        x += 1
+      }
+      y += 1
+    }
+    return out
+  }
+
+  /// Smallest max-channel distance to `ink` among the points of `rect`.
+  @MainActor
+  private func inkiest(_ pixels: Pixels, in rect: CGRect, ink: (Int, Int, Int)) -> Int {
+    var best = 255
+    var y = rect.minY
+    while y < rect.maxY {
+      var x = rect.minX
+      while x < rect.maxX {
+        let c = pixels.color(at: CGPoint(x: x, y: y))
+        best = min(best, max(abs(c.0 - ink.0), abs(c.1 - ink.1), abs(c.2 - ink.2)))
+        x += 0.34
+      }
+      y += 0.34
+    }
+    return best
   }
 
   // MARK: - Helpers
@@ -648,7 +946,7 @@ final class DeckUITests: XCTestCase {
     let button = el(app, "study.deck")
     XCTAssertTrue(button.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
-    waitForLabel(el(app, "deck.title"), "Cards", file: file, line: line)
+    waitForDeckTitle(app, file: file, line: line)
   }
 
   @MainActor
@@ -692,7 +990,7 @@ final class DeckUITests: XCTestCase {
     var rows: [(String, CGFloat)] = []
     func walk(_ node: XCUIElementSnapshot) {
       let id = node.identifier
-      if id.hasPrefix("deck.row."), !id.hasSuffix(".due"), !id.hasSuffix(".state"), !id.lowercased().hasSuffix(".delete"), !node.frame.isEmpty,
+      if id.hasPrefix("deck.row."), !id.hasSuffix(".due"), !id.hasSuffix(".state"), !id.lowercased().hasSuffix(".delete"), !id.hasSuffix(".edit"), !id.lowercased().hasSuffix(".contextdelete"), !node.frame.isEmpty,
          !rows.contains(where: { $0.0 == id }) {
         rows.append((id, node.frame.minY))
       }
@@ -804,18 +1102,23 @@ final class DeckUITests: XCTestCase {
     }
   }
 
-  /// Ref 04 header: "Cards" title left, `deck.add` 44pt circle right on the same line, search under it.
+  /// Spec 009a #1-#3: large "Cards" title on the left, settings + add toolbar buttons top-right (above the title),
+  /// the system search field under the title, rows under the search field.
   @MainActor
   private func assertDeckChrome(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let window = app.windows.firstMatch.frame
-    let title = el(app, "deck.title").frame, add = el(app, "deck.add").frame, search = el(app, "deck.search").frame
-    XCTAssertEqual(add.width, 44, accuracy: 1, "deck.add not 44pt: \(add)", file: file, line: line)
-    XCTAssertEqual(add.height, 44, accuracy: 1, "deck.add not 44pt: \(add)", file: file, line: line)
-    XCTAssertLessThan(title.minX, 30, "deck.title not left: \(title)", file: file, line: line)
+    let title = deckTitleText(app).frame, add = el(app, "deck.add").frame, gear = el(app, "deck.settings").frame
+    let search = deckSearch(app).frame
+    XCTAssertTrue(deckTitleText(app).exists, "no \"Cards\" text in the navigation bar", file: file, line: line)
+    XCTAssertLessThan(title.minX, 30, "large title not left-aligned: \(title)", file: file, line: line)
+    XCTAssertGreaterThanOrEqual(title.height, 34, "title not large: \(title)", file: file, line: line)
     XCTAssertGreaterThan(add.maxX, window.width - 30, "deck.add not right: \(add)", file: file, line: line)
-    XCTAssertEqual(title.midY, add.midY, accuracy: 3, "title and add not on one line", file: file, line: line)
-    XCTAssertGreaterThanOrEqual(search.minY, max(title.maxY, add.maxY) - 1, "search not under the title row",
-                                file: file, line: line)
+    XCTAssertLessThan(gear.maxX, add.minX + 1, "deck.settings not left of deck.add", file: file, line: line)
+    XCTAssertEqual(gear.midY, add.midY, accuracy: 1, "settings and add not on one line", file: file, line: line)
+    XCTAssertLessThanOrEqual(max(add.maxY, gear.maxY), title.minY + 1, "toolbar not above the large title",
+                             file: file, line: line)
+    XCTAssertGreaterThanOrEqual(search.minY, title.maxY - 1, "search not under the title", file: file, line: line)
+    XCTAssertGreaterThan(search.width, window.width * 0.6, "search field not full width: \(search)", file: file, line: line)
     if let first = rowIDs(app).first {
       XCTAssertGreaterThanOrEqual(row(app, first).frame.minY, search.maxY, "rows overlap search", file: file, line: line)
     }
@@ -856,8 +1159,6 @@ final class DeckUITests: XCTestCase {
     check("left of a row", CGPoint(x: frames[0].minX / 2, y: frames[0].midY), background)
     check("below the rows", CGPoint(x: window.midX, y: frames.last!.maxY + 60), background)
     check("near the bottom edge", CGPoint(x: window.midX, y: window.maxY - 4), background)
-    let search = el(app, "deck.search").frame
-    check("search field fill", CGPoint(x: search.maxX + 6, y: search.midY), surface)
   }
 
   // MARK: Live API helpers
