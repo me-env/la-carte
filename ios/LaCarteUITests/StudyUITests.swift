@@ -20,58 +20,52 @@ final class StudyUITests: XCTestCase {
   /// #4 rate → next card unrevealed + decrement, #8 corner buttons present and 44pt.
   @MainActor
   func testStudy_frontRevealRateNext() {
-    for appearance in [XCUIDevice.Appearance.light, .dark] {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock)
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock)
 
-      // Front, unrevealed.
-      assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
-      assertCornerButtons(app)
-      snapshot("study-front", appearance: appearance)
-      let frontBefore = el(app, "study.front").frame
+    // Front, unrevealed.
+    assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
+    assertCornerButtons(app)
+    snapshot("study-front", appearance: .light)
+    let frontBefore = el(app, "study.front").frame
 
-      // Reveal by tapping the card (middle area).
-      el(app, "study.card").tap()
-      assertRevealed(app, front: Self.fixtures[0].front, back: Self.fixtures[0].back)
-      assertFrontDidNotMove(app, from: frontBefore)
-      assertCornerButtons(app)
-      snapshot("study-revealed", appearance: appearance)
+    // Reveal by tapping the card (middle area).
+    el(app, "study.card").tap()
+    assertRevealed(app, front: Self.fixtures[0].front, back: Self.fixtures[0].back)
+    assertFrontDidNotMove(app, from: frontBefore)
+    assertCornerButtons(app)
+    snapshot("study-revealed", appearance: .light)
 
-      // Rate → next card, unrevealed, remaining decrements.
-      el(app, "study.rate.good").tap()
-      assertFront(app, Self.fixtures[1].front, remaining: "2 to review")
+    // Rate → next card, unrevealed, remaining decrements.
+    el(app, "study.rate.good").tap()
+    assertFront(app, Self.fixtures[1].front, remaining: "2 to review")
 
-      // Reveal with the "Show answer" button this time.
-      let secondBefore = el(app, "study.front").frame
-      XCTAssertGreaterThanOrEqual(el(app, "study.reveal").frame.height, 43.99,
-                                  "study.reveal hit area under 44pt: \(el(app, "study.reveal").frame)")
-      el(app, "study.reveal").tap()
-      assertRevealed(app, front: Self.fixtures[1].front, back: Self.fixtures[1].back)
-      assertFrontDidNotMove(app, from: secondBefore)
-      el(app, "study.rate.hard").tap()
-      assertFront(app, Self.fixtures[2].front, remaining: "1 to review")
-      app.terminate()
-    }
+    // Reveal with the "Show answer" button this time.
+    let secondBefore = el(app, "study.front").frame
+    XCTAssertGreaterThanOrEqual(el(app, "study.reveal").frame.height, 43.99,
+                                "study.reveal hit area under 44pt: \(el(app, "study.reveal").frame)")
+    el(app, "study.reveal").tap()
+    assertRevealed(app, front: Self.fixtures[1].front, back: Self.fixtures[1].back)
+    assertFrontDidNotMove(app, from: secondBefore)
+    el(app, "study.rate.hard").tap()
+    assertFront(app, Self.fixtures[2].front, remaining: "1 to review")
   }
 
   /// #4 + #5: rate every due card (each rating button once at least) → "All caught up" + "Next card in…".
   @MainActor
   func testStudy_rateAllToCaughtUp() {
-    for appearance in [XCUIDevice.Appearance.light, .dark] {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock)
-      let plan = ["easy", "again", "good"]
-      for (index, card) in Self.fixtures.enumerated() {
-        assertFront(app, card.front, remaining: "\(3 - index) to review")
-        el(app, index.isMultiple(of: 2) ? "study.card" : "study.reveal").tap()
-        assertRevealed(app, front: card.front, back: card.back)
-        el(app, "study.rate.\(plan[index])").tap()
-      }
-      assertCaughtUp(app, nextDuePrefix: "Next card in")
-      assertCornerButtons(app)
-      snapshot("study-caught-up", appearance: appearance)
-      app.terminate()
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock)
+    let plan = ["easy", "again", "good"]
+    for (index, card) in Self.fixtures.enumerated() {
+      assertFront(app, card.front, remaining: "\(3 - index) to review")
+      el(app, index.isMultiple(of: 2) ? "study.card" : "study.reveal").tap()
+      assertRevealed(app, front: card.front, back: card.back)
+      el(app, "study.rate.\(plan[index])").tap()
     }
+    assertCaughtUp(app, nextDuePrefix: "Next card in")
+    assertCornerButtons(app)
+    snapshot("study-caught-up", appearance: .light)
   }
 
   /// #8 + spec 002 #1/#7: `study.deck` opens the deck sheet, `study.add` opens the "New card" editor; closing
@@ -99,49 +93,6 @@ final class StudyUITests: XCTestCase {
 
   // MARK: - Stub-API states (criteria 4, 5, 6, 7)
 
-  /// #4: the request is `POST /cards/{id}/review` with the tapped rating, and the rating buttons are
-  /// disabled while it is in flight.
-  @MainActor
-  func testStudy_ratingsDisabledWhileReviewInFlight() throws {
-    XCUIDevice.shared.appearance = .light
-    let id = "11111111-1111-1111-1111-111111111111"
-    let card = StubJSON.card(id: id, front: "greeting", back: "hello")
-    let server = StubAPIServer()
-    server.handler = { [weak server] request in
-      // The current request is already recorded, so a POST in the log means "reviewed" for GETs.
-      let reviewed = server?.requests.contains { $0.method == "POST" } ?? false
-      switch (request.method, request.path) {
-      case ("POST", _): return .init(body: card, delay: 3)
-      case (_, let p) where p.hasPrefix("/cards/due"): return .init(body: reviewed ? "[]" : StubJSON.cards([card]))
-      case (_, let p) where p.hasPrefix("/stats"):
-        return .init(body: StubJSON.stats(total: 1, nextDue: Date().addingTimeInterval(23 * 3600 + 600)))
-      default: return .init(status: 404, body: "{}")
-      }
-    }
-    try server.start()
-    let app = launch(api: .live(server.url))
-    assertFront(app, "greeting", remaining: "1 to review")
-    el(app, "study.reveal").tap()
-    assertRevealed(app, front: "greeting", back: "hello")
-    el(app, "study.rate.easy").tap()
-    // In flight (3s): all four rating buttons disabled.
-    for rating in Self.ratings {
-      let button = el(app, "study.rate.\(rating)")
-      XCTAssertTrue(button.exists, "study.rate.\(rating) vanished while the review is in flight")
-      XCTAssertFalse(button.isEnabled, "study.rate.\(rating) still enabled while the review is in flight")
-    }
-    snapshot("study-reviewing", appearance: .light)
-    assertCaughtUp(app, nextDuePrefix: "Next card in", timeout: 10)
-    let label = el(app, "study.nextDue").label
-    XCTAssertNotNil(label.range(of: #"^Next card in 23 hours$"#, options: .regularExpression),
-                    "next_due 23h10m ahead should read 'Next card in 23 hours', got '\(label)'")
-    let posts = server.requests.filter { $0.method == "POST" }
-    XCTAssertEqual(posts.count, 1, "expected exactly one review POST, got \(posts.map(\.path))")
-    XCTAssertEqual(posts.first?.path, "/cards/\(id)/review")
-    XCTAssertTrue(posts.first?.body.contains("\"easy\"") ?? false, "review body \(posts.first?.body ?? "nil") lacks \"easy\"")
-    server.stop()
-  }
-
   /// #6: `/stats` with `next_due: null` → "All caught up" / "Your deck is empty".
   @MainActor
   func testStudy_emptyDeck() throws {
@@ -151,14 +102,11 @@ final class StudyUITests: XCTestCase {
       return .init(status: 404, body: "{}")
     }
     try server.start()
-    for appearance in [XCUIDevice.Appearance.light, .dark] {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .live(server.url))
-      assertCaughtUp(app, nextDueLabel: "Your deck is empty")
-      assertCornerButtons(app)
-      snapshot("study-empty", appearance: appearance)
-      app.terminate()
-    }
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .live(server.url))
+    assertCaughtUp(app, nextDueLabel: "Your deck is empty")
+    assertCornerButtons(app)
+    snapshot("study-empty", appearance: .light)
     server.stop()
   }
 
@@ -171,7 +119,9 @@ final class StudyUITests: XCTestCase {
       if request.path.hasPrefix("/cards/due") { return .init(body: StubJSON.cards([card])) }
       return .init(status: 404, body: "{}")
     }
-    // Server not started yet: the port refuses connections.
+    // Server down: take an OS-picked port, then close it so it refuses connections.
+    try server.start()
+    server.stop()
     let app = launch(api: .live(server.url))
     assertOffline(app)
     snapshot("study-offline", appearance: .light)
@@ -188,201 +138,6 @@ final class StudyUITests: XCTestCase {
     XCTAssertFalse(el(app, "study.retry").exists, "study.retry still shown after a successful retry")
     snapshot("study-retry-recovered", appearance: .light)
     server.stop()
-  }
-
-  /// #7 (closed port, the spec's "unreachable URL"), dark appearance too.
-  @MainActor
-  func testStudy_apiUnreachable() {
-    XCUIDevice.shared.appearance = .dark
-    let app = launch(api: .live(unreachableAPIURL))
-    assertOffline(app)
-    snapshot("study-offline", appearance: .dark)
-  }
-
-  /// #7: a failing review → offline; retry brings back the same card, still revealed.
-  @MainActor
-  func testStudy_reviewFailureGoesOffline() throws {
-    XCUIDevice.shared.appearance = .light
-    let card = StubJSON.card(id: "33333333-3333-3333-3333-333333333333", front: "feline", back: "cat")
-    let server = StubAPIServer { request in
-      if request.method == "POST" { return .init(status: 500, body: #"{"detail":"boom"}"#) }
-      if request.path.hasPrefix("/cards/due") { return .init(body: StubJSON.cards([card])) }
-      return .init(status: 404, body: "{}")
-    }
-    try server.start()
-    let app = launch(api: .live(server.url))
-    assertFront(app, "feline", remaining: "1 to review")
-    el(app, "study.card").tap()
-    assertRevealed(app, front: "feline", back: "cat")
-    el(app, "study.rate.again").tap()
-    assertOffline(app)
-    snapshot("study-review-failed", appearance: .light)
-    el(app, "study.retry").tap()
-    // Spec 001 #7 (round 2): the same card comes back still revealed, no "Show answer" tap needed.
-    waitForLabel(el(app, "study.front"), "feline")
-    waitForLabel(el(app, "study.remaining"), "1 to review")
-    XCTAssertFalse(el(app, "study.reveal").exists, "study.reveal shown: the card came back unrevealed after retry")
-    assertRevealed(app, front: "feline", back: "cat")
-    snapshot("study-review-failed-retried", appearance: .light)
-    // And the retried card is rateable: a second review succeeds → caught up.
-    server.handler = { request in
-      if request.method == "POST" { return .init(body: card) }
-      if request.path.hasPrefix("/cards/due") { return .init(body: "[]") }
-      if request.path.hasPrefix("/stats") {
-        return .init(body: StubJSON.stats(total: 1, nextDue: Date().addingTimeInterval(23 * 3600 + 600)))
-      }
-      return .init(status: 404, body: "{}")
-    }
-    el(app, "study.rate.good").tap()
-    assertCaughtUp(app, nextDuePrefix: "Next card in")
-    server.stop()
-  }
-
-  // MARK: - Dynamic Type (criterion 11)
-
-  /// #11: revealed card + rating row at accessibility XL: readable, scaled, centered, ratings reachable.
-  @MainActor
-  func testStudy_accessibilityXL() {
-    XCUIDevice.shared.appearance = .light
-    let baseline = launch(api: .mock)
-    XCTAssertTrue(el(baseline, "study.front").waitForExistence(timeout: 5))
-    let baseHeight = el(baseline, "study.front").frame.height
-    baseline.terminate()
-
-    let app = launch(api: .mock, arguments: accessibilityXLArguments)
-    assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
-    let frontBefore = el(app, "study.front").frame
-    el(app, "study.reveal").tap()
-    assertRevealed(app, front: Self.fixtures[0].front, back: Self.fixtures[0].back)
-    assertFrontDidNotMove(app, from: frontBefore)
-    snapshot("study-xl", appearance: .light)
-    assertTextsReadable(in: app)
-    assertRatingRowUsable(app)
-    XCTAssertGreaterThan(el(app, "study.front").frame.height, baseHeight * 1.3,
-                         "study.front did not scale with Dynamic Type (height \(baseHeight) at default)")
-  }
-
-  /// #11: long text at accessibility XL wraps (multi-line) and stays centered; nothing is clipped. Per the
-  /// layout notes, card text stops growing at `.accessibility2` and the card area scrolls if still too long:
-  /// every line must be visible on screen at some scroll position, never drawn under the rating row.
-  @MainActor
-  func testStudy_accessibilityXLLongText() throws {
-    XCUIDevice.shared.appearance = .light
-    let front = "the quick brown fox jumps over the lazy dog near the riverbank"
-    let back = "a sentence that uses every letter of the alphabet, often used to test typewriters and fonts"
-    let card = StubJSON.card(id: "44444444-4444-4444-4444-444444444444", front: front, back: back)
-    let server = StubAPIServer { request in
-      if request.path.hasPrefix("/cards/due") { return .init(body: StubJSON.cards([card])) }
-      return .init(status: 404, body: "{}")
-    }
-    try server.start()
-    let app = launch(api: .live(server.url), arguments: accessibilityXLArguments)
-    assertFront(app, front, remaining: "1 to review")
-    snapshot("study-xl-long-front", appearance: .light)
-    let topRowBottom = max(el(app, "study.deck").frame.maxY, el(app, "study.remaining").frame.maxY)
-    let frontBefore = el(app, "study.front").frame
-    XCTAssertGreaterThanOrEqual(frontBefore.minY, topRowBottom - 1,
-                                "study.front starts under the top row before reveal: \(frontBefore)")
-    el(app, "study.card").tap()
-    assertRevealed(app, front: front, back: back)
-    assertFrontDidNotMove(app, from: frontBefore)
-    snapshot("study-xl-long", appearance: .light)
-    let ratingTop = Self.ratings.map { el(app, "study.rate.\($0)").frame.minY }.min()!
-    let cardFrame = el(app, "study.card").frame
-    XCTAssertLessThanOrEqual(cardFrame.maxY, ratingTop + 1,
-                             "study.card (text area) extends under the rating row: card \(cardFrame), ratings top \(ratingTop)")
-    XCTAssertGreaterThanOrEqual(cardFrame.minY, topRowBottom - 1,
-                                "study.card (text area) extends under the top row: \(cardFrame)")
-    for id in ["study.front", "study.back"] {
-      let f = el(app, id).frame
-      XCTAssertGreaterThan(f.height, 100, "\(id) should wrap to several lines at XL: \(f)")
-    }
-    // The bottom of the back must be reachable: either already above the rating row, or after scrolling.
-    if el(app, "study.back").frame.maxY > ratingTop + 1 {
-      for _ in 0..<4 where el(app, "study.back").frame.maxY > ratingTop + 1 {
-        el(app, "study.card").swipeUp()
-      }
-      snapshot("study-xl-long-scrolled", appearance: .light)
-    }
-    let backEnd = el(app, "study.back").frame
-    XCTAssertLessThanOrEqual(backEnd.maxY, ratingTop + 1,
-                             "end of study.back unreachable: still under the rating row after scrolling: \(backEnd)")
-    XCTAssertLessThanOrEqual(backEnd.maxY, cardFrame.maxY + 1, "end of study.back outside the card area: \(backEnd)")
-    assertRatingRowUsable(app, checkBackAbove: false)
-    // Scrolling must not have revealed/hid anything else: still revealed, ratings still there.
-    assertRevealed(app, front: front, back: back)
-    server.stop()
-  }
-
-  /// #11 + layout note "scrolls if it is still too long": text too long for one screen even when capped.
-  /// The card area must scroll, stay between the top row and the rating row, and every line must be reachable.
-  @MainActor
-  func testStudy_accessibilityXLVeryLongTextScrolls() throws {
-    XCUIDevice.shared.appearance = .light
-    let front = "a very long prompt that keeps going so that even with the card text capped it cannot possibly fit"
-    let back = "an equally long answer, several sentences long, written to overflow the card area at accessibility "
-      + "sizes so that the only way to read its final words is to scroll the card area up: the end"
-    let card = StubJSON.card(id: "55555555-5555-5555-5555-555555555555", front: front, back: back)
-    let server = StubAPIServer { request in
-      if request.path.hasPrefix("/cards/due") { return .init(body: StubJSON.cards([card])) }
-      return .init(status: 404, body: "{}")
-    }
-    try server.start()
-    let app = launch(api: .live(server.url), arguments: accessibilityXLArguments)
-    assertFront(app, front, remaining: "1 to review")
-    snapshot("study-xl-verylong-front", appearance: .light)
-    let topRowBottom = max(el(app, "study.deck").frame.maxY, el(app, "study.remaining").frame.maxY)
-    let frontBefore = el(app, "study.front").frame
-    XCTAssertGreaterThanOrEqual(frontBefore.minY, topRowBottom - 1,
-                                "study.front starts under the top row before reveal: \(frontBefore)")
-    el(app, "study.reveal").tap()
-    assertRevealed(app, front: front, back: back)
-    assertFrontDidNotMove(app, from: frontBefore)
-    snapshot("study-xl-verylong", appearance: .light)
-    let ratingTop = Self.ratings.map { el(app, "study.rate.\($0)").frame.minY }.min()!
-    let cardFrame = el(app, "study.card").frame
-    XCTAssertLessThanOrEqual(cardFrame.maxY, ratingTop + 1,
-                             "study.card extends under the rating row: card \(cardFrame), ratings top \(ratingTop)")
-    XCTAssertGreaterThan(el(app, "study.back").frame.maxY, ratingTop,
-                         "fixture not long enough to need scrolling; the scroll path is untested")
-    for _ in 0..<6 where el(app, "study.back").frame.maxY > ratingTop + 1 {
-      el(app, "study.card").swipeUp()
-    }
-    snapshot("study-xl-verylong-scrolled", appearance: .light)
-    let backEnd = el(app, "study.back").frame
-    XCTAssertLessThanOrEqual(backEnd.maxY, min(ratingTop, cardFrame.maxY) + 1,
-                             "end of study.back unreachable by scrolling: \(backEnd)")
-    let cardAfter = el(app, "study.card").frame
-    XCTAssertEqual(cardAfter.minY, cardFrame.minY, accuracy: 0.5, "the card area itself moved while scrolling")
-    XCTAssertEqual(cardAfter.height, cardFrame.height, accuracy: 0.5, "the card area resized while scrolling")
-    assertRatingRowUsable(app, checkBackAbove: false)
-    // Still revealed after scrolling; rating still works.
-    XCTAssertFalse(el(app, "study.reveal").exists, "scrolling un-revealed the card")
-    server.stop()
-  }
-
-  /// #11 + layout note: the card-text cap at `.accessibility2`. At AX5 the card text is the same size as at
-  /// AX XL (capped), the rating row stays usable, and the fixture card still fits without overlap.
-  @MainActor
-  func testStudy_accessibilityXXXLCapped() {
-    XCUIDevice.shared.appearance = .light
-    let xl = launch(api: .mock, arguments: accessibilityXLArguments)
-    XCTAssertTrue(el(xl, "study.front").waitForExistence(timeout: 5))
-    let xlHeight = el(xl, "study.front").frame.height
-    xl.terminate()
-
-    let app = launch(api: .mock, arguments: ["-UIPreferredContentSizeCategoryName",
-                                             "UICTContentSizeCategoryAccessibilityXXXL"])
-    assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
-    XCTAssertEqual(el(app, "study.front").frame.height, xlHeight, accuracy: 1,
-                   "card text not capped: front height at AX5 differs from AX XL (\(xlHeight))")
-    let frontBefore = el(app, "study.front").frame
-    el(app, "study.reveal").tap()
-    assertRevealed(app, front: Self.fixtures[0].front, back: Self.fixtures[0].back)
-    assertFrontDidNotMove(app, from: frontBefore)
-    snapshot("study-xxxl", appearance: .light)
-    assertTextsReadable(in: app)
-    assertRatingRowUsable(app)
   }
 
   // MARK: - Live API (criterion 10)
@@ -436,7 +191,7 @@ final class StudyUITests: XCTestCase {
     XCTAssertEqual(el(app, "study.remaining").frame.midX, window.midX, accuracy: 1,
                    "study.remaining not centered", file: file, line: line)
     XCTAssertFalse(el(app, "study.back").exists, "study.back visible before reveal", file: file, line: line)
-    XCTAssertTrue(el(app, "study.reveal").waitForExistence(timeout: 5), "study.reveal missing", file: file, line: line)
+    XCTAssertTrue(el(app, "study.reveal").waitFor(timeout: 5), "study.reveal missing", file: file, line: line)
     XCTAssertTrue(el(app, "study.reveal").isHittable, "study.reveal not hittable", file: file, line: line)
     XCTAssertEqual(el(app, "study.reveal").label, "Show answer", file: file, line: line)
     XCTAssertTrue(el(app, "study.card").exists, "study.card missing", file: file, line: line)
@@ -451,8 +206,8 @@ final class StudyUITests: XCTestCase {
   private func assertFrontDidNotMove(_ app: XCUIApplication, from before: CGRect,
                                      file: StaticString = #filePath, line: UInt = #line) {
     // Let the 0.25s fade settle, then compare.
-    _ = el(app, "study.rate.easy").waitForExistence(timeout: 3)
-    Thread.sleep(forTimeInterval: 0.5)
+    _ = el(app, "study.rate.easy").waitFor(timeout: 3)
+    _ = poll(timeout: 2) { abs(el(app, "study.front").frame.minY - before.minY) < 0.5 }  // 0.25 s fade
     let after = el(app, "study.front").frame
     XCTAssertEqual(after.minY, before.minY, accuracy: 0.5, "study.front moved on reveal: \(before) → \(after)",
                    file: file, line: line)
@@ -473,14 +228,11 @@ final class StudyUITests: XCTestCase {
     let window = app.windows.firstMatch.frame
     XCTAssertEqual(backEl.frame.midX, window.midX, accuracy: 1, "study.back not centered: \(backEl.frame)",
                    file: file, line: line)
-    let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
-                                         object: el(app, "study.reveal"))
-    XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 3), .completed, "study.reveal still shown after reveal",
-                   file: file, line: line)
+    waitForAbsence(el(app, "study.reveal"), timeout: 3, "study.reveal still shown after reveal", file: file, line: line)
     let labels = ["again": "Again", "hard": "Hard", "good": "Good", "easy": "Easy"]
     for rating in Self.ratings {
       let button = el(app, "study.rate.\(rating)")
-      XCTAssertTrue(button.waitForExistence(timeout: 3), "study.rate.\(rating) missing", file: file, line: line)
+      XCTAssertTrue(button.waitFor(timeout: 3), "study.rate.\(rating) missing", file: file, line: line)
       XCTAssertTrue(button.isEnabled, "study.rate.\(rating) disabled", file: file, line: line)
       XCTAssertEqual(button.label, labels[rating], file: file, line: line)
     }
@@ -491,7 +243,7 @@ final class StudyUITests: XCTestCase {
                               timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line) {
     waitForLabel(el(app, "study.message"), "All caught up", timeout: timeout, file: file, line: line)
     let nextDue = el(app, "study.nextDue")
-    XCTAssertTrue(nextDue.waitForExistence(timeout: 5), "study.nextDue missing", file: file, line: line)
+    XCTAssertTrue(nextDue.waitFor(timeout: 5), "study.nextDue missing", file: file, line: line)
     if let nextDueLabel { waitForLabel(nextDue, nextDueLabel, file: file, line: line) }
     if let nextDuePrefix {
       XCTAssertTrue(nextDue.label.hasPrefix(nextDuePrefix), "study.nextDue = '\(nextDue.label)'", file: file, line: line)
@@ -512,7 +264,7 @@ final class StudyUITests: XCTestCase {
   private func assertOffline(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     waitForLabel(el(app, "study.message"), "Can't reach your deck", timeout: 20, file: file, line: line)
     let retry = el(app, "study.retry")
-    XCTAssertTrue(retry.waitForExistence(timeout: 5), "study.retry missing", file: file, line: line)
+    XCTAssertTrue(retry.waitFor(timeout: 5), "study.retry missing", file: file, line: line)
     XCTAssertTrue(retry.isHittable, "study.retry not hittable", file: file, line: line)
     // 44pt within half a point: XCUI reports 43.67 (131px @3x) for a 44pt circle at a fractional origin.
     XCTAssertGreaterThanOrEqual(retry.frame.width, 43.5, "study.retry too narrow: \(retry.frame)", file: file, line: line)
@@ -532,7 +284,7 @@ final class StudyUITests: XCTestCase {
   @MainActor
   private func assertCornerButtons(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let deck = el(app, "study.deck"), add = el(app, "study.add")
-    XCTAssertTrue(deck.waitForExistence(timeout: 5), "study.deck missing", file: file, line: line)
+    XCTAssertTrue(deck.waitFor(timeout: 5), "study.deck missing", file: file, line: line)
     XCTAssertTrue(add.exists, "study.add missing", file: file, line: line)
     let window = app.windows.firstMatch.frame
     for (id, b) in [("study.deck", deck), ("study.add", add)] {

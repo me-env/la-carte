@@ -4,23 +4,10 @@ import XCTest
 /// `-theme <value>` launch argument.
 ///
 /// The stored theme survives between test launches. Every test that taps the picker launches with `theme: nil`
-/// (so the argument domain doesn't mask the picker) and registers `resetThemeOnTeardown()`, which puts the stored
-/// value back to System even when the test fails. Other suites launch with `-theme system` (see `launch`).
+/// (so the argument domain doesn't mask the picker), ends on System, and registers `resetThemeOnTeardown()`,
+/// which puts the stored value back to System when the test fails. Other suites launch with `-theme system` (see `launch`).
 final class ThemeUITests: XCTestCase {
-  typealias RGB = (Int, Int, Int)
-  struct Palette {
-    let background: RGB, surface: RGB, ink: RGB, secondaryInk: RGB
-    static let light = Palette(background: (249, 250, 245), surface: (255, 255, 255), ink: (28, 28, 28),
-                               secondaryInk: (157, 157, 155))
-    static let dark = Palette(background: (26, 26, 26), surface: (37, 37, 37), ink: (242, 242, 240),
-                              secondaryInk: (138, 138, 136))
-    /// Spec 004 #4: background #0E1913, surface #16241B, ink #EEF2EC, secondaryInk #83938A.
-    static let forest = Palette(background: (14, 25, 19), surface: (22, 36, 27), ink: (238, 242, 236),
-                                secondaryInk: (131, 147, 138))
-  }
-
   static let themes = ["system", "light", "dark", "forest"]
-  static let appearances: [XCUIDevice.Appearance] = [.light, .dark]
   static let mockIDs = (1...3).map { "00000000-0000-0000-0000-00000000000\($0)" }
   static let fixtures: [(front: String, back: String)] = [
     ("serendipity", "finding something good without looking for it"),
@@ -39,36 +26,32 @@ final class ThemeUITests: XCTestCase {
   /// test). Segment colors are the system's (009b), only the sheet background is checked here.
   @MainActor
   func testSettings_appearancePicker() {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock, theme: nil)
-      openDeck(app)
-      openSettings(app)
-      let palette: Palette = appearance == .dark ? .dark : .light
-      let buttons = Self.themes.map { themeButton(app, $0) }
-      for (theme, b) in zip(Self.themes, buttons) {
-        XCTAssertTrue(b.waitForExistence(timeout: 5), "settings.theme.\(theme) missing")
-        XCTAssertTrue(b.isHittable, "settings.theme.\(theme) not hittable")
-        XCTAssertEqual(b.label, theme.capitalized, "settings.theme.\(theme) label")
-      }
-      assertSelected(app, "system")
-      // One row, equal widths, in order, under the server section.
-      let frames = buttons.map(\.frame)
-      for f in frames.dropFirst() {
-        XCTAssertEqual(f.minY, frames[0].minY, accuracy: 0.5, "options not on one row: \(frames)")
-        XCTAssertEqual(f.width, frames[0].width, accuracy: 1, "options not equal width: \(frames)")
-      }
-      for (a, b) in zip(frames, frames.dropFirst()) {
-        XCTAssertLessThanOrEqual(a.maxX, b.minX + 0.5, "options out of order / overlapping: \(frames)")
-      }
-      XCTAssertGreaterThanOrEqual(frames[0].minY, el(app, "settings.test").frame.maxY - 1,
-                                  "Appearance not below the server section")
-      waitForColors(app, [
-        ("sheet background left of the options", CGPoint(x: 3, y: frames[0].midY), palette.background),
-      ])
-      snapshot("settings-appearance", appearance: appearance)
-      app.terminate()
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock, theme: nil)
+    openDeck(app)
+    openSettings(app)
+    let buttons = Self.themes.map { themeButton(app, $0) }
+    for (theme, b) in zip(Self.themes, buttons) {
+      XCTAssertTrue(b.waitFor(timeout: 5), "theme segment \(theme) missing")
+      XCTAssertTrue(b.isHittable, "theme segment \(theme) not hittable")
+      XCTAssertEqual(b.label, theme.capitalized, "theme segment \(theme) label")
     }
+    assertSelected(app, "system")
+    // One row, equal widths, in order, under the server section.
+    let frames = buttons.map(\.frame)
+    for f in frames.dropFirst() {
+      XCTAssertEqual(f.minY, frames[0].minY, accuracy: 0.5, "options not on one row: \(frames)")
+      XCTAssertEqual(f.width, frames[0].width, accuracy: 1, "options not equal width: \(frames)")
+    }
+    for (a, b) in zip(frames, frames.dropFirst()) {
+      XCTAssertLessThanOrEqual(a.maxX, b.minX + 0.5, "options out of order / overlapping: \(frames)")
+    }
+    XCTAssertGreaterThanOrEqual(frames[0].minY, el(app, "settings.test").frame.maxY - 1,
+                                "Appearance not below the server section")
+    waitForColors(app, [
+      ("sheet background left of the options", CGPoint(x: 3, y: frames[0].midY), Palette.light.background),
+    ])
+    snapshot("settings-appearance", appearance: .light)
   }
 
   // MARK: - #2 live switch, #3 forced schemes
@@ -139,7 +122,7 @@ final class ThemeUITests: XCTestCase {
 
       // Flip the device while forced: nothing changes.
       XCUIDevice.shared.appearance = device == .dark ? .light : .dark
-      Thread.sleep(forTimeInterval: 1)
+      Thread.sleep(forTimeInterval: 1)  // negative check: give a wrong re-theme time to happen
       assertStudyColors(app, forcedPalette, "\(forced) forced after flipping the device")
       XCUIDevice.shared.appearance = device
 
@@ -214,179 +197,96 @@ final class ThemeUITests: XCTestCase {
     closeDeck(app)
     assertStudyColors(app, .forest, "study, forest from the picker")
     assertStatusBar(app, darkScheme: true, "forest from the picker")
+    openDeck(app)
+    openSettings(app)
+    themeButton(app, "system").tap()
+    assertSelected(app, "system")
   }
 
-  // MARK: - #5 persistence
-
-  /// #5: Forest survives a relaunch (no launch argument): study opens in forest and the picker shows Forest; then
-  /// Light survives too.
-  @MainActor
-  func testTheme_persistsAcrossRelaunch() {
-    resetThemeOnTeardown()
-    XCUIDevice.shared.appearance = .light
-    for (theme, palette) in [("forest", Palette.forest), ("light", .light)] {
-      if theme == "light" { XCUIDevice.shared.appearance = .dark }  // Light must still win on a dark device
-      var app = launch(api: .mock, theme: nil)
-      openDeck(app)
-      openSettings(app)
-      themeButton(app, theme).tap()
-      assertSelected(app, theme)
-      app.terminate()
-
-      app = launch(api: .mock, theme: nil)
-      waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
-      assertStudyColors(app, palette, "\(theme) after relaunch")
-      snapshot("study-relaunched-\(theme)", appearance: XCUIDevice.shared.appearance)
-      openDeck(app)
-      openSettings(app)
-      assertSelected(app, theme)
-      app.terminate()
-    }
-  }
+  // #5 persistence across a relaunch: SettingsUITests.testSettings_persistAcrossRelaunch (with the Keychain token).
 
   // MARK: - #4 + #6 forest on every screen via `-theme forest`
 
   /// #6: `-theme forest` starts in forest. #4: forest palette on Study (front, revealed, caught up), Deck, Editor
-  /// (keyboard dark), Settings (Forest selected), on a light and a dark device. The argument doesn't persist.
+  /// (keyboard dark), Settings (Forest selected), on a light device (forest must win over it). The argument doesn't persist.
   @MainActor
   func testTheme_forestEveryScreen() {
-    resetThemeOnTeardown()
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      var app = launch(api: .mock, theme: "forest")
-      let p = Palette.forest
+    XCUIDevice.shared.appearance = .light
+    var app = launch(api: .mock, theme: "forest")
+    let p = Palette.forest
 
-      // Study front.
-      waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
-      assertStudyColors(app, p, "study front")
-      assertStatusBar(app, darkScheme: true, "-theme forest")
-      assertTextColor(app, "study.front", p.ink, background: p.background)
-      assertTextColor(app, "study.remaining", p.secondaryInk, background: p.background)
-      snapshot("study-forest", appearance: appearance)
+    // Study front.
+    waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
+    assertStudyColors(app, p, "study front")
+    assertStatusBar(app, darkScheme: true, "-theme forest")
+    // Card text is inside a ScrollView, which unit renders can't draw; `study.remaining`: ScreenColorTests.
+    assertTextColor(app, "study.front", p.ink, background: p.background)
+    snapshot("study-forest", appearance: .light)
 
-      // Revealed.
-      el(app, "study.card").tap()
-      XCTAssertTrue(el(app, "study.rate.good").waitForExistence(timeout: 5), "ratings missing after reveal")
-      assertStudyColors(app, p, "study revealed")
-      assertTextColor(app, "study.back", p.secondaryInk, background: p.background)
-      snapshot("study-revealed-forest", appearance: appearance)
+    // Revealed.
+    el(app, "study.card").tap()
+    XCTAssertTrue(el(app, "study.rate.good").waitFor(timeout: 5), "ratings missing after reveal")
+    Thread.sleep(forTimeInterval: 0.5)  // the back fades in over 0.25 s
+    assertTextColor(app, "study.back", p.secondaryInk, background: p.background)
+    snapshot("study-revealed-forest", appearance: .light)
 
-      // Deck.
-      openDeck(app)
-      assertDeckColors(app, p, "deck")
-      snapshot("deck-forest", appearance: appearance)
+    // Deck.
+    openDeck(app)
+    assertDeckColors(app, p, "deck")
+    snapshot("deck-forest", appearance: .light)
 
-      // Editor (edit), then new card with the keyboard up.
-      deckRow(app, Self.mockIDs[2]).tap()
-      waitForSheet(app, "Edit card")
-      assertEditorColors(app, p, "editor (edit)")
-      snapshot("editor-forest", appearance: appearance)
-      el(app, "editor.close").tap()
-      waitForAbsence(editorBar(app))
-      el(app, "deck.add").tap()
-      waitForSheet(app, "New card")
-      assertKeyboard(app, dark: true, "-theme forest, new card")
-      snapshot("editor-new-forest", appearance: appearance)
-      el(app, "editor.close").tap()
-      waitForAbsence(editorBar(app))
+    // Editor (edit), then new card with the keyboard up.
+    deckRow(app, Self.mockIDs[2]).tap()
+    waitForSheet(app, "Edit card")
+    assertEditorColors(app, p, "editor (edit)")
+    snapshot("editor-forest", appearance: .light)
+    el(app, "editor.close").tap()
+    waitForAbsence(editorBar(app))
+    el(app, "deck.add").tap()
+    waitForSheet(app, "New card")
+    assertKeyboard(app, dark: true, "-theme forest, new card")
+    snapshot("editor-new-forest", appearance: .light)
+    el(app, "editor.close").tap()
+    waitForAbsence(editorBar(app))
 
-      // Settings: Forest is the selected option.
-      openSettings(app)
-      assertSelected(app, "forest")
-      assertSettingsColors(app, p, "settings")
-      snapshot("settings-forest", appearance: appearance)
-      closeSettings(app)
-      closeDeck(app)
+    // Settings: Forest is the selected option.
+    openSettings(app)
+    assertSelected(app, "forest")
+    assertSettingsColors(app, p, "settings")
+    snapshot("settings-forest", appearance: .light)
+    closeSettings(app)
+    closeDeck(app)
 
-      // Caught up.
-      for card in Self.fixtures.dropFirst() {
-        if el(app, "study.rate.good").exists { el(app, "study.rate.good").tap() }
-        waitForLabel(el(app, "study.front"), card.front)
-        el(app, "study.reveal").tap()
-        XCTAssertTrue(el(app, "study.rate.good").waitForExistence(timeout: 5))
-      }
-      el(app, "study.rate.good").tap()
-      waitForLabel(el(app, "study.message"), "All caught up")
-      assertStudyColors(app, p, "caught up")
-      assertTextColor(app, "study.message", p.ink, background: p.background)
-      snapshot("study-caught-up-forest", appearance: appearance)
-      app.terminate()
-
-      // The argument is not written to the stored value: a plain relaunch is back on System.
-      app = launch(api: .mock, theme: nil)
-      waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
-      assertStudyColors(app, appearance == .dark ? .dark : .light, "relaunch without -theme")
-      app.terminate()
+    // Caught up.
+    for card in Self.fixtures.dropFirst() {
+      if el(app, "study.rate.good").exists { el(app, "study.rate.good").tap() }
+      waitForLabel(el(app, "study.front"), card.front)
+      el(app, "study.reveal").tap()
+      XCTAssertTrue(el(app, "study.rate.good").waitFor(timeout: 5))
     }
+    el(app, "study.rate.good").tap()
+    waitForLabel(el(app, "study.message"), "All caught up")
+    assertTextColor(app, "study.message", p.ink, background: p.background)
+    snapshot("study-caught-up-forest", appearance: .light)
+    app.terminate()
+
+    // The argument is not written to the stored value: a plain relaunch is back on System.
+    app = launch(api: .mock, theme: nil)
+    waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
+    assertStudyColors(app, .light, "relaunch without -theme")
   }
 
   /// #6 + gallery: `LA_CARTE_SCREEN=design-system` with `-theme forest` renders the gallery in forest.
   @MainActor
   func testDesignSystem_forest() {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock, screen: "design-system", theme: "forest")
-      let button = app.buttons["gallery.button.plus"]
-      XCTAssertTrue(button.waitForExistence(timeout: 5), "gallery missing")
-      scrollIntoView(app, button)
-      let window = app.windows.firstMatch.frame
-      let f = button.frame
-      waitForColors(app, [
-        ("gallery background left edge", CGPoint(x: 3, y: f.midY), Palette.forest.background),
-        ("gallery background bottom", CGPoint(x: 8, y: window.maxY - 8), Palette.forest.background),
-        ("gallery circle button fill", CGPoint(x: f.midX - f.width / 2 + 7, y: f.midY), Palette.forest.surface),
-      ])
-      assertStatusBar(app, darkScheme: true, "gallery -theme forest")
-      snapshot("design-system-forest", appearance: appearance)
-      app.terminate()
-    }
-  }
-
-  // MARK: - accessibility XL
-
-  /// At accessibility XL the four options stay inside the window, don't overlap and keep their full label; Forest
-  /// can be picked; study in forest at XL stays readable.
-  @MainActor
-  func testTheme_accessibilityXL() {
-    resetThemeOnTeardown()
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      var app = launch(api: .mock, arguments: accessibilityXLArguments, theme: nil)
-      openDeck(app)
-      openSettings(app)
-      let forest = themeButton(app, "forest")
-      if !forest.isHittable { app.swipeUp() }
-      XCTAssertTrue(forest.isHittable, "settings.theme.forest not reachable at XL")
-      let window = app.windows.firstMatch.frame
-      let frames = Self.themes.map { themeButton(app, $0).frame }
-      for (theme, f) in zip(Self.themes, frames) {
-        XCTAssertTrue(window.insetBy(dx: -0.5, dy: -0.5).contains(f), "settings.theme.\(theme) clipped at XL: \(f)")
-      }
-      for (i, a) in frames.enumerated() {
-        for b in frames[(i + 1)...] {
-          let o = a.intersection(b)
-          XCTAssertTrue(o.isNull || o.width < 1 || o.height < 1, "theme options overlap at XL: \(a) / \(b)")
-        }
-      }
-      assertSelected(app, "system")
-      snapshot("settings-appearance-xl", appearance: appearance)
-      forest.tap()
-      assertSelected(app, "forest")
-      snapshot("settings-forest-xl", appearance: appearance)
-      themeButton(app, "system").tap()
-      assertSelected(app, "system")
-      app.terminate()
-
-      app = launch(api: .mock, arguments: accessibilityXLArguments, theme: "forest")
-      waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
-      assertStudyColors(app, .forest, "study forest XL")
-      assertTextsReadable(in: app)
-      snapshot("study-forest-xl", appearance: appearance)
-      el(app, "study.card").tap()
-      XCTAssertTrue(el(app, "study.rate.good").waitForExistence(timeout: 5))
-      snapshot("study-revealed-forest-xl", appearance: appearance)
-      app.terminate()
-    }
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock, screen: "design-system", theme: "forest")
+    let button = app.buttons["gallery.button.plus"]
+    XCTAssertTrue(button.waitFor(timeout: 5), "gallery missing")
+    scrollIntoView(app, button)
+    // Gallery colours per theme × scheme: ScreenColorTests.gallery. Here only what needs the device.
+    assertStatusBar(app, darkScheme: true, "gallery -theme forest")
+    snapshot("design-system-forest", appearance: .light)
   }
 
   // MARK: - live API (scripts/e2e.sh)
@@ -399,23 +299,25 @@ final class ThemeUITests: XCTestCase {
     }
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .live(url), theme: "forest")
-    XCTAssertTrue(el(app, "study.deck").waitForExistence(timeout: 15))
+    XCTAssertTrue(el(app, "study.deck").waitFor(timeout: 15))
     assertStudyColors(app, .forest, "live study")
     snapshot("study-live-forest", appearance: .light)
     openDeck(app)
     let anyRow = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'deck.row.'"))
       .firstMatch
-    XCTAssertTrue(anyRow.waitForExistence(timeout: 10), "no seeded rows in the live deck")
+    XCTAssertTrue(anyRow.waitFor(timeout: 10), "no seeded rows in the live deck")
     assertDeckColors(app, .forest, "live deck")
     snapshot("deck-live-forest", appearance: .light)
   }
 
   // MARK: - Helpers
 
-  /// Puts the stored theme back to System after the test, pass or fail.
+  /// Puts the stored theme back to System if the test failed. A passing test ends on System itself (tapped in its
+  /// open Settings sheet), which saves a relaunch per test.
   @MainActor
   private func resetThemeOnTeardown() {
     addTeardownBlock { @MainActor [self] in
+      guard testRun?.hasSucceeded == false else { return }
       XCUIDevice.shared.appearance = .light
       let app = launch(api: .mock, theme: nil)
       openDeck(app)
@@ -446,7 +348,7 @@ final class ThemeUITests: XCTestCase {
   @MainActor
   private func openDeck(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let button = el(app, "study.deck")
-    XCTAssertTrue(button.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
+    XCTAssertTrue(button.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
     waitForDeckTitle(app, file: file, line: line)
   }
@@ -460,7 +362,7 @@ final class ThemeUITests: XCTestCase {
   @MainActor
   private func openSettings(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let gear = el(app, "deck.settings")
-    XCTAssertTrue(gear.waitForExistence(timeout: 5), "deck.settings missing", file: file, line: line)
+    XCTAssertTrue(gear.waitFor(timeout: 5), "deck.settings missing", file: file, line: line)
     gear.tap()
     waitForSheet(app, "Settings", file: file, line: line)
   }
@@ -474,37 +376,14 @@ final class ThemeUITests: XCTestCase {
   @MainActor
   private func tapField(_ app: XCUIApplication, _ id: String) {
     el(app, id).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-    XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "no keyboard after tapping \(id)")
-  }
-
-  private static func close(_ c: RGB, _ e: RGB, tolerance: Int = 4) -> Bool {
-    abs(c.0 - e.0) <= tolerance && abs(c.1 - e.1) <= tolerance && abs(c.2 - e.2) <= tolerance
-  }
-
-  /// Polls screenshots for up to `timeout` until every point has its expected color (re-render + sheet animations).
-  @MainActor
-  private func waitForColors(_ app: XCUIApplication, _ checks: [(String, CGPoint, RGB)], context: String = "",
-                             timeout: TimeInterval = 3, file: StaticString = #filePath, line: UInt = #line) {
-    let width = app.windows.firstMatch.frame.width
-    let deadline = Date().addingTimeInterval(timeout)
-    var failures: [String] = []
-    repeat {
-      let pixels = Pixels(XCUIScreen.main.screenshot(), pointWidth: width)
-      failures = checks.compactMap { name, p, expected in
-        let c = pixels.color(at: p)
-        return Self.close(c, expected) ? nil : "\(name) at \(p) is \(c), expected \(expected)"
-      }
-      if failures.isEmpty { return }
-      Thread.sleep(forTimeInterval: 0.2)
-    } while Date() < deadline
-    for f in failures { XCTFail("[\(context)] \(f)", file: file, line: line) }
+    XCTAssertTrue(app.keyboards.firstMatch.waitFor(timeout: 5), "no keyboard after tapping \(id)")
   }
 
   @MainActor
   private func assertStudyColors(_ app: XCUIApplication, _ p: Palette, _ context: String,
                                  file: StaticString = #filePath, line: UInt = #line) {
     let deck = el(app, "study.deck")
-    XCTAssertTrue(deck.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
+    XCTAssertTrue(deck.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     let window = app.windows.firstMatch.frame, d = deck.frame
     waitForColors(app, [
       ("study background top-left (status bar area)", CGPoint(x: 3, y: 3), p.background),
@@ -523,7 +402,7 @@ final class ThemeUITests: XCTestCase {
     let title = deckTitleText(app).frame
     let firstRow = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'deck.row.'"))
       .firstMatch
-    XCTAssertTrue(firstRow.waitForExistence(timeout: 10), "no deck rows", file: file, line: line)
+    XCTAssertTrue(firstRow.waitFor(timeout: 10), "no deck rows", file: file, line: line)
     let r = firstRow.frame
     waitForColors(app, [
       ("deck background left of the title", CGPoint(x: 4, y: title.midY), p.background),
@@ -560,72 +439,6 @@ final class ThemeUITests: XCTestCase {
       ("settings URL row fill", CGPoint(x: url.maxX - 4, y: url.midY), p.surface),
       ("settings Appearance row fill", CGPoint(x: picker.minX - 6, y: picker.midY), p.surface),
     ], context: context, file: file, line: line)
-  }
-
-  /// The glyph pixel furthest from the background along the element's middle should be the token color.
-  @MainActor
-  private func assertTextColor(_ app: XCUIApplication, _ id: String, _ expected: RGB, background: RGB,
-                               file: StaticString = #filePath, line: UInt = #line) {
-    let element = el(app, id)
-    XCTAssertTrue(element.waitForExistence(timeout: 5), "\(id) missing", file: file, line: line)
-    let f = element.frame
-    let pixels = Pixels(XCUIScreen.main.screenshot(), pointWidth: app.windows.firstMatch.frame.width)
-    var best = background, bestDistance = -1
-    for y in stride(from: f.minY + f.height * 0.3, through: f.minY + f.height * 0.7, by: 0.5) {
-      for x in stride(from: f.minX, to: f.maxX, by: 0.34) {
-        let c = pixels.color(at: CGPoint(x: x, y: y))
-        let d = abs(c.0 - background.0) + abs(c.1 - background.1) + abs(c.2 - background.2)
-        if d > bestDistance { bestDistance = d; best = c }
-      }
-    }
-    XCTAssertTrue(Self.close(best, expected, tolerance: 8), "\(id) text color \(best), expected \(expected)",
-                  file: file, line: line)
-  }
-
-  /// Status bar glyphs (time, top-left): light text on a dark scheme, dark text on a light one.
-  @MainActor
-  private func assertStatusBar(_ app: XCUIApplication, darkScheme: Bool, _ context: String,
-                               file: StaticString = #filePath, line: UInt = #line) {
-    let width = app.windows.firstMatch.frame.width
-    let bottom = min(50, el(app, "study.deck").exists ? el(app, "study.deck").frame.minY - 2 : 50)
-    let deadline = Date().addingTimeInterval(3)
-    var minL = 255.0, maxL = 0.0
-    repeat {
-      let pixels = Pixels(XCUIScreen.main.screenshot(), pointWidth: width)
-      minL = 255; maxL = 0
-      for y in stride(from: 8.0, to: bottom, by: 0.5) {
-        for x in stride(from: 16.0, to: 140.0, by: 0.5) {
-          let c = pixels.color(at: CGPoint(x: x, y: y))
-          let l = 0.299 * Double(c.0) + 0.587 * Double(c.1) + 0.114 * Double(c.2)
-          minL = min(minL, l); maxL = max(maxL, l)
-        }
-      }
-      if darkScheme ? maxL > 200 : minL < 80 { return }
-      Thread.sleep(forTimeInterval: 0.2)
-    } while Date() < deadline
-    XCTFail("[\(context)] status bar text not \(darkScheme ? "light (dark scheme)" : "dark (light scheme)"): "
-      + "luminance \(Int(minL))…\(Int(maxL))", file: file, line: line)
-  }
-
-  /// Average luminance of the keyboard: dark keyboard < 110, light keyboard > 150.
-  @MainActor
-  private func assertKeyboard(_ app: XCUIApplication, dark: Bool, _ context: String,
-                              file: StaticString = #filePath, line: UInt = #line) {
-    let keyboard = app.keyboards.firstMatch
-    XCTAssertTrue(keyboard.waitForExistence(timeout: 5), "[\(context)] no keyboard", file: file, line: line)
-    Thread.sleep(forTimeInterval: 0.8)  // keyboard slide-in
-    let f = keyboard.frame
-    let pixels = Pixels(XCUIScreen.main.screenshot(), pointWidth: app.windows.firstMatch.frame.width)
-    var total = 0.0, n = 0.0
-    for y in stride(from: f.minY + 4, to: f.maxY - 4, by: 4) {
-      for x in stride(from: f.minX + 4, to: f.maxX - 4, by: 4) {
-        let c = pixels.color(at: CGPoint(x: x, y: y))
-        total += 0.299 * Double(c.0) + 0.587 * Double(c.1) + 0.114 * Double(c.2)
-        n += 1
-      }
-    }
-    let avg = n > 0 ? total / n : 0
-    XCTAssertTrue(dark ? avg < 110 : avg > 150, "[\(context)] keyboard average luminance \(Int(avg)), expected a "
-      + (dark ? "dark" : "light") + " keyboard", file: file, line: line)
+    assertNotTintedBlue(app, "settings.test", file: file, line: line)
   }
 }

@@ -31,7 +31,7 @@ final class LaunchUITests: XCTestCase {
   private func assertCornerButtonsStable(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let deck = el(app, "study.deck")
     let add = el(app, "study.add")
-    XCTAssertTrue(deck.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
+    XCTAssertTrue(deck.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     let early = (deck: deck.frame, add: add.frame)
     _ = XCTWaiter().wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
     let settled = (deck: deck.frame, add: add.frame)

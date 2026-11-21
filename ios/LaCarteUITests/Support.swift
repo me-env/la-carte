@@ -11,10 +11,25 @@ enum APIMode {
 /// Port nothing listens on: used to exercise the "API unreachable" state.
 let unreachableAPIURL = "http://127.0.0.1:9"
 
-/// Launch argument pair forcing Dynamic Type to accessibility XL.
-let accessibilityXLArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"]
-/// Largest Dynamic Type size (AX5), spec 009b #9.
-let accessibilityAX5Arguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+/// Checks `condition` right away, then every 0.1 s until `timeout`. XCTWaiter (behind `waitForExistence` and
+/// predicate expectations) polls once per second, so an element already on screen still cost about 1 s.
+@MainActor
+func poll(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+  let deadline = Date().addingTimeInterval(timeout)
+  while true {
+    if condition() { return true }
+    if Date() >= deadline { return false }
+    Thread.sleep(forTimeInterval: 0.1)
+  }
+}
+
+extension XCUIElement {
+  /// Fast `waitForExistence`: true as soon as the element exists (checked now, then every 0.1 s).
+  @MainActor
+  func waitFor(timeout: TimeInterval) -> Bool {
+    poll(timeout: timeout) { exists }
+  }
+}
 
 extension XCTestCase {
   @MainActor
@@ -48,11 +63,9 @@ extension XCTestCase {
   @MainActor
   func waitForLabel(_ element: XCUIElement, _ expected: String, timeout: TimeInterval = 10,
                     file: StaticString = #filePath, line: UInt = #line) {
-    XCTAssertTrue(element.waitForExistence(timeout: timeout), "\(element) missing", file: file, line: line)
-    let predicate = NSPredicate(format: "label == %@", expected)
-    let exp = XCTNSPredicateExpectation(predicate: predicate, object: element)
-    let result = XCTWaiter().wait(for: [exp], timeout: timeout)
-    XCTAssertEqual(result, .completed, "Expected label '\(expected)', got '\(element.label)'", file: file, line: line)
+    XCTAssertTrue(element.waitFor(timeout: timeout), "\(element) missing", file: file, line: line)
+    let matched = poll(timeout: timeout) { element.label == expected }
+    XCTAssertTrue(matched, "Expected label '\(expected)', got '\(element.label)'", file: file, line: line)
   }
 
   /// Asserts the on-screen static texts don't overlap each other and stay inside the window width.
@@ -96,9 +109,8 @@ extension XCTestCase {
   @MainActor
   func waitForAbsence(_ element: XCUIElement, timeout: TimeInterval = 5, _ message: String = "",
                       file: StaticString = #filePath, line: UInt = #line) {
-    let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
-    XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: timeout), .completed,
-                   message.isEmpty ? "\(element) still exists" : message, file: file, line: line)
+    XCTAssertTrue(poll(timeout: timeout) { !element.exists },
+                  message.isEmpty ? "\(element) still exists" : message, file: file, line: line)
   }
 
   /// Dismisses the frontmost sheet with a downward drag starting on `handle` (e.g. its title).
@@ -124,7 +136,7 @@ extension XCTestCase {
   @MainActor
   func backgroundAndReactivate(_ app: XCUIApplication) {
     XCUIDevice.shared.press(.home)
-    Thread.sleep(forTimeInterval: 1)
+    _ = poll(timeout: 3) { app.state != .runningForeground }
     app.activate()
   }
 
@@ -188,6 +200,196 @@ extension XCTestCase {
   }
 }
 
+// MARK: - Colours (one helper for every pixel check)
+
+/// An 8-bit sRGB colour sampled from a screenshot.
+struct RGB: Equatable, CustomStringConvertible {
+  let r: Int, g: Int, b: Int
+
+  init(_ r: Int, _ g: Int, _ b: Int) {
+    self.r = r; self.g = g; self.b = b
+  }
+
+  /// Rec. 601 luma, 0…255.
+  var luminance: Double { 0.299 * Double(r) + 0.587 * Double(g) + 0.114 * Double(b) }
+
+  /// Every channel within `tolerance` of `other`.
+  func isClose(to other: RGB, tolerance: Int = 4) -> Bool {
+    abs(r - other.r) <= tolerance && abs(g - other.g) <= tolerance && abs(b - other.b) <= tolerance
+  }
+
+  /// Sum of channel differences.
+  func distance(to other: RGB) -> Int { abs(r - other.r) + abs(g - other.g) + abs(b - other.b) }
+
+  /// A saturated blue pixel: the default system tint leaking in (design system "no default blue tint").
+  var isSaturatedBlue: Bool { b > r + 60 && b > g + 30 }
+
+  var description: String { "(\(r), \(g), \(b))" }
+}
+
+/// The app's colour tokens (`Theme` in LaCarteKit) per palette. LaCarteKit's `ScreenColorTests` assert the same
+/// values on rendered screens; UI tests only use them for what needs the device (theme switching, sheets, chrome).
+struct Palette {
+  let background: RGB, surface: RGB, ink: RGB, secondaryInk: RGB
+  static let light = Palette(background: RGB(249, 250, 245), surface: RGB(255, 255, 255), ink: RGB(28, 28, 28),
+                             secondaryInk: RGB(157, 157, 155))
+  static let dark = Palette(background: RGB(26, 26, 26), surface: RGB(37, 37, 37), ink: RGB(242, 242, 240),
+                            secondaryInk: RGB(138, 138, 136))
+  /// Spec 004 #4: background #0E1913, surface #16241B, ink #EEF2EC, secondaryInk #83938A.
+  static let forest = Palette(background: RGB(14, 25, 19), surface: RGB(22, 36, 27), ink: RGB(238, 242, 236),
+                              secondaryInk: RGB(131, 147, 138))
+
+  static func of(_ appearance: XCUIDevice.Appearance) -> Palette { appearance == .dark ? .dark : .light }
+}
+
+/// RGB sampling of a screenshot at point coordinates.
+struct ColorProbe {
+  private let data: [UInt8]
+  private let width: Int
+  private let height: Int
+  private let scale: CGFloat
+  /// Size of the screenshot in points.
+  let size: CGSize
+
+  /// `pointWidth`: the window width in points (the image is @2x/@3x).
+  init(_ cg: CGImage, pointWidth: CGFloat) {
+    width = cg.width
+    height = cg.height
+    scale = CGFloat(cg.width) / pointWidth
+    size = CGSize(width: pointWidth, height: CGFloat(cg.height) / scale)
+    var buffer = [UInt8](repeating: 0, count: width * height * 4)
+    let context = CGContext(data: &buffer, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+    data = buffer
+  }
+
+  /// A fresh screenshot of the screen.
+  @MainActor
+  init(screenOf app: XCUIApplication) {
+    self.init(XCUIScreen.main.screenshot().image.cgImage!, pointWidth: app.windows.firstMatch.frame.width)
+  }
+
+  /// An @3x screenshot (iPhone 17 Pro) taken without the app, e.g. by `pullToRefreshCapturing`.
+  init(at3x cg: CGImage) {
+    self.init(cg, pointWidth: CGFloat(cg.width) / 3)
+  }
+
+  func color(at point: CGPoint) -> RGB {
+    let x = min(max(Int(point.x * scale), 0), width - 1), y = min(max(Int(point.y * scale), 0), height - 1)
+    let i = (y * width + x) * 4
+    return RGB(Int(data[i]), Int(data[i + 1]), Int(data[i + 2]))
+  }
+
+  /// Every sample in `rect`, `step` points apart.
+  func colors(in rect: CGRect, step: CGFloat) -> [RGB] {
+    stride(from: rect.minY, to: rect.maxY, by: step).flatMap { y in
+      stride(from: rect.minX, to: rect.maxX, by: step).map { x in color(at: CGPoint(x: x, y: y)) }
+    }
+  }
+}
+
+extension XCTestCase {
+  /// Polls screenshots for up to `timeout` until every point has its expected colour (re-render, sheet animations).
+  @MainActor
+  func waitForColors(_ app: XCUIApplication, _ checks: [(String, CGPoint, RGB)], context: String = "",
+                     timeout: TimeInterval = 3, file: StaticString = #filePath, line: UInt = #line) {
+    let deadline = Date().addingTimeInterval(timeout)
+    var failures: [String] = []
+    repeat {
+      let probe = ColorProbe(screenOf: app)
+      failures = checks.compactMap { name, p, expected in
+        let c = probe.color(at: p)
+        return c.isClose(to: expected) ? nil : "\(name) at \(p) is \(c), expected \(expected)"
+      }
+      if failures.isEmpty { return }
+      Thread.sleep(forTimeInterval: 0.2)
+    } while Date() < deadline
+    for f in failures { XCTFail(context.isEmpty ? f : "[\(context)] \(f)", file: file, line: line) }
+  }
+
+  /// Status bar glyphs (time, top-left): light text on a dark scheme, dark text on a light one. Scans above
+  /// `study.deck` when it's on screen, so the circle button isn't taken for status bar glyphs.
+  @MainActor
+  func assertStatusBar(_ app: XCUIApplication, darkScheme: Bool, _ context: String,
+                       file: StaticString = #filePath, line: UInt = #line) {
+    let deck = el(app, "study.deck")
+    let bottom = min(50, deck.exists ? deck.frame.minY - 2 : 50)
+    let deadline = Date().addingTimeInterval(3)
+    var minL = 255.0, maxL = 0.0
+    repeat {
+      let lums = ColorProbe(screenOf: app).colors(in: CGRect(x: 16, y: 8, width: 124, height: bottom - 8), step: 0.5)
+        .map(\.luminance)
+      minL = lums.min() ?? 255; maxL = lums.max() ?? 0
+      if darkScheme ? maxL > 200 : minL < 80 { return }
+      Thread.sleep(forTimeInterval: 0.2)
+    } while Date() < deadline
+    XCTFail("[\(context)] status bar text not \(darkScheme ? "light (dark scheme)" : "dark (light scheme)"): "
+      + "luminance \(Int(minL))…\(Int(maxL))", file: file, line: line)
+  }
+
+  /// Average luminance of the keyboard: dark keyboard < 110, light keyboard > 150.
+  @MainActor
+  func assertKeyboard(_ app: XCUIApplication, dark: Bool, _ context: String,
+                      file: StaticString = #filePath, line: UInt = #line) {
+    let keyboard = app.keyboards.firstMatch
+    XCTAssertTrue(keyboard.waitFor(timeout: 5), "[\(context)] no keyboard", file: file, line: line)
+    Thread.sleep(forTimeInterval: 0.8)  // keyboard slide-in
+    let lums = ColorProbe(screenOf: app).colors(in: keyboard.frame.insetBy(dx: 4, dy: 4), step: 4).map(\.luminance)
+    let avg = lums.isEmpty ? 0 : lums.reduce(0, +) / Double(lums.count)
+    XCTAssertTrue(dark ? avg < 110 : avg > 150, "[\(context)] keyboard average luminance \(Int(avg)), expected a "
+      + (dark ? "dark" : "light") + " keyboard", file: file, line: line)
+  }
+
+  /// Spec 006 #11 / design system "no default blue tint": no saturated blue pixel anywhere on an @3x screenshot.
+  func assertNoBlue(_ image: CGImage?, _ context: String, file: StaticString = #filePath, line: UInt = #line) {
+    guard let image else { return XCTFail("\(context): no screenshot", file: file, line: line) }
+    let probe = ColorProbe(at3x: image)
+    let blue = probe.colors(in: CGRect(origin: .zero, size: probe.size), step: 1).filter(\.isSaturatedBlue)
+    XCTAssertTrue(blue.isEmpty, "\(context): \(blue.count) blue pixels, e.g. \(blue.prefix(3))", file: file, line: line)
+  }
+
+  /// Text in `ink` is drawn somewhere in the content area (y 130–760 pt) of an @3x screenshot: the screen isn't blank.
+  func assertInkVisible(_ image: CGImage?, ink: RGB, _ context: String,
+                        file: StaticString = #filePath, line: UInt = #line) {
+    guard let image else { return XCTFail("\(context): no screenshot", file: file, line: line) }
+    let probe = ColorProbe(at3x: image)
+    let count = probe.colors(in: CGRect(x: 0, y: 130, width: probe.size.width, height: 630), step: 1)
+      .filter { $0.isClose(to: ink, tolerance: 19) }.count
+    XCTAssertGreaterThan(count, 30, "\(context): no ink-coloured text in the content area", file: file, line: line)
+  }
+}
+
+extension XCTestCase {
+  /// No pixel across the middle line of the element is tinted blue (a text button picking up the default tint).
+  @MainActor
+  func assertNotTintedBlue(_ app: XCUIApplication, _ id: String, file: StaticString = #filePath, line: UInt = #line) {
+    let f = el(app, id).frame
+    let samples = ColorProbe(screenOf: app).colors(in: CGRect(x: f.minX, y: f.midY, width: f.width, height: 1), step: 1)
+    XCTAssertFalse(samples.contains { $0.b - max($0.r, $0.g) > 40 }, "\(id) is tinted blue", file: file, line: line)
+  }
+
+  /// The glyph pixel furthest from `background` across the middle of the element should be `expected` (± 8).
+  @MainActor
+  func assertTextColor(_ app: XCUIApplication, _ id: String, _ expected: RGB, background: RGB,
+                       file: StaticString = #filePath, line: UInt = #line) {
+    let element = el(app, id)
+    XCTAssertTrue(element.waitFor(timeout: 5), "\(id) missing", file: file, line: line)
+    let f = element.frame
+    let probe = ColorProbe(screenOf: app)
+    var best = background, bestDistance = -1
+    for y in stride(from: f.minY + f.height * 0.3, through: f.minY + f.height * 0.7, by: 0.5) {
+      for x in stride(from: f.minX, to: f.maxX, by: 0.34) {
+        let c = probe.color(at: CGPoint(x: x, y: y))
+        if c.distance(to: background) > bestDistance { bestDistance = c.distance(to: background); best = c }
+      }
+    }
+    XCTAssertTrue(best.isClose(to: expected, tolerance: 8), "\(id) text color \(best), expected \(expected)",
+                  file: file, line: line)
+  }
+}
+
 /// Spec 009a: the deck is a `NavigationStack` titled "Cards" with a system `.searchable` field (no ids of its own).
 extension XCTestCase {
   /// The deck's navigation bar (`app.navigationBars["Cards"]`): present while the deck sheet is shown.
@@ -206,7 +408,7 @@ extension XCTestCase {
   @MainActor
   func waitForDeckTitle(_ app: XCUIApplication, timeout: TimeInterval = 10,
                         file: StaticString = #filePath, line: UInt = #line) {
-    XCTAssertTrue(deckTitle(app).waitForExistence(timeout: timeout), "deck navigation bar \"Cards\" missing",
+    XCTAssertTrue(deckTitle(app).waitFor(timeout: timeout), "deck navigation bar \"Cards\" missing",
                   file: file, line: line)
   }
 }
@@ -236,7 +438,7 @@ extension XCTestCase {
   @MainActor
   func waitForSheet(_ app: XCUIApplication, _ title: String, timeout: TimeInterval = 10,
                     file: StaticString = #filePath, line: UInt = #line) {
-    XCTAssertTrue(sheetBar(app, title).waitForExistence(timeout: timeout), "sheet '\(title)' missing",
+    XCTAssertTrue(sheetBar(app, title).waitFor(timeout: timeout), "sheet '\(title)' missing",
                   file: file, line: line)
   }
 

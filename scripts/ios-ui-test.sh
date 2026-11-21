@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # UI / end-to-end tests (XCUITest) + screenshot export.
 #
-#   scripts/ios-ui-test.sh [run-name] [-only-testing:LaCarteUITests/LaCarteUITests/testX ...]
+#   scripts/ios-ui-test.sh [run-name] [--smoke] [-only-testing:LaCarteUITests/LaCarteUITests/testX ...]
 #
+# --smoke: only the SMOKE tests below (one per screen/flow, for PR feedback).
 # Screenshots (XCTAttachments named in the tests) land in qa/screenshots/<run-name>/.
 # Builds under the app's DerivedData lock into a private copy of the test products, then tests that copy
 # on the first free UI simulator of a pool (scripts/_sim-pool.sh), so other builds and UI runs go meanwhile
 # (docs/dev-velocity.md).
+# Test classes run on UI_WORKERS parallel clones of that simulator (default 1, set in _ios-env.sh).
 # Extra env forwarded to the test runner: LA_CARTE_API_URL, LA_CARTE_API_TOKEN (see scripts/e2e.sh).
 # Each finished test prints as it finishes (also into a file), then a `TESTS: …` summary line.
 # Exit code = xcodebuild's (65 test failure, 75 lock timeout); export/summary/contact-sheet failures only warn.
@@ -16,6 +18,19 @@ if [ "${1:-}" = --split ]; then  # one run over several pool simulators: scripts
 fi
 source "$(dirname "$0")/_ios-env.sh"
 RUN="${1:-$(date +%Y%m%d-%H%M%S)}"; shift || true
+SMOKE=(
+  StudyUITests/testStudy_frontRevealRateNext
+  DeckUITests/testDeck_addFromDeck
+  SetupUITests/testSetup_connectFromStudy
+  ThemeUITests/testTheme_forcedSchemesAndBackToSystem
+  RefreshUITests/testStudy_pullToRefreshWhileStudying
+  LaCarteUITests/testDesignSystem_tapEachButton
+)
+ARGS=()
+for a in "$@"; do
+  if [ "$a" = --smoke ]; then for t in "${SMOKE[@]}"; do ARGS+=("-only-testing:LaCarteUITests/$t"); done
+  else ARGS+=("$a"); fi
+done
 OUT="$ROOT/qa/screenshots/$RUN"
 RESULT="$RESULTS_DIR/$RUN.xcresult"   # qa/.results, or $LA_CARTE_SCRATCH/qa-results/<checkout>
 PRODUCTS="$RESULTS_DIR/$RUN.xctestproducts"  # this run's own app + runner; removed on exit
@@ -31,11 +46,16 @@ set +e
   -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER"
 STATUS=${PIPESTATUS[0]}
 # 2. Test the copy on the first free UI simulator ($POOL_DESTINATION), under its lock only.
+# One worker runs serially: classes in alphabetical order, which e2e.sh's live tests rely on (parallel testing
+# reorders classes even with a single worker).
+if [ "$UI_WORKERS" -gt 1 ]; then PARALLEL=(-parallel-testing-enabled YES -parallel-testing-worker-count "$UI_WORKERS")
+else PARALLEL=(-parallel-testing-enabled NO); fi
 if [ "$STATUS" -eq 0 ]; then
   TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" \
   TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \
   SIM_POOL=ui "$ROOT/scripts/_sim-pool.sh" /bin/sh -c 'exec xcodebuild test-without-building -destination "$POOL_DESTINATION" "$@"' \
-    sh -testProductsPath "$PRODUCTS" -collect-test-diagnostics never -resultBundlePath "$RESULT" "$@" 2>&1 \
+    sh -testProductsPath "$PRODUCTS" "${PARALLEL[@]}" \
+    -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} 2>&1 \
     | grep --line-buffered -E "$FILTER"
   STATUS=${PIPESTATUS[0]}
 fi
