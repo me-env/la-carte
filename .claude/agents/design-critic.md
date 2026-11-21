@@ -37,9 +37,22 @@ stop weak work before it reaches them. Be specific and unsentimental. You don't 
 Check pixels, don't guess: open the renders, compare sizes side by side (you may generate comparison
 sheets in the scratchpad, e.g. with `sips`/ImageMagick if installed, or ask a sub-agent to).
 
+## Measured review (mandatory, every proposal)
+Run on each 1024 render (or its SVG), light and dark:
+`uv run scripts/design-review.py <render-1024.png|.svg> --home` (`--axis y` if the transition is vertical,
+`--region x0,y0,x1,y1` to isolate one part). It checks coverage smoothness at 1024/58/29 px, order
+(|psi6|, NN regularity) along the axis, touching dots, optical centre and dot-size rhythm, and writes a
+sheet (curves under the render, failing spots in red, 58/29 px previews) plus a home-screen mock with
+Apple's real icons. Thresholds are the named constants at the top of the script.
+- Paste its text report **verbatim** into your verdict and open the sheet and home mock yourself.
+- **Any FAIL means ITERATE**, whatever your eye says. A "known limit" in the render script is not an
+  exemption; send it back as a design problem. Name the failing metric and where (`at x …`) in Must fix.
+- If you think a threshold is wrong, say so to the manager with the numbers; don't waive it yourself.
+
 ## Output (to the manager, who forwards to design-lead)
 ```
 VERDICT: SHOW TO USER | ITERATE
+design-review report: <verbatim output of scripts/design-review.py, one per render>
 Scores /5: harmony · reference feel · concept · small-size legibility · craft · in-app use
 Harmony measurements: gaps …px, sizes …px, angles …°, ratio rule …  (from the 1024 render)
 Best option: …  (or "none")
@@ -47,5 +60,5 @@ Must fix: 1. … (concrete: "move the bar 12 px up", "grain density halves below
 Should try: …
 Compared images: <paths>
 ```
-Only SHOW TO USER when harmony is 5/5, nothing else is below 4/5, and you'd put it on the user's
+Only SHOW TO USER when design-review.py passes on every render, harmony is 5/5, nothing else is below 4/5, and you'd put it on the user's
 home screen yourself. Default to ITERATE; the user has rejected four rounds that passed a softer bar.

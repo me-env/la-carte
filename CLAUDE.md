@@ -22,10 +22,13 @@ scripts/ios-build.sh         # build app for simulator
 scripts/ios-test.sh          # LaCarteKit unit tests (TestStore)
 scripts/ios-ui-test.sh <run> # XCUITest (mock API) → qa/screenshots/<run>/
 scripts/e2e.sh <run>         # fresh API + seeded deck → live UI tests → qa/screenshots/<run>/
+uv run scripts/design-review.py <render> --home  # measured logo/visual review (design-critic gates on it)
 scripts/ios-adhoc.sh         # signed Ad Hoc .ipa (same steps as CI)
 scripts/ios-install-device.sh [ipa]  # install latest CI .ipa (or a local one) on the iPhone
 ```
 Simulator defaults: `iPhone 17 Pro`, latest iOS (27). Override with `SIMULATOR=… OS=…`.
+The iOS scripts take the build/simulator locks themselves: just run them (set `LACARTE_AGENT=<you>`),
+never poll `pgrep` or sleep-wait. What runs in parallel: `docs/dev-velocity.md`.
 
 ## How work gets done (agent team)
 

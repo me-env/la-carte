@@ -18,6 +18,8 @@ qa/screenshots/*
 !qa/screenshots/.gitkeep
 # Third-party design references (downloaded with scripts/fetch-design-refs.sh)
 docs/design/reference/
+# Apple app icons for the home-screen mock (scripts/design-review.py --home; Apple trademarks, never commit)
+docs/design/reference/home-icons/
 
 # CI build output (archives, ipa, decoded keys)
 build/
