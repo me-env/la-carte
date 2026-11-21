@@ -65,23 +65,11 @@ extension APIClient: DependencyKey {
   ) -> APIClient {
     let http = HTTP(baseURL: baseURL, token: token, load: load)
     return APIClient(
-      cards: { query in
-        // 500 is the API max: the deck list must not be silently cut at the default 100.
-        var parameters = ["limit": "500"]
-        parameters["query"] = query
-        return try await http.send("GET", "cards", query: parameters)
-      },
       dueCards: { limit in
         try await http.send("GET", "cards/due", query: ["limit": "\(limit)"])
       },
-      addCard: { front, back in
-        try await http.send("POST", "cards", body: ["front": front, "back": back])
-      },
       updateCard: { id, front, back in
         try await http.send("PATCH", "cards/\(id)", body: ["front": front, "back": back])
-      },
-      deleteCard: { id in
-        _ = try await http.data("DELETE", "cards/\(id)")
       },
       review: { id, rating in
         try await http.send("POST", "cards/\(id)/review", body: ["rating": rating.rawValue])
@@ -90,6 +78,7 @@ extension APIClient: DependencyKey {
         try await http.send("GET", "stats", query: ["tz": TimeZone.current.identifier])
       },
       notes: { query in
+        // 500 is the API max: the deck list must not be silently cut at the default 100.
         var parameters = ["limit": "500"]
         parameters["query"] = query
         return try await http.send("GET", "notes", query: parameters)

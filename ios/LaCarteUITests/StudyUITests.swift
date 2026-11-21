@@ -84,9 +84,9 @@ final class StudyUITests: XCTestCase {
 
     XCTAssertTrue(el(app, "study.deck").isHittable, "study.deck not hittable")
     el(app, "study.deck").tap()
-    waitForLabel(el(app, "deck.title"), "Cards")
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"), "deck sheet still open after swiping down")
+    waitForDeckTitle(app)
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app), "deck sheet still open after swiping down")
     assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
 
     XCTAssertTrue(el(app, "study.add").isHittable, "study.add not hittable")

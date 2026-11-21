@@ -1,7 +1,7 @@
-import CardEditorFeature
 import ComposableArchitecture
 import DeckFeature
 import DesignSystem
+import NoteEditorFeature
 import SettingsFeature
 import StudyFeature
 
@@ -11,7 +11,7 @@ struct AppFeature {
   @Reducer
   enum Destination {
     case deck(DeckFeature)
-    case addCard(CardEditorFeature)
+    case addNote(NoteEditorFeature)
     case settings(SettingsFeature)
   }
 
@@ -38,14 +38,14 @@ struct AppFeature {
         return .none
 
       case .study(.delegate(.addCardRequested)):
-        state.destination = .addCard(CardEditorFeature.State())
+        state.destination = .addNote(NoteEditorFeature.State())
         return .none
 
       case .study(.delegate(.settingsRequested)):
         state.destination = .settings(SettingsFeature.State())
         return .none
 
-      case .destination(.presented(.addCard(.delegate(.saved)))),
+      case .destination(.presented(.addNote(.delegate(.saved)))),
         .destination(.presented(.deck(.delegate(.deckChanged)))),
         .destination(.presented(.settings(.delegate(.serverChanged)))):
         return .send(.study(.deckChanged))

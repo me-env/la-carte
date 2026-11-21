@@ -5,7 +5,7 @@ import Foundation
 import Testing
 
 @testable import AppFeature
-@testable import CardEditorFeature
+@testable import NoteEditorFeature
 @testable import SettingsFeature
 @testable import StudyFeature
 
@@ -40,31 +40,39 @@ struct AppFeatureTests {
   @Test func addingFromStudyShowsTheNewCardWhenCaughtUp() async {
     let date = Date(timeIntervalSince1970: 1_795_000_000)
     let new = Card(id: UUID(1), front: "chat", back: "cat", due: date, createdAt: date, updatedAt: date)
+    let note = Note(
+      id: new.id, type: .basic, fields: new.fields,
+      cards: [Note.Card(id: new.id, prompt: ["front"], answer: ["back"], due: date)],
+      createdAt: date, updatedAt: date
+    )
     var state = AppFeature.State()
     state.study.phase = .caughtUp(nextDue: nil)
     let store = TestStore(initialState: state) {
       AppFeature()
     } withDependencies: {
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.addCard = { _, _ in new }
+      $0.apiClient.addNote = { _ in note }
       $0.apiClient.dueCards = { _ in [new] }
     }
 
     await store.send(\.study.addButtonTapped)
     await store.receive(\.study.delegate.addCardRequested) {
-      $0.destination = .addCard(CardEditorFeature.State())
+      $0.destination = .addNote(NoteEditorFeature.State())
     }
-    await store.send(\.destination.addCard.binding.front, "chat") {
-      $0.destination?.modify(\.addCard) { $0.front = "chat" }
+    await store.send(\.destination.addNote.fieldChanged, ("front", "chat")) {
+      $0.destination?.modify(\.addNote) { $0.fields["front"] = "chat" }
     }
-    await store.send(\.destination.addCard.binding.back, "cat") {
-      $0.destination?.modify(\.addCard) { $0.back = "cat" }
+    await store.send(\.destination.addNote.fieldChanged, ("back", "cat")) {
+      $0.destination?.modify(\.addNote) {
+        $0.fields["back"] = "cat"
+        $0.directions = [Direction(prompt: ["front"], answer: ["back"])]
+      }
     }
-    await store.send(\.destination.addCard.saveButtonTapped) {
-      $0.destination?.modify(\.addCard) { $0.isSaving = true }
+    await store.send(\.destination.addNote.saveButtonTapped) {
+      $0.destination?.modify(\.addNote) { $0.isSaving = true }
     }
-    await store.receive(\.destination.addCard.saveResponse.success)
-    await store.receive(\.destination.addCard.delegate.saved)
+    await store.receive(\.destination.addNote.saveResponse.success)
+    await store.receive(\.destination.addNote.delegate.saved)
     await store.receive(\.study.deckChanged)
     await store.receive(\.destination.dismiss) {
       $0.destination = nil
@@ -77,6 +85,7 @@ struct AppFeatureTests {
 
   @Test func deletingFromTheDeckRefreshesStudy() async {
     let cards = [Card].fixtures
+    let notes = [Note].fixtures
     let clock = TestClock()
     var state = AppFeature.State()
     state.study.cards = IdentifiedArray(uniqueElements: cards)
@@ -86,16 +95,18 @@ struct AppFeatureTests {
       AppFeature()
     } withDependencies: {
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.deleteCard = { _ in }
+      $0.apiClient.deleteNote = { _ in }
       // The deck's reload waits on the clock so the two reloads arrive in a fixed order.
-      $0.apiClient.cards = { _ in
+      $0.apiClient.notes = { _ in
         try await clock.sleep(for: .seconds(1))
-        return Array(cards.dropFirst())
+        return Array(notes.dropFirst())
       }
       $0.apiClient.dueCards = { _ in Array(cards.dropFirst()) }
     }
 
-    await store.send(\.destination.deck.rowSwipedToDelete, cards[0].id)
+    await store.send(\.destination.deck.rowSwipedToDelete, notes[0].id) {
+      $0.destination?.modify(\.deck) { $0.deletions = 1 }
+    }
     await store.receive(\.destination.deck.deleteResponse.success)
     await store.receive(\.destination.deck.delegate.deckChanged)
     await store.receive(\.study.deckChanged)
@@ -103,9 +114,9 @@ struct AppFeatureTests {
       $0.study.cards = IdentifiedArray(uniqueElements: cards.dropFirst())
     }
     await clock.advance(by: .seconds(1))
-    await store.receive(\.destination.deck.cardsResponse.success) {
+    await store.receive(\.destination.deck.notesResponse.success) {
       $0.destination?.modify(\.deck) {
-        $0.cards = IdentifiedArray(uniqueElements: cards.dropFirst())
+        $0.notes = IdentifiedArray(uniqueElements: notes.dropFirst())
         $0.phase = .loaded
       }
     }

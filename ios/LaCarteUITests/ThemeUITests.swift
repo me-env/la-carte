@@ -448,13 +448,13 @@ final class ThemeUITests: XCTestCase {
     let button = el(app, "study.deck")
     XCTAssertTrue(button.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
-    waitForLabel(el(app, "deck.title"), "Cards", file: file, line: line)
+    waitForDeckTitle(app, file: file, line: line)
   }
 
   @MainActor
   private func closeDeck(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"), "deck still open", file: file, line: line)
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app), "deck still open", file: file, line: line)
   }
 
   @MainActor
@@ -519,7 +519,8 @@ final class ThemeUITests: XCTestCase {
   private func assertDeckColors(_ app: XCUIApplication, _ p: Palette, _ context: String,
                                 file: StaticString = #filePath, line: UInt = #line) {
     let window = app.windows.firstMatch.frame
-    let title = el(app, "deck.title").frame, search = el(app, "deck.search").frame, add = el(app, "deck.add").frame
+    // Spec 009a: large navigation title + system search field and glass toolbar buttons (system materials).
+    let title = deckTitleText(app).frame
     let firstRow = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'deck.row.'"))
       .firstMatch
     XCTAssertTrue(firstRow.waitForExistence(timeout: 10), "no deck rows", file: file, line: line)
@@ -529,8 +530,6 @@ final class ThemeUITests: XCTestCase {
       ("deck background near the bottom edge", CGPoint(x: window.midX, y: window.maxY - 4), p.background),
       ("deck background left of a row", CGPoint(x: r.minX / 2, y: r.midY), p.background),
       ("deck row fill", CGPoint(x: r.minX + 6, y: r.midY), p.surface),
-      ("deck search fill", CGPoint(x: search.maxX + 6, y: search.midY), p.surface),
-      ("deck.add circle fill", CGPoint(x: add.minX + 7, y: add.midY), p.surface),
     ], context: context, file: file, line: line)
   }
 

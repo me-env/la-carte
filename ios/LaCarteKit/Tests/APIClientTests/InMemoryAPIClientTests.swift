@@ -35,7 +35,7 @@ struct InMemoryAPIClientTests {
 
   @Test func mockDeckServesTheSameCardsAsBeforeNotes() async throws {
     let client = APIClient.inMemory(cards: .fixtures, now: now)
-    #expect(try await client.cards(nil) == .fixtures)
+    #expect(try await client.notes(nil).map(\.id) == [Card].fixtures.map(\.id))
     #expect(try await client.dueCards(100) == .fixtures)
   }
 
@@ -84,9 +84,16 @@ struct InMemoryAPIClientTests {
     #expect(updated.cards[0].lastReview == now)
   }
 
-  @Test func deletingANotesLastCardDeletesTheNote() async throws {
-    let client = APIClient.inMemory(cards: .fixtures, now: now)
-    try await client.deleteCard([Card].fixtures[0].id)
-    #expect(try await client.notes(nil).map(\.id) == [[Card].fixtures[1].id, [Card].fixtures[2].id])
+  @Test func searchMatchesEveryTextFieldButThePhoto() async throws {
+    let client = APIClient.inMemory(notes: .fixtures, now: now)
+    #expect(try await client.notes("bakery").map(\.id) == [[Note].fixtures[0].id])
+    #expect(try await client.notes("base64").isEmpty)
+  }
+
+  @Test func deletingANoteDeletesItsCards() async throws {
+    let client = APIClient.inMemory(notes: .fixtures, now: now)
+    try await client.deleteNote([Note].fixtures[2].id)
+    #expect(try await client.notes(nil).count == 3)
+    #expect(try await client.dueCards(100).count == 3)
   }
 }

@@ -5,11 +5,8 @@ import Foundation
 /// Everything the app can ask the la-carte API. Mirrors `api/src/la_carte_api/rest.py`.
 @DependencyClient
 public struct APIClient: Sendable {
-  public var cards: @Sendable (_ query: String?) async throws -> [Card]
   public var dueCards: @Sendable (_ limit: Int) async throws -> [Card]
-  public var addCard: @Sendable (_ front: String, _ back: String) async throws -> Card
   public var updateCard: @Sendable (_ id: Card.ID, _ front: String, _ back: String) async throws -> Card
-  public var deleteCard: @Sendable (_ id: Card.ID) async throws -> Void
   public var review: @Sendable (_ id: Card.ID, _ rating: Rating) async throws -> Card
   public var stats: @Sendable () async throws -> DeckStats
   public var notes: @Sendable (_ query: String?) async throws -> [Note]

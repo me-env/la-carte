@@ -187,14 +187,14 @@ final class RefreshUITests: XCTestCase {
 
       deck.add(card(Self.idA, "canine", "dog"))
       pullToRefresh(app, from: el(app, "deck.message"))
-      XCTAssertTrue(el(app, "deck.title").waitForExistence(timeout: 2), "the pull closed the deck sheet")
+      XCTAssertTrue(deckTitle(app).waitForExistence(timeout: 2), "the pull closed the deck sheet")
       XCTAssertTrue(row(app, Self.idA).waitForExistence(timeout: 10), "deck.row.<canine> missing after the pull")
       XCTAssertFalse(el(app, "deck.message").exists, "deck.message still shown with a row")
       snapshot("deck-after-refresh", appearance: appearance)
 
       // With a query.
-      el(app, "deck.search").tap()
-      el(app, "deck.search").typeText("ine")
+      deckSearch(app).tap()
+      deckSearch(app).typeText("ine")
       Thread.sleep(forTimeInterval: 1)  // debounce
       XCTAssertTrue(row(app, Self.idA).waitForExistence(timeout: 5))
       deck.add(card(Self.idB, "feline", "cat", minutes: 1))
@@ -206,11 +206,11 @@ final class RefreshUITests: XCTestCase {
       // In flight: the canine row still drawn (visual review), only one row before the response.
       assertInkVisible(inFlight, appearance, "existing row during the refresh")
       assertNoBlue(inFlight, "deck refresh spinner")
-      XCTAssertTrue(el(app, "deck.title").exists, "the pull closed the deck sheet")
+      XCTAssertTrue(deckTitle(app).exists, "the pull closed the deck sheet")
       XCTAssertTrue(row(app, Self.idB).waitForExistence(timeout: 20), "feline row missing after the pull with a query")
       XCTAssertTrue(row(app, Self.idA).exists, "canine row gone after the pull")
       XCTAssertFalse(row(app, Self.idC).exists, "raven (not matching 'ine') shown: the refresh ignored the query")
-      XCTAssertEqual(el(app, "deck.search").value as? String, "ine", "search field lost its text")
+      XCTAssertEqual(deckSearch(app).value as? String, "ine", "search field lost its text")
       let gets = server.requests.dropFirst(before).filter { $0.method == "GET" && StubDeck.route($0.path) == "/cards" }
       XCTAssertFalse(gets.isEmpty, "no GET /cards after the pull")
       for g in gets {
@@ -240,8 +240,8 @@ final class RefreshUITests: XCTestCase {
     XCTAssertTrue(row(app, Self.idA).waitForExistence(timeout: 10), "new row missing after reactivating")
     snapshot("deck-foreground", appearance: .light)
 
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"))
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app))
     assertFront(app, "canine", remaining: "1 to review")
     server.stop()
   }
@@ -266,7 +266,7 @@ final class RefreshUITests: XCTestCase {
     deck.readDelay = 5
     let deckShot = pullToRefreshCapturing(app, from: row(app, Self.idA), name: "deck-refresh-forest",
                                           appearance: .light)
-    XCTAssertTrue(el(app, "deck.title").exists, "the pull closed the deck sheet")
+    XCTAssertTrue(deckTitle(app).exists, "the pull closed the deck sheet")
     assertNoBlue(deckShot, "forest deck spinner")
     server.stop()
   }
@@ -298,8 +298,8 @@ final class RefreshUITests: XCTestCase {
     XCTAssertTrue(row(app, canineID).waitForExistence(timeout: 10), "canine row missing after pulling the list")
     snapshot("deck-refresh-live", appearance: .light)
 
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"))
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app))
     assertFront(app, "greeting", remaining: "2 to review")
     pullToRefresh(app, from: el(app, "study.card"))
     assertFront(app, "greeting", remaining: "3 to review")
@@ -332,7 +332,7 @@ final class RefreshUITests: XCTestCase {
     let button = el(app, "study.deck")
     XCTAssertTrue(button.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
-    waitForLabel(el(app, "deck.title"), "Cards", file: file, line: line)
+    waitForDeckTitle(app, file: file, line: line)
   }
 
   @MainActor

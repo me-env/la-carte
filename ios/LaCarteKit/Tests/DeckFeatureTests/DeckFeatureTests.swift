@@ -3,30 +3,30 @@ import ComposableArchitecture
 import Foundation
 import Testing
 
-@testable import CardEditorFeature
 @testable import DeckFeature
+@testable import NoteEditorFeature
 @testable import SettingsFeature
 
 @MainActor
 @Suite(.timeLimit(.minutes(1)))
 struct DeckFeatureTests {
-  let cards = [Card].fixtures
+  let notes = [Note].fixtures
   struct Offline: Error {}
 
-  @Test func appearLoadsEveryCardInAPIOrder() async {
+  @Test func appearLoadsEveryNoteInAPIOrder() async {
     let store = TestStore(initialState: DeckFeature.State()) {
       DeckFeature()
-    } withDependencies: { [cards] in
+    } withDependencies: { [notes] in
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.cards = { query in
+      $0.apiClient.notes = { query in
         #expect(query == nil)
-        return cards
+        return notes
       }
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.success) {
-      $0.cards = IdentifiedArray(uniqueElements: self.cards)
+    await store.receive(\.notesResponse.success) {
+      $0.notes = IdentifiedArray(uniqueElements: self.notes)
       $0.phase = .loaded
     }
     #expect(store.state.message == nil)
@@ -40,17 +40,17 @@ struct DeckFeatureTests {
     #expect(DeckView.dueText(now.addingTimeInterval(3 * 86_400 + 60), now: now, locale: english) == "Due in 3 days")
   }
 
-  @Test func searchIsDebouncedAndClearingShowsEveryCard() async {
+  @Test func searchIsDebouncedAndClearingShowsEveryNote() async {
     let clock = TestClock()
     let queries = LockIsolated<[String?]>([])
-    let store = TestStore(initialState: loaded(cards)) {
+    let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
-    } withDependencies: { [cards] in
+    } withDependencies: { [notes] in
       $0.apiClient.isConfigured = { true }
       $0.continuousClock = clock
-      $0.apiClient.cards = { query in
+      $0.apiClient.notes = { query in
         queries.withValue { $0.append(query) }
-        return query == "ser" ? [cards[0]] : cards
+        return query == "ser" ? [notes[0]] : notes
       }
     }
 
@@ -64,34 +64,34 @@ struct DeckFeatureTests {
     await clock.advance(by: .seconds(0.29))
     #expect(queries.value.isEmpty)
     await clock.advance(by: .seconds(0.01))
-    await store.receive(\.cardsResponse.success) {
-      $0.cards = [self.cards[0]]
+    await store.receive(\.notesResponse.success) {
+      $0.notes = [self.notes[0]]
     }
 
     await store.send(\.binding.query, "") {
       $0.query = ""
     }
     await clock.advance(by: .seconds(0.3))
-    await store.receive(\.cardsResponse.success) {
-      $0.cards = IdentifiedArray(uniqueElements: self.cards)
+    await store.receive(\.notesResponse.success) {
+      $0.notes = IdentifiedArray(uniqueElements: self.notes)
     }
     #expect(queries.value == ["ser", nil])
   }
 
-  /// QA ci-ios26-triage D1: deleting "ser" quickly must end on every card, never on the "s" results.
-  @Test func deletingTheQueryQuicklyCancelsPendingSearchesAndShowsEveryCard() async {
+  /// QA ci-ios26-triage D1: deleting "ser" quickly must end on every note, never on the "s" results.
+  @Test func deletingTheQueryQuicklyCancelsPendingSearchesAndShowsEveryNote() async {
     let clock = TestClock()
     let queries = LockIsolated<[String?]>([])
-    var state = loaded([cards[0]])
+    var state = loaded([notes[0]])
     state.query = "ser"
     let store = TestStore(initialState: state) {
       DeckFeature()
-    } withDependencies: { [cards] in
+    } withDependencies: { [notes] in
       $0.apiClient.isConfigured = { true }
       $0.continuousClock = clock
-      $0.apiClient.cards = { query in
+      $0.apiClient.notes = { query in
         queries.withValue { $0.append(query) }
-        return query == "s" ? [cards[0], cards[2]] : cards
+        return query == "s" ? [notes[0], notes[2]] : notes
       }
     }
 
@@ -107,8 +107,8 @@ struct DeckFeatureTests {
       $0.query = ""
     }
     await clock.advance(by: .seconds(0.3))
-    await store.receive(\.cardsResponse.success) {
-      $0.cards = IdentifiedArray(uniqueElements: self.cards)
+    await store.receive(\.notesResponse.success) {
+      $0.notes = IdentifiedArray(uniqueElements: self.notes)
     }
     #expect(queries.value == [nil])
   }
@@ -117,131 +117,171 @@ struct DeckFeatureTests {
     var state = DeckFeature.State()
     #expect(state.message == nil)
     state.phase = .loaded
-    #expect(state.message == "No cards yet")
+    #expect(state.message == .noCards)
     state.query = "zzz"
-    #expect(state.message == "No matches")
+    #expect(state.message == .noMatches)
 
-    let store = TestStore(initialState: loaded(cards)) {
+    let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
     } withDependencies: {
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.cards = { _ in throw Offline() }
+      $0.apiClient.notes = { _ in throw Offline() }
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.failure) {
-      $0.cards = []
+    await store.receive(\.notesResponse.failure) {
+      $0.notes = []
       $0.phase = .offline
     }
-    #expect(store.state.message == "Can't reach your deck")
+    #expect(store.state.message == .offline)
   }
 
   @Test func swipingDeletesTheRowAndTellsTheParent() async {
-    let deck = LockIsolated(cards)
-    let store = TestStore(initialState: loaded(cards)) {
+    let deck = LockIsolated(notes)
+    let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
     } withDependencies: {
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.deleteCard = { id in deck.withValue { $0.removeAll { $0.id == id } } }
-      $0.apiClient.cards = { _ in deck.value }
+      $0.apiClient.deleteNote = { id in deck.withValue { $0.removeAll { $0.id == id } } }
+      $0.apiClient.notes = { _ in deck.value }
     }
 
-    await store.send(.rowSwipedToDelete(cards[1].id)) {
-      $0.cards.remove(id: self.cards[1].id)
+    await store.send(.rowSwipedToDelete(notes[1].id)) {
+      $0.notes.remove(id: self.notes[1].id)
+      $0.deletions = 1
     }
     await store.receive(\.deleteResponse.success)
     await store.receive(\.delegate.deckChanged)
-    await store.receive(\.cardsResponse.success)
-    #expect(deck.value.map(\.id) == [cards[0].id, cards[2].id])
+    await store.receive(\.notesResponse.success)
+    #expect(deck.value.map(\.id) == [notes[0].id, notes[2].id, notes[3].id])
+  }
+
+  /// Spec 009a #5: each message keeps its copy and gets its system symbol.
+  @Test func messagesHaveTheirTitleAndSymbol() {
+    let expected: [(DeckFeature.State.Message, String, String)] = [
+      (.noCards, "No cards yet", "rectangle.stack"),
+      (.offline, "Can't reach your deck", "wifi.slash"),
+      (.notSetUp, "Connect your deck", "link"),
+      (.unauthorized, "Token rejected", "key"),
+    ]
+    for (message, title, symbol) in expected {
+      #expect(message.title == title)
+      #expect(message.systemImage == symbol)
+    }
+  }
+
+  /// Spec 009a #7: every delete, from the swipe or the context menu, bumps the light-impact haptic trigger.
+  @Test func everyDeleteBumpsTheHapticTrigger() async {
+    let deck = LockIsolated(notes)
+    let store = TestStore(initialState: loaded(notes)) {
+      DeckFeature()
+    } withDependencies: {
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.deleteNote = { id in deck.withValue { $0.removeAll { $0.id == id } } }
+      $0.apiClient.notes = { _ in deck.value }
+    }
+
+    for (index, note) in notes.prefix(2).enumerated() {
+      await store.send(.rowSwipedToDelete(note.id)) {
+        $0.notes.remove(id: note.id)
+        $0.deletions = index + 1
+      }
+      await store.receive(\.deleteResponse.success)
+      await store.receive(\.delegate.deckChanged)
+      await store.receive(\.notesResponse.success)
+    }
   }
 
   @Test func failedDeleteReloadsTheList() async {
-    let store = TestStore(initialState: loaded(cards)) {
+    let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
-    } withDependencies: { [cards] in
+    } withDependencies: { [notes] in
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.deleteCard = { _ in throw Offline() }
-      $0.apiClient.cards = { _ in cards }
+      $0.apiClient.deleteNote = { _ in throw Offline() }
+      $0.apiClient.notes = { _ in notes }
     }
 
-    await store.send(.rowSwipedToDelete(cards[1].id)) {
-      $0.cards.remove(id: self.cards[1].id)
+    await store.send(.rowSwipedToDelete(notes[1].id)) {
+      $0.notes.remove(id: self.notes[1].id)
+      $0.deletions = 1
     }
     await store.receive(\.deleteResponse.failure)
-    await store.receive(\.cardsResponse.success) {
-      $0.cards = IdentifiedArray(uniqueElements: self.cards)
+    await store.receive(\.notesResponse.success) {
+      $0.notes = IdentifiedArray(uniqueElements: self.notes)
     }
   }
 
   @Test func swipingCancelsALoadInFlightSoTheRowCantComeBack() async {
     let clock = TestClock()
-    let deck = LockIsolated(cards)
+    let deck = LockIsolated(notes)
     let loads = LockIsolated(0)
-    let store = TestStore(initialState: loaded(cards)) {
+    let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
     } withDependencies: {
       $0.apiClient.isConfigured = { true }
       $0.continuousClock = clock
-      $0.apiClient.cards = { _ in
+      $0.apiClient.notes = { _ in
         // Snapshot before the delete lands, like a slow response from the server.
         let snapshot = deck.value
         loads.withValue { $0 += 1 }
         try await clock.sleep(for: .seconds(1))
         return snapshot
       }
-      $0.apiClient.deleteCard = { id in deck.withValue { $0.removeAll { $0.id == id } } }
+      $0.apiClient.deleteNote = { id in deck.withValue { $0.removeAll { $0.id == id } } }
     }
 
     await store.send(.onAppear)
-    await store.send(.rowSwipedToDelete(cards[1].id)) {
-      $0.cards.remove(id: self.cards[1].id)
+    await store.send(.rowSwipedToDelete(notes[1].id)) {
+      $0.notes.remove(id: self.notes[1].id)
+      $0.deletions = 1
     }
     await store.receive(\.deleteResponse.success)
     await store.receive(\.delegate.deckChanged)
     await clock.advance(by: .seconds(1))
-    await store.receive(\.cardsResponse.success)
-    #expect(store.state.cards.ids == [cards[0].id, cards[2].id])
+    await store.receive(\.notesResponse.success)
+    #expect(store.state.notes.ids == [notes[0].id, notes[2].id, notes[3].id])
     #expect(loads.value == 2)
   }
 
   @Test func deletingDuringAPendingSearchShowsResultsForTheField() async {
     let clock = TestClock()
     let queries = LockIsolated<[String?]>([])
-    let store = TestStore(initialState: loaded(cards)) {
+    let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
-    } withDependencies: { [cards] in
+    } withDependencies: { [notes] in
       $0.apiClient.isConfigured = { true }
       $0.continuousClock = clock
-      $0.apiClient.cards = { query in
+      $0.apiClient.notes = { query in
         queries.withValue { $0.append(query) }
-        return query == "ser" ? [cards[0]] : cards
+        return query == "ser" ? [notes[0]] : notes
       }
-      $0.apiClient.deleteCard = { _ in }
+      $0.apiClient.deleteNote = { _ in }
     }
 
     await store.send(\.binding.query, "ser") {
       $0.query = "ser"
     }
-    await store.send(.rowSwipedToDelete(cards[1].id)) {
-      $0.cards.remove(id: self.cards[1].id)
+    await store.send(.rowSwipedToDelete(notes[1].id)) {
+      $0.notes.remove(id: self.notes[1].id)
+      $0.deletions = 1
     }
     await store.receive(\.deleteResponse.success)
     await store.receive(\.delegate.deckChanged)
-    await store.receive(\.cardsResponse.success) {
-      $0.cards = [self.cards[0]]
+    await store.receive(\.notesResponse.success) {
+      $0.notes = [self.notes[0]]
     }
     await clock.run()
     #expect(queries.value == ["ser"])
   }
 
   @Test func aSuccessfulConnectionTestReloadsTheDeckAndTellsTheParent() async {
-    let other = Array(cards.prefix(1))
-    let store = TestStore(initialState: loaded(cards)) {
+    let other = Array(notes.prefix(1))
+    let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
     } withDependencies: {
       $0.apiClient.isConfigured = { true }
       $0.apiClient.stats = { DeckStats(total: 1, due: 1, new: 1, reviewedToday: 0, nextDue: nil) }
-      $0.apiClient.cards = { _ in other }
+      $0.apiClient.notes = { _ in other }
     }
 
     await store.send(.settingsButtonTapped) {
@@ -255,18 +295,18 @@ struct DeckFeatureTests {
     }
     await store.receive(\.destination.settings.delegate.serverChanged)
     await store.receive(\.delegate.deckChanged)
-    await store.receive(\.cardsResponse.success) {
-      $0.cards = IdentifiedArray(uniqueElements: other)
+    await store.receive(\.notesResponse.success) {
+      $0.notes = IdentifiedArray(uniqueElements: other)
     }
   }
 
   @Test func aTokenEditIsSavedEvenWhenSettingsIsSwipedAwayRightAfter() async {
     let saved = LockIsolated<[String?]>([])
-    let store = TestStore(initialState: loaded(cards)) {
+    let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
     } withDependencies: {
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.cards = { _ in [] }
+      $0.apiClient.notes = { _ in [] }
       $0.tokenStore.save = { token in saved.withValue { $0.append(token) } }
     }
 
@@ -282,41 +322,41 @@ struct DeckFeatureTests {
     }
     #expect(saved.value == ["s3"])
     await store.receive(\.delegate.deckChanged)
-    await store.receive(\.cardsResponse.success) {
-      $0.cards = []
+    await store.receive(\.notesResponse.success) {
+      $0.notes = []
     }
   }
 
   @Test func withoutAServerOrTokenTheDeckAsksToConnectWithoutARequest() async {
-    // `cards` is unimplemented: calling it fails the test.
-    let store = TestStore(initialState: loaded(cards)) {
+    // `notes` is unimplemented: calling it fails the test.
+    let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
     } withDependencies: {
       $0.apiClient.isConfigured = { false }
     }
 
     await store.send(.onAppear) {
-      $0.cards = []
+      $0.notes = []
       $0.phase = .notSetUp
     }
-    #expect(store.state.message == "Connect your deck")
+    #expect(store.state.message == .notSetUp)
     #expect(store.state.showsSettingsButton)
   }
 
   @Test func aRejectedTokenSaysSoAndOffersSettings() async {
-    let store = TestStore(initialState: loaded(cards)) {
+    let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
     } withDependencies: {
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.cards = { _ in throw APIError(statusCode: 403, message: "Forbidden") }
+      $0.apiClient.notes = { _ in throw APIError(statusCode: 403, message: "Forbidden") }
     }
 
     await store.send(.pulledToRefresh)
-    await store.receive(\.cardsResponse.failure) {
-      $0.cards = []
+    await store.receive(\.notesResponse.failure) {
+      $0.notes = []
       $0.phase = .unauthorized
     }
-    #expect(store.state.message == "Token rejected")
+    #expect(store.state.message == .unauthorized)
     #expect(store.state.showsSettingsButton)
   }
 
@@ -329,16 +369,16 @@ struct DeckFeatureTests {
   }
 
   @Test func closingSettingsReloadsWithTheQueryAndTellsTheParent() async {
-    var state = loaded(cards)
+    var state = loaded(notes)
     state.query = "ser"
     state.destination = .settings(SettingsFeature.State())
     let store = TestStore(initialState: state) {
       DeckFeature()
-    } withDependencies: { [cards] in
+    } withDependencies: { [notes] in
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.cards = { query in
+      $0.apiClient.notes = { query in
         #expect(query == "ser")
-        return [cards[1]]
+        return [notes[1]]
       }
     }
 
@@ -346,15 +386,15 @@ struct DeckFeatureTests {
       $0.destination = nil
     }
     await store.receive(\.delegate.deckChanged)
-    await store.receive(\.cardsResponse.success) {
-      $0.cards = [self.cards[1]]
+    await store.receive(\.notesResponse.success) {
+      $0.notes = [self.notes[1]]
     }
   }
 
   @Test func closingTheEditorDoesNotReload() async {
-    var state = loaded(cards)
-    state.destination = .editor(CardEditorFeature.State())
-    // `cards` is unimplemented: a reload fails the test.
+    var state = loaded(notes)
+    state.destination = .editor(NoteEditorFeature.State())
+    // `notes` is unimplemented: a reload fails the test.
     let store = TestStore(initialState: state) { DeckFeature() }
 
     await store.send(\.destination.dismiss) {
@@ -363,60 +403,67 @@ struct DeckFeatureTests {
   }
 
   @Test func tappingARowEditsItAndSavingReplacesTheRow() async {
-    var updated = cards[1]
-    updated.back = "the menu"
-    let store = TestStore(initialState: loaded(cards)) {
+    var updated = notes[1]
+    updated.fields["back"] = "the menu"
+    let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
     } withDependencies: { [updated] in
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.updateCard = { _, _, _ in updated }
+      $0.apiClient.updateNote = { _, _ in updated }
     }
 
-    await store.send(.rowTapped(cards[1].id)) {
-      $0.destination = .editor(CardEditorFeature.State(card: self.cards[1]))
+    await store.send(.rowTapped(notes[1].id)) {
+      $0.destination = .editor(NoteEditorFeature.State(note: self.notes[1]))
     }
-    await store.send(\.destination.editor.binding.back, "the menu") {
-      $0.destination?.modify(\.editor) { $0.back = "the menu" }
+    await store.send(\.destination.editor.fieldChanged, ("back", "the menu")) {
+      $0.destination?.modify(\.editor) { $0.fields["back"] = "the menu" }
     }
     await store.send(\.destination.editor.saveButtonTapped) {
       $0.destination?.modify(\.editor) { $0.isSaving = true }
     }
     await store.receive(\.destination.editor.saveResponse.success)
     await store.receive(\.destination.editor.delegate.saved) {
-      $0.cards[id: updated.id] = updated
+      $0.notes[id: updated.id] = updated
     }
     await store.receive(\.delegate.deckChanged)
     await store.receive(\.destination.dismiss) {
       $0.destination = nil
     }
-    #expect(store.state.cards.ids == IdentifiedArray(uniqueElements: cards).ids)
+    #expect(store.state.notes.ids == IdentifiedArray(uniqueElements: notes).ids)
   }
 
-  @Test func addingACardPutsItAtTheTop() async {
+  @Test func addingANotePutsItAtTheTop() async {
     let date = Date(timeIntervalSince1970: 1_795_000_000)
-    let new = Card(id: UUID(1), front: "chat", back: "cat", due: date, createdAt: date, updatedAt: date)
-    let store = TestStore(initialState: loaded(cards)) {
+    let new = Note(
+      id: UUID(1), type: .basic, fields: ["front": "chat", "back": "cat"],
+      cards: [Note.Card(id: UUID(2), prompt: ["front"], answer: ["back"], due: date)],
+      createdAt: date, updatedAt: date
+    )
+    let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
     } withDependencies: {
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.addCard = { _, _ in new }
+      $0.apiClient.addNote = { _ in new }
     }
 
     await store.send(.addButtonTapped) {
-      $0.destination = .editor(CardEditorFeature.State())
+      $0.destination = .editor(NoteEditorFeature.State())
     }
-    await store.send(\.destination.editor.binding.front, "chat") {
-      $0.destination?.modify(\.editor) { $0.front = "chat" }
+    await store.send(\.destination.editor.fieldChanged, ("front", "chat")) {
+      $0.destination?.modify(\.editor) { $0.fields["front"] = "chat" }
     }
-    await store.send(\.destination.editor.binding.back, "cat") {
-      $0.destination?.modify(\.editor) { $0.back = "cat" }
+    await store.send(\.destination.editor.fieldChanged, ("back", "cat")) {
+      $0.destination?.modify(\.editor) {
+        $0.fields["back"] = "cat"
+        $0.directions = [Direction(prompt: ["front"], answer: ["back"])]
+      }
     }
     await store.send(\.destination.editor.saveButtonTapped) {
       $0.destination?.modify(\.editor) { $0.isSaving = true }
     }
     await store.receive(\.destination.editor.saveResponse.success)
     await store.receive(\.destination.editor.delegate.saved) {
-      $0.cards.insert(new, at: 0)
+      $0.notes.insert(new, at: 0)
     }
     await store.receive(\.delegate.deckChanged)
     await store.receive(\.destination.dismiss) {
@@ -426,52 +473,74 @@ struct DeckFeatureTests {
 
   @Test func pullingReloadsWithTheQueryKeepingRowsUntilTheResponse() async {
     let queries = LockIsolated<[String?]>([])
-    var state = loaded(cards)
+    var state = loaded(notes)
     state.query = "ser"
     let store = TestStore(initialState: state) {
       DeckFeature()
-    } withDependencies: { [cards] in
+    } withDependencies: { [notes] in
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.cards = { query in
+      $0.apiClient.notes = { query in
         queries.withValue { $0.append(query) }
-        return [cards[0]]
+        return [notes[0]]
       }
     }
 
     // No delegate and no query change: exhaustivity fails the test on either.
     await store.send(.pulledToRefresh)
-    await store.receive(\.cardsResponse.success) {
-      $0.cards = [self.cards[0]]
+    await store.receive(\.notesResponse.success) {
+      $0.notes = [self.notes[0]]
     }
     #expect(queries.value == ["ser"])
   }
 
   @Test func onlyBecomingActiveReloadsWithTheQuery() async {
     let queries = LockIsolated<[String?]>([])
-    var state = loaded([cards[0]])
+    var state = loaded([notes[0]])
     state.query = "ser"
     let store = TestStore(initialState: state) {
       DeckFeature()
-    } withDependencies: { [cards] in
+    } withDependencies: { [notes] in
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.cards = { query in
+      $0.apiClient.notes = { query in
         queries.withValue { $0.append(query) }
-        return cards
+        return notes
       }
     }
 
     await store.send(.scenePhaseChanged(.inactive))
     await store.send(.scenePhaseChanged(.background))
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.success) {
-      $0.cards = IdentifiedArray(uniqueElements: self.cards)
+    await store.receive(\.notesResponse.success) {
+      $0.notes = IdentifiedArray(uniqueElements: self.notes)
     }
     #expect(queries.value == ["ser"])
   }
 
-  private func loaded(_ cards: [Card]) -> DeckFeature.State {
+  @Test func rowsShowTheKeyFieldTheAnswerOrRoleAndHowManyDirections() {
+    let person = notes[0]
+    #expect(person.title == "Ada Example")
+    #expect(person.subtitle == "runs the bakery")
+    #expect(person.stateText == "2 directions")
+    #expect(person.photoURL != nil)
+
+    let basic = notes[1]
+    #expect(basic.title == "serendipity")
+    #expect(basic.subtitle == "finding something good without looking for it")
+    #expect(basic.stateText == "new")
+    #expect(basic.photoURL == nil)
+    #expect(notes[2].stateText == "2 directions")
+  }
+
+  @Test func aRowIsDueWhenItsEarliestCardIs() {
+    var note = notes[0]
+    let early = Date(timeIntervalSince1970: 1_000)
+    note.cards[1].due = early
+    #expect(note.due == early)
+  }
+
+  private func loaded(_ notes: [Note]) -> DeckFeature.State {
     var state = DeckFeature.State()
-    state.cards = IdentifiedArray(uniqueElements: cards)
+    state.notes = IdentifiedArray(uniqueElements: notes)
     state.phase = .loaded
     return state
   }

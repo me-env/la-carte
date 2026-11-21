@@ -93,6 +93,16 @@ extension View {
   }
 }
 
+extension Theme {
+  /// `.tint` doesn't reach the navigation bar's search field cursor (iOS 27), so it's set through UIKit.
+  /// Forest is dark-styled and shares dark's accent, so light/dark traits are enough. Called by `RootView`.
+  @MainActor public static func tintSearchFields() {
+    UISearchTextField.appearance().tintColor = UIColor { traits in
+      UIColor(traits.userInterfaceStyle == .dark ? accent.dark : accent.light)
+    }
+  }
+}
+
 extension AppTheme {
   fileprivate var interfaceStyle: UIUserInterfaceStyle {
     switch self {
