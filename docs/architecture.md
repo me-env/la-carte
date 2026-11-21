@@ -140,6 +140,7 @@ Changes flow up as delegates: `CardEditor.saved` → Deck/App; `Settings.serverC
 | Variable | Effect |
 |---|---|
 | `LA_CARTE_API=mock` | In-memory deck seeded with `[Card].fixtures` (UI tests, demos) |
+| `LA_CARTE_API=mock-notes` | In-memory deck seeded with `[Note].fixtures`: the 3 mock cards as `basic` notes, a `back → front` direction on "la carte", and a made-up person note (generated `data:` image) with 2 cards (spec 014b) |
 | `LA_CARTE_API_URL` | API base URL (no default: without it or a stored URL the app shows "Connect your deck") |
 | `LA_CARTE_API_TOKEN` | Bearer token |
 
