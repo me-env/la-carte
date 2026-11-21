@@ -12,6 +12,11 @@ public struct APIClient: Sendable {
   public var deleteCard: @Sendable (_ id: Card.ID) async throws -> Void
   public var review: @Sendable (_ id: Card.ID, _ rating: Rating) async throws -> Card
   public var stats: @Sendable () async throws -> DeckStats
+  public var notes: @Sendable (_ query: String?) async throws -> [Note]
+  public var addNote: @Sendable (_ draft: NoteDraft) async throws -> Note
+  /// Sends every field of the draft's type (absent ones as `""`, which clears them) and the full set of directions.
+  public var updateNote: @Sendable (_ id: Note.ID, _ draft: NoteDraft) async throws -> Note
+  public var deleteNote: @Sendable (_ id: Note.ID) async throws -> Void
   /// False until a server URL and a token are both set: features show "Connect your deck" instead of loading.
   public var isConfigured: @Sendable () -> Bool = { false }
 }

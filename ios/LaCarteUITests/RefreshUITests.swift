@@ -121,15 +121,20 @@ final class RefreshUITests: XCTestCase {
     snapshot("deck-empty-before-refresh", appearance: .light)
 
     deck.add(card(Self.idA, "canine", "dog"))
-    pullToRefresh(app, from: el(app, "deck.message"))
-    XCTAssertTrue(el(app, "deck.title").waitFor(timeout: 2), "the pull closed the deck sheet")
+    // Pull from just under the search field: the message sits low in the 009a empty state, and a drag starting
+    // there is too short to trigger the refresh.
+    let window = app.windows.firstMatch
+    let top = deckSearch(app).frame.maxY + 30, h = window.frame.height
+    window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: top / h))
+      .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (top + 400) / h)))
+    XCTAssertTrue(deckTitle(app).waitFor(timeout: 2), "the pull closed the deck sheet")
     XCTAssertTrue(row(app, Self.idA).waitFor(timeout: 10), "deck.row.<canine> missing after the pull")
     XCTAssertFalse(el(app, "deck.message").exists, "deck.message still shown with a row")
     snapshot("deck-after-refresh", appearance: .light)
 
     // With a query.
-    el(app, "deck.search").tap()
-    el(app, "deck.search").typeText("ine")
+    deckSearch(app).tap()
+    deckSearch(app).typeText("ine")
     // Debounce: wait for the search request (the old fixed 1 s sleep); the checks below fail if it never came.
     _ = poll(timeout: 3) { server.requests.contains { StubDeck.queryItems($0.path)["query"] == "ine" } }
     XCTAssertTrue(row(app, Self.idA).waitFor(timeout: 5))
@@ -142,11 +147,11 @@ final class RefreshUITests: XCTestCase {
     // In flight: the canine row still drawn (visual review), only one row before the response.
     assertInkVisible(inFlight, ink: Palette.light.ink, "existing row during the refresh")
     assertNoBlue(inFlight, "deck refresh spinner")
-    XCTAssertTrue(el(app, "deck.title").exists, "the pull closed the deck sheet")
+    XCTAssertTrue(deckTitle(app).exists, "the pull closed the deck sheet")
     XCTAssertTrue(row(app, Self.idB).waitFor(timeout: 20), "feline row missing after the pull with a query")
     XCTAssertTrue(row(app, Self.idA).exists, "canine row gone after the pull")
     XCTAssertFalse(row(app, Self.idC).exists, "raven (not matching 'ine') shown: the refresh ignored the query")
-    XCTAssertEqual(el(app, "deck.search").value as? String, "ine", "search field lost its text")
+    XCTAssertEqual(deckSearch(app).value as? String, "ine", "search field lost its text")
     let gets = server.requests.dropFirst(before).filter { $0.method == "GET" && StubDeck.route($0.path) == "/cards" }
     XCTAssertFalse(gets.isEmpty, "no GET /cards after the pull")
     for g in gets {
@@ -177,7 +182,7 @@ final class RefreshUITests: XCTestCase {
     deck.readDelay = 5
     let deckShot = pullToRefreshCapturing(app, from: row(app, Self.idA), name: "deck-refresh-forest",
                                           appearance: .light)
-    XCTAssertTrue(el(app, "deck.title").exists, "the pull closed the deck sheet")
+    XCTAssertTrue(deckTitle(app).exists, "the pull closed the deck sheet")
     assertNoBlue(deckShot, "forest deck spinner")
     server.stop()
   }
@@ -209,8 +214,8 @@ final class RefreshUITests: XCTestCase {
     XCTAssertTrue(row(app, canineID).waitFor(timeout: 10), "canine row missing after pulling the list")
     snapshot("deck-refresh-live", appearance: .light)
 
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"))
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app))
     assertFront(app, "greeting", remaining: "2 to review")
     pullToRefresh(app, from: el(app, "study.card"))
     assertFront(app, "greeting", remaining: "3 to review")
@@ -243,7 +248,7 @@ final class RefreshUITests: XCTestCase {
     let button = el(app, "study.deck")
     XCTAssertTrue(button.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
-    waitForLabel(el(app, "deck.title"), "Cards", file: file, line: line)
+    waitForDeckTitle(app, file: file, line: line)
   }
 
   @MainActor

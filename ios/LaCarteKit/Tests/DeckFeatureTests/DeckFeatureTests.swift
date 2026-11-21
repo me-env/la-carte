@@ -117,9 +117,9 @@ struct DeckFeatureTests {
     var state = DeckFeature.State()
     #expect(state.message == nil)
     state.phase = .loaded
-    #expect(state.message == "No cards yet")
+    #expect(state.message == .noCards)
     state.query = "zzz"
-    #expect(state.message == "No matches")
+    #expect(state.message == .noMatches)
 
     let store = TestStore(initialState: loaded(cards)) {
       DeckFeature()
@@ -133,7 +133,7 @@ struct DeckFeatureTests {
       $0.cards = []
       $0.phase = .offline
     }
-    #expect(store.state.message == "Can't reach your deck")
+    #expect(store.state.message == .offline)
   }
 
   @Test func swipingDeletesTheRowAndTellsTheParent() async {
@@ -148,11 +148,48 @@ struct DeckFeatureTests {
 
     await store.send(.rowSwipedToDelete(cards[1].id)) {
       $0.cards.remove(id: self.cards[1].id)
+      $0.deletions = 1
     }
     await store.receive(\.deleteResponse.success)
     await store.receive(\.delegate.deckChanged)
     await store.receive(\.cardsResponse.success)
     #expect(deck.value.map(\.id) == [cards[0].id, cards[2].id])
+  }
+
+  /// Spec 009a #5: each message keeps its copy and gets its system symbol.
+  @Test func messagesHaveTheirTitleAndSymbol() {
+    let expected: [(DeckFeature.State.Message, String, String)] = [
+      (.noCards, "No cards yet", "rectangle.stack"),
+      (.offline, "Can't reach your deck", "wifi.slash"),
+      (.notSetUp, "Connect your deck", "link"),
+      (.unauthorized, "Token rejected", "key"),
+    ]
+    for (message, title, symbol) in expected {
+      #expect(message.title == title)
+      #expect(message.systemImage == symbol)
+    }
+  }
+
+  /// Spec 009a #7: every delete, from the swipe or the context menu, bumps the light-impact haptic trigger.
+  @Test func everyDeleteBumpsTheHapticTrigger() async {
+    let deck = LockIsolated(cards)
+    let store = TestStore(initialState: loaded(cards)) {
+      DeckFeature()
+    } withDependencies: {
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.deleteCard = { id in deck.withValue { $0.removeAll { $0.id == id } } }
+      $0.apiClient.cards = { _ in deck.value }
+    }
+
+    for (index, card) in cards.prefix(2).enumerated() {
+      await store.send(.rowSwipedToDelete(card.id)) {
+        $0.cards.remove(id: card.id)
+        $0.deletions = index + 1
+      }
+      await store.receive(\.deleteResponse.success)
+      await store.receive(\.delegate.deckChanged)
+      await store.receive(\.cardsResponse.success)
+    }
   }
 
   @Test func failedDeleteReloadsTheList() async {
@@ -166,6 +203,7 @@ struct DeckFeatureTests {
 
     await store.send(.rowSwipedToDelete(cards[1].id)) {
       $0.cards.remove(id: self.cards[1].id)
+      $0.deletions = 1
     }
     await store.receive(\.deleteResponse.failure)
     await store.receive(\.cardsResponse.success) {
@@ -195,6 +233,7 @@ struct DeckFeatureTests {
     await store.send(.onAppear)
     await store.send(.rowSwipedToDelete(cards[1].id)) {
       $0.cards.remove(id: self.cards[1].id)
+      $0.deletions = 1
     }
     await store.receive(\.deleteResponse.success)
     await store.receive(\.delegate.deckChanged)
@@ -224,6 +263,7 @@ struct DeckFeatureTests {
     }
     await store.send(.rowSwipedToDelete(cards[1].id)) {
       $0.cards.remove(id: self.cards[1].id)
+      $0.deletions = 1
     }
     await store.receive(\.deleteResponse.success)
     await store.receive(\.delegate.deckChanged)
@@ -299,7 +339,7 @@ struct DeckFeatureTests {
       $0.cards = []
       $0.phase = .notSetUp
     }
-    #expect(store.state.message == "Connect your deck")
+    #expect(store.state.message == .notSetUp)
     #expect(store.state.showsSettingsButton)
   }
 
@@ -316,7 +356,7 @@ struct DeckFeatureTests {
       $0.cards = []
       $0.phase = .unauthorized
     }
-    #expect(store.state.message == "Token rejected")
+    #expect(store.state.message == .unauthorized)
     #expect(store.state.showsSettingsButton)
   }
 

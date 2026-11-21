@@ -31,7 +31,7 @@ case " ${LACARTE_HELD_LOCKS:-} " in *" sim-"*) FREE=1 ;; esac  # a caller holds 
 N="${N:-$FREE}"; [ "$N" -le "$FREE" ] || N="$FREE"
 if [ "$N" -le 1 ]; then echo "🔀 1 shard (free UI simulators: $FREE): plain run" >&2; plain "$@"; fi
 
-# 2. List the selected test methods and deal them into N shards.
+# 2. Prepare, then build.
 OUT="$ROOT/qa/screenshots/$RUN"
 RESULT="$RESULTS_DIR/$RUN.xcresult"
 PRODUCTS="$RESULTS_DIR/$RUN.xctestproducts"
@@ -39,18 +39,32 @@ WORK="$RESULTS_DIR/$RUN.split"   # shard lists, logs and bundles; removed on exi
 DURATIONS="$RESULTS_DIR/ui-test-durations.tsv"
 mkdir -p "$RESULTS_DIR"; rm -rf "$OUT" "$RESULT" "$PRODUCTS" "$WORK"; mkdir -p "$OUT" "$WORK"
 trap 'rm -rf "$PRODUCTS" "$WORK"' EXIT
-N="$(python3 -I - "$ROOT/ios/LaCarteUITests" "$DURATIONS" "$WORK" "$N" "${ONLY[@]+"${ONLY[@]}"}" <<'PY'
-import glob, os, re, sys
+cd "$ROOT/ios"
+FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|TEST( EXECUTE)? (SUCCEEDED|FAILED)|^🔒"
+export NSUnbufferedIO=YES
+START=$SECONDS
+set +e
+# Build once under the app's DerivedData lock, into this run's own products copy.
+"$LOCK" "$APP_BUILD_LOCK" $BUILD_SLOT xcodebuild build-for-testing $BUILD_JOBS_FLAGS -project LaCarte.xcodeproj -scheme LaCarte \
+  -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER"
+STATUS=${PIPESTATUS[0]}
+set -e
+[ "$STATUS" -eq 0 ] || { echo "TESTS: none run (exit $STATUS: build failed or lock timeout)"; exit "$STATUS"; }
+
+# 3. List the selected tests from the built bundle (catches tests declared in extensions) and deal them into N shards.
+ENUM="$WORK/tests.json"
+xcodebuild test-without-building -testProductsPath "$PRODUCTS" -destination "$DESTINATION" -enumerate-tests \
+  -test-enumeration-style flat -test-enumeration-format json -test-enumeration-output-path "$ENUM" >/dev/null 2>&1 \
+  || { echo "ERROR: could not enumerate tests in the built bundle" >&2; exit 1; }
+N="$(python3 -I - "$ENUM" "$DURATIONS" "$WORK" "$N" "${ONLY[@]+"${ONLY[@]}"}" <<'PY'
+import json, os, sys
 src, durations, work, n, only = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), sys.argv[5:]
-tests = []
-for path in sorted(glob.glob(os.path.join(src, "*.swift"))):
-    cls = None
-    for line in open(path):
-        if m := re.match(r"\s*(?:final\s+)?class\s+(\w+)\s*:", line): cls = m.group(1)
-        elif (m := re.match(r"\s*func\s+(test\w*)\s*\(", line)) and cls: tests.append(f"{cls}/{m.group(1)}")
+tests = [e["identifier"].removeprefix("LaCarteUITests/").removesuffix("()")
+         for v in json.load(open(src))["values"] for e in v["enabledTests"] if e["identifier"].startswith("LaCarteUITests/")]
 sel = [o.removeprefix("LaCarteUITests/").removesuffix("()") for o in only]
+total = len(tests)
 tests = [t for t in tests if not sel or any(t == s or t.startswith(s + "/") for s in sel)]
-if not tests: sys.exit("no UI test matches " + " ".join(only))
+if not tests: sys.exit("ERROR: 0 UI tests matched " + (" ".join(only) or "(no filter)") + f" among {total} tests in the built bundle")
 known = {}
 if os.path.exists(durations):
     for line in open(durations):
@@ -66,17 +80,6 @@ print(len(shards))
 PY
 )"
 
-cd "$ROOT/ios"
-FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|TEST( EXECUTE)? (SUCCEEDED|FAILED)|^🔒"
-export NSUnbufferedIO=YES
-START=$SECONDS
-set +e
-# 3. Build once under the app's DerivedData lock, into this run's own products copy.
-"$LOCK" "$APP_BUILD_LOCK" xcodebuild build-for-testing -project LaCarte.xcodeproj -scheme LaCarte \
-  -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER"
-STATUS=${PIPESTATUS[0]}
-set -e
-[ "$STATUS" -eq 0 ] || { echo "TESTS: none run (exit $STATUS: build failed or lock timeout)"; exit "$STATUS"; }
 
 # 4. Every shard at once, each on its own free pool slot with its own result bundle.
 PIDS=()

@@ -5,7 +5,7 @@
 | API unit/integration | `api/tests/` | pytest (in-memory SQLite, `TestClient`, MCP in-process `Client`) | api-engineer | `scripts/api-test.sh` |
 | Feature logic | `ios/LaCarteKit/Tests/` | Swift Testing + TCA `TestStore` | ios-engineer | `scripts/ios-test.sh` |
 | API contract (iOS side) | `Tests/APIClientTests/DecodingTests.swift` | real JSON payloads from the API | ios-engineer + api-engineer | `scripts/ios-test.sh` |
-| UI end-to-end (mock) | `ios/LaCarteUITests/` | XCUITest, `LA_CARTE_API=mock` | **qa-validator** | `scripts/ios-ui-test.sh <run>` |
+| UI end-to-end (mock) | `ios/LaCarteUITests/` | XCUITest, `LA_CARTE_API=mock` (3 basic cards) or `mock-notes` (notes with several directions + a person, spec 014b) | **qa-validator** | `scripts/ios-ui-test.sh <run>` |
 | Full-stack E2E | same, `*_liveAPI` tests | XCUITest against a fresh seeded API | **qa-validator** | `scripts/e2e.sh <run>` |
 
 **Logo renders.** `scripts/ios-test.sh --render -only-testing:DesignSystemTests/RenderTests` (about 15 s) writes
@@ -29,12 +29,24 @@ ScrollView as empty.
 
 ## UI tests
 
+**UI tests test UI, not logic.** A UI test exists only for what a TestStore/unit test can't see: the screen
+renders right (layout, colours, light/dark, accessibility sizes), navigation and gestures work on real UIKit,
+and the app wires to the API end to end (a few `_liveAPI` tests). Reducer logic (state changes, API calls made,
+errors, debounce, in-flight guards, persistence) is a unit test. Before adding a UI test, ask "could a TestStore
+test catch this?" — if yes, write that instead. One UI test per flow, one appearance pass unless the look differs.
+**No Dynamic Type / accessibility-size (XL, XXXL, AX5) UI tests for now** (user, 2026-11-21): revisit before
+publishing. Don't add them, don't block a verdict on text-size layout.
+
 - Test names: `test<Screen>_<scenario>` (e.g. `testStudy_revealAndRateGood`). Live-API variants end in `_liveAPI`
   and `XCTSkip` when `LA_CARTE_API_URL` is unset.
 - Find elements **only** by accessibility identifier (`<feature>.<element>`), never by visible text or index.
 - Mock tests run in **light and dark** (`XCUIDevice.shared.appearance`).
 - Call `snapshot("<screen>-<state>", appearance:)` at every state worth reviewing. Names are stable:
   QA compares runs by filename.
+- Debug galleries (debug builds only, no network): `LA_CARTE_SCREEN=design-system` (tokens and components),
+  `LA_CARTE_SCREEN=widget` (spec 007: every Home Screen widget state in 170 pt tiles, `widgetGallery.title`,
+  `widgetGallery.tile.<due|caughtUp|caughtUpLater|empty|unavailable|long>`). Widgets themselves aren't reachable
+  from XCUITest. Both follow `-theme forest`.
 - Mock data comes from `[Card].fixtures` (`APIClient/InMemoryAPIClient.swift`). Changing fixtures changes
   screenshots — coordinate with qa-validator.
 

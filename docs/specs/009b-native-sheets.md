@@ -20,7 +20,7 @@ no white flash on a dark launch, and round buttons that match the system glass o
 | # | Criterion (observable) | Validated by |
 |---|---|---|
 | 1 | **Editor sheet** is a `NavigationStack` with inline title "New card" / "Edit card" (QA: `app.navigationBars`). Toolbar: `Button(role: .confirm)` in `.confirmationAction` (`editor.save`, disabled exactly as today) and `Button(role: .close)` in `.cancellationAction` (`editor.close`). Background `Theme.background` (`.scrollContentBackground(.hidden)`). The old header `HStack` is gone | UI (light, dark, forest) |
-| 2 | **Discard protection.** With unsaved changes (front or back differs from the original after trimming), swipe-down does not dismiss (`.interactiveDismissDisabled`), and `editor.close` shows a confirmation dialog "Discard changes?" with "Discard" (destructive, `editor.discard`) and "Keep editing" (`editor.keepEditing`). Discard dismisses; Keep editing leaves text as typed. Without changes, `editor.close` dismisses immediately | unit + UI |
+| 2 | **Discard protection.** With unsaved changes (front or back differs from the original after trimming), swipe-down does not dismiss (`.interactiveDismissDisabled`), and `editor.close` shows a confirmation dialog "Discard changes?" with "Discard" (destructive, `editor.discard`). On iOS 26+ the system shows it as a popover with Discard only; tapping outside it is "keep editing" (native behaviour, amended after QA 2026-11-21). Discard dismisses; tapping outside leaves text as typed. Without changes, `editor.close` dismisses immediately | unit + UI |
 | 3 | Editor: an `.error` haptic plays when a save fails (`saveFailed` becomes true); `editor.error` unchanged | review |
 | 4 | **Settings sheet** is a `NavigationStack` + `Form`, inline title "Settings". `Section("Server")`: URL `TextField` (`settings.url`), token field with the reveal toggle from 008 (`settings.token`, `settings.token.reveal`), `Button("Test connection")` (`settings.test`), status line (`settings.status`). `Section("Appearance")`: `Picker` `.segmented` System/Light/Dark/Forest (`settings.theme`; QA selects segments by label). Close = toolbar `Button(role: .close)` (`settings.close`). Form background `Theme.background`, rows `Theme.surface` (`.listRowBackground`), tint ink. `SurfaceRow` is deleted | UI (light, dark, forest) |
 | 5 | Choosing "Forest" in the picker switches the theme live, as `themeTapped` does today (picker binds through the existing action) | unit (unchanged) + UI |
@@ -49,7 +49,7 @@ Screenshots (light + dark, forest where noted): `editor-new` (+ forest), `editor
 None.
 
 ## Accessibility identifiers
-New: `editor.discard`, `editor.keepEditing`. Gone: `editor.title`, `settings.title` (navigation titles),
+New: `editor.discard`. Gone: `editor.title`, `settings.title` (navigation titles),
 `settings.theme.<name>` (segments selected by label). Unchanged: `editor.save`, `editor.close`, `editor.front`,
 `editor.back`, `editor.error`, `settings.url`, `settings.token`, `settings.token.reveal`, `settings.test`,
 `settings.status`, `settings.close`.

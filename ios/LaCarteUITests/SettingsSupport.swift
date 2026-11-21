@@ -42,7 +42,7 @@ class SettingsTestCase: XCTestCase {
     let button = el(app, "study.deck")
     XCTAssertTrue(button.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
-    waitForLabel(el(app, "deck.title"), "Cards", file: file, line: line)
+    waitForDeckTitle(app, file: file, line: line)
   }
 
   @MainActor
@@ -50,7 +50,7 @@ class SettingsTestCase: XCTestCase {
     let gear = el(app, "deck.settings")
     XCTAssertTrue(gear.waitFor(timeout: 5), "deck.settings missing", file: file, line: line)
     gear.tap()
-    waitForLabel(el(app, "settings.title"), "Settings", file: file, line: line)
+    waitForSheet(app, "Settings", file: file, line: line)
   }
 
   @MainActor

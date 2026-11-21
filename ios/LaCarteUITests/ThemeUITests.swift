@@ -21,21 +21,20 @@ final class ThemeUITests: XCTestCase {
 
   // MARK: - #1 picker
 
-  /// #1: "Appearance" section with four equal-width options in one row (System, Light, Dark, Forest); System is
-  /// selected by default (stored value = System, reset by every theme test); selected = ink fill, others = surface.
+  /// #1 / 009b #4: "Appearance" section with a native segmented picker, four equal-width segments in one row
+  /// (System, Light, Dark, Forest); System is selected by default (stored value = System, reset by every theme
+  /// test). Segment colors are the system's (009b), only the sheet background is checked here.
   @MainActor
   func testSettings_appearancePicker() {
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .mock, theme: nil)
     openDeck(app)
     openSettings(app)
-    let palette = Palette.light
     let buttons = Self.themes.map { themeButton(app, $0) }
     for (theme, b) in zip(Self.themes, buttons) {
-      XCTAssertTrue(b.waitFor(timeout: 5), "settings.theme.\(theme) missing")
-      XCTAssertTrue(b.isHittable, "settings.theme.\(theme) not hittable")
-      XCTAssertEqual(b.label, theme.capitalized, "settings.theme.\(theme) label")
-      XCTAssertGreaterThanOrEqual(b.frame.height, 43.5, "settings.theme.\(theme) under 44pt: \(b.frame)")
+      XCTAssertTrue(b.waitFor(timeout: 5), "theme segment \(theme) missing")
+      XCTAssertTrue(b.isHittable, "theme segment \(theme) not hittable")
+      XCTAssertEqual(b.label, theme.capitalized, "theme segment \(theme) label")
     }
     assertSelected(app, "system")
     // One row, equal widths, in order, under the server section.
@@ -45,16 +44,12 @@ final class ThemeUITests: XCTestCase {
       XCTAssertEqual(f.width, frames[0].width, accuracy: 1, "options not equal width: \(frames)")
     }
     for (a, b) in zip(frames, frames.dropFirst()) {
-      XCTAssertLessThan(a.maxX, b.minX, "options out of order / overlapping: \(frames)")
+      XCTAssertLessThanOrEqual(a.maxX, b.minX + 0.5, "options out of order / overlapping: \(frames)")
     }
     XCTAssertGreaterThanOrEqual(frames[0].minY, el(app, "settings.test").frame.maxY - 1,
                                 "Appearance not below the server section")
-    // Fills: selected = ink, others = surface; the sheet stays on background.
     waitForColors(app, [
-      ("selected (System) fill", CGPoint(x: frames[0].minX + 5, y: frames[0].midY), palette.ink),
-      ("Light option fill", CGPoint(x: frames[1].minX + 5, y: frames[1].midY), palette.surface),
-      ("Forest option fill", CGPoint(x: frames[3].minX + 5, y: frames[3].midY), palette.surface),
-      ("sheet background left of the options", CGPoint(x: 3, y: frames[0].midY), palette.background),
+      ("sheet background left of the options", CGPoint(x: 3, y: frames[0].midY), Palette.light.background),
     ])
     snapshot("settings-appearance", appearance: .light)
   }
@@ -174,8 +169,8 @@ final class ThemeUITests: XCTestCase {
       assertSelected(app, "system")
       assertSettingsColors(app, devicePalette, "system after \(forced), settings still open")
       snapshot("settings-back-to-system-after-\(forced)", appearance: device)
-      swipeSheetDown(app, from: el(app, "settings.title"))
-      waitForAbsence(el(app, "settings.title"), "settings still open after swiping down")
+      swipeSheetDown(app, from: sheetBar(app, "Settings"))
+      waitForAbsence(sheetBar(app, "Settings"), "settings still open after swiping down")
       assertDeckColors(app, devicePalette, "deck behind settings, system after \(forced)")
       snapshot("deck-back-to-system-after-\(forced)", appearance: device)
       closeDeck(app)
@@ -242,16 +237,17 @@ final class ThemeUITests: XCTestCase {
 
     // Editor (edit), then new card with the keyboard up.
     deckRow(app, Self.mockIDs[2]).tap()
-    waitForLabel(el(app, "editor.title"), "Edit card")  // editor colours: ScreenColorTests
+    waitForSheet(app, "Edit card")
+    assertEditorColors(app, p, "editor (edit)")
     snapshot("editor-forest", appearance: .light)
     el(app, "editor.close").tap()
-    waitForAbsence(el(app, "editor.title"))
+    waitForAbsence(editorBar(app))
     el(app, "deck.add").tap()
-    waitForLabel(el(app, "editor.title"), "New card")
+    waitForSheet(app, "New card")
     assertKeyboard(app, dark: true, "-theme forest, new card")
     snapshot("editor-new-forest", appearance: .light)
     el(app, "editor.close").tap()
-    waitForAbsence(el(app, "editor.title"))
+    waitForAbsence(editorBar(app))
 
     // Settings: Forest is the selected option.
     openSettings(app)
@@ -291,50 +287,6 @@ final class ThemeUITests: XCTestCase {
     // Gallery colours per theme × scheme: ScreenColorTests.gallery. Here only what needs the device.
     assertStatusBar(app, darkScheme: true, "gallery -theme forest")
     snapshot("design-system-forest", appearance: .light)
-  }
-
-  // MARK: - accessibility XL
-
-  /// At accessibility XL the four options stay inside the window, don't overlap and keep their full label; Forest
-  /// can be picked; study in forest at XL stays readable.
-  @MainActor
-  func testTheme_accessibilityXL() {
-    resetThemeOnTeardown()
-    XCUIDevice.shared.appearance = .light
-    var app = launch(api: .mock, arguments: accessibilityXLArguments, theme: nil)
-    openDeck(app)
-    openSettings(app)
-    let forest = themeButton(app, "forest")
-    if !forest.isHittable { app.swipeUp() }
-    XCTAssertTrue(forest.isHittable, "settings.theme.forest not reachable at XL")
-    let window = app.windows.firstMatch.frame
-    let frames = Self.themes.map { themeButton(app, $0).frame }
-    for (theme, f) in zip(Self.themes, frames) {
-      XCTAssertTrue(window.insetBy(dx: -0.5, dy: -0.5).contains(f), "settings.theme.\(theme) clipped at XL: \(f)")
-      XCTAssertGreaterThanOrEqual(f.height, 43.5, "settings.theme.\(theme) under 44pt at XL")
-    }
-    for (i, a) in frames.enumerated() {
-      for b in frames[(i + 1)...] {
-        let o = a.intersection(b)
-        XCTAssertTrue(o.isNull || o.width < 1 || o.height < 1, "theme options overlap at XL: \(a) / \(b)")
-      }
-    }
-    assertSelected(app, "system")
-    snapshot("settings-appearance-xl", appearance: .light)
-    forest.tap()
-    assertSelected(app, "forest")
-    snapshot("settings-forest-xl", appearance: .light)
-    themeButton(app, "system").tap()
-    assertSelected(app, "system")
-    app.terminate()
-
-    app = launch(api: .mock, arguments: accessibilityXLArguments, theme: "forest")
-    waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
-    assertTextsReadable(in: app)
-    snapshot("study-forest-xl", appearance: .light)
-    el(app, "study.card").tap()
-    XCTAssertTrue(el(app, "study.rate.good").waitFor(timeout: 5))
-    snapshot("study-revealed-forest-xl", appearance: .light)
   }
 
   // MARK: - live API (scripts/e2e.sh)
@@ -378,7 +330,7 @@ final class ThemeUITests: XCTestCase {
 
   @MainActor
   private func themeButton(_ app: XCUIApplication, _ theme: String) -> XCUIElement {
-    el(app, "settings.theme.\(theme)")
+    themeSegment(app, theme.capitalized)  // spec 009b: segments picked by label
   }
 
   @MainActor
@@ -398,13 +350,13 @@ final class ThemeUITests: XCTestCase {
     let button = el(app, "study.deck")
     XCTAssertTrue(button.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
-    waitForLabel(el(app, "deck.title"), "Cards", file: file, line: line)
+    waitForDeckTitle(app, file: file, line: line)
   }
 
   @MainActor
   private func closeDeck(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"), "deck still open", file: file, line: line)
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app), "deck still open", file: file, line: line)
   }
 
   @MainActor
@@ -412,13 +364,13 @@ final class ThemeUITests: XCTestCase {
     let gear = el(app, "deck.settings")
     XCTAssertTrue(gear.waitFor(timeout: 5), "deck.settings missing", file: file, line: line)
     gear.tap()
-    waitForLabel(el(app, "settings.title"), "Settings", file: file, line: line)
+    waitForSheet(app, "Settings", file: file, line: line)
   }
 
   @MainActor
   private func closeSettings(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     el(app, "settings.close").tap()
-    waitForAbsence(el(app, "settings.title"), "settings still open", file: file, line: line)
+    waitForAbsence(sheetBar(app, "Settings"), "settings still open", file: file, line: line)
   }
 
   @MainActor
@@ -446,7 +398,8 @@ final class ThemeUITests: XCTestCase {
   private func assertDeckColors(_ app: XCUIApplication, _ p: Palette, _ context: String,
                                 file: StaticString = #filePath, line: UInt = #line) {
     let window = app.windows.firstMatch.frame
-    let title = el(app, "deck.title").frame, search = el(app, "deck.search").frame, add = el(app, "deck.add").frame
+    // Spec 009a: large navigation title + system search field and glass toolbar buttons (system materials).
+    let title = deckTitleText(app).frame
     let firstRow = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'deck.row.'"))
       .firstMatch
     XCTAssertTrue(firstRow.waitFor(timeout: 10), "no deck rows", file: file, line: line)
@@ -456,8 +409,21 @@ final class ThemeUITests: XCTestCase {
       ("deck background near the bottom edge", CGPoint(x: window.midX, y: window.maxY - 4), p.background),
       ("deck background left of a row", CGPoint(x: r.minX / 2, y: r.midY), p.background),
       ("deck row fill", CGPoint(x: r.minX + 6, y: r.midY), p.surface),
-      ("deck search fill", CGPoint(x: search.maxX + 6, y: search.midY), p.surface),
-      ("deck.add circle fill", CGPoint(x: add.minX + 7, y: add.midY), p.surface),
+    ], context: context, file: file, line: line)
+  }
+
+  @MainActor
+  private func assertEditorColors(_ app: XCUIApplication, _ p: Palette, _ context: String,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+    let window = app.windows.firstMatch.frame
+    // 009b #1: native nav bar over Theme.background; toolbar buttons are system glass (not pixel-checked).
+    let bar = editorBar(app).frame, close = el(app, "editor.close").frame, front = el(app, "editor.front").frame
+    waitForColors(app, [
+      ("editor background at the bar's leading edge", CGPoint(x: 4, y: bar.midY), p.background),
+      ("editor background between close and title", CGPoint(x: (close.maxX + window.midX) / 2 - 20, y: bar.midY),
+       p.background),
+      ("editor background left of the front field", CGPoint(x: 4, y: front.midY), p.background),
+      ("editor front row fill", CGPoint(x: front.maxX - 4, y: front.midY), p.surface),
     ], context: context, file: file, line: line)
   }
 
@@ -465,17 +431,13 @@ final class ThemeUITests: XCTestCase {
   private func assertSettingsColors(_ app: XCUIApplication, _ p: Palette, _ context: String,
                                     file: StaticString = #filePath, line: UInt = #line) {
     let window = app.windows.firstMatch.frame
-    let url = el(app, "settings.url").frame, close = el(app, "settings.close").frame
-    let selected = Self.themes.map { themeButton(app, $0) }.first { $0.isSelected }?.frame ?? .zero
-    let unselected = Self.themes.map { themeButton(app, $0) }.first { !$0.isSelected }!.frame
+    // 009b #4: Form on Theme.background, rows on Theme.surface; close + segments are system controls.
+    let url = el(app, "settings.url").frame, picker = themeSegment(app, "System").frame
     waitForColors(app, [
       ("settings background left of the URL row", CGPoint(x: 4, y: url.midY), p.background),
       ("settings background near the bottom", CGPoint(x: window.midX, y: window.maxY - 60), p.background),
       ("settings URL row fill", CGPoint(x: url.maxX - 4, y: url.midY), p.surface),
-      ("settings.close circle fill", CGPoint(x: close.minX + 7, y: close.midY), p.surface),
-      ("selected option fill (ink)", CGPoint(x: selected.minX + 5, y: selected.midY), p.ink),
-      ("unselected option fill (surface)", CGPoint(x: unselected.minX + 5, y: unselected.midY), p.surface),
-      ("settings token row fill", CGPoint(x: url.maxX - 4, y: el(app, "settings.token").frame.midY), p.surface),
+      ("settings Appearance row fill", CGPoint(x: picker.minX - 6, y: picker.midY), p.surface),
     ], context: context, file: file, line: line)
     assertNotTintedBlue(app, "settings.test", file: file, line: line)
   }

@@ -137,7 +137,7 @@ struct CardEditorFeatureTests {
     #expect(store.state.canSave)
   }
 
-  @Test func closeDismissesWithoutCallingTheAPI() async {
+  @Test func closeWithoutChangesDismissesWithoutCallingTheAPI() async {
     let dismissed = LockIsolated(false)
     let store = TestStore(initialState: CardEditorFeature.State(card: card)) {
       CardEditorFeature()
@@ -145,7 +145,67 @@ struct CardEditorFeatureTests {
       $0.dismiss = DismissEffect { dismissed.setValue(true) }
     }
 
+    #expect(!store.state.hasChanges)
     await store.send(.closeButtonTapped)
+    #expect(dismissed.value)
+  }
+
+  @Test func whitespaceOnlyChangeCountsAsNoChange() async {
+    let dismissed = LockIsolated(false)
+    let store = TestStore(initialState: CardEditorFeature.State(card: card)) {
+      CardEditorFeature()
+    } withDependencies: {
+      $0.dismiss = DismissEffect { dismissed.setValue(true) }
+    }
+
+    await store.send(\.binding.front, " \(card.front)\n") {
+      $0.front = " \(card.front)\n"
+    }
+    #expect(!store.state.hasChanges)
+    await store.send(.closeButtonTapped)
+    #expect(dismissed.value)
+  }
+
+  @Test func closeWithChangesAsksBeforeDiscarding() async {
+    let store = TestStore(initialState: CardEditorFeature.State()) {
+      CardEditorFeature()
+    }
+
+    await store.send(\.binding.back, "cat") {
+      $0.back = "cat"
+    }
+    #expect(store.state.hasChanges)
+    await store.send(.closeButtonTapped) {
+      $0.isDiscardDialogPresented = true
+    }
+  }
+
+  @Test func keepEditingClosesTheDialogAndKeepsTheText() async {
+    var state = CardEditorFeature.State(card: card)
+    state.back = "a happy accident"
+    state.isDiscardDialogPresented = true
+    let store = TestStore(initialState: state) {
+      CardEditorFeature()
+    }
+
+    await store.send(\.binding.isDiscardDialogPresented, false) {
+      $0.isDiscardDialogPresented = false
+    }
+    #expect(store.state.back == "a happy accident")
+  }
+
+  @Test func discardDismisses() async {
+    let dismissed = LockIsolated(false)
+    var state = CardEditorFeature.State(card: card)
+    state.back = "a happy accident"
+    state.isDiscardDialogPresented = true
+    let store = TestStore(initialState: state) {
+      CardEditorFeature()
+    } withDependencies: {
+      $0.dismiss = DismissEffect { dismissed.setValue(true) }
+    }
+
+    await store.send(.discardTapped)
     #expect(dismissed.value)
   }
 }

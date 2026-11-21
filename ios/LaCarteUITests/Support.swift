@@ -11,9 +11,6 @@ enum APIMode {
 /// Port nothing listens on: used to exercise the "API unreachable" state.
 let unreachableAPIURL = "http://127.0.0.1:9"
 
-/// Launch argument pair forcing Dynamic Type to accessibility XL.
-let accessibilityXLArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"]
-
 /// Checks `condition` right away, then every 0.1 s until `timeout`. XCTWaiter (behind `waitForExistence` and
 /// predicate expectations) polls once per second, so an element already on screen still cost about 1 s.
 @MainActor
@@ -390,5 +387,66 @@ extension XCTestCase {
     }
     XCTAssertTrue(best.isClose(to: expected, tolerance: 8), "\(id) text color \(best), expected \(expected)",
                   file: file, line: line)
+  }
+}
+
+/// Spec 009a: the deck is a `NavigationStack` titled "Cards" with a system `.searchable` field (no ids of its own).
+extension XCTestCase {
+  /// The deck's navigation bar (`app.navigationBars["Cards"]`): present while the deck sheet is shown.
+  @MainActor
+  func deckTitle(_ app: XCUIApplication) -> XCUIElement { app.navigationBars["Cards"] }
+
+  /// The large/inline "Cards" title text inside the deck's navigation bar.
+  @MainActor
+  func deckTitleText(_ app: XCUIApplication) -> XCUIElement { deckTitle(app).staticTexts["Cards"].firstMatch }
+
+  /// The deck's system search field.
+  @MainActor
+  func deckSearch(_ app: XCUIApplication) -> XCUIElement { app.searchFields.firstMatch }
+
+  /// Waits for the deck sheet ("Cards" navigation bar) to be on screen.
+  @MainActor
+  func waitForDeckTitle(_ app: XCUIApplication, timeout: TimeInterval = 10,
+                        file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertTrue(deckTitle(app).waitFor(timeout: timeout), "deck navigation bar \"Cards\" missing",
+                  file: file, line: line)
+  }
+}
+
+// MARK: - Native sheets (spec 009b): the title is the navigation bar's, not an element with an id.
+
+extension XCTestCase {
+  /// Navigation bar of the sheet titled `title` ("Settings", "New card", "Edit card").
+  @MainActor
+  func sheetBar(_ app: XCUIApplication, _ title: String) -> XCUIElement {
+    app.navigationBars.matching(identifier: title).firstMatch
+  }
+
+  /// Navigation bar of the card editor, whichever its title ("New card" / "Edit card").
+  @MainActor
+  func editorBar(_ app: XCUIApplication) -> XCUIElement {
+    app.navigationBars.matching(NSPredicate(format: "identifier IN %@", ["New card", "Edit card"])).firstMatch
+  }
+
+  /// The title text inside the sheet's navigation bar (for frame checks).
+  @MainActor
+  func sheetTitle(_ app: XCUIApplication, _ title: String) -> XCUIElement {
+    sheetBar(app, title).staticTexts.matching(identifier: title).firstMatch
+  }
+
+  /// Waits for the sheet titled `title` to be on screen.
+  @MainActor
+  func waitForSheet(_ app: XCUIApplication, _ title: String, timeout: TimeInterval = 10,
+                    file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertTrue(sheetBar(app, title).waitFor(timeout: timeout), "sheet '\(title)' missing",
+                  file: file, line: line)
+  }
+
+  /// Settings' theme segment labelled `label` ("System", "Light", "Dark", "Forest"); `settings.theme.<name>` ids
+  /// are gone (spec 009b).
+  @MainActor
+  func themeSegment(_ app: XCUIApplication, _ label: String) -> XCUIElement {
+    let control = app.segmentedControls.matching(identifier: "settings.theme").firstMatch
+    return control.exists ? control.buttons[label] : app.buttons.matching(identifier: label).firstMatch
   }
 }

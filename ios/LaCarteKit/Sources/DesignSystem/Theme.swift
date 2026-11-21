@@ -47,6 +47,9 @@ public enum Theme {
 /// How the app looks, picked in Settings (spec 004). `system` follows the device.
 public enum AppTheme: String, CaseIterable, Sendable {
   case system, light, dark, forest
+
+  /// The defaults key it is stored under (App Group suite), shared by Settings and the widget.
+  public static let storageKey = "theme"
 }
 
 /// A token that resolves itself from the environment (`\.appTheme` + `colorScheme`), so themes need no globals.
@@ -76,6 +79,16 @@ extension View {
   public func appTheme(_ theme: AppTheme) -> some View {
     environment(\.appTheme, theme)
       .background(WindowStyle(style: theme.interfaceStyle))
+  }
+}
+
+extension Theme {
+  /// `.tint` doesn't reach the navigation bar's search field cursor (iOS 27), so it's set through UIKit.
+  /// Forest is dark-styled and shares dark's accent, so light/dark traits are enough. Called by `RootView`.
+  @MainActor public static func tintSearchFields() {
+    UISearchTextField.appearance().tintColor = UIColor { traits in
+      UIColor(traits.userInterfaceStyle == .dark ? accent.dark : accent.light)
+    }
   }
 }
 
