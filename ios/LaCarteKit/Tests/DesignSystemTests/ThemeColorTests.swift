@@ -33,6 +33,18 @@ struct ThemeColorTests {
     }
   }
 
+  /// The accent is the darker pink on light paper and Flourish Pink on dark/forest; on the ink card it's the reverse.
+  @Test(arguments: [
+    (AppTheme.light, ColorScheme.light, 0xB8325A, 0xED6E8C),
+    (.dark, .dark, 0xED6E8C, 0xB8325A),
+    (.forest, .dark, 0xED6E8C, 0xB8325A),
+  ])
+  func accentKeepsContrast(theme: AppTheme, scheme: ColorScheme, accent: Int, onInk: Int) {
+    let environment = environment(theme, scheme)
+    #expect(hex(Theme.accent, environment) == accent)
+    #expect(hex(Theme.accentOnInk, environment) == onInk)
+  }
+
   private func environment(_ theme: AppTheme, _ scheme: ColorScheme) -> EnvironmentValues {
     var environment = EnvironmentValues()
     environment.appTheme = theme

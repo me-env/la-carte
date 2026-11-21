@@ -5,8 +5,8 @@ import UIKit
 
 @testable import DesignSystem
 
-/// Renders the logo to PNGs for design reviews (`scripts/design-review.py`).
-/// Not the gallery: `ImageRenderer` draws its ScrollView empty.
+/// Renders the logo and the design-system gallery to PNGs for design reviews (`scripts/design-review.py`).
+/// The gallery renders `DesignSystemGalleryContent` (no ScrollView, which `ImageRenderer` draws empty).
 /// Off by default; `scripts/ios-test.sh --render` turns it on (docs/testing.md).
 @MainActor
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["LA_CARTE_RENDER_DIR"] != nil))
@@ -38,12 +38,24 @@ struct RenderTests {
     }
   }
 
-  private func write(_ view: some View, scale: CGFloat, to file: String, expectedPixels: CGSize) throws {
+  /// 390 pt wide (iPhone 17 Pro) at scale 3; the height is the content's.
+  @Test func gallery() throws {
+    for (name, theme, scheme) in Self.themes {
+      let view = DesignSystemGalleryContent()
+        .frame(width: 390)
+        .background(Theme.background)
+        .environment(\.appTheme, theme)
+        .environment(\.colorScheme, scheme)
+      try write(view, scale: 3, to: "gallery-\(name).png", expectedPixels: nil)
+    }
+  }
+
+  private func write(_ view: some View, scale: CGFloat, to file: String, expectedPixels: CGSize?) throws {
     let renderer = ImageRenderer(content: view)
     renderer.scale = scale
     let image = try #require(renderer.uiImage)
     let pixels = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
-    #expect(pixels == expectedPixels, "\(file)")
+    if let expectedPixels { #expect(pixels == expectedPixels, "\(file)") }
     let data = try #require(image.pngData())
     try data.write(to: directory.appendingPathComponent(file))
   }

@@ -105,6 +105,15 @@ Screenshots (gallery, light + dark + forest): `widget-gallery`, plus one per til
 `widget-unavailable`, `widget-long`. Forest names end in `-forest` (e.g. `widget-gallery-forest`).
 Device photo/screenshot of the real Home Screen widget: by the user (#24), attached to the QA report if provided.
 
+> **Design note (design-lead, 2026-11-21, native-audit.md):** on iOS 26 a tinted or clear Home Screen renders
+> widgets in `.accented` mode. Mark the hero (count / "All caught up" / "No cards yet") `.widgetAccentable()`.
+> When `@Environment(\.widgetRenderingMode) != .fullColor`, use `.primary`/`.secondary` foreground styles instead of
+> the ink tokens, so the text doesn't go muddy.
+> **Accent (2026-11-21, user request):** the streak **number** only ("12" in "12-day streak", when streak ≥ 1) uses
+> `Theme.accent` (`Text("\(n)").foregroundStyle(Theme.accent) + Text("-day streak")`). The rest of the line stays as
+> in #19. In `.accented` rendering mode the number is `.widgetAccentable()` instead. Nothing else in the widget is pink. Add an "accented" tile to the gallery if it's cheap; otherwise QA
+> checks it on the device (#24). No other change.
+
 ## TCA shape (iOS)
 No reducer changes. The widget is plain SwiftUI + WidgetKit (no TCA, like `DesignSystem`).
 

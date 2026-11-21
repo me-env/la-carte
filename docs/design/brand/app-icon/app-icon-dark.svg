@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <rect width="1024" height="1024" fill="#1A1A1A"/>
+  <g transform="translate(132 132) scale(7.6)">
+  <defs>
+    <mask id="gap" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <rect width="100" height="100" fill="white"/>
+      <rect x="24" y="17" width="46" height="64" rx="8" fill="black" stroke="black" stroke-width="4" stroke-linejoin="round" transform="rotate(-6 47 81)"/>
+    </mask>
+  </defs>
+  <g >
+    <g mask="url(#gap)"><rect x="24" y="17" width="46" height="64" rx="8" fill="#8A8A88" transform="rotate(12 47 81)"/></g>
+    <rect x="24" y="17" width="46" height="64" rx="8" fill="#F2F2F0" transform="rotate(-6 47 81)"/>
+    <g transform="rotate(-6 47 81)"><rect x="32" y="39" width="26" height="6" rx="3" fill="#B8325A"/><rect x="32" y="51" width="16" height="6" rx="3" fill="#8A8A88"/></g>
+  </g>
+  </g>
+</svg>

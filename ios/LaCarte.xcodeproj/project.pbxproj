@@ -23,7 +23,7 @@
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* LaCarte.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LaCarte.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000121 /* LaCarteUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LaCarteUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		000000000000000000000130 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Signing.xcconfig; sourceTree = "<group>"; };
+		000000000000000000000130 /* Config/Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Signing.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -42,14 +42,18 @@
 /* Begin PBXFrameworksBuildPhase section */
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 				0000000000000000000000B1 /* AppFeature in Frameworks */,
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		000000000000000230000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
@@ -59,7 +63,7 @@
 			children = (
 				000000000000000000000010 /* LaCarte */,
 				000000000000000000000011 /* LaCarteUITests */,
-				000000000000000000000130 /* Signing.xcconfig */,
+				000000000000000000000130 /* Config/Signing.xcconfig */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -85,6 +89,8 @@
 				000000000000000140000000 /* Resources */,
 			);
 			buildRules = (
+			);
+			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
 				000000000000000000000010 /* LaCarte */,
@@ -163,26 +169,34 @@
 /* Begin PBXResourcesBuildPhase section */
 		000000000000000140000000 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		000000000000000240000000 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		000000000000000120000000 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		000000000000000220000000 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
@@ -195,7 +209,7 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		000000000000000011000000 /* Debug configuration for PBXProject "LaCarte" */ = {
+		000000000000000011000000 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -228,7 +242,7 @@
 			};
 			name = Debug;
 		};
-		000000000000000012000000 /* Release configuration for PBXProject "LaCarte" */ = {
+		000000000000000012000000 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -255,10 +269,11 @@
 			};
 			name = Release;
 		};
-		000000000000000111000000 /* Debug configuration for PBXNativeTarget "LaCarte" */ = {
+		000000000000000111000000 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 000000000000000000000130 /* Signing.xcconfig */;
+			baseConfigurationReference = 000000000000000000000130 /* Config/Signing.xcconfig */;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -285,10 +300,11 @@
 			};
 			name = Debug;
 		};
-		000000000000000112000000 /* Release configuration for PBXNativeTarget "LaCarte" */ = {
+		000000000000000112000000 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 000000000000000000000130 /* Signing.xcconfig */;
+			baseConfigurationReference = 000000000000000000000130 /* Config/Signing.xcconfig */;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -315,9 +331,9 @@
 			};
 			name = Release;
 		};
-		000000000000000211000000 /* Debug configuration for PBXNativeTarget "LaCarteUITests" */ = {
+		000000000000000211000000 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 000000000000000000000130 /* Signing.xcconfig */;
+			baseConfigurationReference = 000000000000000000000130 /* Config/Signing.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -332,9 +348,9 @@
 			};
 			name = Debug;
 		};
-		000000000000000212000000 /* Release configuration for PBXNativeTarget "LaCarteUITests" */ = {
+		000000000000000212000000 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 000000000000000000000130 /* Signing.xcconfig */;
+			baseConfigurationReference = 000000000000000000000130 /* Config/Signing.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -355,25 +371,28 @@
 		000000000000000010000000 /* Build configuration list for PBXProject "LaCarte" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				000000000000000011000000 /* Debug configuration for PBXProject "LaCarte" */,
-				000000000000000012000000 /* Release configuration for PBXProject "LaCarte" */,
+				000000000000000011000000 /* Debug */,
+				000000000000000012000000 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		000000000000000110000000 /* Build configuration list for PBXNativeTarget "LaCarte" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				000000000000000111000000 /* Debug configuration for PBXNativeTarget "LaCarte" */,
-				000000000000000112000000 /* Release configuration for PBXNativeTarget "LaCarte" */,
+				000000000000000111000000 /* Debug */,
+				000000000000000112000000 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		000000000000000210000000 /* Build configuration list for PBXNativeTarget "LaCarteUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				000000000000000211000000 /* Debug configuration for PBXNativeTarget "LaCarteUITests" */,
-				000000000000000212000000 /* Release configuration for PBXNativeTarget "LaCarteUITests" */,
+				000000000000000211000000 /* Debug */,
+				000000000000000212000000 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
