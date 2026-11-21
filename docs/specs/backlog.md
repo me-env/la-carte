@@ -24,5 +24,6 @@ Ordered. The manager moves items into specs (`architect`) one at a time.
 | 17 | **Setup state**: "Connect your deck" when the server URL or token is missing, "Token rejected" on 401/403, both open Settings; no localhost default in any build | User feedback from first iPhone install. Lands before 007 | [008](008-setup.md) |
 | 18 | **Inline edit**: on the revealed study card, double-tap the front or back to fix it in place (PATCH, optimistic) | User request. Design notes from design-lead first | [010](010-inline-edit.md) |
 | 19 | Cancel / undo an inline edit (hardware Escape, shake to undo) | Split from 010 | |
-| 20 | **Ratings**: two buttons (Forgot / Got it) + four-way swipe on the revealed card (distance = confidence: Hard/Forgot left, Got it/Easy right), VoiceOver actions | User request. Design notes from design-lead first; after 010 | [011](011-ratings.md) |
-| 21 | Swipe-to-rate extras: flick (velocity) commit, threshold hysteresis, first-run hint | Split from 011 | |
+| 20 | **Ratings**: two buttons (Forgot / Got it) + drag on the revealed card: a ring of ink dots around the finger, scattered (forgot) to ordered (easy), continuous value quantized to the 4 FSRS grades on release; VoiceOver actions | User request. Design notes (dots from the logo's primitive) from design-lead first; after 010 | [011](011-ratings.md) |
+| 21 | Rating-drag extras: flick (velocity) commit, hysteresis at bin edges, first-run hint | Split from 011 | |
+| 22 | Store the continuous confidence (0–1) with each review for future scheduling/analytics (optional review field, `ReviewLog` column, MCP) | Split from 011: today only the quantized grade is sent | |
