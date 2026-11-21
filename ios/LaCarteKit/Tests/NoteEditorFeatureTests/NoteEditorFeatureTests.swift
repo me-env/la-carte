@@ -38,7 +38,7 @@ struct NoteEditorFeatureTests {
     #expect(state.directions == [d("front", "back"), d("back", "front")])
 
     let personState = NoteEditorFeature.State(note: person)
-    #expect(personState.directions == [d("photo", "name", "description"), d("description", "photo", "name")])
+    #expect(personState.directions == personState.catalog)
     #expect(
       personState.catalog
         == [d("photo", "name", "description"), d("name", "photo", "description"), d("description", "photo", "name")]
@@ -97,7 +97,7 @@ struct NoteEditorFeatureTests {
     note.cards.append(Note.Card(id: UUID(), prompt: extra.prompt, answer: extra.answer, due: note.createdAt))
     let state = NoteEditorFeature.State(note: note)
     #expect(state.catalog.last == extra)
-    #expect(state.directions == [d("photo", "name", "description"), d("description", "photo", "name"), extra])
+    #expect(state.directions == state.catalog)
   }
 
   @Test func aDirectionWithAnEmptyPromptCantBeTurnedOnButOneAlreadyOnStaysOn() async {
@@ -298,7 +298,7 @@ struct NoteEditorFeatureTests {
     let store = TestStore(initialState: NoteEditorFeature.State(note: person)) { NoteEditorFeature() }
 
     await store.send(.directionToggled(d("description", "photo", "name"))) {
-      $0.directions = [self.d("photo", "name", "description")]
+      $0.directions = [self.d("photo", "name", "description"), self.d("name", "photo", "description")]
     }
     await store.send(.closeButtonTapped) {
       $0.isDiscardDialogPresented = true
@@ -306,7 +306,7 @@ struct NoteEditorFeatureTests {
     await store.send(\.binding.isDiscardDialogPresented, false) {
       $0.isDiscardDialogPresented = false
     }
-    #expect(store.state.directions == [d("photo", "name", "description")])
+    #expect(store.state.directions == [d("photo", "name", "description"), d("name", "photo", "description")])
   }
 
   @Test func discardDismisses() async {

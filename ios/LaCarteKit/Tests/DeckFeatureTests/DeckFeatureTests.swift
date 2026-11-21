@@ -520,7 +520,7 @@ struct DeckFeatureTests {
     let person = notes[0]
     #expect(person.title == "Ada Example")
     #expect(person.subtitle == "runs the bakery")
-    #expect(person.stateText == "2 directions")
+    #expect(person.stateText == "3 directions")
     #expect(person.photoURL != nil)
 
     let basic = notes[1]

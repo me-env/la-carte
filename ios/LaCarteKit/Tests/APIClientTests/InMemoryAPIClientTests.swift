@@ -61,7 +61,7 @@ struct InMemoryAPIClientTests {
     let ids = (11...15).map { UUID(uuidString: "00000000-0000-0000-0000-0000000000\($0)")! }
 
     #expect(notes.count == 4)
-    #expect(try await client.cards(nil).count == 7)
+    #expect(notes.flatMap(\.cards).count == 7)
     #expect(notes[0].id == ids[0])
     #expect(notes[0].cards.map(\.id) == [ids[1], ids[2], ids[4]])
     #expect(notes[2].cards.map(\.id) == [[Card].fixtures[1].id, ids[3]])
