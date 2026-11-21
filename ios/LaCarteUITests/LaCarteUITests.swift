@@ -23,7 +23,7 @@ final class LaCarteUITests: XCTestCase {
     let app = launch(api: .mock, screen: "design-system")
     for icon in Self.galleryIcons {
       let button = app.buttons["gallery.button.\(icon)"]
-      XCTAssertTrue(button.waitForExistence(timeout: 5), "missing gallery.button.\(icon)")
+      XCTAssertTrue(button.waitFor(timeout: 5), "missing gallery.button.\(icon)")
       XCTAssertGreaterThanOrEqual(button.frame.width, 44, "\(icon) hit area too narrow: \(button.frame)")
       XCTAssertGreaterThanOrEqual(button.frame.height, 44, "\(icon) hit area too short: \(button.frame)")
     }
@@ -37,10 +37,10 @@ final class LaCarteUITests: XCTestCase {
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .mock, screen: "design-system")
     let lastTapped = app.staticTexts["gallery.lastTapped"]
-    XCTAssertTrue(lastTapped.waitForExistence(timeout: 5))
+    XCTAssertTrue(lastTapped.waitFor(timeout: 5))
     for icon in Self.galleryIcons {
       let button = app.buttons["gallery.button.\(icon)"]
-      XCTAssertTrue(button.waitForExistence(timeout: 5), "missing gallery.button.\(icon)")
+      XCTAssertTrue(button.waitFor(timeout: 5), "missing gallery.button.\(icon)")
       scrollIntoView(app, button)
       XCTAssertTrue(button.isHittable, "gallery.button.\(icon) not hittable")
       button.tap()
@@ -55,10 +55,10 @@ final class LaCarteUITests: XCTestCase {
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .mock, screen: "design-system")
     let lastTapped = app.staticTexts["gallery.lastTapped"]
-    XCTAssertTrue(lastTapped.waitForExistence(timeout: 5))
+    XCTAssertTrue(lastTapped.waitFor(timeout: 5))
     for icon in Self.galleryIcons {
       let button = app.buttons["gallery.button.\(icon)"]
-      XCTAssertTrue(button.waitForExistence(timeout: 5))
+      XCTAssertTrue(button.waitFor(timeout: 5))
       scrollIntoView(app, button)
       // ~4pt inside the right edge, vertically centered.
       let dx = max(0.0, (button.frame.width - 4) / button.frame.width)
@@ -72,14 +72,14 @@ final class LaCarteUITests: XCTestCase {
   func testDesignSystem_accessibilityXL() {
     continueAfterFailure = true  // capture the screenshots even if scaling fails
     let baseline = launch(api: .mock, screen: "design-system")
-    XCTAssertTrue(baseline.staticTexts["gallery.lastTapped"].waitForExistence(timeout: 5))
+    XCTAssertTrue(baseline.staticTexts["gallery.lastTapped"].waitFor(timeout: 5))
     let baseHeight = baseline.staticTexts["gallery.lastTapped"].frame.height
     baseline.terminate()
 
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .mock, screen: "design-system", arguments: accessibilityXLArguments)
-    XCTAssertTrue(app.staticTexts["gallery.lastTapped"].waitForExistence(timeout: 5)
-      || app.buttons["gallery.button.list.bullet"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["gallery.lastTapped"].waitFor(timeout: 5)
+      || app.buttons["gallery.button.list.bullet"].waitFor(timeout: 5))
     snapshot("design-system-xl", appearance: .light)
     assertTextsReadable(in: app)
     // Scroll to reveal the rest of the gallery, if it scrolls.

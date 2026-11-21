@@ -137,7 +137,7 @@ extension SettingsUITests {
     waitForLabel(el(app, "study.front"), "alpha", timeout: 15)
 
     openDeck(app)
-    XCTAssertTrue(el(app, "deck.row.\(uuid("f1"))").waitForExistence(timeout: 5), "deck row missing once set up")
+    XCTAssertTrue(el(app, "deck.row.\(uuid("f1"))").waitFor(timeout: 5), "deck row missing once set up")
     openSettings(app)
     setText(app, "settings.token", "", secure: true)
     closeSettingsSheet(app)
@@ -227,7 +227,7 @@ extension SettingsUITests {
   func assertNoSavePasswordPrompt(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let prompt = app.descendants(matching: .any).matching(
       NSPredicate(format: "label == 'Not Now' OR label BEGINSWITH 'Save Password'")).firstMatch
-    XCTAssertFalse(prompt.waitForExistence(timeout: 2), "system 'Save Password?' prompt shown after closing Settings",
+    XCTAssertFalse(prompt.waitFor(timeout: 2), "system 'Save Password?' prompt shown after closing Settings",
                    file: file, line: line)
   }
 
@@ -236,8 +236,8 @@ extension SettingsUITests {
   @MainActor
   func clearStoredServer(_ app: XCUIApplication) {
     let study = el(app, "study.openSettings"), deck = el(app, "study.deck")
-    XCTAssertTrue(deck.waitForExistence(timeout: 10), "study.deck missing")
-    let direct = study.waitForExistence(timeout: 3)
+    XCTAssertTrue(deck.waitFor(timeout: 10), "study.deck missing")
+    let direct = study.waitFor(timeout: 3)
     if direct {
       study.tap()
       waitForLabel(el(app, "settings.title"), "Settings")
@@ -262,7 +262,7 @@ extension SettingsUITests {
     waitForLabel(el(app, "study.message"), copy.message, timeout: 15, file: file, line: line)
     waitForLabel(el(app, "study.detail"), copy.detail, file: file, line: line)
     let button = el(app, "study.openSettings")
-    XCTAssertTrue(button.waitForExistence(timeout: 5), "study.openSettings missing", file: file, line: line)
+    XCTAssertTrue(button.waitFor(timeout: 5), "study.openSettings missing", file: file, line: line)
     XCTAssertEqual(button.label, "Open Settings", file: file, line: line)
     XCTAssertTrue(button.isHittable, "study.openSettings not hittable", file: file, line: line)
     XCTAssertFalse(el(app, "study.retry").exists, "study.retry shown in '\(copy.message)'", file: file, line: line)
@@ -289,7 +289,7 @@ extension SettingsUITests {
     waitForLabel(el(app, "deck.message"), message, timeout: timeout, file: file, line: line)
     let open = el(app, "deck.openSettings")
     if button {
-      XCTAssertTrue(open.waitForExistence(timeout: 5), "deck.openSettings missing", file: file, line: line)
+      XCTAssertTrue(open.waitFor(timeout: 5), "deck.openSettings missing", file: file, line: line)
       XCTAssertEqual(open.label, "Open Settings", file: file, line: line)
       XCTAssertTrue(open.isHittable, "deck.openSettings not hittable", file: file, line: line)
       XCTAssertGreaterThanOrEqual(open.frame.minY, el(app, "deck.message").frame.maxY - 1,

@@ -32,7 +32,7 @@ final class ThemeUITests: XCTestCase {
     let palette = Palette.light
     let buttons = Self.themes.map { themeButton(app, $0) }
     for (theme, b) in zip(Self.themes, buttons) {
-      XCTAssertTrue(b.waitForExistence(timeout: 5), "settings.theme.\(theme) missing")
+      XCTAssertTrue(b.waitFor(timeout: 5), "settings.theme.\(theme) missing")
       XCTAssertTrue(b.isHittable, "settings.theme.\(theme) not hittable")
       XCTAssertEqual(b.label, theme.capitalized, "settings.theme.\(theme) label")
       XCTAssertGreaterThanOrEqual(b.frame.height, 43.5, "settings.theme.\(theme) under 44pt: \(b.frame)")
@@ -253,7 +253,7 @@ final class ThemeUITests: XCTestCase {
 
     // Revealed.
     el(app, "study.card").tap()
-    XCTAssertTrue(el(app, "study.rate.good").waitForExistence(timeout: 5), "ratings missing after reveal")
+    XCTAssertTrue(el(app, "study.rate.good").waitFor(timeout: 5), "ratings missing after reveal")
     Thread.sleep(forTimeInterval: 0.5)  // the back fades in over 0.25 s
     assertTextColor(app, "study.back", p.secondaryInk, background: p.background)
     snapshot("study-revealed-forest", appearance: .light)
@@ -289,7 +289,7 @@ final class ThemeUITests: XCTestCase {
       if el(app, "study.rate.good").exists { el(app, "study.rate.good").tap() }
       waitForLabel(el(app, "study.front"), card.front)
       el(app, "study.reveal").tap()
-      XCTAssertTrue(el(app, "study.rate.good").waitForExistence(timeout: 5))
+      XCTAssertTrue(el(app, "study.rate.good").waitFor(timeout: 5))
     }
     el(app, "study.rate.good").tap()
     waitForLabel(el(app, "study.message"), "All caught up")
@@ -309,7 +309,7 @@ final class ThemeUITests: XCTestCase {
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .mock, screen: "design-system", theme: "forest")
     let button = app.buttons["gallery.button.plus"]
-    XCTAssertTrue(button.waitForExistence(timeout: 5), "gallery missing")
+    XCTAssertTrue(button.waitFor(timeout: 5), "gallery missing")
     scrollIntoView(app, button)
     // Gallery colours per theme × scheme: ScreenColorTests.gallery. Here only what needs the device.
     assertStatusBar(app, darkScheme: true, "gallery -theme forest")
@@ -356,7 +356,7 @@ final class ThemeUITests: XCTestCase {
     assertTextsReadable(in: app)
     snapshot("study-forest-xl", appearance: .light)
     el(app, "study.card").tap()
-    XCTAssertTrue(el(app, "study.rate.good").waitForExistence(timeout: 5))
+    XCTAssertTrue(el(app, "study.rate.good").waitFor(timeout: 5))
     snapshot("study-revealed-forest-xl", appearance: .light)
   }
 
@@ -370,13 +370,13 @@ final class ThemeUITests: XCTestCase {
     }
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .live(url), theme: "forest")
-    XCTAssertTrue(el(app, "study.deck").waitForExistence(timeout: 15))
+    XCTAssertTrue(el(app, "study.deck").waitFor(timeout: 15))
     assertStudyColors(app, .forest, "live study")
     snapshot("study-live-forest", appearance: .light)
     openDeck(app)
     let anyRow = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'deck.row.'"))
       .firstMatch
-    XCTAssertTrue(anyRow.waitForExistence(timeout: 10), "no seeded rows in the live deck")
+    XCTAssertTrue(anyRow.waitFor(timeout: 10), "no seeded rows in the live deck")
     assertDeckColors(app, .forest, "live deck")
     snapshot("deck-live-forest", appearance: .light)
   }
@@ -417,7 +417,7 @@ final class ThemeUITests: XCTestCase {
   @MainActor
   private func openDeck(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let button = el(app, "study.deck")
-    XCTAssertTrue(button.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
+    XCTAssertTrue(button.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
     waitForLabel(el(app, "deck.title"), "Cards", file: file, line: line)
   }
@@ -431,7 +431,7 @@ final class ThemeUITests: XCTestCase {
   @MainActor
   private func openSettings(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let gear = el(app, "deck.settings")
-    XCTAssertTrue(gear.waitForExistence(timeout: 5), "deck.settings missing", file: file, line: line)
+    XCTAssertTrue(gear.waitFor(timeout: 5), "deck.settings missing", file: file, line: line)
     gear.tap()
     waitForLabel(el(app, "settings.title"), "Settings", file: file, line: line)
   }
@@ -445,14 +445,14 @@ final class ThemeUITests: XCTestCase {
   @MainActor
   private func tapField(_ app: XCUIApplication, _ id: String) {
     el(app, id).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-    XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "no keyboard after tapping \(id)")
+    XCTAssertTrue(app.keyboards.firstMatch.waitFor(timeout: 5), "no keyboard after tapping \(id)")
   }
 
   @MainActor
   private func assertStudyColors(_ app: XCUIApplication, _ p: Palette, _ context: String,
                                  file: StaticString = #filePath, line: UInt = #line) {
     let deck = el(app, "study.deck")
-    XCTAssertTrue(deck.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
+    XCTAssertTrue(deck.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     let window = app.windows.firstMatch.frame, d = deck.frame
     waitForColors(app, [
       ("study background top-left (status bar area)", CGPoint(x: 3, y: 3), p.background),
@@ -470,7 +470,7 @@ final class ThemeUITests: XCTestCase {
     let title = el(app, "deck.title").frame, search = el(app, "deck.search").frame, add = el(app, "deck.add").frame
     let firstRow = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'deck.row.'"))
       .firstMatch
-    XCTAssertTrue(firstRow.waitForExistence(timeout: 10), "no deck rows", file: file, line: line)
+    XCTAssertTrue(firstRow.waitFor(timeout: 10), "no deck rows", file: file, line: line)
     let r = firstRow.frame
     waitForColors(app, [
       ("deck background left of the title", CGPoint(x: 4, y: title.midY), p.background),

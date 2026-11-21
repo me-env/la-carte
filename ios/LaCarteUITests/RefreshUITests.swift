@@ -179,8 +179,8 @@ final class RefreshUITests: XCTestCase {
 
     deck.add(card(Self.idA, "canine", "dog"))
     pullToRefresh(app, from: el(app, "deck.message"))
-    XCTAssertTrue(el(app, "deck.title").waitForExistence(timeout: 2), "the pull closed the deck sheet")
-    XCTAssertTrue(row(app, Self.idA).waitForExistence(timeout: 10), "deck.row.<canine> missing after the pull")
+    XCTAssertTrue(el(app, "deck.title").waitFor(timeout: 2), "the pull closed the deck sheet")
+    XCTAssertTrue(row(app, Self.idA).waitFor(timeout: 10), "deck.row.<canine> missing after the pull")
     XCTAssertFalse(el(app, "deck.message").exists, "deck.message still shown with a row")
     snapshot("deck-after-refresh", appearance: .light)
 
@@ -188,7 +188,7 @@ final class RefreshUITests: XCTestCase {
     el(app, "deck.search").tap()
     el(app, "deck.search").typeText("ine")
     Thread.sleep(forTimeInterval: 1)  // debounce
-    XCTAssertTrue(row(app, Self.idA).waitForExistence(timeout: 5))
+    XCTAssertTrue(row(app, Self.idA).waitFor(timeout: 5))
     deck.add(card(Self.idB, "feline", "cat", minutes: 1))
     deck.add(card(Self.idC, "raven", "blackbird", minutes: 2))
     deck.readDelay = 5
@@ -199,7 +199,7 @@ final class RefreshUITests: XCTestCase {
     assertInkVisible(inFlight, ink: Palette.light.ink, "existing row during the refresh")
     assertNoBlue(inFlight, "deck refresh spinner")
     XCTAssertTrue(el(app, "deck.title").exists, "the pull closed the deck sheet")
-    XCTAssertTrue(row(app, Self.idB).waitForExistence(timeout: 20), "feline row missing after the pull with a query")
+    XCTAssertTrue(row(app, Self.idB).waitFor(timeout: 20), "feline row missing after the pull with a query")
     XCTAssertTrue(row(app, Self.idA).exists, "canine row gone after the pull")
     XCTAssertFalse(row(app, Self.idC).exists, "raven (not matching 'ine') shown: the refresh ignored the query")
     XCTAssertEqual(el(app, "deck.search").value as? String, "ine", "search field lost its text")
@@ -228,7 +228,7 @@ final class RefreshUITests: XCTestCase {
 
     deck.add(card(Self.idA, "canine", "dog"))
     backgroundAndReactivate(app)
-    XCTAssertTrue(row(app, Self.idA).waitForExistence(timeout: 10), "new row missing after reactivating")
+    XCTAssertTrue(row(app, Self.idA).waitFor(timeout: 10), "new row missing after reactivating")
     snapshot("deck-foreground", appearance: .light)
 
     swipeSheetDown(app, from: el(app, "deck.title"))
@@ -253,7 +253,7 @@ final class RefreshUITests: XCTestCase {
     deck.readDelay = 0
 
     openDeck(app)
-    XCTAssertTrue(row(app, Self.idA).waitForExistence(timeout: 10))
+    XCTAssertTrue(row(app, Self.idA).waitFor(timeout: 10))
     deck.readDelay = 5
     let deckShot = pullToRefreshCapturing(app, from: row(app, Self.idA), name: "deck-refresh-forest",
                                           appearance: .light)
@@ -278,7 +278,7 @@ final class RefreshUITests: XCTestCase {
     openDeck(app)
     let anyRow = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'deck.row.'"))
       .firstMatch
-    XCTAssertTrue(anyRow.waitForExistence(timeout: 10), "no seeded rows")
+    XCTAssertTrue(anyRow.waitFor(timeout: 10), "no seeded rows")
 
     let created = try XCTUnwrap(liveRequest(url + "/cards", method: "POST", body: #"{"front":"canine","back":"dog"}"#))
     let canine = try XCTUnwrap(try JSONSerialization.jsonObject(with: created) as? [String: Any])
@@ -286,7 +286,7 @@ final class RefreshUITests: XCTestCase {
     XCTAssertFalse(row(app, canineID).exists, "canine shown before any refresh")
 
     pullToRefresh(app, from: anyRow)
-    XCTAssertTrue(row(app, canineID).waitForExistence(timeout: 10), "canine row missing after pulling the list")
+    XCTAssertTrue(row(app, canineID).waitFor(timeout: 10), "canine row missing after pulling the list")
     snapshot("deck-refresh-live", appearance: .light)
 
     swipeSheetDown(app, from: el(app, "deck.title"))
@@ -321,7 +321,7 @@ final class RefreshUITests: XCTestCase {
   @MainActor
   private func openDeck(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let button = el(app, "study.deck")
-    XCTAssertTrue(button.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
+    XCTAssertTrue(button.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
     waitForLabel(el(app, "deck.title"), "Cards", file: file, line: line)
   }
@@ -332,7 +332,7 @@ final class RefreshUITests: XCTestCase {
     waitForLabel(el(app, "study.front"), front, file: file, line: line)
     waitForLabel(el(app, "study.remaining"), remaining, file: file, line: line)
     XCTAssertFalse(el(app, "study.back").exists, "study.back visible: card should be unrevealed", file: file, line: line)
-    XCTAssertTrue(el(app, "study.reveal").waitForExistence(timeout: 3), "study.reveal missing", file: file, line: line)
+    XCTAssertTrue(el(app, "study.reveal").waitFor(timeout: 3), "study.reveal missing", file: file, line: line)
     for rating in Self.ratings {
       XCTAssertFalse(el(app, "study.rate.\(rating)").exists, "study.rate.\(rating) shown before reveal",
                      file: file, line: line)
@@ -347,7 +347,7 @@ final class RefreshUITests: XCTestCase {
     XCTAssertFalse(el(app, "study.reveal").exists, "study.reveal shown on a revealed card", file: file, line: line)
     for rating in Self.ratings {
       let b = el(app, "study.rate.\(rating)")
-      XCTAssertTrue(b.waitForExistence(timeout: 3), "study.rate.\(rating) missing", file: file, line: line)
+      XCTAssertTrue(b.waitFor(timeout: 3), "study.rate.\(rating) missing", file: file, line: line)
       XCTAssertTrue(b.isEnabled, "study.rate.\(rating) disabled", file: file, line: line)
     }
   }

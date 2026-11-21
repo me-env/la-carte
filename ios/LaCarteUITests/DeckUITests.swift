@@ -174,7 +174,7 @@ final class DeckUITests: XCTestCase {
     waitForRows(app, Self.ids)
     row(app, Self.ids[1]).swipeLeft()
     let delete = deleteAction(app, Self.ids[1])
-    XCTAssertTrue(delete.waitForExistence(timeout: 3), "no deck.row.<id>.delete after swiping left")
+    XCTAssertTrue(delete.waitFor(timeout: 3), "no deck.row.<id>.delete after swiping left")
     XCTAssertEqual(delete.label, "Delete")
     assertSystemRed(app, delete)
     snapshot("deck-swipe", appearance: .light)
@@ -212,7 +212,7 @@ final class DeckUITests: XCTestCase {
     waitForRows(app, Self.ids)
     row(app, Self.ids[1]).swipeLeft()
     let delete = deleteAction(app, Self.ids[1])
-    XCTAssertTrue(delete.waitForExistence(timeout: 3), "no deck.row.<id>.delete after swiping left")
+    XCTAssertTrue(delete.waitFor(timeout: 3), "no deck.row.<id>.delete after swiping left")
     assertSystemRed(app, delete)
     snapshot("deck-swipe", appearance: .dark)
   }
@@ -379,7 +379,7 @@ final class DeckUITests: XCTestCase {
     for card in Self.fixtures {
       waitForLabel(el(app, "study.front"), card.front)
       el(app, "study.reveal").tap()
-      XCTAssertTrue(el(app, "study.rate.good").waitForExistence(timeout: 3))
+      XCTAssertTrue(el(app, "study.rate.good").waitFor(timeout: 3))
       el(app, "study.rate.good").tap()
     }
     waitForLabel(el(app, "study.message"), "All caught up")
@@ -522,7 +522,7 @@ final class DeckUITests: XCTestCase {
 
     let app = launch(api: .mock, arguments: accessibilityXLArguments)
     openDeck(app)
-    XCTAssertTrue(row(app, Self.ids[0]).waitForExistence(timeout: 10))
+    XCTAssertTrue(row(app, Self.ids[0]).waitFor(timeout: 10))
     snapshot("deck-xl", appearance: .light)
     XCTAssertGreaterThan(row(app, Self.ids[0]).frame.height, baseHeight * 1.3, "rows did not scale with Dynamic Type")
     assertTextsReadable(in: app, ignoring: ["study."])
@@ -571,7 +571,7 @@ final class DeckUITests: XCTestCase {
     addTeardownBlock { [self] in try? self.deleteLiveCards(url, front: "feline") }
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .live(url))
-    XCTAssertTrue(el(app, "study.front").waitForExistence(timeout: 10) || el(app, "study.message").exists)
+    XCTAssertTrue(el(app, "study.front").waitFor(timeout: 10) || el(app, "study.message").exists)
     el(app, "study.add").tap()
     assertNewCardEditor(app)
     el(app, "editor.front").typeText("feline")
@@ -624,7 +624,7 @@ final class DeckUITests: XCTestCase {
   @MainActor
   private func openDeck(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let button = el(app, "study.deck")
-    XCTAssertTrue(button.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
+    XCTAssertTrue(button.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
     waitForLabel(el(app, "deck.title"), "Cards", file: file, line: line)
   }
@@ -642,7 +642,7 @@ final class DeckUITests: XCTestCase {
   private func swipeAndDelete(_ app: XCUIApplication, _ id: String, file: StaticString = #filePath, line: UInt = #line) {
     row(app, id).swipeLeft()
     let delete = deleteAction(app, id)
-    XCTAssertTrue(delete.waitForExistence(timeout: 3), "no deck.row.\(id).delete after swiping left", file: file, line: line)
+    XCTAssertTrue(delete.waitFor(timeout: 3), "no deck.row.\(id).delete after swiping left", file: file, line: line)
     delete.tap()
   }
 
@@ -757,7 +757,7 @@ final class DeckUITests: XCTestCase {
   private func assertRow(_ app: XCUIApplication, _ id: String, front: String, back: String, due: String, state: String,
                          file: StaticString = #filePath, line: UInt = #line) {
     let row = row(app, id)
-    XCTAssertTrue(row.waitForExistence(timeout: 5), "deck.row.\(id) missing", file: file, line: line)
+    XCTAssertTrue(row.waitFor(timeout: 5), "deck.row.\(id) missing", file: file, line: line)
     let dueEl = el(app, "deck.row.\(id.uppercased()).due"), stateEl = el(app, "deck.row.\(id.uppercased()).state")
     waitForLabel(dueEl, due, file: file, line: line)
     waitForLabel(stateEl, state, file: file, line: line)

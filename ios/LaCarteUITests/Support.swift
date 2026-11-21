@@ -14,6 +14,26 @@ let unreachableAPIURL = "http://127.0.0.1:9"
 /// Launch argument pair forcing Dynamic Type to accessibility XL.
 let accessibilityXLArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"]
 
+/// Checks `condition` right away, then every 0.1 s until `timeout`. XCTWaiter (behind `waitForExistence` and
+/// predicate expectations) polls once per second, so an element already on screen still cost about 1 s.
+@MainActor
+func poll(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+  let deadline = Date().addingTimeInterval(timeout)
+  while true {
+    if condition() { return true }
+    if Date() >= deadline { return false }
+    Thread.sleep(forTimeInterval: 0.1)
+  }
+}
+
+extension XCUIElement {
+  /// Fast `waitForExistence`: true as soon as the element exists (checked now, then every 0.1 s).
+  @MainActor
+  func waitFor(timeout: TimeInterval) -> Bool {
+    poll(timeout: timeout) { exists }
+  }
+}
+
 extension XCTestCase {
   @MainActor
   /// `theme`: value passed as `-theme <value>` (UserDefaults argument domain, spec 004 #6). Defaults to `system`
@@ -46,11 +66,9 @@ extension XCTestCase {
   @MainActor
   func waitForLabel(_ element: XCUIElement, _ expected: String, timeout: TimeInterval = 10,
                     file: StaticString = #filePath, line: UInt = #line) {
-    XCTAssertTrue(element.waitForExistence(timeout: timeout), "\(element) missing", file: file, line: line)
-    let predicate = NSPredicate(format: "label == %@", expected)
-    let exp = XCTNSPredicateExpectation(predicate: predicate, object: element)
-    let result = XCTWaiter().wait(for: [exp], timeout: timeout)
-    XCTAssertEqual(result, .completed, "Expected label '\(expected)', got '\(element.label)'", file: file, line: line)
+    XCTAssertTrue(element.waitFor(timeout: timeout), "\(element) missing", file: file, line: line)
+    let matched = poll(timeout: timeout) { element.label == expected }
+    XCTAssertTrue(matched, "Expected label '\(expected)', got '\(element.label)'", file: file, line: line)
   }
 
   /// Asserts the on-screen static texts don't overlap each other and stay inside the window width.
@@ -94,9 +112,8 @@ extension XCTestCase {
   @MainActor
   func waitForAbsence(_ element: XCUIElement, timeout: TimeInterval = 5, _ message: String = "",
                       file: StaticString = #filePath, line: UInt = #line) {
-    let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
-    XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: timeout), .completed,
-                   message.isEmpty ? "\(element) still exists" : message, file: file, line: line)
+    XCTAssertTrue(poll(timeout: timeout) { !element.exists },
+                  message.isEmpty ? "\(element) still exists" : message, file: file, line: line)
   }
 
   /// Dismisses the frontmost sheet with a downward drag starting on `handle` (e.g. its title).
@@ -320,7 +337,7 @@ extension XCTestCase {
   func assertKeyboard(_ app: XCUIApplication, dark: Bool, _ context: String,
                       file: StaticString = #filePath, line: UInt = #line) {
     let keyboard = app.keyboards.firstMatch
-    XCTAssertTrue(keyboard.waitForExistence(timeout: 5), "[\(context)] no keyboard", file: file, line: line)
+    XCTAssertTrue(keyboard.waitFor(timeout: 5), "[\(context)] no keyboard", file: file, line: line)
     Thread.sleep(forTimeInterval: 0.8)  // keyboard slide-in
     let lums = ColorProbe(screenOf: app).colors(in: keyboard.frame.insetBy(dx: 4, dy: 4), step: 4).map(\.luminance)
     let avg = lums.isEmpty ? 0 : lums.reduce(0, +) / Double(lums.count)
@@ -361,7 +378,7 @@ extension XCTestCase {
   func assertTextColor(_ app: XCUIApplication, _ id: String, _ expected: RGB, background: RGB,
                        file: StaticString = #filePath, line: UInt = #line) {
     let element = el(app, id)
-    XCTAssertTrue(element.waitForExistence(timeout: 5), "\(id) missing", file: file, line: line)
+    XCTAssertTrue(element.waitFor(timeout: 5), "\(id) missing", file: file, line: line)
     let f = element.frame
     let probe = ColorProbe(screenOf: app)
     var best = background, bestDistance = -1

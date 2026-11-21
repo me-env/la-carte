@@ -250,7 +250,7 @@ final class SettingsUITests: XCTestCase {
       XCTAssertTrue(el(app, "settings.title").exists, "settings closed by itself after the test")
       el(app, "settings.close").tap()
       waitForAbsence(el(app, "settings.title"))
-      XCTAssertTrue(el(app, "deck.row.\(uuid(id))").waitForExistence(timeout: 5), "deck doesn't show \(front)")
+      XCTAssertTrue(el(app, "deck.row.\(uuid(id))").waitFor(timeout: 5), "deck doesn't show \(front)")
       swipeSheetDown(app, from: el(app, "deck.title"))
       waitForAbsence(el(app, "deck.title"))
       waitForLabel(el(app, "study.front"), front)
@@ -364,7 +364,7 @@ final class SettingsUITests: XCTestCase {
   @MainActor
   func openDeck(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let button = el(app, "study.deck")
-    XCTAssertTrue(button.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
+    XCTAssertTrue(button.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
     waitForLabel(el(app, "deck.title"), "Cards", file: file, line: line)
   }
@@ -372,7 +372,7 @@ final class SettingsUITests: XCTestCase {
   @MainActor
   func openSettings(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let gear = el(app, "deck.settings")
-    XCTAssertTrue(gear.waitForExistence(timeout: 5), "deck.settings missing", file: file, line: line)
+    XCTAssertTrue(gear.waitFor(timeout: 5), "deck.settings missing", file: file, line: line)
     gear.tap()
     waitForLabel(el(app, "settings.title"), "Settings", file: file, line: line)
   }
@@ -423,7 +423,7 @@ final class SettingsUITests: XCTestCase {
   func setText(_ app: XCUIApplication, _ id: String, _ text: String, secure: Bool = false,
                        file: StaticString = #filePath, line: UInt = #line) {
     let field = el(app, id)
-    XCTAssertTrue(field.waitForExistence(timeout: 5), "\(id) missing", file: file, line: line)
+    XCTAssertTrue(field.waitFor(timeout: 5), "\(id) missing", file: file, line: line)
     let old = fieldText(app, id)
     tapEnd(field, file: file, line: line)
     field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count + 2) + text)
@@ -466,7 +466,7 @@ final class SettingsUITests: XCTestCase {
     let titleEl = el(app, "settings.title"), url = el(app, "settings.url"), token = el(app, "settings.token")
     let test = el(app, "settings.test"), close = el(app, "settings.close")
     for e in [url, token, test, close] {
-      XCTAssertTrue(e.waitForExistence(timeout: 5), "\(e.identifier) missing", file: file, line: line)
+      XCTAssertTrue(e.waitFor(timeout: 5), "\(e.identifier) missing", file: file, line: line)
     }
     XCTAssertEqual(url.elementType, .textField, "settings.url is not a text field", file: file, line: line)
     let shown = token.value as? String ?? ""

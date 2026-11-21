@@ -236,7 +236,7 @@ final class StudyUITests: XCTestCase {
   func testStudy_accessibilityXL() {
     XCUIDevice.shared.appearance = .light
     let baseline = launch(api: .mock)
-    XCTAssertTrue(el(baseline, "study.front").waitForExistence(timeout: 5))
+    XCTAssertTrue(el(baseline, "study.front").waitFor(timeout: 5))
     let baseHeight = el(baseline, "study.front").frame.height
     baseline.terminate()
 
@@ -358,7 +358,7 @@ final class StudyUITests: XCTestCase {
   func testStudy_accessibilityXXXLCapped() {
     XCUIDevice.shared.appearance = .light
     let xl = launch(api: .mock, arguments: accessibilityXLArguments)
-    XCTAssertTrue(el(xl, "study.front").waitForExistence(timeout: 5))
+    XCTAssertTrue(el(xl, "study.front").waitFor(timeout: 5))
     let xlHeight = el(xl, "study.front").frame.height
     xl.terminate()
 
@@ -427,7 +427,7 @@ final class StudyUITests: XCTestCase {
     XCTAssertEqual(el(app, "study.remaining").frame.midX, window.midX, accuracy: 1,
                    "study.remaining not centered", file: file, line: line)
     XCTAssertFalse(el(app, "study.back").exists, "study.back visible before reveal", file: file, line: line)
-    XCTAssertTrue(el(app, "study.reveal").waitForExistence(timeout: 5), "study.reveal missing", file: file, line: line)
+    XCTAssertTrue(el(app, "study.reveal").waitFor(timeout: 5), "study.reveal missing", file: file, line: line)
     XCTAssertTrue(el(app, "study.reveal").isHittable, "study.reveal not hittable", file: file, line: line)
     XCTAssertEqual(el(app, "study.reveal").label, "Show answer", file: file, line: line)
     XCTAssertTrue(el(app, "study.card").exists, "study.card missing", file: file, line: line)
@@ -442,7 +442,7 @@ final class StudyUITests: XCTestCase {
   private func assertFrontDidNotMove(_ app: XCUIApplication, from before: CGRect,
                                      file: StaticString = #filePath, line: UInt = #line) {
     // Let the 0.25s fade settle, then compare.
-    _ = el(app, "study.rate.easy").waitForExistence(timeout: 3)
+    _ = el(app, "study.rate.easy").waitFor(timeout: 3)
     Thread.sleep(forTimeInterval: 0.5)
     let after = el(app, "study.front").frame
     XCTAssertEqual(after.minY, before.minY, accuracy: 0.5, "study.front moved on reveal: \(before) → \(after)",
@@ -464,14 +464,11 @@ final class StudyUITests: XCTestCase {
     let window = app.windows.firstMatch.frame
     XCTAssertEqual(backEl.frame.midX, window.midX, accuracy: 1, "study.back not centered: \(backEl.frame)",
                    file: file, line: line)
-    let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
-                                         object: el(app, "study.reveal"))
-    XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 3), .completed, "study.reveal still shown after reveal",
-                   file: file, line: line)
+    waitForAbsence(el(app, "study.reveal"), timeout: 3, "study.reveal still shown after reveal", file: file, line: line)
     let labels = ["again": "Again", "hard": "Hard", "good": "Good", "easy": "Easy"]
     for rating in Self.ratings {
       let button = el(app, "study.rate.\(rating)")
-      XCTAssertTrue(button.waitForExistence(timeout: 3), "study.rate.\(rating) missing", file: file, line: line)
+      XCTAssertTrue(button.waitFor(timeout: 3), "study.rate.\(rating) missing", file: file, line: line)
       XCTAssertTrue(button.isEnabled, "study.rate.\(rating) disabled", file: file, line: line)
       XCTAssertEqual(button.label, labels[rating], file: file, line: line)
     }
@@ -482,7 +479,7 @@ final class StudyUITests: XCTestCase {
                               timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line) {
     waitForLabel(el(app, "study.message"), "All caught up", timeout: timeout, file: file, line: line)
     let nextDue = el(app, "study.nextDue")
-    XCTAssertTrue(nextDue.waitForExistence(timeout: 5), "study.nextDue missing", file: file, line: line)
+    XCTAssertTrue(nextDue.waitFor(timeout: 5), "study.nextDue missing", file: file, line: line)
     if let nextDueLabel { waitForLabel(nextDue, nextDueLabel, file: file, line: line) }
     if let nextDuePrefix {
       XCTAssertTrue(nextDue.label.hasPrefix(nextDuePrefix), "study.nextDue = '\(nextDue.label)'", file: file, line: line)
@@ -503,7 +500,7 @@ final class StudyUITests: XCTestCase {
   private func assertOffline(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     waitForLabel(el(app, "study.message"), "Can't reach your deck", timeout: 20, file: file, line: line)
     let retry = el(app, "study.retry")
-    XCTAssertTrue(retry.waitForExistence(timeout: 5), "study.retry missing", file: file, line: line)
+    XCTAssertTrue(retry.waitFor(timeout: 5), "study.retry missing", file: file, line: line)
     XCTAssertTrue(retry.isHittable, "study.retry not hittable", file: file, line: line)
     // 44pt within half a point: XCUI reports 43.67 (131px @3x) for a 44pt circle at a fractional origin.
     XCTAssertGreaterThanOrEqual(retry.frame.width, 43.5, "study.retry too narrow: \(retry.frame)", file: file, line: line)
@@ -523,7 +520,7 @@ final class StudyUITests: XCTestCase {
   @MainActor
   private func assertCornerButtons(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let deck = el(app, "study.deck"), add = el(app, "study.add")
-    XCTAssertTrue(deck.waitForExistence(timeout: 5), "study.deck missing", file: file, line: line)
+    XCTAssertTrue(deck.waitFor(timeout: 5), "study.deck missing", file: file, line: line)
     XCTAssertTrue(add.exists, "study.add missing", file: file, line: line)
     let window = app.windows.firstMatch.frame
     for (id, b) in [("study.deck", deck), ("study.add", add)] {
