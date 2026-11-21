@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # UI / end-to-end tests (XCUITest) + screenshot export.
 #
-#   scripts/ios-ui-test.sh [run-name] [-only-testing:LaCarteUITests/LaCarteUITests/testX ...]
+#   scripts/ios-ui-test.sh [run-name] [--smoke] [-only-testing:LaCarteUITests/LaCarteUITests/testX ...]
 #
+# --smoke: only the SMOKE tests below (one per screen/flow, for PR feedback).
 # Screenshots (XCTAttachments named in the tests) land in qa/screenshots/<run-name>/.
 # Builds under the app's DerivedData lock into a private copy of the test products, then tests that copy
 # under the simulator lock only, so other builds can run meanwhile (docs/dev-velocity.md).
@@ -12,6 +13,19 @@
 set -euo pipefail
 source "$(dirname "$0")/_ios-env.sh"
 RUN="${1:-$(date +%Y%m%d-%H%M%S)}"; shift || true
+SMOKE=(
+  StudyUITests/testStudy_frontRevealRateNext
+  DeckUITests/testDeck_addFromDeck
+  SettingsUITests/testSetup_connectFromStudy
+  ThemeUITests/testTheme_forcedSchemesAndBackToSystem
+  RefreshUITests/testStudy_pullToRefreshWhileStudying
+  LaCarteUITests/testDesignSystem_tapEachButton
+)
+ARGS=()
+for a in "$@"; do
+  if [ "$a" = --smoke ]; then for t in "${SMOKE[@]}"; do ARGS+=("-only-testing:LaCarteUITests/$t"); done
+  else ARGS+=("$a"); fi
+done
 OUT="$ROOT/qa/screenshots/$RUN"
 RESULT="$RESULTS_DIR/$RUN.xcresult"   # qa/.results, or $LA_CARTE_SCRATCH/qa-results/<checkout>
 PRODUCTS="$RESULTS_DIR/$RUN.xctestproducts"  # this run's own app + runner; removed on exit
@@ -31,7 +45,7 @@ if [ "$STATUS" -eq 0 ]; then
   TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" \
   TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \
   "$LOCK" "$SIM_LOCK" xcodebuild test-without-building -testProductsPath "$PRODUCTS" \
-    -destination "$DESTINATION" -collect-test-diagnostics never -resultBundlePath "$RESULT" "$@" 2>&1 \
+    -destination "$DESTINATION" -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} 2>&1 \
     | grep --line-buffered -E "$FILTER"
   STATUS=${PIPESTATUS[0]}
 fi
