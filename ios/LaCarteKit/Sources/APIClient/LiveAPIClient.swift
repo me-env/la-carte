@@ -2,24 +2,25 @@ import Dependencies
 import Foundation
 
 extension APIClient: DependencyKey {
-  /// `UserDefaults` key of the API URL entered in Settings; the single place it is spelled.
+  /// Key of the API URL entered in Settings, in `AppGroup.defaults`; the single place it is spelled.
   public static let urlDefaultsKey = "apiURL"
 
   /// Launch environment (set by UI tests, or in the Xcode scheme):
   /// - `LA_CARTE_API=mock`      → in-memory deck seeded with `[Card].fixtures` (deterministic screenshots)
   /// - `LA_CARTE_API_URL=…`     → base URL of the API, wins over the one entered in Settings (no default)
   /// - `LA_CARTE_API_TOKEN=…`   → bearer token, wins over the one entered in Settings
+  /// The widget has no launch environment, so it resolves from the App Group and the Keychain only.
   public static var liveValue: APIClient {
-    let environment = ProcessInfo.processInfo.environment
+    live(environment: ProcessInfo.processInfo.environment) { AppGroup.defaults.string(forKey: urlDefaultsKey) }
+  }
+
+  static func live(environment: [String: String], storedURL: @escaping @Sendable () -> String?) -> APIClient {
     if environment["LA_CARTE_API"] == "mock" {
       return .inMemory(cards: .fixtures)
     }
     return .live(
       baseURL: {
-        resolvedBaseURL(
-          environment: environment,
-          stored: UserDefaults.standard.string(forKey: urlDefaultsKey)
-        )
+        resolvedBaseURL(environment: environment, stored: storedURL())
       },
       token: {
         resolvedToken(environment: environment, stored: TokenStore.liveValue.load)
@@ -79,7 +80,7 @@ extension APIClient: DependencyKey {
         try await http.send("POST", "cards/\(id)/review", body: ["rating": rating.rawValue])
       },
       stats: {
-        try await http.send("GET", "stats")
+        try await http.send("GET", "stats", query: ["tz": TimeZone.current.identifier])
       },
       isConfigured: {
         baseURL() != nil && token() != nil

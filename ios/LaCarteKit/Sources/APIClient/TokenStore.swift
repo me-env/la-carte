@@ -4,6 +4,7 @@ import Foundation
 import Security
 
 /// The API bearer token, kept in the Keychain rather than `UserDefaults` because it is a secret (spec 003).
+/// The item lives in the App Group's access group so the widget can read it too (spec 007).
 @DependencyClient
 public struct TokenStore: Sendable {
   public var load: @Sendable () -> String? = { nil }
@@ -35,6 +36,15 @@ extension TokenStore: DependencyKey {
     }
   )
 
+  /// Moves the token saved before spec 007 (no access group) into the App Group's access group, once.
+  public static func migrateToSharedGroup() {
+    guard let group = AppGroup.id, TokenStore.liveValue.load() == nil else { return }
+    let legacy: [CFString: Any] = [
+      kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account,
+    ]
+    SecItemUpdate(legacy as CFDictionary, [kSecAttrAccessGroup: group] as CFDictionary)
+  }
+
   public static let testValue = TokenStore()
 
   public static var previewValue: TokenStore {
@@ -50,8 +60,15 @@ extension DependencyValues {
   }
 }
 
+private let service = "la-carte"
+private let account = "api-token"
+
 private var keychainItem: [CFString: Any] {
-  [kSecClass: kSecClassGenericPassword, kSecAttrService: "la-carte", kSecAttrAccount: "api-token"]
+  var item: [CFString: Any] = [
+    kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account,
+  ]
+  item[kSecAttrAccessGroup] = AppGroup.id
+  return item
 }
 
 struct KeychainError: Error {
