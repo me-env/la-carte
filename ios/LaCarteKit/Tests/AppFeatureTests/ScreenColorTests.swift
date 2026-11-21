@@ -3,6 +3,7 @@ import ComposableArchitecture
 import CoreGraphics
 import SwiftUI
 import Testing
+import UIKit
 
 @testable import CardEditorFeature
 @testable import DeckFeature
@@ -10,13 +11,14 @@ import Testing
 @testable import SettingsFeature
 @testable import StudyFeature
 
-/// Screens rendered with `ImageRenderer` per theme × scheme, checked against the colour tokens. These replace the
-/// UI suite's per-appearance colour passes (tooling proposal P8 / P4).
+/// Screens rendered in a window per theme × scheme, checked against the colour tokens. These replace the UI suite's
+/// per-appearance colour passes (tooling proposal P8 / P4).
 ///
-/// `ImageRenderer` draws ScrollView content empty and a List or TextField as a placeholder, so what lives inside
-/// them (card text, deck rows, Settings fields and theme picker, editor fields) and anything the device draws
-/// (status bar, keyboard, sheets, refresh spinner, swipe actions) stays checked in the UI tests.
+/// Checks sample bands of the screen (top bar, centre, bottom) and colour shares rather than fixed points, so a layout
+/// change doesn't break them. Anything the device draws (status bar, keyboard, sheets, Liquid Glass, swipe actions)
+/// stays checked in the UI tests. `scripts/ios-test.sh --render` also writes each render as a PNG.
 @MainActor
+@Suite(.serialized)
 struct ScreenColorTests {
   /// Light, dark, System on a dark device, Forest.
   nonisolated static let looks: [Look] = [
@@ -33,13 +35,13 @@ struct ScreenColorTests {
     state.phase = .studying
     let screen = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), look)
 
-    screen.expectBackgroundEdges()
-    // Top bar: `study.deck` and `study.add` circles, "3 to review" between them.
-    screen.expect(at: CGPoint(x: 16 + 7, y: 22), screen.palette.surface, "study.deck circle fill")
-    screen.expect(at: CGPoint(x: 402 - 16 - 7, y: 22), screen.palette.surface, "study.add circle fill")
-    screen.expectText(in: CGRect(x: 100, y: 0, width: 202, height: 44), screen.palette.secondaryInk, "study.remaining")
-    // "Show answer" at the bottom.
-    screen.expectText(in: CGRect(x: 100, y: 874 - 16 - 44, width: 202, height: 44), screen.palette.ink, "study.reveal")
+    screen.expectBackground()
+    // Top bar: `study.deck` and `study.add` circles at the sides, "3 to review" between them.
+    #expect(screen.share(of: screen.palette.surface, in: screen.band(0, 0.2, x: 0, 0.25)) > 0.05, "study.deck circle")
+    #expect(screen.share(of: screen.palette.surface, in: screen.band(0, 0.2, x: 0.75, 1)) > 0.05, "study.add circle")
+    screen.expectText(in: screen.band(0, 0.2, x: 0.3, 0.7), screen.palette.secondaryInk, "study.remaining")
+    screen.expectText(in: screen.band(0.4, 0.6), screen.palette.ink, "study.front")
+    screen.expectText(in: screen.band(0.85, 1), screen.palette.ink, "study.reveal")
     screen.expectNoBlue()
   }
 
@@ -51,29 +53,24 @@ struct ScreenColorTests {
     state.isRevealed = true
     let screen = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), look)
 
-    screen.expectBackgroundEdges()
+    screen.expectBackground()
     // Spec 001: the four ratings are plain ink text, no fill, no blue tint.
-    screen.expectText(in: CGRect(x: 16, y: 874 - 16 - 44, width: 370, height: 44), screen.palette.ink, "study.rate.*")
-    screen.expect(at: CGPoint(x: 200, y: 874 - 16 - 22), screen.palette.background, "between the ratings (no fill)")
+    let ratings = screen.band(0.85, 1)
+    screen.expectText(in: ratings, screen.palette.ink, "study.rate.*")
+    #expect(screen.share(of: screen.palette.background, in: ratings) > 0.9, "ratings on the background (no fill)")
     screen.expectNoBlue()
   }
 
+  /// Native screens (spec 009a/b): system navigation title and glass buttons, so only our fills are checked.
   @Test(arguments: looks)
   func deck(_ look: Look) throws {
     var state = DeckFeature.State()
-    state.phase = .loaded  // "No cards yet": a scroll view, drawn empty, instead of the List placeholder
+    state.cards = IdentifiedArray(uniqueElements: [Card].fixtures)
+    state.phase = .loaded
     let screen = try Screen(DeckView(store: Store(initialState: state) { EmptyReducer() }), look)
 
-    screen.expectBackgroundEdges()
-    // Header (24 pt from the top): "Cards", then the gear and add circles at the right.
-    screen.expectText(in: CGRect(x: 16, y: 24, width: 140, height: 44), screen.palette.ink, "deck.title")
-    screen.expect(at: CGPoint(x: 402 - 16 - 44 - 8 - 44 + 7, y: 46), screen.palette.surface, "deck.settings circle fill")
-    screen.expect(at: CGPoint(x: 402 - 16 - 44 + 7, y: 46), screen.palette.surface, "deck.add circle fill")
-    // Search field: a surface row under the header; the TextField itself is a placeholder, so sample its padding.
-    screen.expect(at: CGPoint(x: 16 + 6, y: 103), screen.palette.surface, "deck.search fill, left")
-    screen.expect(at: CGPoint(x: 402 - 16 - 6, y: 103), screen.palette.surface, "deck.search fill, right")
-    screen.expectText(in: CGRect(x: 30, y: 88, width: 24, height: 30), screen.palette.secondaryInk, "magnifying glass")
-    screen.expect(at: CGPoint(x: 8, y: 103), screen.palette.background, "left of the search field")
+    screen.expectBackground()
+    #expect(screen.share(of: screen.palette.surface) > 0.05, "deck rows on \(Screen.hex(screen.palette.surface))")
     screen.expectNoBlue()
   }
 
@@ -81,9 +78,8 @@ struct ScreenColorTests {
   func settings(_ look: Look) throws {
     let screen = try Screen(SettingsView(store: Store(initialState: SettingsFeature.State()) { EmptyReducer() }), look)
 
-    screen.expectBackgroundEdges()
-    screen.expectText(in: CGRect(x: 24, y: 24, width: 160, height: 44), screen.palette.ink, "settings.title")
-    screen.expect(at: CGPoint(x: 402 - 24 - 44 + 7, y: 46), screen.palette.surface, "settings.close circle fill")
+    screen.expectBackground()
+    #expect(screen.share(of: screen.palette.surface) > 0.05, "settings rows on \(Screen.hex(screen.palette.surface))")
     screen.expectNoBlue()
   }
 
@@ -92,11 +88,8 @@ struct ScreenColorTests {
     let state = CardEditorFeature.State(card: [Card].fixtures[2])
     let screen = try Screen(CardEditorView(store: Store(initialState: state) { EmptyReducer() }), look)
 
-    screen.expectBackgroundEdges()
-    screen.expectText(in: CGRect(x: 24, y: 24, width: 160, height: 44), screen.palette.ink, "editor.title")
-    screen.expect(at: CGPoint(x: 402 - 24 - 44 - 8 - 44 + 7, y: 46), screen.palette.surface, "editor.save circle fill")
-    screen.expect(at: CGPoint(x: 402 - 24 - 44 + 7, y: 46), screen.palette.surface, "editor.close circle fill")
-    screen.expect(at: CGPoint(x: 201, y: 46), screen.palette.background, "between title and buttons")
+    screen.expectBackground()
+    #expect(screen.share(of: screen.palette.surface) > 0.02, "editor fields on \(Screen.hex(screen.palette.surface))")
     screen.expectNoBlue()
   }
 
@@ -107,8 +100,8 @@ struct ScreenColorTests {
 
     screen.expect(at: CGPoint(x: 3, y: 3), screen.palette.background, "gallery background top-left")
     screen.expect(at: CGPoint(x: 3, y: screen.size.height - 3), screen.palette.background, "gallery background bottom")
-    #expect(screen.share(of: screen.palette.background) > 0.5, "gallery mostly \(screen.palette.background)")
-    #expect(screen.share(of: screen.palette.surface) > 0.01, "gallery has \(screen.palette.surface) circle buttons")
+    #expect(screen.share(of: screen.palette.background) > 0.5, "gallery mostly \(Screen.hex(screen.palette.background))")
+    #expect(screen.share(of: screen.palette.surface) > 0.01, "gallery has \(Screen.hex(screen.palette.surface)) circle buttons")
     screen.expectNoBlue()
   }
 }
@@ -132,7 +125,9 @@ struct Palette: Sendable {
   static let forest = Palette(background: 0x0E1913, surface: 0x16241B, ink: 0xEEF2EC, secondaryInk: 0x83938A)
 }
 
-/// A view rendered at iPhone 17 Pro size (402 × 874 pt, no safe area) at 2×, sampled in points.
+/// A view hosted in a window at iPhone 17 Pro size (402 × 874 pt) and drawn with `CALayer.render` at 2×, sampled in
+/// points. A window, not `ImageRenderer`: the native screens are UIKit-backed (NavigationStack, Form, toolbar,
+/// searchable), which `ImageRenderer` can't draw and which crashed the test process when it tried.
 @MainActor
 struct Screen {
   static let scale: CGFloat = 2
@@ -143,16 +138,33 @@ struct Screen {
   private let width: Int, height: Int
 
   /// `pointHeight: nil` lets the content pick its height (the gallery).
-  init(_ view: some View, _ look: Look, pointHeight: CGFloat? = 874) throws {
-    let renderer = ImageRenderer(
-      content: view
-        .frame(width: 402, height: pointHeight)
-        .environment(\.appTheme, look.theme)
-        .environment(\.colorScheme, look.scheme)
-    )
-    renderer.scale = Self.scale
+  init(_ view: some View, _ look: Look, pointHeight: CGFloat? = 874, name: String = #function) throws {
+    let host = UIHostingController(rootView: view.environment(\.appTheme, look.theme))
+    let pointHeight = pointHeight ?? host.sizeThatFits(in: CGSize(width: 402, height: CGFloat.infinity)).height
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: pointHeight))
+    window.overrideUserInterfaceStyle = look.scheme == .dark ? .dark : .light
+    window.rootViewController = host
+    window.makeKeyAndVisible()
+    defer { window.isHidden = true }
+    RunLoop.main.run(until: .now + 0.05)
+    host.view.layoutIfNeeded()
+    // Liquid Glass shapes (`CASDFLayer`, e.g. behind a `.confirm` toolbar button) blank the whole `render(in:)`.
+    for layer in Self.layers(in: window.layer) where NSStringFromClass(type(of: layer)) == "CASDFLayer" {
+      layer.isHidden = true
+    }
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = Self.scale
+    format.preferredRange = .standard
+    let rendered = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image {
+      window.layer.render(in: $0.cgContext)
+    }
+    if let dir = ProcessInfo.processInfo.environment["LA_CARTE_RENDER_DIR"] {
+      let file = "screen-\(name.prefix { $0 != "(" })-\(look.testDescription.replacingOccurrences(of: "/", with: "-")).png"
+      try rendered.pngData()?.write(to: URL(fileURLWithPath: dir).appending(path: file))
+    }
+
     palette = look.palette
-    let image = try #require(renderer.cgImage)
+    let image = try #require(rendered.cgImage)
     width = image.width
     height = image.height
     size = CGSize(width: CGFloat(width) / Self.scale, height: CGFloat(height) / Self.scale)
@@ -165,6 +177,16 @@ struct Screen {
     pixels = buffer
   }
 
+  private static func layers(in layer: CALayer) -> [CALayer] {
+    [layer] + (layer.sublayers ?? []).flatMap(layers(in:))
+  }
+
+  /// The part of the screen between fractions `top` and `bottom` of its height (and `left`, `right` of its width).
+  func band(_ top: CGFloat, _ bottom: CGFloat, x left: CGFloat = 0, _ right: CGFloat = 1) -> CGRect {
+    CGRect(x: size.width * left, y: size.height * top,
+           width: size.width * (right - left), height: size.height * (bottom - top))
+  }
+
   func color(at point: CGPoint) -> UInt32 {
     let x = min(max(Int(point.x * Self.scale), 0), width - 1)
     let y = min(max(Int(point.y * Self.scale), 0), height - 1)
@@ -172,20 +194,28 @@ struct Screen {
     return UInt32(pixels[i]) << 16 | UInt32(pixels[i + 1]) << 8 | UInt32(pixels[i + 2])
   }
 
-  /// Pixels (as r, g, b) that match `predicate`.
-  private func count(where predicate: (Int, Int, Int) -> Bool) -> Int {
+  /// Pixels in `rect` (as r, g, b) that match `predicate`, and how many pixels `rect` has.
+  private func count(in rect: CGRect? = nil, where predicate: (Int, Int, Int) -> Bool) -> (matching: Int, total: Int) {
+    let r = rect ?? CGRect(origin: .zero, size: size)
+    let xs = max(Int(r.minX * Self.scale), 0)..<min(Int(r.maxX * Self.scale), width)
+    let ys = max(Int(r.minY * Self.scale), 0)..<min(Int(r.maxY * Self.scale), height)
+    var n = 0
     pixels.withUnsafeBufferPointer { p in
-      stride(from: 0, to: p.count, by: 4).reduce(0) { n, i in
-        predicate(Int(p[i]), Int(p[i + 1]), Int(p[i + 2])) ? n + 1 : n
+      for y in ys {
+        for x in xs {
+          let i = (y * width + x) * 4
+          if predicate(Int(p[i]), Int(p[i + 1]), Int(p[i + 2])) { n += 1 }
+        }
       }
     }
+    return (n, xs.count * ys.count)
   }
 
-  /// Fraction of pixels within ±4 per channel of `color`.
-  func share(of color: UInt32) -> Double {
+  /// Fraction of pixels in `rect` (default: the whole screen) within ±4 per channel of `color`.
+  func share(of color: UInt32, in rect: CGRect? = nil) -> Double {
     let (r, g, b) = (Int(color >> 16), Int(color >> 8 & 0xFF), Int(color & 0xFF))
-    let n = count { abs($0 - r) <= 4 && abs($1 - g) <= 4 && abs($2 - b) <= 4 }
-    return Double(n) / Double(width * height)
+    let n = count(in: rect) { abs($0 - r) <= 4 && abs($1 - g) <= 4 && abs($2 - b) <= 4 }
+    return n.total == 0 ? 0 : Double(n.matching) / Double(n.total)
   }
 
   func expect(at point: CGPoint, _ expected: UInt32, _ what: String, sourceLocation: SourceLocation = #_sourceLocation) {
@@ -194,8 +224,11 @@ struct Screen {
             sourceLocation: sourceLocation)
   }
 
-  /// The four edges (top-left, left middle, right at 35 %, bottom-left) are the background, like the UI tests sample.
-  func expectBackgroundEdges(sourceLocation: SourceLocation = #_sourceLocation) {
+  /// Mostly the background, and the four edges (top-left, left middle, right at 35 %, bottom-left) too, like the UI
+  /// tests sample.
+  func expectBackground(sourceLocation: SourceLocation = #_sourceLocation) {
+    #expect(share(of: palette.background) > 0.5, "screen mostly \(Self.hex(palette.background))",
+            sourceLocation: sourceLocation)
     for (name, point) in [
       ("top-left", CGPoint(x: 3, y: 3)), ("left edge", CGPoint(x: 3, y: size.height / 2)),
       ("right edge", CGPoint(x: size.width - 3, y: size.height * 0.35)), ("bottom-left", CGPoint(x: 8, y: size.height - 8)),
@@ -203,26 +236,26 @@ struct Screen {
       expect(at: point, palette.background, "background \(name)", sourceLocation: sourceLocation)
     }
   }
-
-  /// Text is anti-aliased: the pixel furthest from the background in `rect` should be the token (± 8), as in the
-  /// UI tests' `assertTextColor`.
+  /// Text is anti-aliased, and light-on-dark glyphs overshoot a little at their edges: the commonest colour among the
+  /// pixels furthest from the background in `rect` (within 90 % of the furthest) should be the token (± 10).
   func expectText(in rect: CGRect, _ expected: UInt32, _ what: String,
                   sourceLocation: SourceLocation = #_sourceLocation) {
-    let background = palette.background
-    var best = background, bestDistance = -1
-    for y in stride(from: rect.minY, to: rect.maxY, by: 0.5) {
-      for x in stride(from: rect.minX, to: rect.maxX, by: 0.5) {
-        let c = color(at: CGPoint(x: x, y: y))
-        if Self.distance(c, background) > bestDistance { bestDistance = Self.distance(c, background); best = c }
+    var colors: [UInt32] = []
+    for y in stride(from: rect.minY, to: rect.maxY, by: 1 / Self.scale) {
+      for x in stride(from: rect.minX, to: rect.maxX, by: 1 / Self.scale) {
+        colors.append(color(at: CGPoint(x: x, y: y)))
       }
     }
-    #expect(Self.isClose(best, expected, tolerance: 8), "\(what) text is \(Self.hex(best)), expected \(Self.hex(expected))",
+    let furthest = colors.map { Self.distance($0, palette.background) }.max() ?? 0
+    let core = Dictionary(grouping: colors.filter { Self.distance($0, palette.background) * 10 >= furthest * 9 }) { $0 }
+    let text = core.max { $0.value.count < $1.value.count }?.key ?? palette.background
+    #expect(Self.isClose(text, expected, tolerance: 10), "\(what) text is \(Self.hex(text)), expected \(Self.hex(expected))",
             sourceLocation: sourceLocation)
   }
 
   /// Design system "no default blue tint": no saturated blue pixel anywhere (same rule as the UI tests).
   func expectNoBlue(sourceLocation: SourceLocation = #_sourceLocation) {
-    let blue = count { r, g, b in b > r + 60 && b > g + 30 }
+    let blue = count { r, g, b in b > r + 60 && b > g + 30 }.matching
     #expect(blue == 0, "\(blue) blue pixels", sourceLocation: sourceLocation)
   }
 
