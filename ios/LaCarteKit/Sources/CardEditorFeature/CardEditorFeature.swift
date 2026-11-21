@@ -12,6 +12,8 @@ public struct CardEditorFeature {
     var back: String
     var isSaving = false
     var saveFailed = false
+    /// A plain flag rather than `ConfirmationDialogState`, whose buttons can't carry accessibility identifiers.
+    var isDiscardDialogPresented = false
 
     public init(card: Card? = nil) {
       self.card = card
@@ -22,12 +24,17 @@ public struct CardEditorFeature {
     var canSave: Bool {
       !isSaving && !front.trimmed.isEmpty && !back.trimmed.isEmpty
     }
+
+    var hasChanges: Bool {
+      front.trimmed != (card?.front ?? "") || back.trimmed != (card?.back ?? "")
+    }
   }
 
   public enum Action: BindableAction {
     case binding(BindingAction<State>)
     case saveButtonTapped
     case closeButtonTapped
+    case discardTapped
     case saveResponse(Result<Card, any Error>)
     case delegate(Delegate)
 
@@ -66,6 +73,11 @@ public struct CardEditorFeature {
         }
 
       case .closeButtonTapped:
+        guard state.hasChanges else { return .run { [dismiss] _ in await dismiss() } }
+        state.isDiscardDialogPresented = true
+        return .none
+
+      case .discardTapped:
         return .run { [dismiss] _ in await dismiss() }
 
       case let .saveResponse(.success(card)):

@@ -13,6 +13,8 @@ let unreachableAPIURL = "http://127.0.0.1:9"
 
 /// Launch argument pair forcing Dynamic Type to accessibility XL.
 let accessibilityXLArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"]
+/// Largest Dynamic Type size (AX5), spec 009b #9.
+let accessibilityAX5Arguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
 
 extension XCTestCase {
   @MainActor
@@ -183,5 +185,43 @@ extension XCTestCase {
         .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
       swipes += 1
     }
+  }
+}
+
+// MARK: - Native sheets (spec 009b): the title is the navigation bar's, not an element with an id.
+
+extension XCTestCase {
+  /// Navigation bar of the sheet titled `title` ("Settings", "New card", "Edit card").
+  @MainActor
+  func sheetBar(_ app: XCUIApplication, _ title: String) -> XCUIElement {
+    app.navigationBars.matching(identifier: title).firstMatch
+  }
+
+  /// Navigation bar of the card editor, whichever its title ("New card" / "Edit card").
+  @MainActor
+  func editorBar(_ app: XCUIApplication) -> XCUIElement {
+    app.navigationBars.matching(NSPredicate(format: "identifier IN %@", ["New card", "Edit card"])).firstMatch
+  }
+
+  /// The title text inside the sheet's navigation bar (for frame checks).
+  @MainActor
+  func sheetTitle(_ app: XCUIApplication, _ title: String) -> XCUIElement {
+    sheetBar(app, title).staticTexts.matching(identifier: title).firstMatch
+  }
+
+  /// Waits for the sheet titled `title` to be on screen.
+  @MainActor
+  func waitForSheet(_ app: XCUIApplication, _ title: String, timeout: TimeInterval = 10,
+                    file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertTrue(sheetBar(app, title).waitForExistence(timeout: timeout), "sheet '\(title)' missing",
+                  file: file, line: line)
+  }
+
+  /// Settings' theme segment labelled `label` ("System", "Light", "Dark", "Forest"); `settings.theme.<name>` ids
+  /// are gone (spec 009b).
+  @MainActor
+  func themeSegment(_ app: XCUIApplication, _ label: String) -> XCUIElement {
+    let control = app.segmentedControls.matching(identifier: "settings.theme").firstMatch
+    return control.exists ? control.buttons[label] : app.buttons.matching(identifier: label).firstMatch
   }
 }

@@ -289,7 +289,7 @@ final class DeckUITests: XCTestCase {
       openDeck(app)
       waitForRows(app, Self.ids)
       row(app, Self.ids[2]).tap()
-      waitForLabel(el(app, "editor.title"), "Edit card")
+      waitForSheet(app, "Edit card")
       XCTAssertEqual(fieldText(app, "editor.front"), Self.fixtures[2].front)
       XCTAssertEqual(fieldText(app, "editor.back"), Self.fixtures[2].back)
       assertEditorChrome(app)
@@ -297,7 +297,7 @@ final class DeckUITests: XCTestCase {
       replaceText(app, "editor.back", with: "short-lived")
       XCTAssertTrue(el(app, "editor.save").isEnabled)
       el(app, "editor.save").tap()
-      waitForAbsence(el(app, "editor.title"), "editor still open after saving")
+      waitForAbsence(editorBar(app), "editor still open after saving")
       waitUntil("row shows the new back") { self.rowText(app, Self.ids[2], "short-lived").exists }
       XCTAssertFalse(rowText(app, Self.ids[2], Self.fixtures[2].back).exists, "old back still shown")
       waitForRows(app, Self.ids)  // replaced in place
@@ -315,10 +315,10 @@ final class DeckUITests: XCTestCase {
     openDeck(app)
     waitForRows(app, stubOrder)
     row(app, Self.ids[2]).tap()
-    waitForLabel(el(app, "editor.title"), "Edit card")
+    waitForSheet(app, "Edit card")
     replaceText(app, "editor.back", with: "short-lived")
     el(app, "editor.save").tap()
-    waitForAbsence(el(app, "editor.title"), "editor still open after saving")
+    waitForAbsence(editorBar(app), "editor still open after saving")
     let patches = server.requests.filter { $0.method == "PATCH" }
     XCTAssertEqual(patches.map { $0.path.lowercased() }, ["/cards/\(Self.ids[2])"])
     XCTAssertTrue(patches.first?.body.contains("short-lived") ?? false, "PATCH body: \(patches.first?.body ?? "nil")")
@@ -350,7 +350,7 @@ final class DeckUITests: XCTestCase {
       XCTAssertTrue(el(app, "editor.save").isEnabled, "editor.save disabled with front + back filled")
       if appearance == .light { snapshot("editor-filled", appearance: .light) }
       el(app, "editor.save").tap()
-      waitForAbsence(el(app, "editor.title"), "editor still open after saving")
+      waitForAbsence(editorBar(app), "editor still open after saving")
       waitUntil("new row at the top") { self.rowIDs(app).count == 4 }
       let top = rowIDs(app)[0]
       XCTAssertFalse(Self.ids.contains(top), "new card is not the top row: \(rowIDs(app))")
@@ -376,10 +376,10 @@ final class DeckUITests: XCTestCase {
     el(app, "editor.back").tap()
     el(app, "editor.back").typeText("cat")
     el(app, "editor.save").tap()
-    XCTAssertTrue(el(app, "editor.title").exists, "editor closed before the save finished")
+    XCTAssertTrue(editorBar(app).exists, "editor closed before the save finished")
     XCTAssertFalse(el(app, "editor.save").isEnabled, "editor.save enabled while the save is in flight")
     snapshot("editor-saving", appearance: .light)
-    waitForAbsence(el(app, "editor.title"), timeout: 10, "editor still open after the save finished")
+    waitForAbsence(editorBar(app), timeout: 10, "editor still open after the save finished")
     let posts = server.requests.filter { $0.method == "POST" }
     XCTAssertEqual(posts.map(\.path), ["/cards"])
     XCTAssertTrue(posts[0].body.contains("\"feline\"") && posts[0].body.contains("\"cat\""), "POST body: \(posts[0].body)")
@@ -408,7 +408,7 @@ final class DeckUITests: XCTestCase {
     el(app, "editor.back").tap()
     el(app, "editor.back").typeText("cat")
     el(app, "editor.save").tap()
-    waitForAbsence(el(app, "editor.title"), "editor still open after saving")
+    waitForAbsence(editorBar(app), "editor still open after saving")
     waitForLabel(el(app, "study.front"), "feline")
     waitForLabel(el(app, "study.remaining"), "1 to review")
     snapshot("study-after-add", appearance: .light)
@@ -432,7 +432,7 @@ final class DeckUITests: XCTestCase {
       el(app, "editor.back").typeText("cat")
       el(app, "editor.save").tap()
       waitForLabel(el(app, "editor.error"), "Couldn't save. Check your connection.")
-      XCTAssertTrue(el(app, "editor.title").exists, "editor closed after a failed save")
+      XCTAssertTrue(editorBar(app).exists, "editor closed after a failed save")
       XCTAssertEqual(fieldText(app, "editor.front"), "feline")
       XCTAssertEqual(fieldText(app, "editor.back"), "cat")
       waitUntil("editor.save re-enabled after the failure") { self.el(app, "editor.save").isEnabled }
@@ -455,8 +455,7 @@ final class DeckUITests: XCTestCase {
     el(app, "study.add").tap()
     assertNewCardEditor(app)
     el(app, "editor.front").typeText("feline")
-    el(app, "editor.close").tap()
-    waitForAbsence(el(app, "editor.title"), "editor still open after editor.close")
+    discardEdits(app)
     // New card from the deck.
     openDeck(app)
     waitForRows(app, stubOrder)
@@ -465,15 +464,13 @@ final class DeckUITests: XCTestCase {
     el(app, "editor.front").typeText("feline")
     el(app, "editor.back").tap()
     el(app, "editor.back").typeText("cat")
-    el(app, "editor.close").tap()
-    waitForAbsence(el(app, "editor.title"), "editor still open after editor.close")
+    discardEdits(app)
     waitForRows(app, stubOrder)
     // Edit, then close.
     row(app, Self.ids[2]).tap()
-    waitForLabel(el(app, "editor.title"), "Edit card")
+    waitForSheet(app, "Edit card")
     replaceText(app, "editor.back", with: "short-lived")
-    el(app, "editor.close").tap()
-    waitForAbsence(el(app, "editor.title"), "editor still open after editor.close")
+    discardEdits(app)
     XCTAssertTrue(rowText(app, Self.ids[2], Self.fixtures[2].back).exists, "row lost its back after closing")
     Thread.sleep(forTimeInterval: 1)
     let writes = server.requests.filter { ["POST", "PATCH", "DELETE"].contains($0.method) }
@@ -508,10 +505,10 @@ final class DeckUITests: XCTestCase {
     openDeck(app)
     waitForRows(app, Array(Self.ids.dropFirst()))
     row(app, Self.ids[1]).tap()
-    waitForLabel(el(app, "editor.title"), "Edit card")
+    waitForSheet(app, "Edit card")
     replaceText(app, "editor.front", with: "la carta")
     el(app, "editor.save").tap()
-    waitForAbsence(el(app, "editor.title"))
+    waitForAbsence(editorBar(app))
     swipeSheetDown(app, from: el(app, "deck.title"))
     waitForAbsence(el(app, "deck.title"))
     waitForLabel(el(app, "study.front"), "la carta")
@@ -524,7 +521,7 @@ final class DeckUITests: XCTestCase {
     el(app, "editor.back").tap()
     el(app, "editor.back").typeText("cat")
     el(app, "editor.save").tap()
-    waitForAbsence(el(app, "editor.title"))
+    waitForAbsence(editorBar(app))
     swipeSheetDown(app, from: el(app, "deck.title"))
     waitForAbsence(el(app, "deck.title"))
     waitForLabel(el(app, "study.remaining"), "3 to review")
@@ -560,10 +557,10 @@ final class DeckUITests: XCTestCase {
                       el(app, "deck.row.\(Self.ids[0]).state").frame.minX, "due/state overlap at XL")
 
     first.tap()
-    waitForLabel(el(app, "editor.title"), "Edit card")
+    waitForSheet(app, "Edit card")
     snapshot("editor-xl", appearance: .light)
     // Only the editor's own elements: the deck and study stay in the hierarchy under the sheet.
-    let editorIDs = ["editor.title", "editor.save", "editor.close", "editor.front", "editor.back"]
+    let editorIDs = ["editor.save", "editor.close", "editor.front", "editor.back"]
     for (i, a) in editorIDs.enumerated() {
       for b in editorIDs[(i + 1)...] {
         let overlap = el(app, a).frame.intersection(el(app, b).frame)
@@ -575,7 +572,7 @@ final class DeckUITests: XCTestCase {
       XCTAssertTrue(window.contains(el(app, id).frame), "\(id) outside the window at XL: \(el(app, id).frame)")
     }
     XCTAssertTrue(el(app, "editor.save").isHittable && el(app, "editor.close").isHittable)
-    XCTAssertGreaterThanOrEqual(el(app, "editor.front").frame.minY, el(app, "editor.title").frame.maxY - 1,
+    XCTAssertGreaterThanOrEqual(el(app, "editor.front").frame.minY, editorBar(app).frame.maxY - 1,
                                 "editor.front overlaps the title at XL")
     XCTAssertGreaterThanOrEqual(el(app, "editor.back").frame.minY, el(app, "editor.front").frame.maxY - 1,
                                 "editor.back overlaps editor.front at XL")
@@ -600,7 +597,7 @@ final class DeckUITests: XCTestCase {
     el(app, "editor.back").tap()
     el(app, "editor.back").typeText("cat")
     el(app, "editor.save").tap()
-    waitForAbsence(el(app, "editor.title"), timeout: 10, "editor still open after saving")
+    waitForAbsence(editorBar(app), timeout: 10, "editor still open after saving")
 
     openDeck(app)
     waitUntil("3 rows in the live deck") { self.rowIDs(app).count == 3 }
@@ -748,7 +745,7 @@ final class DeckUITests: XCTestCase {
 
   @MainActor
   private func assertNewCardEditor(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
-    waitForLabel(el(app, "editor.title"), "New card", file: file, line: line)
+    waitForSheet(app, "New card", file: file, line: line)
     XCTAssertEqual(fieldText(app, "editor.front"), "", "editor.front not empty", file: file, line: line)
     XCTAssertEqual(fieldText(app, "editor.back"), "", "editor.back not empty", file: file, line: line)
     waitUntil("editor.front focused on a new card", timeout: 5, file: file, line: line) {
@@ -758,21 +755,29 @@ final class DeckUITests: XCTestCase {
     assertEditorChrome(app, file: file, line: line)
   }
 
-  /// Ref 03: title top-left; save then close (rightmost) circle buttons top-right, 44pt, same line; Front above Back.
+  /// Spec 009b #1: native sheet. Inline nav title centred; `editor.close` in the leading slot, `editor.save` in the
+  /// trailing slot, same line, ≥ 44pt; Front above Back under the bar; no `editor.title` element any more.
   @MainActor
   private func assertEditorChrome(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let window = app.windows.firstMatch.frame
-    let title = el(app, "editor.title").frame, save = el(app, "editor.save").frame, close = el(app, "editor.close").frame
+    let bar = editorBar(app)
+    XCTAssertTrue(bar.exists, "no editor navigation bar", file: file, line: line)
+    XCTAssertFalse(el(app, "editor.title").exists, "editor.title should be gone (nav title)", file: file, line: line)
+    let title = sheetTitle(app, bar.identifier).frame
+    let save = el(app, "editor.save").frame, close = el(app, "editor.close").frame
     for (id, f) in [("editor.save", save), ("editor.close", close)] {
-      XCTAssertEqual(f.width, 44, accuracy: 1, "\(id) not 44pt: \(f)", file: file, line: line)
-      XCTAssertEqual(f.height, 44, accuracy: 1, "\(id) not 44pt: \(f)", file: file, line: line)
+      // System toolbar glass buttons report a 36pt frame; iOS extends their hit area (009b: native toolbar).
+      XCTAssertGreaterThanOrEqual(f.width, 35.5, "\(id) smaller than a system toolbar button: \(f)", file: file, line: line)
+      XCTAssertGreaterThanOrEqual(f.height, 35.5, "\(id) smaller than a system toolbar button: \(f)", file: file, line: line)
     }
-    XCTAssertLessThan(title.minX, window.width / 4, "editor.title not left: \(title)", file: file, line: line)
-    XCTAssertLessThan(save.maxX, close.minX, "editor.close is not right of editor.save", file: file, line: line)
-    XCTAssertGreaterThan(close.maxX, window.width - 40, "editor.close not at the right edge: \(close)", file: file, line: line)
-    XCTAssertEqual(save.minY, close.minY, accuracy: 0.5, "save/close not aligned", file: file, line: line)
+    XCTAssertEqual(title.midX, window.midX, accuracy: 4, "inline title not centred: \(title)", file: file, line: line)
+    XCTAssertLessThan(close.minX, window.width / 4, "editor.close not leading: \(close)", file: file, line: line)
+    XCTAssertGreaterThan(save.maxX, window.width * 3 / 4, "editor.save not trailing: \(save)", file: file, line: line)
+    XCTAssertEqual(save.midY, close.midY, accuracy: 1, "save/close not aligned", file: file, line: line)
+    XCTAssertEqual(title.midY, close.midY, accuracy: 3, "title not on the buttons' line", file: file, line: line)
+    XCTAssertEqual(el(app, "editor.save").label, "Save", "editor.save label", file: file, line: line)
     let front = el(app, "editor.front").frame, back = el(app, "editor.back").frame
-    XCTAssertGreaterThanOrEqual(front.minY, max(title.maxY, close.maxY) - 1, "editor.front under the header",
+    XCTAssertGreaterThanOrEqual(front.minY, max(title.maxY, close.maxY) - 1, "editor.front under the bar",
                                 file: file, line: line)
     XCTAssertGreaterThanOrEqual(back.minY, front.maxY - 1, "editor.back not below editor.front", file: file, line: line)
   }
@@ -917,5 +922,155 @@ struct Pixels {
     let x = min(max(Int(point.x * scale), 0), width - 1), y = min(max(Int(point.y * scale), 0), height - 1)
     let i = (y * width + x) * 4
     return (Int(data[i]), Int(data[i + 1]), Int(data[i + 2]))
+  }
+}
+
+// MARK: - Spec 009b: native editor sheet, discard protection, AX5
+
+extension DeckUITests {
+  /// 009b #2: with unsaved changes swipe-down doesn't dismiss and `editor.close` asks "Discard changes?";
+  /// Keep editing leaves the text, Discard dismisses. Without changes (incl. whitespace-only, or an edit typed
+  /// back to the original), `editor.close` and swipe-down dismiss at once.
+  @MainActor
+  func testEditor_discardProtection() {
+    for appearance in Self.appearances {
+      XCUIDevice.shared.appearance = appearance
+      let app = launch(api: .mock)
+      openDeck(app)
+      waitForRows(app, Self.ids)
+
+      // New card: typed text → swipe-down blocked → dialog → Keep editing → Discard.
+      el(app, "deck.add").tap()
+      waitForSheet(app, "New card")
+      el(app, "editor.front").typeText("feline")
+      for _ in 0..<2 {  // first drag may only drop the keyboard
+        swipeSheetDown(app, from: editorBar(app))
+        Thread.sleep(forTimeInterval: 0.8)
+      }
+      XCTAssertTrue(editorBar(app).exists, "swipe-down dismissed the editor with unsaved changes")
+      XCTAssertEqual(fieldText(app, "editor.front"), "feline", "text lost after the blocked swipe")
+      el(app, "editor.close").tap()
+      let discard = el(app, "editor.discard")
+      XCTAssertTrue(discard.waitForExistence(timeout: 3), "editor.discard not reachable by id")
+      XCTAssertEqual(discard.label, "Discard")
+      XCTAssertTrue(app.staticTexts["Discard changes?"].exists, "dialog title missing")
+      snapshot("editor-discard", appearance: appearance)
+      // "Keep editing": by id / label if iOS shows it; on iOS 26+ the dialog is a popover without its cancel
+      // button, so keeping the text means tapping outside it (see the 009b report).
+      let keep = el(app, "editor.keepEditing")
+      if keep.exists {
+        keep.tap()
+      } else if app.buttons["Keep editing"].exists {
+        app.buttons["Keep editing"].tap()
+      } else {
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.45)).tap()
+      }
+      waitForAbsence(discard, "dialog still shown after Keep editing")
+      XCTAssertTrue(editorBar(app).exists, "Keep editing closed the editor")
+      XCTAssertEqual(fieldText(app, "editor.front"), "feline", "Keep editing changed the text")
+      discardEdits(app)
+      waitForRows(app, Self.ids)
+
+      // New card, whitespace only: no change → close dismisses without a dialog.
+      el(app, "deck.add").tap()
+      waitForSheet(app, "New card")
+      el(app, "editor.front").typeText("   ")
+      el(app, "editor.close").tap()
+      waitForAbsence(editorBar(app), "whitespace-only new card asked to discard / stayed open")
+      XCTAssertFalse(el(app, "editor.discard").exists || app.buttons["Discard"].exists, "dialog for whitespace only")
+
+      // Edit card: change then type the original back → no change → swipe-down dismisses.
+      row(app, Self.ids[2]).tap()
+      waitForSheet(app, "Edit card")
+      replaceText(app, "editor.back", with: Self.fixtures[2].back + " ")
+      for _ in 0..<2 where editorBar(app).exists {
+        swipeSheetDown(app, from: editorBar(app))
+        Thread.sleep(forTimeInterval: 0.8)
+      }
+      waitForAbsence(editorBar(app), "edit sheet with only trailing whitespace added didn't swipe away")
+
+      // Edit card: real change → close → Discard → row unchanged.
+      row(app, Self.ids[2]).tap()
+      waitForSheet(app, "Edit card")
+      replaceText(app, "editor.back", with: "short-lived")
+      discardEdits(app)
+      XCTAssertTrue(rowText(app, Self.ids[2], Self.fixtures[2].back).exists, "row changed after Discard")
+      app.terminate()
+    }
+  }
+
+  /// 009b #9: at AX5 neither the new nor the edit sheet clips; every editor id stays reachable.
+  @MainActor
+  func testEditor_accessibilityAX5() {
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock, arguments: accessibilityAX5Arguments)
+    openDeck(app)
+    XCTAssertTrue(row(app, Self.ids[2]).waitForExistence(timeout: 10))
+    el(app, "deck.add").tap()
+    waitForSheet(app, "New card")
+    assertEditorReachable(app)
+    snapshot("editor-new-ax5", appearance: .light)
+    el(app, "editor.front").typeText("feline")
+    el(app, "editor.close").tap()
+    let discard = el(app, "editor.discard")
+    XCTAssertTrue(discard.waitForExistence(timeout: 3), "editor.discard not reachable by id at AX5")
+    snapshot("editor-discard-ax5", appearance: .light)
+    let window = app.windows.firstMatch.frame
+    XCTAssertTrue(window.contains(discard.frame), "Discard outside the window at AX5: \(discard.frame)")
+    discard.tap()
+    waitForAbsence(editorBar(app))
+    row(app, Self.ids[2]).tap()
+    waitForSheet(app, "Edit card")
+    assertEditorReachable(app)
+    snapshot("editor-edit-ax5", appearance: .light)
+  }
+
+  @MainActor
+  private func assertEditorReachable(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+    let window = app.windows.firstMatch.frame
+    let ids = ["editor.save", "editor.close", "editor.front", "editor.back"]
+    for id in ids {
+      let e = el(app, id)
+      XCTAssertTrue(e.waitForExistence(timeout: 5), "\(id) missing at AX5", file: file, line: line)
+      XCTAssertTrue(window.contains(e.frame), "\(id) outside the window at AX5: \(e.frame)", file: file, line: line)
+    }
+    XCTAssertTrue(el(app, "editor.close").isHittable && el(app, "editor.save").isHittable,
+                  "toolbar buttons not hittable at AX5", file: file, line: line)
+    for (i, a) in ids.enumerated() {
+      for b in ids[(i + 1)...] {
+        let o = el(app, a).frame.intersection(el(app, b).frame)
+        XCTAssertTrue(o.isNull || o.width < 1 || o.height < 1, "\(a) overlaps \(b) at AX5", file: file, line: line)
+      }
+    }
+    let title = sheetTitle(app, editorBar(app).identifier).frame
+    XCTAssertTrue(window.contains(title), "title clipped at AX5: \(title)", file: file, line: line)
+    XCTAssertGreaterThanOrEqual(el(app, "editor.front").frame.minY, editorBar(app).frame.maxY - 1,
+                                "editor.front under the bar at AX5", file: file, line: line)
+  }
+}
+
+extension XCTestCase {
+  /// Confirmation-dialog button: by its id (spec 009b), else by label. Records which one matched in the log.
+  @MainActor
+  func dialogButton(_ app: XCUIApplication, _ id: String, _ label: String,
+                    file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+    let byID = el(app, id)
+    if byID.waitForExistence(timeout: 3) {
+      XCTContext.runActivity(named: "dialog button \(id): found by id") { _ in }
+      return byID
+    }
+    let byLabel = app.buttons.matching(identifier: label).firstMatch
+    XCTAssertTrue(byLabel.waitForExistence(timeout: 2), "\(id) / '\(label)' missing", file: file, line: line)
+    XCTContext.runActivity(named: "dialog button \(id): NOT reachable by id, fell back to label") { _ in }
+    print("QA-FALLBACK: \(id) not reachable by id, used label '\(label)'")
+    return byLabel
+  }
+
+  /// `editor.close` with unsaved changes → "Discard changes?" → Discard → editor gone (spec 009b #2).
+  @MainActor
+  func discardEdits(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+    el(app, "editor.close").tap()
+    dialogButton(app, "editor.discard", "Discard", file: file, line: line).tap()
+    waitForAbsence(editorBar(app), "editor still open after Discard", file: file, line: line)
   }
 }
