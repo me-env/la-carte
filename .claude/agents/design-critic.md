@@ -39,15 +39,24 @@ sheets in the scratchpad, e.g. with `sips`/ImageMagick if installed, or ask a su
 
 ## Measured review (mandatory, every proposal)
 Run on each 1024 render (or its SVG), light and dark:
-`uv run scripts/design-review.py <light-1024.png> <dark-1024.png> --home` (`--axis y` if the transition is
+`uv run scripts/design-review.py <light-1024.png> <dark-1024.png> --home [--screen lattice|stochastic]` (`--axis y` if the transition is
 vertical, `--region x0,y0,x1,y1` to isolate one part; `--watch` re-runs on every save with a one-line
-summary). It checks coverage smoothness at 1024/58/29 px; order (|psi6|, NN regularity) along the axis over
-dots AND holes (an AM halftone's paper holes past 50% are marks too); seams: a dots -> holes flip must mix
-over >= 4 pitches and the first holes must continue the last dots (pitch, size, order); touching marks
-(allowed only where local coverage >= 0.65, measured inside the card's silhouette, i.e. closing into solid); in
-the closing zone (coverage >= 0.5) grey mush (grey px that aren't a clean anti-aliased edge) and hairline walls
-(< 2 px); the front into the solid (swing along the card's height, and the unblurred step at 2 px); optical
-centre and mark-size rhythm. **Animations:** also run `--frames <dir>` (or a quoted glob) on the frame sequence;
+summary). **Pick the screen per proposal** from how the render is built (its render script / brief), and say
+which one you used in the verdict:
+- `--screen lattice` (default): marks settle onto a hex lattice (rounds 6-8b). Order must rise to the lattice.
+- `--screen stochastic`: a blue-noise screen (random but evenly spaced, no lattice; round 9 onward if the
+  proposal says so). Order must stay even instead of rising (NN regularity floor and no drawdown, no clumped
+  marks, no voids), touching is allowed from coverage 0.35, and the edge into the solid is judged at 58/29 px.
+  Never run a lattice design under `stochastic` to make it pass; if the construction is unclear, ask the manager.
+It checks coverage smoothness at 1024/58/29 px; that every band of intermediate coverage holds detected marks
+(nothing measured fails); order (|psi6|, NN regularity) along the axis over dots AND holes (an AM halftone's paper
+holes past 50% are marks too); seams: a dots -> holes flip must mix over >= 4 pitches and the first holes must
+continue the last dots (pitch, size, order); touching marks (allowed only where local coverage >= 0.65, 0.35 on
+a stochastic screen, measured inside the card's silhouette, i.e. closing into solid); in the closing zone
+(coverage >= 0.5) grey mush (grey px that aren't a clean anti-aliased edge), hairline walls (< 2 px) and the
+closing holes themselves (size, shrinking, spacing); the front into the solid (swing along the card's height,
+and the unblurred step at 2 px) and the edge's row-to-row spread at 58/29 px (a ragged edge); optical centre
+and mark-size rhythm. **Animations:** also run `--frames <dir>` (or a quoted glob) on the frame sequence;
 it runs every metric on every frame and reports the worst frame per metric (any frame FAIL = ITERATE; the optical
 centre is shown but not counted on frames).
 Every line says where (`at x …, y … (band n)`, 1024 px). It writes a sheet (curves under the render,
@@ -61,7 +70,7 @@ icons. Thresholds are the named constants at the top of the script.
 ## Output (to the manager, who forwards to design-lead)
 ```
 VERDICT: SHOW TO USER | ITERATE
-design-review report: <verbatim output of scripts/design-review.py, one per render>
+design-review report (--screen …): <verbatim output of scripts/design-review.py, one per render>
 Scores /5: harmony · reference feel · concept · small-size legibility · craft · in-app use
 Harmony measurements: gaps …px, sizes …px, angles …°, ratio rule …  (from the 1024 render)
 Best option: …  (or "none")

@@ -10,15 +10,15 @@ payoff. Measurements are from 2026-11-21 (CI run 44907442393, local `qa/.results
 | 1 | `scripts/api-test.sh` (7 lines) | ruff + format check + pytest | api-engineer | every API change; CI | none (CI step 7 s) |
 | 2 | `scripts/api-dev.sh` (5) | uvicorn with reload | api-engineer | dev | none |
 | 3 | `scripts/api-live-check.sh` (16) | compares deployed `/health` build hash with local source | api-engineer / release-engineer | after deploys | none |
-| 4 | `scripts/_ios-env.sh` (5) | simulator name/OS → `-destination` | release-engineer | sourced by all iOS scripts | one shared simulator and one default DerivedData for every agent (see 10) |
+| 4 | `scripts/_ios-env.sh` (5) | simulator name/OS → `-destination` | dev-velocity | sourced by all iOS scripts | one shared simulator and one default DerivedData for every agent (see 10) |
 | 5 | `scripts/ios-build.sh` (8) | simulator build | ios-engineer | every iOS change | none |
 | 6 | `scripts/ios-test.sh` (11) | LaCarteKit unit tests, grep-filtered output | ios-engineer | every iOS change; CI (2–2.5 min) | piped through `\|\| true` until 2026-11-21, so failures were hidden; output filtering is hand-rolled (xcbeautify does this) |
 | 7 | `scripts/ios-ui-test.sh` (47) | XCUITest + xcresult export + inline Python rename of attachments | qa-validator | every feature, often several times | full suite 2.6 min (8 tests) → **41.6 min (74 tests)** in one day, ~34 s/test, serial; 1.0 GB of xcresults kept in `qa/.results` |
 | 8 | `scripts/e2e.sh` (42) | two fresh APIs + seed + 6 live UI tests | qa-validator | every feature (3.4 min) | fixed ports 8765/8766: two agents can't run it at once |
 | 9 | UI-test helpers: `Support.swift` (187), `StubAPIServer.swift` (251), pixel samplers in Theme/Deck/Settings/Refresh tests (~365 lines) | launch, waits, screenshots, colour asserts by sampling PNG pixels | qa-validator | all UI tests | colour checks cost a full UI test (~35 s) each; light+dark looped inside tests; dark appearance ignored on CI's iOS 26 sim (6 CI-only failures); drags can't pause mid-gesture (DEBUG launch args used instead) |
 | 10 | Agent coordination | `scripts/_lock.sh` (lockf named locks, commit aa5473b); was `pgrep -x xcodebuild` polling | manager / all | every iOS run | solved for waiting: design-lead's `wait-xcodebuild.sh` request is covered by `_lock.sh` (scripts block on the lock themselves), no new script |
-| 11 | `.github/workflows/ci.yml` (59) | API, docker image, iOS unit + UI + E2E | release-engineer | every push | iOS job **~50 min** (UI step 46 min, sum of test times 2566 s); 10 tests fail only on iOS 26; E2E skipped when UI fails |
-| 12 | `ci/boot-simulator.sh` (31) | pre-boot sim + `simctl ui appearance` to fix dark on CI | release-engineer | CI | untested (not in the last pushed run); Apple forum 812656 confirms appearance is ignored under `xcodebuild` on iOS 26, no confirmed fix |
+| 11 | `.github/workflows/ci.yml` (59) | API, docker image, iOS unit + UI + E2E | cicd-lead | every push | iOS job **~50 min** (UI step 46 min, sum of test times 2566 s); 10 tests fail only on iOS 26; E2E skipped when UI fails |
+| 12 | `ci/boot-simulator.sh` (31) | pre-boot sim + `simctl ui appearance` to fix dark on CI | cicd-lead | CI | untested (not in the last pushed run); Apple forum 812656 confirms appearance is ignored under `xcodebuild` on iOS 26, no confirmed fix |
 | 13 | `.github/workflows/adhoc.yml` + `ci/archive.sh`, `export-ipa.sh`, `verify-ipa.sh`, `_env.sh` (~175) | signed Ad Hoc .ipa (tags/manual) | release-engineer | releases | works; fine as is |
 | 14 | `scripts/ios-adhoc.sh` (11) + `ios-install-device.sh` (38) | local Ad Hoc build; download latest CI ipa + devicectl install | release-engineer | "put it on my phone" | devicectl triggers privacy prompts: needs the user at the Mac |
 | 15 | `scripts/fetch-design-refs.sh` (14) | Vyst screenshots + icon via iTunes lookup (gitignored) | design-lead / design-critic | design rounds | none |
@@ -93,6 +93,39 @@ payoff. Measurements are from 2026-11-21 (CI run 44907442393, local `qa/.results
     cells at x ≈ 715 are now exempt (a real early-closed cell at x 513 still fails). pass5 FAIL 7/20 → 8/24
     (adds raw step 0.22); round7 flip FAIL 4/20 → 6/24 (adds swing 21–40 px, raw step 0.138).
 
+- **Update 2026-11-21 (closing holes never measured; stochastic screens; design-lead + design-critic requested,
+  manager approved).** Now 1,306 lines, ~1.1–2.5 s per render, 30 metrics (lattice) / 31 (stochastic).
+  - **Bug:** round 8b `card-{light,dark}-1024.png` reported **0 holes** and passed every hole/seam check. Detection
+    was fine (312 holes found, verified on a 5× zoom of x 500–680: every Y hole and small hole circled; only the
+    last sub-3 px specks past x ≈ 640 are below the size floor). Cause: `keep = in_rows & (mcov < 0.65)` dropped
+    every mark at coverage ≥ 0.65, and a closing that keeps walls ≥ 2.2 px only breaks into holes above ≈ 0.67, so
+    for this whole design family the holes were never analysed. Stitching them into the dot order bands is wrong
+    too (they sit on the cell corners, a honeycomb of pitch A/√3: the lattice synthetic then fails 8 metrics).
+    Fix: closing holes get their own metrics (`closing: hole size CV within band`, `… size rise` (must shrink into
+    the solid), `… 1-CV(NN) floor` ≥ 0.80), and a guard `marks: empty coverage bands` FAILS when a 32 px band with
+    coverage 0.05–0.95 has no detected mark (nothing measured ≠ pass; it also catches pass5's gap column).
+  - **`--screen stochastic`** (default `lattice`, unchanged): order must stay even, not rise: 1-CV(NN) drawdown
+    and floor ≥ 0.65, `stochastic: clumped marks %` (NN < 0.6 × the band's median NN, g(r) below the min distance,
+    ≤ 2%) and `stochastic: max void / NN` (largest empty Delaunay circle ≤ 1.5 × median NN); |ψ6| drawdown INFO.
+    Touching from coverage **0.35** (design-lead: d ≥ 2.4 r for the gap rule; 0.68/d² × π/5.76 ≈ 0.37; growth
+    starts ≈ 0.34 with D = 2.5 R0). The closing-hole metrics are INFO (random gaps between merging disks), the
+    per-row front swing is replaced by an INFO hole-area front (per 64 px strip, where paper < 2%): measured, it
+    can't tell random from ragged (synthetic 16–56 px, round 9 32 px, round 7's rejected bitten front 33 px).
+  - **Edge guard, both screens:** `edge: row spread at 58/29 px` (std across rows of the perceived ink, columns ≥
+    0.8 coverage; ≤ 0.045 / 0.025). Lattice synthetic 0.003/0.002, round 8b 0.010/0.004, round 7 card
+    0.055/0.032 (FAIL), round 9 0.061/0.021 (FAIL at 58).
+  - **`--make-synthetic --screen stochastic`:** design-lead's plan via the new `brandkit.progressive_blue_noise`
+    (Bridson at d/1.06 pushed apart to ≥ d: 0.68/d², the density the 0.35 derivation assumes; plain Bridson holds
+    0.60/d², round 9's best-candidate set 0.49/d²; then farthest-point ranking, 0.6 s for 2,100 points). PASSES 31/31
+    (default seed), 11 of 12 seeds (seed 1 fails the 58 px edge spread at 0.053). A uniform-random control FAILS
+    (void 2.33, 42 merged blobs, edge 0.069).
+  - Results (before → after): round 8b light/dark PASS 24/24 with 0 holes → **PASS 30/30 with 312 holes
+    measured** (hole CV 0.13, rise 0, NN 0.87, edge 0.010). pass5 FAIL 8/24 → 9/30 (adds the empty band at
+    x 475). round7 flip FAIL 6/24 → 7/30 (adds hole CV 0.218, light). round7 card FAIL 3/24 → 6/30 (adds hole NN
+    0.66, edge 0.055/0.032). Lattice synthetic PASS 30/30 on 12 of 12 seeds. Round 9 (`--screen stochastic`):
+    **FAIL 4/31** light and dark: edge spread at 58 px 0.061, merged blobs 3/2 at x 343, min gap 0.084/0.093 at
+    x ≈ 372 (11 marks below), dot size CV 0.224/0.208 at x 371; frames: FAIL 6/31 (merged blobs on 5 of 5).
+
 **Problem (measured on `round6/pass5/card-light-1024.png`).** The user saw a non-smooth noise→structure
 transition. The critic missed it because it reviews by eye and with zoom crops, and has no numeric test for
 transitions. It accepted the render script's "known limit: the jump into solid stays about ×2". The render
@@ -152,8 +185,8 @@ field instead of three stitched zones:
 
 ### P2. CI iOS: 50 min → about 10 min on PRs, about 16 min full (parked behind P1)
 
-- **Owner:** release-engineer (workflow), qa-validator (which tests form the smoke set).
-- **Status:** proposed.
+- **Owner:** cicd-lead (workflow), qa-validator (which tests form the smoke set).
+- **Status:** **done** in 82574ce (PR smoke set, light only; 4 sharded UI jobs + separate E2E on main). xcbeautify (item 3) not adopted; live output is P7.
 
 **Problem.** The iOS job takes about 50 min per push. The UI step is 46 min, and the 64 UI test durations
 sum to 2566 s, by class: Theme 715 s, Deck 641, Study 461, Settings 335, Refresh 316, misc 97. Unit tests
@@ -200,7 +233,7 @@ builds in one DerivedData fail with "database is locked" (forum 729968). The dis
 4. **Later:** `-parallel-testing-enabled YES -parallel-testing-worker-count 2` for mock UI tests only.
    StubAPIServer already uses random ports; e2e stays serial. Estimate: 40 → 20–25 min.
 
-### P4. Colour/design checks as unit tests instead of XCUITest pixel scans (proposed, after P2)
+### P4. Colour/design checks as unit tests instead of XCUITest pixel scans (qa-validator requested; see P8)
 
 - **Owner:** qa-validator + ios-engineer, with design-lead.
 - **Status:** proposed.
@@ -253,6 +286,43 @@ XCUITest keeps navigation, E2E and one appearance-switch smoke test.
   stays P4). **Risk:** `ImageRenderer` can't draw UIKit-backed views (none in the logo; gallery checked).
   **Rollback:** delete the test file and the 2 script lines.
 
+### P7. Live per-test progress, a summary line and correct exit codes (qa-validator request)
+
+- **Owner:** dev-velocity / cicd-lead (shared scripts), qa-validator (user). **Status:** approved by the manager's brief 2026-11-21; implementer spawned.
+- **Problem:** `xcodebuild … | grep` writes nothing to a file or agent log until the run ends: xcodebuild block-buffers
+  stdout into a pipe, and so does grep. QA watched 30–50 min runs blind (full suite 008-r4: 75 tests, 49.3 min).
+  Exit codes were reported wrong twice in one day.
+- **Proposal:** `NSUnbufferedIO=YES` for xcodebuild + `grep --line-buffered` (both standard; no xcbeautify dependency),
+  each finished test streamed as `[n] ✔/✘ Class.test (12.3 s)`; a final line `TESTS: 69 passed, 0 failed, 6 skipped (49.3 min)`
+  from `xcresulttool get test-results summary` (UI) or the stream (unit); exit code = xcodebuild's, never masked by
+  export/rename; a PATH-shim check that a failing/build-broken xcodebuild exits non-zero. **Gain:** first line within
+  seconds of the first test finishing instead of at the end. **Rollback:** revert 3 scripts.
+
+### P8. Contact sheet + one colour helper, then colour checks out of the UI suite (qa-validator request)
+
+- **Owner:** qa-validator (UI tests, qa/), ios-engineer informed (test-only files in `LaCarteKit/Tests`). **Status:** approved; implementers spawned.
+- **Evidence (008-r4):** UI suite 2,952 s; ThemeUITests 622 s; 27 light/dark loops; 5 hand-rolled samplers
+  (`Pixels` in DeckUITests, `close`/`waitForColors`/`assertTextColor`/`assertStatusBar`/`assertKeyboard` in Theme,
+  `assertNoBlue`/`assertInkVisible` in Refresh); 78 sampler call sites. QA opens every PNG by eye.
+- **Proposal:** (a) `scripts/contact-sheet.py <run dir>` (PEP 723, pinned Pillow, `uv run`): one PNG grid, a row per
+  screen, light | dark | forest side by side, names under each; `ios-ui-test.sh` runs it after export when `uv` is present.
+  (b) one `ColorProbe` helper in `Support.swift` (sample, tolerance compare, luminance, "no blue", wait-until) replacing the 5 copies.
+  (c) P4: token × theme × scheme colours of screens `ImageRenderer` can draw, asserted in LaCarteKit unit tests; UI
+  tests keep one light + one dark/forest pass per screen for real-device chrome (status bar, keyboard, sheets).
+  Target ≥ 15 min off the full suite; measured with a before/after full run.
+- **Risk:** ImageRenderer can't draw List/sheets/UIKit chrome, so those checks stay in UI tests. **Rollback:** revert.
+
+### P9. Dark appearance on the iOS 26.5 simulator, unattended (qa-validator request)
+
+- **Owner:** cicd-lead (`ci/boot-simulator.sh`), qa-validator. **Status:** decided 2026-11-21: CI-only, documented.
+- **Finding:** every way to make the *system* appearance dark on a local iOS 26 simulator needs either `simctl ui`
+  (privacy prompt) or writing the device plist under `~/Library/Developer/CoreSimulator` (forbidden unattended);
+  `XCUIDevice.shared.appearance` is ignored under xcodebuild on iOS 26 (Apple forum 812656). No safe local path exists.
+- **Decision:** (1) dark *rendering* on iOS 26.5 locally: use the forced Dark / Forest theme (`-theme dark`), which
+  works without the device appearance (triage A: forced themes rendered correctly on iOS 26). (2) "System follows device
+  dark" on iOS 26: CI shards only (`ci/boot-simulator.sh`), or locally with the user at the Mac running
+  `SIMULATOR=… OS=26.5 ci/boot-simulator.sh` once. (3) P8c moves most colour checks off the device appearance.
+
 ## Decisions log
 
 | Date | Proposal | Owner answer | Result |
@@ -261,3 +331,6 @@ XCUITest keeps navigation, E2E and one appearance-switch smoke test.
 | 2026-11-21 | P1 design-review tool | manager approved for design-critic and design-lead | implemented: `scripts/design-review.py`, critic rule updated; pass5 FAILS, synthetic PASSES |
 | 2026-11-21 | P3 step 1 / design-lead's `wait-xcodebuild.sh` | already solved by `scripts/_lock.sh` (aa5473b) | no new script |
 | 2026-11-21 | P5 brandkit, P6 Swift renders | manager pre-approved, design-lead requested | tooling-implementers spawned |
+| 2026-11-21 | stale owners (rows 4, 11, 12), P2 status | instructions-keeper via manager | fixed: dev-velocity / cicd-lead; P2 done (82574ce) |
+| 2026-11-21 | P1 closing-hole bug + `--screen stochastic` (+ brandkit `progressive_blue_noise`) | design-lead + design-critic requested, manager approved | implemented: round 8b's 312 closing holes measured; stochastic mode + synthetic (11 of 12 seeds); round 9 FAILS 4/31 |
+| 2026-11-21 | P7 live progress, P8 contact sheet + colour helper + P4, P9 iOS 26 dark | manager pre-approved, qa-validator requested | P7, P8 implementers spawned; P9 documented as CI-only / forced-theme locally |
