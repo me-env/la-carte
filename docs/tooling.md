@@ -69,6 +69,29 @@ payoff. Measurements are from 2026-11-21 (CI run 44907442393, local `qa/.results
     continuity 0.396, |ψ6| drawdown 0.132, NN drawdown 0.129). round7 `card-{light,dark}-1024.png` (fix b,
     hexagons): FAIL 1/18 (min gap 0.085 under the old dot-only rule) → **PASS 20/20**, but the min gap is
     0.200, right at the limit, at x 385, y 536. pass5: still FAIL 7/20, with the same values.
+- **Update 2026-11-21 (round 7 defects the critic saw by eye; design-lead requested, manager approved).** Round 7
+  `card-*-1024.png` passed 20/20 with hairline walls, grey mush and a bitten front; mid-animation frames were
+  never checked. Now 1,013 lines, ~1.1 s per render (was 0.95 s), 24 metrics:
+  - **`--frames DIR|GLOB`** (repeatable): every metric on every frame, one line per frame, then the worst frame
+    per metric. The optical centre is shown but not counted on frames (a fill moves the ink centroid).
+  - **Closing zone** (local coverage ≥ 0.5 up to the plateau): `closing: grey px (not AA edge) %` (luminance
+    60–200 on the render normalised to paper 255 / ink 0, minus clean AA edge pixels; limit 1%) and
+    `closing: hairline walls < 2 px %` (ink or paper walls a 2 px disk can't fit, runs ≥ 6 px; limit 0.5%).
+  - **Front into the solid** (one-pitch box at the plateau, per row, running mean over 3 pitches):
+    `front: swing px` (limit 8) and `front: raw step / 2 px` (unblurred, boxed over one lattice period; limit 0.06).
+  - **Touching exemption** coverage is now measured inside the silhouette (normalised convolution, mask = convex
+    hull of the ink), so closing cells at the card's edge aren't diluted by the background.
+  - **`--make-synthetic` changed:** the old one closed exactly like round 7 (walls thinning to 0) and fails the
+    new checks (grey 8.9%, hairlines 6.2%). Now walls stop at 2.2 px and the paper web retracts into the cell
+    corners (Y holes, then shrinking holes): grey 0.47%, hairlines 0.04%, swing 3.6 px; PASS 24/24 on 12 of 12
+    seeds. `scripts/brandkit.py`'s `mark()` still uses the old closing, so `brandkit.py --selftest` (e) FAILS
+    until design-lead ports the new closing (owner: design-lead).
+  - Results (before → after): round7 `card-{light,dark,forest}-1024.png` PASS 20/20 → **FAIL 3/24** (grey 3.6%,
+    hairlines 5.7%, swing 41 px at x 527); round7 frames: worst frame FAILs |ψ6| drawdown 0.101 (frame 050), NN
+    drawdown 0.100 and 4 merged blobs at x 760 (frame 025), grey/hairlines/swing (frame 075); round8
+    `card-{light,dark}-1024.png` PASS 20/20 → FAIL 2/24 (hairlines 4.7%, swing 57 px); round8 frame 0.50's edge
+    cells at x ≈ 715 are now exempt (a real early-closed cell at x 513 still fails). pass5 FAIL 7/20 → 8/24
+    (adds raw step 0.22); round7 flip FAIL 4/20 → 6/24 (adds swing 21–40 px, raw step 0.138).
 
 **Problem (measured on `round6/pass5/card-light-1024.png`).** The user saw a non-smooth noise→structure
 transition. The critic missed it because it reviews by eye and with zoom crops, and has no numeric test for

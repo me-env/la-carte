@@ -13,19 +13,25 @@
     uv run scripts/design-review.py <render-1024.png|.svg>... [--home] [--axis x|y] [--region x0,y0,x1,y1] [--out sheet.png]
     uv run scripts/design-review.py card-light-1024.png card-dark-1024.png --watch   # re-run on every save
     uv run scripts/design-review.py --make-synthetic out.png     # a smooth reference ramp that must PASS
+    uv run scripts/design-review.py --frames round8/frames/  (or --frames 'round8/card-frame-*.png')   # an animation
 
 Prints PASS/FAIL per metric (value vs limit, and WHERE: `at x 385, y 535 (band 5)` in the render's own 1024 px
 coordinates; band = 32 px band counted from where the ink starts rising) and writes an annotated sheet (render,
 curves under it on the same x axis, failing spots in red and failing marks circled, 58/29 px previews).
 Exit code 1 on any FAIL. Several renders: each is reviewed. `--watch`: re-runs when a render's file changes
-(polls mtime) and prints one PASS/FAIL line per run with the failing metrics and their spots.
+(polls mtime) and prints one PASS/FAIL line per run with the failing metrics and their spots. `--frames DIR|GLOB`
+(repeatable, one per animation): every metric on every frame, one line per frame, then the worst frame per metric
+(its value, frame and spot, and how many frames fail). The optical centre is shown but not counted on frames (a
+fill moves the ink centroid; the still icon is reviewed on its own).
 All lengths are in px of a 1024 tile; other sizes are resampled to 1024 first. SVGs go through rsvg-convert.
 
 Marks are dots (small ink components: SVG circles or PNG connected components) AND holes (small paper
 components sitting in ink: the inverted image). An AM halftone flips from ink dots to paper holes at 50%
 coverage; both halves are marks, stitched into one point set along the axis. Local coverage = the grain-blurred
-coverage profile at the mark's x. Where it is >= TOUCH_OK_COVERAGE (0.65) marks may touch and close into solid,
-so marks there are not analysed (the coverage profile judges that zone; the header line counts them).
+coverage profile at the mark's x, measured inside the mark's silhouette only (normalised convolution
+blur(ink*mask)/blur(mask), mask = convex hull of the ink), so cells at the card's edge aren't diluted by the
+background. Where it is >= TOUCH_OK_COVERAGE (0.65) marks may touch and close into solid, so marks there are not
+analysed (the coverage profile and checks 5-6 judge that zone; the header line counts them).
 
 What it measures, along the transition axis (default x; the direction of rising ink is auto-detected):
 1. Coverage profile at 1024: ink per 8 px column over the middle 60% of the mark's height (avoids rounded
@@ -43,7 +49,18 @@ What it measures, along the transition axis (default x; the direction of rising 
    - flip continuity: the last dots and the first holes (2 pitches either side of the flip, where the hole
      fraction in a one-pitch window reaches 1/2) must match: max of |d pitch|/pitch, |d r|/max r and
      |d |psi6|| <= FLIP_STEP_MAX. The negative must continue the positive.
-5. Geometry: merged (elongated) marks and the smallest gap / (r1+r2), both polarities: mark to mark along
+5. Closing zone (local coverage >= 0.5 up to the solid plateau): grey mush and hairlines.
+   - grey px: % of pixels with luminance 60-200 (on the render normalised to paper 255 / ink 0) that are NOT a
+     clean anti-aliased edge (a clean edge pixel has pure ink and pure paper in its 3x3); the note gives all grey.
+   - hairline walls: % of pixels in ink or paper walls thinner than 2 px (4x upsample; a disk just under 2 px
+     doesn't fit: grey top-hat > 0.25), counting only runs >= 6 px long (corner tips and the last specks of a
+     closing hole are not walls). A web of 1 px walls between closing hexagons fails both.
+6. Front into the solid. Per row (middle 80% of the height), where coverage boxed over one pitch (inside the
+   silhouette) stays at the plateau into the solid; a running mean over 3 pitches removes the lattice zigzag.
+   - swing: max - min of that front (a "bitten", swinging front fails; round 7: 41 px).
+   - raw step: max |step| per 2 px column of the raw (unblurred) profile, boxed over exactly one lattice period
+     (autocorrelation) so the lattice doesn't alias, from coverage 0.5 into the solid: a gap or jump at the joint.
+7. Geometry: merged (elongated) marks and the smallest gap / (r1+r2), both polarities: mark to mark along
    Delaunay edges (sub-pixel on the centre line; r = each mark's own extent along it, so facing hexagons
    use their apothem), and mark to the rest of its colour (a dot touching the solid or the ink between
    holes, a hole opening into the paper; pixel distance). Optical centre (midpoint of the bbox centre and
@@ -59,8 +76,11 @@ blue-noise points (Bridson Poisson-disc) matched one-to-one to a hex lattice of 
 once dots are within ~0.2 pitch of their site, so a linear or smoothstep w bunches the order rise at the
 end) and reaching the site by c = 0.55 (later, near-random big marks break the gap rule); one coverage
 function c(x) drives one ink mark per cell: a dot, then a rounded hexagon growing into the cell, closing into
-solid. Coverage is continuous 0 -> 1 with no flip, no gap column and no jump into the solid. (The earlier
-AM-halftone version, dots inverting to holes in one column at 50%, fails `seam: polarity mix`.)
+solid: walls stop at 2.2 px (c ~ 0.67), then the paper web keeps that width and retracts from the middle of each
+edge into the cell corners (Y-shaped holes, then small holes shrinking to nothing), so no wall is ever thinner than
+2 px. Coverage is continuous 0 -> 1 with no flip, no gap column and no jump into the solid. (The earlier
+AM-halftone version, dots inverting to holes in one column at 50%, fails `seam: polarity mix`; the round-7-style
+version, walls thinning to 0, fails the hairline checks.)
 """
 import argparse, json, math, os, re, subprocess, sys, tempfile, urllib.request
 from pathlib import Path
@@ -71,8 +91,9 @@ from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial import Delaunay, cKDTree
 
-# ---- Thresholds (calibrated 2026-11-21 on round6/pass5 and round7/render_flip.py's flip-*-1024.png, which must
-# FAIL, and --make-synthetic (12 of 12 seeds) and round7 card-*-1024.png, which PASS; revisit after two rounds). Units: coverage fraction 0..1 per column of the given size.
+# ---- Thresholds (calibrated 2026-11-21 on round6/pass5, round7 flip-*-1024.png and round7 card-* (hairline
+# walls, bitten front: the critic's eye), which must FAIL, and --make-synthetic (12 of 12 seeds), which PASSES;
+# revisit after two rounds). Units: coverage fraction 0..1 per column of the given size.
 TILE = 1024
 COL_PX = 8                      # profile column width at 1024
 ROW_BAND = 0.6                  # middle fraction of the mark's height used for profiles
@@ -102,6 +123,23 @@ CENTROID_TOL = 0.03             # optical centre (midpoint of bbox centre and in
                                 # tile (31 px) of the tile centre, per axis
 SIZE_CV_MAX = 0.20              # mark radius CV inside one band (one size per position)
 SIZE_STEP_MAX = 0.20            # change of median mark radius between adjacent bands, as a fraction of the max
+# Closing zone (local coverage >= CLOSING_COVERAGE, up to the solid plateau): hairlines and grey mush.
+CLOSING_COVERAGE = 0.5
+GREY_INK = (0.216, 0.765)       # "grey" = luminance 60..200 of 8 bit on the render normalised to paper 255 / ink 0
+                                # (so light, dark and coloured variants measure the same): ink fraction in this range
+GREY_EXCESS_MAX = 1.0           # % of closing-zone px that are grey AND not a clean anti-aliased edge (a clean edge
+                                # pixel has a pure ink and a pure paper pixel, <= 0.1 / >= 0.9, in its 3x3)
+THIN_WALL_PX = 2.0              # ink or paper walls thinner than this (at the 50% level) are hairlines
+HAIRLINE_MIN_LEN = 6            # px: a thin run at least this long is a wall; shorter ones are tips / last specks
+THIN_WALL_MAX = 0.5             # % of closing-zone px inside a hairline wall (the last sub-2 px specks of a closing
+                                # hole are allowed; a web of 1 px walls is not)
+# Front into the solid: per row, where coverage (ink boxed over one pitch, so a closing hole doesn't break it) stays
+# >= PLATEAU into the solid, over the middle FRONT_ROW_BAND of the mark's height, then a running mean over 3
+# pitches along the front (averages out the lattice's own zigzag, ~0.6 pitch).
+FRONT_ROW_BAND = 0.8
+FRONT_SWING_MAX = 8.0           # px: max - min of the smoothed front (synthetic ~1, round 7's bitten front ~41)
+FRONT_RAW_STEP_MAX = 0.06       # max |step| per 2 px column of the raw profile (no blur; only a box of one lattice
+                                # period, which removes the lattice's own aliasing) from coverage 0.5 into the solid
 
 ICON_IDS = [1110145109, 1108187841, 1108185179, 1069512882, 1584215688, 915056765]   # Notes, Reminders,
 # Calendar, Stocks, Clock, Maps: Apple's own apps via the public iTunes lookup API (no personal data).
@@ -224,7 +262,8 @@ def mark_gaps(ink, marks, labels, ids, cov):
             rb = np.argmax(other[:, ::-1], axis=1) / (len(t) - 1) * L
             ext = np.where(other.any(axis=1), ra + rb, rs)
             ok = cov(((a + b) / 2)[:, 0]) >= TOUCH_OK_COVERAGE
-            g = np.where(ok, np.inf, gap / ext)
+            with np.errstate(divide="ignore"):
+                g = np.where(ok, np.inf, gap / ext)
             np.minimum.at(ratio, sel[e[:, 0]], g); np.minimum.at(ratio, sel[e[:, 1]], g)
         lab = labels[pol]
         rest = (lab > 0) & ~np.isin(lab, ids[pol])
@@ -319,6 +358,107 @@ def profile(ink, y0, y1, sigma):
     return band.mean(axis=0)
 
 
+def silhouette(ink):
+    """The filled mark silhouette: convex hull of the ink (the card outline for a card)."""
+    from matplotlib.path import Path as MPath
+    from scipy.spatial import ConvexHull
+    pts = np.argwhere(ink > 0.5)[:, ::-1].astype(float)
+    hull = pts[ConvexHull(pts).vertices]
+    yy, xx = np.mgrid[:TILE, :TILE]
+    inside = MPath(hull).contains_points(np.column_stack([xx.ravel(), yy.ravel()]), radius=1.0)
+    return inside.reshape(TILE, TILE).astype(float)
+
+
+def local_coverage(ink, mask, y0, y1, sigma):
+    """Coverage profile along the axis inside the silhouette only (normalised convolution:
+    blur(ink*mask) / blur(mask)), so marks at the card's edge aren't diluted by the background."""
+    num = ndimage.gaussian_filter(ink * mask, sigma)[y0:y1].sum(axis=0)
+    den = ndimage.gaussian_filter(mask, sigma)[y0:y1].sum(axis=0)
+    return np.where(den > 1e-3 * (y1 - y0), num / np.maximum(den, 1e-9), 0.0)
+
+
+def closing_metrics(ink, covn, y0, y1, x0, x1):
+    """Closing zone = columns from local coverage >= CLOSING_COVERAGE to the plateau. Returns None or
+    (a, b, excess grey %, raw grey %, thin-wall %, worst x, worst y, thin mask)."""
+    c = covn[x0:x1]
+    if not (c >= CLOSING_COVERAGE).any():
+        return None
+    a = x0 + int(np.argmax(c >= CLOSING_COVERAGE))
+    b = max(x0 + int(np.argmax(c >= PLATEAU * c.max())), a + 2)
+    zone = ink[y0:y1, a:b]
+    grey = (zone > GREY_INK[0]) & (zone < GREY_INK[1])
+    edge = (ndimage.maximum_filter(ink >= 0.9, 3) & ndimage.maximum_filter(ink <= 0.1, 3))[y0:y1, a:b]
+    excess = grey & ~edge
+    # hairlines: on a 4x upsampled copy, a wall is thin if a disk just under THIN_WALL_PX (so a 2 px wall passes
+    # at any sub-pixel phase) doesn't fit: grey top-hat > 0.25 (a dim sub-pixel wall counts); only connected runs at
+    # least HAIRLINE_MIN_LEN long are walls (a corner tip or the last speck of a closing hole is not)
+    U, pad = 4, 8
+    sub = ink[y0:y1, max(a - pad, 0):b + pad]
+    up = ndimage.zoom(sub, U, order=1)
+    rad = (THIN_WALL_PX * U - 1) / 2
+    k = int(rad)
+    yy, xx = np.mgrid[-k:k + 1, -k:k + 1]
+    disk = xx ** 2 + yy ** 2 <= rad ** 2 + 0.25
+    thin = np.zeros(sub.shape, bool)
+    for f in (up, 1 - up):                             # ink walls, paper walls
+        th = (f - ndimage.grey_opening(f, footprint=disk)) > 0.25
+        thin |= th[:sub.shape[0] * U, :sub.shape[1] * U].reshape(sub.shape[0], U, sub.shape[1], U).any(axis=(1, 3))
+    lab, n = ndimage.label(thin, np.ones((3, 3)))
+    if n:
+        ext = np.array([max(s[0].stop - s[0].start, s[1].stop - s[1].start) for s in ndimage.find_objects(lab)])
+        thin = np.isin(lab, 1 + np.nonzero(ext >= HAIRLINE_MIN_LEN)[0])
+    off = a - max(a - pad, 0)
+    thin = thin[:, off:off + b - a]
+    bad = excess | thin
+    if bad.any():
+        dens = ndimage.uniform_filter(bad.astype(float), 16)
+        wy, wx = np.unravel_index(int(np.argmax(dens)), dens.shape)
+    else:
+        wy, wx = (y1 - y0) // 2, 0
+    return a, b, excess.mean() * 100, grey.mean() * 100, thin.mean() * 100, a + wx, y0 + wy, thin
+
+
+def front_metrics(ink, mask, covp, pitch, y0, y1, x0, x1):
+    """The front into the solid. Returns None (no solid front) or (swing px, std px, worst x, worst y,
+    raw step per 2 px, raw step x)."""
+    h = y1 - y0
+    fr0, fr1 = int(y0 + h * (1 - FRONT_ROW_BAND) / 2), int(y1 - h * (1 - FRONT_ROW_BAND) / 2)
+    c = covp[x0:x1]
+    xp = x0 + int(np.argmax(c >= PLATEAU * c.max()))
+    xs = min(int(xp + 2 * pitch), x1 - 2)
+    rows = np.arange(fr0, fr1)
+    F = np.full(len(rows), np.nan)
+    n = int(pitch) | 1                                 # one-pitch box inside the silhouette: closing holes and the
+    solid = ndimage.uniform_filter(ink * mask, n) >= PLATEAU * np.maximum(ndimage.uniform_filter(mask, n), 1e-9)  # card edge don't break it
+    for k, y in enumerate(rows):
+        row = solid[y, :xs + 1]
+        if row[xs]:
+            gaps = np.nonzero(~row)[0]
+            F[k] = gaps.max() + 1 if len(gaps) else 0
+    ok = ~np.isnan(F)
+    if ok.mean() < 0.5:
+        return None
+    sm = ndimage.uniform_filter1d(F[ok], int(3 * pitch) | 1, mode="nearest")   # mean: averages the lattice zigzag
+    j = int(np.argmax(np.abs(sm - np.median(sm))))
+    swing, std = float(sm.max() - sm.min()), float(sm.std())
+    # raw step: 1 px profile over the same rows, boxed over one lattice period (autocorrelation peak in
+    # 0.4..1.2 pitch over the closing stretch), sampled every 2 px, from coverage 0.5 to past the front
+    raw = ink[fr0:fr1].mean(axis=0)
+    lo = x0 + int(np.argmax(c >= CLOSING_COVERAGE)) if (c >= CLOSING_COVERAGE).any() else int(np.nanmin(F))
+    hi = int(min(np.nanmax(F) + pitch, x1 - 1))
+    seg = raw[lo:hi] - ndimage.uniform_filter1d(raw[lo:hi], int(2 * pitch) | 1)
+    lags = np.arange(max(2, int(0.4 * pitch)), int(1.2 * pitch) + 1)
+    period = int(pitch)
+    if len(seg) > 3 * pitch:
+        ac = [np.dot(seg[:-L], seg[L:]) / (len(seg) - L) for L in lags]
+        period = int(lags[int(np.argmax(ac))])
+    box = ndimage.uniform_filter1d(raw, period)
+    cols = np.arange(lo, hi, 2)
+    st = np.abs(np.diff(box[cols])) if len(cols) > 1 else np.zeros(1)
+    i = int(np.argmax(st))
+    return swing, std, float(sm[j]), float(rows[ok][j]), float(st[i]), float(cols[min(i, len(cols) - 1)] + 1)
+
+
 def ramp_metrics(p):
     """p: coverage per column. Returns (i0, i1, steps, drawdown, d2) over the ramp i0..i1 inclusive."""
     i0 = int(np.argmax(p > 0.01))
@@ -331,8 +471,9 @@ def ramp_metrics(p):
 
 
 # ---------------------------------------------------------------- review
-def review(path, axis="x", region=None, out=None, home=False, quiet=False):
-    """Prints the report (or, quiet, nothing) and writes the sheet. Returns (fail count, results)."""
+def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame=False):
+    """Prints the report (or, quiet, nothing) and writes the sheet. Returns (fail count, results).
+    frame: an animation frame; the optical centre is reported but not counted (a fill moves the ink centroid)."""
     img, rgb, circles = load(path, axis)
     ink, bg, inkc = ink_map(rgb)
     if region:
@@ -358,7 +499,10 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False):
     # local coverage = the grain-blurred coverage profile along the axis (middle rows, so the paper around the
     # card's edges doesn't dilute it)
     covp = profile(ink, ry0, ry1, sigma)
-    cov = lambda x: covp[np.clip(np.asarray(x).astype(int), 0, TILE - 1)]
+    # local coverage for the touching exemption and the closing zone: inside the silhouette only
+    mask = silhouette(ink)
+    covn = local_coverage(ink, mask, ry0, ry1, sigma)
+    cov = lambda x: covn[np.clip(np.asarray(x).astype(int), 0, TILE - 1)]
     gaps = mark_gaps(ink, marks, labels, ids, cov)
     mcov = cov(marks[:, 0])
     merged_xy = marks[(marks[:, 4] > 0) & (mcov < TOUCH_OK_COVERAGE), :2]
@@ -447,7 +591,38 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False):
         if mix < POLARITY_MIN_MIX or step > FLIP_STEP_MAX:
             bad_x.append(flip_x)
 
-    # 5. geometry
+    # 5. closing zone: grey mush and hairline walls
+    cm = closing_metrics(ink, covn, ry0, ry1, x0, x1)
+    if cm is None:
+        results.append(("closing: grey px (not AA edge) %", 0, GREY_EXCESS_MAX, True, f"no zone with coverage >= {CLOSING_COVERAGE}"))
+        results.append(("closing: hairline walls < 2 px %", 0, THIN_WALL_MAX, True, f"no zone with coverage >= {CLOSING_COVERAGE}"))
+    else:
+        a, b, excess, grey, thin, wx, wy, _ = cm
+        zone = f"zone {axis} {min(x_report(a, flip), x_report(b, flip)):.0f}-{max(x_report(a, flip), x_report(b, flip)):.0f}"
+        results.append(("closing: grey px (not AA edge) %", excess, GREY_EXCESS_MAX, excess <= GREY_EXCESS_MAX,
+                        f"{zone}; all grey (lum 60-200) {grey:.1f}%; densest {at(wx, wy)}"))
+        results.append(("closing: hairline walls < 2 px %", thin, THIN_WALL_MAX, thin <= THIN_WALL_MAX,
+                        f"{zone}; ink or paper walls < {THIN_WALL_PX:g} px; densest {at(wx, wy)}"))
+        if excess > GREY_EXCESS_MAX or thin > THIN_WALL_MAX:
+            bad_x.append(float(wx)); bad_pts.append((float(wx), float(wy)))
+
+    # 6. front into the solid: straightness and the unblurred step
+    fm2 = front_metrics(ink, mask, covp, pitch, y0, y1, x0, x1)
+    if fm2 is None:
+        results.append(("front: swing px", 0, FRONT_SWING_MAX, True, "no solid front"))
+        results.append(("front: raw step / 2 px", 0, FRONT_RAW_STEP_MAX, True, "no solid front"))
+    else:
+        swing, fstd, fx, fy, rstep, rx = fm2
+        results.append(("front: swing px", swing, FRONT_SWING_MAX, swing <= FRONT_SWING_MAX,
+                        f"std {fstd:.1f} px over the middle {FRONT_ROW_BAND:.0%} of the height; furthest {at(fx, fy)}"))
+        results.append(("front: raw step / 2 px", rstep, FRONT_RAW_STEP_MAX, rstep <= FRONT_RAW_STEP_MAX,
+                        f"unblurred, boxed over one lattice period; worst {at(rx)}"))
+        if swing > FRONT_SWING_MAX:
+            bad_x.append(fx); bad_pts.append((fx, fy))
+        if rstep > FRONT_RAW_STEP_MAX:
+            bad_x.append(rx)
+
+    # 7. geometry
     results.append(("touching: merged blobs", merged, 0, merged == 0,
                     f"count where coverage < {TOUCH_OK_COVERAGE}" + (f"; first {at(*merged_xy[0])}" if merged else "")))
     bad_pts += [tuple(p_) for p_ in merged_xy]
@@ -472,8 +647,8 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False):
         bx, by = by, bx
     ox, oy = (cx + bx) / 2, (cy + by) / 2
     off = max(abs(ox - TILE / 2), abs(oy - TILE / 2)) / TILE
-    results.append(("optical centre offset / tile", off, CENTROID_TOL, off <= CENTROID_TOL,
-                    f"centroid ({cx:.0f}, {cy:.0f}), bbox centre ({bx:.0f}, {by:.0f})"))
+    results.append(("optical centre offset / tile", off, CENTROID_TOL, frame or off <= CENTROID_TOL,
+                    ("INFO, not counted on a frame: " if frame and off > CENTROID_TOL else "") + f"centroid ({cx:.0f}, {cy:.0f}), bbox centre ({bx:.0f}, {by:.0f})"))
     if len(bands):
         j = int(np.nanargmax(bands[:, 4]))
         cv = bands[j, 4]
@@ -507,6 +682,42 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False):
     print(f"RESULT: {'FAIL' if fails else 'PASS'} ({fails} of {len(results)} metrics failed)")
     print(f"sheet: {out}" + (f"\nhome:  {out.with_name(Path(path).stem + '-home.png')}" if home else ""))
     return fails, results
+
+
+def frame_paths(spec):
+    """--frames value: a directory (its *.png and *.svg, sorted) or a glob pattern."""
+    import glob
+    p = Path(spec)
+    if p.is_dir():
+        return sorted(str(f) for f in p.iterdir() if f.suffix.lower() in (".png", ".svg"))
+    return sorted(glob.glob(spec))
+
+
+def review_frames(paths, axis, region, home):
+    """Every metric on every frame; prints one line per frame, then the worst frame per metric. Returns fails."""
+    runs = []
+    for p in paths:
+        fails, results = review(p, axis, region, None, home, quiet=True, frame=True)
+        runs.append((Path(p).name, fails, results))
+        bad = ", ".join(m.strip() for m, _, _, ok, _ in results if not ok)
+        print(f"frame {Path(p).name}: {'FAIL' if fails else 'PASS'} ({fails} of {len(results)})" + (f": {bad}" if bad else ""))
+    print(f"\ndesign-review frames: {len(runs)} frames, worst frame per metric")
+    print(f"{'METRIC':<40}{'VALUE':>8}{'LIMIT':>8}  RESULT  FRAME / WHERE")
+    nfail = 0
+    for k, (m, _, lim, _, _) in enumerate(runs[0][2]):
+        higher = "min gap" in m or "polarity mix" in m
+        rows = [(name, res[k]) for name, _, res in runs]
+        bad = [r for r in rows if not r[1][3]]
+        pool = bad or rows                             # the worst failing frame, else the worst value
+        name, (_, v, _, ok, note) = (min if higher else max)(pool, key=lambda r: r[1][1])
+        nfail += not ok
+        tail = f" ({len(bad)} of {len(rows)} frames fail)" if bad else ""
+        print(f"{m:<40}{v:>8.3f}{'>=' if higher else '<=':>4}{lim:<5.3g} {'PASS' if ok else 'FAIL'}  {name}: {note}{tail}")
+    worst = max(runs, key=lambda r: r[1])
+    print(f"RESULT: {'FAIL' if nfail else 'PASS'} ({nfail} of {len(runs[0][2])} metrics fail on some frame)")
+    print(f"sheets: {Path(tempfile.gettempdir()) / 'design-review'}/<frame>-review.png; most failures: "
+          f"{Path(tempfile.gettempdir()) / 'design-review' / (Path(worst[0]).stem + '-review.png')}")
+    return nfail
 
 
 def watch(paths, run):
@@ -721,16 +932,29 @@ def synthetic_ramp(out, seed=7):
     ink = (sd <= 0) & (xs >= XS)                   # the solid
     ramp = (sd <= 0) & (xs < XS)
     p = np.column_stack([xs[ramp], ys[ramp]])
-    # mark shape per coverage: round dot (k = 0) below C1, then a rounded hexagon of exact area c * cell
-    cell_area, C1 = math.sqrt(3) / 2 * A * A, 0.35
-    e1 = A * math.sqrt(C1 * math.sqrt(3) / (2 * math.pi))
-    es = np.linspace(e1, A / 2, 600)                                    # extent k + rho
-    rhos = e1 * (A / 2 - es) / (A / 2 - e1)
+    # mark shape per coverage: round dot (k = 0) below C1, then a rounded hexagon of exact area c * cell whose
+    # walls stop at SYN_WALL (C2); then the paper web keeps that width and retracts from each edge's middle
+    # into the cell corners (paper = wall band within L of a corner, L -> 0): no wall ever thinner than 2 px
+    cell_area, C1, SYN_WALL = math.sqrt(3) / 2 * A * A, 0.35, 2.2
+    e1, e2 = A * math.sqrt(C1 * math.sqrt(3) / (2 * math.pi)), (A - SYN_WALL) / 2
+    es = np.linspace(e1, e2, 600)                                       # extent k + rho
+    rhos = e1 * (e2 - es) / (e2 - e1)
     covs = (2 * math.sqrt(3) * (es - rhos) ** 2 + 4 * math.sqrt(3) * (es - rhos) * rhos + math.pi * rhos ** 2) / cell_area
+    C2 = covs[-1]
+    Rc = A / math.sqrt(3)                                               # cell circumradius (corner distance)
+    corners = np.array([[Rc, 0], [Rc / 2, A / 2]])
+    hexnorm = lambda q: np.maximum(q[..., 1], 0.866025404 * q[..., 0] + 0.5 * q[..., 1])
+    corner_d = lambda q: np.min(np.linalg.norm(q[..., None, :] - corners, axis=-1), axis=-1)
+    g = (np.mgrid[0:300, 0:300].reshape(2, -1).T + 0.5) / 300 * [Rc, A / 2]   # one quarter cell, sampled
+    g = g[hexnorm(g) <= A / 2]
+    band = A / 2 - hexnorm(g) < SYN_WALL / 2
+    Ls = np.linspace(0, math.hypot(Rc / 2, SYN_WALL / 2) + 0.01, 300)
+    covL = np.array([1 - (band & (corner_d(g) < L)).mean() for L in Ls])     # falls from 1 to C2 as L grows
     cl = cKDTree(lat).query(p)[1]                  # Voronoi cell of each pixel
     cc = c(lat[:, 0])
-    e = np.where(cc < C1, A * np.sqrt(cc * math.sqrt(3) / (2 * math.pi)), np.interp(cc, covs, es))
-    rho = np.where(cc < C1, e, np.interp(cc, covs, rhos))
+    e = np.where(cc < C1, A * np.sqrt(cc * math.sqrt(3) / (2 * math.pi)), np.interp(np.minimum(cc, C2), covs, es))
+    rho = np.where(cc < C1, e, np.interp(np.minimum(cc, C2), covs, rhos))
+    L = np.interp(-cc, -covL, Ls)                  # covL is decreasing in L
     pc = pos[cl]                                   # marks stay whole: drop any not fully inside the card
     qx, qy = np.abs(pc[:, 0] - CX) - (W / 2 - R), np.abs(pc[:, 1] - CY) - (H / 2 - R)
     whole = (np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - R <= -e[cl]) | (cc[cl] >= 0.9)
@@ -739,7 +963,9 @@ def synthetic_ramp(out, seed=7):
     d = np.minimum(-0.866025404 * q[:, 0] + 0.5 * q[:, 1], 0)
     hx, hy = q[:, 0] + 2 * d * 0.866025404, q[:, 1] - 2 * d * 0.5
     hx, hy = hx - np.clip(hx, -0.577350269 * k, 0.577350269 * k), hy - k
-    ink[ramp] = (np.hypot(hx, hy) * np.sign(hy) - rho[cl] <= 0) & whole
+    late = cc[cl] >= C2
+    web = (A / 2 - hexnorm(q) < SYN_WALL / 2) & (corner_d(q) < L[cl])
+    ink[ramp] = np.where(late, ~web, (np.hypot(hx, hy) * np.sign(hy) - rho[cl] <= 0) & whole)
     cov = ink.reshape(TILE, S, TILE, S).mean(axis=(1, 3))[..., None]
     Image.fromarray((BG * (1 - cov) + INK * cov).astype(np.uint8)).save(out)
     print(f"synthetic ramp: {out}")
@@ -755,14 +981,19 @@ if __name__ == "__main__":
     ap.add_argument("--out", help="sheet path (default: $TMPDIR/design-review/<name>-review.png)")
     ap.add_argument("--make-synthetic", metavar="OUT.png", help="write the smooth reference ramp and review it")
     ap.add_argument("--watch", action="store_true", help="re-run when a render changes; one PASS/FAIL line per run")
+    ap.add_argument("--frames", action="append", metavar="DIR|GLOB",
+                    help="an animation's frames (a directory or a quoted glob): every metric on every frame, worst "
+                         "frame per metric; repeatable")
     a = ap.parse_args()
     if a.make_synthetic:
         synthetic_ramp(a.make_synthetic)
         a.render = a.render or [a.make_synthetic]
-    if not a.render:
-        ap.error("render path required")
-    if a.out and len(a.render) > 1:
-        ap.error("--out takes one render")
+    if not a.render and not a.frames:
+        ap.error("render path (or --frames) required")
+    if a.out and (len(a.render) > 1 or a.frames):
+        ap.error("--out takes one render (frame sheets go to $TMPDIR/design-review/)")
+    if a.watch and a.frames:
+        ap.error("--watch takes renders, not --frames")
     region = tuple(int(v) for v in a.region.split(",")) if a.region else None
     if a.watch:
         watch(a.render, lambda p: review(p, a.axis, region, a.out, a.home, quiet=True))
@@ -772,4 +1003,11 @@ if __name__ == "__main__":
         if k:
             print()
         fails += review(path, a.axis, region, a.out, a.home)[0]
+    for k, spec in enumerate(a.frames or []):
+        paths = frame_paths(spec)
+        if not paths:
+            ap.error(f"--frames {spec}: no .png/.svg frames")
+        if k or a.render:
+            print()
+        fails += review_frames(paths, a.axis, region, a.home)
     sys.exit(1 if fails else 0)

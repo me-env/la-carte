@@ -44,7 +44,12 @@ vertical, `--region x0,y0,x1,y1` to isolate one part; `--watch` re-runs on every
 summary). It checks coverage smoothness at 1024/58/29 px; order (|psi6|, NN regularity) along the axis over
 dots AND holes (an AM halftone's paper holes past 50% are marks too); seams: a dots -> holes flip must mix
 over >= 4 pitches and the first holes must continue the last dots (pitch, size, order); touching marks
-(allowed only where local coverage >= 0.65, i.e. closing into solid); optical centre and mark-size rhythm.
+(allowed only where local coverage >= 0.65, measured inside the card's silhouette, i.e. closing into solid); in
+the closing zone (coverage >= 0.5) grey mush (grey px that aren't a clean anti-aliased edge) and hairline walls
+(< 2 px); the front into the solid (swing along the card's height, and the unblurred step at 2 px); optical
+centre and mark-size rhythm. **Animations:** also run `--frames <dir>` (or a quoted glob) on the frame sequence;
+it runs every metric on every frame and reports the worst frame per metric (any frame FAIL = ITERATE; the optical
+centre is shown but not counted on frames).
 Every line says where (`at x …, y … (band n)`, 1024 px). It writes a sheet (curves under the render,
 failing spots in red, failing marks circled, 58/29 px previews) plus a home-screen mock with Apple's real
 icons. Thresholds are the named constants at the top of the script.
