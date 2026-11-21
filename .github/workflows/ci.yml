@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API (ruff + pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: scripts/api-test.sh
+
+  api-image:
+    name: API (docker build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the production image (same as Dokploy)
+        run: docker build -t la-carte-api:ci api/
+      - name: Starts and answers /health
+        run: |
+          docker run -d --name api -p 8000:8000 -e LA_CARTE_API_TOKEN=ci-token la-carte-api:ci
+          for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/health && exit 0; sleep 1; done
+          docker logs api; exit 1
+
+  ios:
+    name: iOS (unit + UI + E2E, screenshots)
+    runs-on: macos-26
+    env:
+      SIMULATOR: ${{ vars.CI_SIMULATOR || 'iPhone 17' }}
+      OS: ${{ vars.CI_IOS_VERSION || 'latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '27'  # iOS 27 deployment target needs the Xcode 27 SDK
+      - uses: astral-sh/setup-uv@v6
+      - name: Unit tests
+        run: scripts/ios-test.sh
+      - name: UI tests (mock deck, light + dark)
+        run: scripts/ios-ui-test.sh ci-mock
+      - name: E2E (live API)
+        run: scripts/e2e.sh ci-e2e
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: qa/screenshots/

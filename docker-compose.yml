@@ -1,0 +1,17 @@
+# Production deployment of the la-carte API (Dokploy "Docker Compose" service). See docs/deploy.md.
+# Dokploy writes the env vars set in its UI to a .env file next to this file; they reach the
+# container only through the ${...} references below. The domain + HTTPS (Traefik labels) are
+# added by Dokploy from its Domains tab, so none are declared here.
+services:
+  api:
+    build: ./api
+    restart: unless-stopped
+    environment:
+      LA_CARTE_API_TOKEN: ${LA_CARTE_API_TOKEN:?Set LA_CARTE_API_TOKEN (openssl rand -hex 32)}
+    expose:
+      - "8000"
+    volumes:
+      - la-carte-data:/data
+
+volumes:
+  la-carte-data:

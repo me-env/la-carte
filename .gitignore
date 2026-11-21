@@ -1,0 +1,23 @@
+.DS_Store
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcresult
+ios/LaCarteKit/.build/
+ios/LaCarteKit/.swiftpm/
+# Python
+api/.venv/
+__pycache__/
+*.db
+.env
+# QA artifacts (screenshots are reviewed, then kept only via reports)
+qa/.results/
+qa/screenshots/*
+!qa/screenshots/.gitkeep
+# Third-party design references (downloaded with scripts/fetch-design-refs.sh)
+docs/design/reference/
+
+# CI build output (archives, ipa, decoded keys)
+build/
+*.p8
+*.p12

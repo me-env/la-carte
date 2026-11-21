@@ -1,0 +1,55 @@
+# la-carte
+
+A minimalist flashcard app: **one deck, no login, spaced repetition (FSRS)**, plus an **MCP server**
+so any agent can say "add these words to my deck". Monorepo:
+
+| Path | What | Stack |
+|---|---|---|
+| `api/` | Source of truth: cards, scheduling, REST for the app, MCP for agents | Python 3.13, FastAPI, SQLModel/SQLite, `fsrs`, `mcp` 2.x, uv |
+| `ios/` | The app: thin Xcode shell + `LaCarteKit` Swift package (all code lives there) | Swift 6, SwiftUI, TCA 1.26, iOS 27 |
+| `docs/` | Architecture, conventions, design system, specs | — |
+| `qa/` | QA reports + exported UI-test screenshots | — |
+| `scripts/` | The only way to build/test (agents: use these, don't improvise xcodebuild) | bash |
+| `ci/`, `.github/` | CI + Ad Hoc .ipa for the iPhone (see `docs/release.md`) | GitHub Actions |
+| `docker-compose.yml`, `api/Dockerfile` | Production API on Dokploy (see `docs/deploy.md`) | Docker Compose |
+
+## Commands
+
+```bash
+scripts/api-test.sh          # ruff + pytest
+scripts/api-dev.sh           # API on :8000 (REST + /mcp), auto-reload
+scripts/ios-build.sh         # build app for simulator
+scripts/ios-test.sh          # LaCarteKit unit tests (TestStore)
+scripts/ios-ui-test.sh <run> # XCUITest (mock API) → qa/screenshots/<run>/
+scripts/e2e.sh <run>         # fresh API + seeded deck → live UI tests → qa/screenshots/<run>/
+scripts/ios-adhoc.sh         # signed Ad Hoc .ipa (same steps as CI)
+scripts/ios-install-device.sh [ipa]  # install latest CI .ipa (or a local one) on the iPhone
+```
+Simulator defaults: `iPhone 17 Pro`, latest iOS (27). Override with `SIMULATOR=… OS=…`.
+
+## How work gets done (agent team)
+
+The main session is the **manager**: it talks to the user, keeps the backlog
+(`docs/specs/backlog.md`), and delegates. It does not write feature code itself.
+
+| Agent | Owns | Never |
+|---|---|---|
+| `architect` | Specs in `docs/specs/`, API ↔ app contracts, architecture docs | Writes feature code |
+| `ios-engineer` | `ios/LaCarteKit/**`, `ios/LaCarte/**` + unit tests | Touches `LaCarteUITests/`, `api/` |
+| `api-engineer` | `api/**` (REST, MCP, scheduling) + pytest | Touches `ios/` |
+| `code-reviewer` | Read-only review for simplicity/clarity/conventions | Edits code |
+| `qa-validator` | **Independent** E2E: `ios/LaCarteUITests/**`, `qa/**`, screenshots, verdict | Edits app or API code |
+| `release-engineer` | CI, signing, Ad Hoc builds, installing on the iPhone (`ci/`, `.github/`) | Changes features; touches the Apple account/repo without the user's OK |
+
+Pipeline per feature — full detail in `docs/workflow.md`:
+**spec (architect) → implement (ios/api engineer) → review (code-reviewer) → validate (qa-validator) → done.**
+A feature is **not done** until `qa-validator` has written a PASS report with screenshots in `qa/reports/`.
+
+## Non-negotiables
+
+- **Simple and readable beats clever.** Smallest change that fully solves the spec. No speculative abstractions.
+- iOS follows `docs/tca-conventions.md` (latest Point-Free practices). API follows `docs/architecture.md`.
+- Visual work follows `docs/design-system.md`; tokens live in `ios/LaCarteKit/Sources/DesignSystem`.
+- Any API contract change updates **both** sides in the same feature: `api/` models + `APIClient` + `DecodingTests`.
+- Every interactive view element gets an `accessibilityIdentifier("<feature>.<element>")` (UI tests depend on it).
+- Run the relevant `scripts/*` before reporting work as finished, and report failures honestly.

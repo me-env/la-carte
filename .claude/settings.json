@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scripts/*)",
+      "Bash(ci/archive.sh)", "Bash(ci/export-ipa.sh)", "Bash(ci/verify-ipa.sh)",
+      "Bash(uv run *)",
+      "Bash(xcodebuild *)", "Bash(xcrun simctl *)", "Bash(xcrun xcresulttool *)",
+      "Bash(xcrun devicectl list *)",
+      "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)"
+    ],
+    "ask": [
+      "Bash(xcrun devicectl device install *)",
+      "Bash(git push*)", "Bash(gh secret *)", "Bash(gh release *)"
+    ]
+  }
+}
