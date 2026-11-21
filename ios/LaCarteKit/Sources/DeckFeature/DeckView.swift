@@ -15,86 +15,114 @@ public struct DeckView: View {
   }
 
   public var body: some View {
-    NavigationStack {
-      content
-        // Rows, menus and swipe-delete keep the system tint; the search cursor's pink is `Theme.tintSearchFields()`.
-        .tint(Color?.none)
-        .background(Theme.background)
-        .refreshable { await store.send(.pulledToRefresh).finish() }
-        .navigationTitle("Cards")
-        .toolbar {
-          ToolbarItem(placement: .primaryAction) {
-            Button("Settings", systemImage: "gearshape") { store.send(.settingsButtonTapped) }
-              .tint(Theme.ink)
-              .accessibilityIdentifier("deck.settings")
-          }
-          ToolbarItem(placement: .primaryAction) {
-            Button("Add card", systemImage: "plus") { store.send(.addButtonTapped) }
-              .tint(Theme.ink)
-              .accessibilityIdentifier("deck.add")
-          }
-        }
-        .searchable(text: $store.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled()
+    NavigationStack { navigationContent }
+      .sensoryFeedback(.impact(weight: .light), trigger: store.deletions)
+      .sensoryFeedback(.error, trigger: store.phase, condition: Self.isErrorPhase)
+      .onAppear { store.send(.onAppear) }
+      .onChange(of: scenePhase) { (_: ScenePhase, phase: ScenePhase) in store.send(.scenePhaseChanged(phase)) }
+      .sheet(item: editorStore) { (editorStore: StoreOf<NoteEditorFeature>) in
+        NoteEditorView(store: editorStore)
+      }
+      .sheet(item: settingsStore) { (settingsStore: StoreOf<SettingsFeature>) in
+        SettingsView(store: settingsStore)
+      }
+  }
+
+  private var editorStore: Binding<StoreOf<NoteEditorFeature>?> {
+    $store.scope(\.$destination, action: \.destination).editor
+  }
+
+  private var settingsStore: Binding<StoreOf<SettingsFeature>?> {
+    $store.scope(\.$destination, action: \.destination).settings
+  }
+
+  private var navigationContent: some View {
+    content
+      // Rows, menus and swipe-delete keep the system tint; the search cursor's pink is `Theme.tintSearchFields()`.
+      .tint(Color?.none)
+      .background(Theme.background)
+      .refreshable { await store.send(.pulledToRefresh).finish() }
+      .navigationTitle("Cards")
+      .toolbar { toolbar }
+      .searchable(text: $store.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+      .textInputAutocapitalization(.never)
+      .autocorrectionDisabled()
+  }
+
+  @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+    ToolbarItem(placement: .primaryAction) {
+      Button("Settings", systemImage: "gearshape") { store.send(.settingsButtonTapped) }
+        .tint(Theme.ink)
+        .accessibilityIdentifier("deck.settings")
     }
-    .sensoryFeedback(.impact(weight: .light), trigger: store.deletions)
-    .sensoryFeedback(.error, trigger: store.phase) { _, new in new == .offline || new == .unauthorized }
-    .onAppear { store.send(.onAppear) }
-    .onChange(of: scenePhase) { _, phase in store.send(.scenePhaseChanged(phase)) }
-    .sheet(item: $store.scope(\.$destination, action: \.destination).editor) { editorStore in
-      NoteEditorView(store: editorStore)
+    ToolbarItem(placement: .primaryAction) {
+      Button("Add card", systemImage: "plus") { store.send(.addButtonTapped) }
+        .tint(Theme.ink)
+        .accessibilityIdentifier("deck.add")
     }
-    .sheet(item: $store.scope(\.$destination, action: \.destination).settings) { settingsStore in
-      SettingsView(store: settingsStore)
-    }
+  }
+
+  private static func isErrorPhase(_ old: DeckFeature.State.Phase, _ new: DeckFeature.State.Phase) -> Bool {
+    new == .offline || new == .unauthorized
   }
 
   @ViewBuilder private var content: some View {
     if let message = store.message {
-      // In a scroll view so the message can be pulled to refresh.
-      ScrollView {
-        Group {
-          if message == .noMatches {
-            ContentUnavailableView.search(text: store.query)
-          } else {
-            unavailable(message)
-          }
-        }
-        .padding(.horizontal, Theme.Spacing.m)
-        .frame(maxWidth: .infinity)
-        .containerRelativeFrame(.vertical)
-      }
-      .scrollDismissesKeyboard(.immediately)
+      messageView(message)
     } else {
-      List {
-        ForEach(store.notes) { note in
-          row(note)
-            .listRowInsets(
-              EdgeInsets(
-                top: Theme.Spacing.s / 2, leading: Theme.Spacing.m,
-                bottom: Theme.Spacing.s / 2, trailing: Theme.Spacing.m
-              )
-            )
-            .listRowSeparator(.hidden)
-            .listRowBackground(Rectangle().fill(Theme.background))
-            .swipeActions(edge: .trailing) {
-              Button("Delete", role: .destructive) { delete(note) }
-                .accessibilityIdentifier("deck.row.\(note.id).delete")
-            }
-            .contextMenu {
-              Button("Edit", systemImage: "pencil") { store.send(.rowTapped(note.id)) }
-                .accessibilityIdentifier("deck.row.\(note.id).edit")
-              Button("Delete", systemImage: "trash", role: .destructive) { delete(note) }
-                .accessibilityIdentifier("deck.row.\(note.id).contextDelete")
-            }
-        }
-      }
-      .listStyle(.plain)
-      .scrollContentBackground(.hidden)
-      .scrollDismissesKeyboard(.immediately)
+      list
     }
   }
+
+  // In a scroll view so the message can be pulled to refresh.
+  private func messageView(_ message: DeckFeature.State.Message) -> some View {
+    ScrollView {
+      Group {
+        if message == .noMatches {
+          ContentUnavailableView.search(text: store.query)
+        } else {
+          unavailable(message)
+        }
+      }
+      .padding(.horizontal, Theme.Spacing.m)
+      .frame(maxWidth: .infinity)
+      .containerRelativeFrame(.vertical)
+    }
+    .scrollDismissesKeyboard(.immediately)
+  }
+
+  private var list: some View {
+    List {
+      ForEach(store.notes) { (note: Note) in
+        listRow(note)
+      }
+    }
+    .listStyle(.plain)
+    .scrollContentBackground(.hidden)
+    .scrollDismissesKeyboard(.immediately)
+  }
+
+  private func listRow(_ note: Note) -> some View {
+    row(note)
+      .listRowInsets(Self.rowInsets)
+      .listRowSeparator(.hidden)
+      .listRowBackground(Rectangle().fill(Theme.background))
+      .swipeActions(edge: .trailing) {
+        Button("Delete", role: .destructive) { delete(note) }
+          .accessibilityIdentifier("deck.row.\(note.id).delete")
+      }
+      .contextMenu {
+        Button("Edit", systemImage: "pencil") { store.send(.rowTapped(note.id)) }
+          .accessibilityIdentifier("deck.row.\(note.id).edit")
+        Button("Delete", systemImage: "trash", role: .destructive) { delete(note) }
+          .accessibilityIdentifier("deck.row.\(note.id).contextDelete")
+      }
+  }
+
+  private static let rowInsets = EdgeInsets(
+    top: Theme.Spacing.s / 2, leading: Theme.Spacing.m,
+    bottom: Theme.Spacing.s / 2, trailing: Theme.Spacing.m
+  )
 
   private func unavailable(_ message: DeckFeature.State.Message) -> some View {
     ContentUnavailableView {
