@@ -24,6 +24,8 @@ from la_carte_api.models import (
     NoteType,
     NoteUpdate,
     Rating,
+    ReportOutcome,
+    ReportRead,
 )
 
 INSTRUCTIONS = """\
@@ -55,6 +57,16 @@ outside this deck.
 
 Quiz: `due_cards` (siblings of a just-reviewed card are held back for 6 hours), then `review_card`.
 Ready-made prompts: `quiz_me`, `make_cards`, `add_people`.
+
+Reports. While studying, the user flags cards; a reported card is out of study until its report is
+closed. Work through `list_reports`, then close each with `update_report`:
+- wrong: fix the note (`update_note`), then `fixed`.
+- drop: `deleted` (removes that card only).
+- doubt: check it, show the user your evidence and change nothing until they confirm; then `fixed`
+  or `kept`.
+- rephrase: ask the user how they want it; change nothing before they answer; then `fixed`.
+- other: read `comment`; ask the user if unclear.
+When you ask the user, first set `waiting_user` with your question as `note`.
 """
 
 QUIZ_ME = """Quiz me on my la-carte flashcards.
@@ -127,7 +139,7 @@ def build_mcp(engine: Engine) -> MCPServer:
         with Session(engine) as session:
             try:
                 return operation(session, *args)
-            except (deck.NotFound, deck.InvalidNote) as error:
+            except (deck.NotFound, deck.InvalidNote, deck.InvalidReport) as error:
                 raise ToolError(str(error)) from error
 
     # --- Notes ---------------------------------------------------------------------------------
@@ -265,6 +277,31 @@ def build_mcp(engine: Engine) -> MCPServer:
         except deck.UnknownTimeZone as error:
             raise ToolError(str(error)) from error
         return run(partial(deck.stats, tz=zone))
+
+    # --- Reports (spec 015) ---------------------------------------------------------------------
+
+    @mcp.tool()
+    def list_reports(status: deck.ReportFilter = "active") -> list[ReportRead]:
+        """Cards the user flagged while studying, oldest first, each with its `reason`
+        (wrong, drop, doubt, rephrase, other), optional `comment` and the current `card` (null
+        once deleted). `active` (default) = open + waiting_user: those cards are held out of
+        study. Also "all" or one status (open, waiting_user, resolved, dismissed). Read-only.
+        Handle each by its reason (see the server instructions), then `update_report`."""
+        return run(deck.list_reports, status)
+
+    @mcp.tool()
+    def update_report(report_id: UUID, outcome: ReportOutcome, note: str) -> ReportRead:
+        """Record what you did with a report. `note` (required) is stored as its resolution.
+        - waiting_user: you asked the user (`note` = your question); the card stays held.
+        - fixed: you fixed the note first (`update_note`); report resolved, card back in study,
+          schedule unchanged.
+        - kept: the card was right or the user withdrew; report dismissed, card back in study,
+          unchanged.
+        - deleted: deletes that card only (the note too if it was its last card; review history
+          kept); report resolved. Only for "drop", or after the user confirmed.
+        A card with several active reports stays held until all are closed. Error on an unknown
+        or already closed report."""
+        return run(deck.update_report, report_id, outcome, note)
 
     @mcp.prompt(title="Quiz me")
     def quiz_me(

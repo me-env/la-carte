@@ -15,7 +15,7 @@ scheduling logic.
 
 | File | Role |
 |---|---|
-| `models.py` | SQLModel tables (`Note`, `Card`, `ReviewLog`) + public pydantic schemas (`NoteRead`, `CardRead`, `NoteCreate`, …) |
+| `models.py` | SQLModel tables (`Note`, `Card`, `ReviewLog`, `Report`) + public pydantic schemas (`NoteRead`, `CardRead`, `NoteCreate`, …) |
 | `deck.py` | **All behavior.** Plain functions taking a `Session`, returning the read schemas. Testable without HTTP. |
 | `rest.py` | FastAPI routes, thin wrappers over `deck` (consumed by iOS) |
 | `mcp_server.py` | MCP tools, thin wrappers over `deck` (consumed by agents) |
@@ -33,7 +33,8 @@ Rules:
   Plain SQL, no migration framework. A table rebuild (`db._rebuild_if`) runs in one transaction
   (`PRAGMA foreign_keys=OFF` around it, condition re-checked under `BEGIN IMMEDIATE`) after a
   `VACUUM INTO <db>.pre-<spec>-<timestamp>.bak` copy of the file; any failure rolls back.
-  Steps: 012 (reviewlog loses its FK), 013 (`reviewlog.confidence`), 014 (cards → notes, below).
+  Steps: 012 (reviewlog loses its FK), 013 (`reviewlog.confidence`), 014 (cards → notes, below), 015 (creates
+  `report` through `_rebuild_if`: backup + one transaction; skipped once it exists).
 - Review history (`ReviewLog`) is never deleted: `card_id` has no foreign key, so deleting a card keeps its reviews
   and `streak` / `reviewed_today` don't change (spec 012).
 
@@ -55,6 +56,12 @@ Rules:
   own reviews don't bury it). The servable queue (`deck._queue`) = due, not buried, most overdue first, at most one
   card per note; it backs `/cards/due`, `due_cards`, `stats.due`, and `stats.next_due` (earliest time a card not
   servable now becomes servable: `max(due, latest sibling review + 6 h)`). `total` / `new` count cards.
+- **Held cards (spec 015)**: a card with any `Report` whose status is `open` or `waiting_user` is left out of the
+  servable queue entirely (so out of `/cards/due`, `due_cards`, `stats.due`, `stats.next_due`; it doesn't bury its
+  siblings). It still counts in `total` and shows in `/cards`, `/notes`. Its FSRS state is never touched.
+- **`report` table**: `{id, card_id, note_id, reason: wrong|drop|doubt|rephrase|other, comment, status:
+  open|waiting_user|resolved|dismissed, resolution, created_at, updated_at, resolved_at}`. `card_id` / `note_id` have
+  no foreign key (like `ReviewLog`): a report outlives its card.
 - **Migration 014**: when `card` still has `front`, each card becomes a `basic` note **with the same id** and
   `fields = {front, back}`; `card` is rebuilt with `note_id = id`, `prompt ["front"]`, `answer ["back"]`. Card ids,
   FSRS state and review logs are untouched. Backup `<db>.pre-014-<timestamp>.bak`.
@@ -76,12 +83,15 @@ Rules:
 | GET | `/cards/due` | `?limit=` | `[Card]`: the servable queue (burying, one per note) |
 | GET/PATCH/DELETE | `/cards/{id}` | PATCH `{front?, back?}` edits the note field this card shows on that side (422 if the side has several fields: use `PATCH /notes/{note_id}`); DELETE removes the direction, and the note with its last card | `Card` / 204 |
 | POST | `/cards/{id}/review` | `{rating: again\|hard\|good\|easy, confidence?: 0–1}` (`confidence`: optional measured drag value, stored in `ReviewLog`, not used by FSRS; outside [0, 1] → 422 — spec 013) | rescheduled `Card` |
+| POST | `/cards/{id}/report` | `{reason: wrong\|drop\|doubt\|rephrase\|other, comment?: string}` (`comment` trimmed, 1–500 chars, required for `other`; bad reason/comment → 422 `{"detail": …}`; unknown card → 404 — spec 015) | `Report` (201); the card is held out of study |
 | GET | `/stats` | `?tz=` (IANA name, default `UTC`; unknown → 422 `{"detail": "Unknown time zone: <name>"}`) | `{total, due, new, reviewed_today, next_due, streak}` (`due` / `next_due`: servable queue, see burying — spec 014; `reviewed_today` and `streak` (consecutive review days ending today or yesterday) use local days in `tz` — spec 007) |
 
 `Note` = `{id, type, fields, cards: [{id, prompt, answer, state, due, last_review}], created_at, updated_at}`.
 `Card` = `{id, note_id, type, prompt, answer, fields, front, back, state: new|learning|review|relearning, due,
 last_review, created_at, updated_at}`; `fields` = the whole note's; `front` / `back` = prompt / answer values joined
 by `"\n"` (for old clients).
+`Report` = `{id, card_id, note_id, reason, comment, status, resolution, created_at, updated_at, resolved_at, card}`;
+`card` = the current `Card`, or `null` once deleted.
 
 ### MCP tools
 Notes: `add_notes(notes, allow_duplicates=False)` → `{added: [Note], skipped: [Note]}` (skips a note whose type +
@@ -94,9 +104,16 @@ notes; same duplicate rule on basic fronts, returns `{added: [Card], skipped: [C
 `delete_card`, `due_cards` (servable queue), `review_card(card_id, rating, confidence=None)`, `deck_stats(tz="UTC")`.
 REST `POST /notes` / `POST /cards` always add.
 
+Reports (spec 015): `list_reports(status="active")` → `[Report]`, oldest first (`active` = open + waiting_user;
+also `all` or one status). `update_report(report_id, outcome, note)` stores `note` (non-blank) as `resolution`:
+`waiting_user` (card stays held), `fixed` → resolved, `kept` → dismissed (both: card back in study, unchanged),
+`deleted` → resolved + `delete_card` semantics (just closes if the card is gone). Unknown or closed report →
+`ToolError`.
+
 Server `instructions` (sent on initialize, `mcp_server.INSTRUCTIONS`) explain notes vs cards and siblings, both
 types, "edit the note, not loose cards", "choose directions deliberately", minimalist cards, photo privacy, and the
-6-hour burying. `allow_duplicates` is only for when the user explicitly asks.
+6-hour burying, and how to handle each report reason (doubt / rephrase: ask the user before changing anything).
+`allow_duplicates` is only for when the user explicitly asks.
 
 ### MCP prompts (spec 005, 014)
 `quiz_me(limit=10)` (uses `due_cards` + `review_card`; shows the `prompt` fields, then the `answer` fields),

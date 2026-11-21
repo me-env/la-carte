@@ -24,7 +24,7 @@ async def test_agent_can_add_and_review_cards(engine):
             "add_cards", "list_cards", "update_card", "delete_card",
             "due_cards", "review_card", "deck_stats",
             "add_notes", "find_notes", "update_note", "add_direction", "remove_direction",
-            "delete_note",
+            "delete_note", "list_reports", "update_report",
         }  # fmt: skip
 
         added = await client.call_tool(

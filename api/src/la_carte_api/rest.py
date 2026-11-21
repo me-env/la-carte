@@ -17,6 +17,8 @@ from la_carte_api.models import (
     NoteRead,
     NoteType,
     NoteUpdate,
+    ReportCreate,
+    ReportRead,
     ReviewCreate,
 )
 
@@ -98,6 +100,14 @@ def delete_card(session: SessionDep, card_id: UUID):
 @router.post("/cards/{card_id}/review", response_model=CardRead)
 def review_card(session: SessionDep, card_id: UUID, body: ReviewCreate):
     return _call(deck.review_card, session, card_id, body.rating, None, body.confidence)
+
+
+@router.post(
+    "/cards/{card_id}/report", response_model=ReportRead, status_code=status.HTTP_201_CREATED
+)
+def report_card(session: SessionDep, card_id: UUID, body: ReportCreate):
+    """Holds the card out of study until an agent closes the report (spec 015)."""
+    return _call(deck.report_card, session, card_id, body)
 
 
 @router.get("/stats", response_model=DeckStats)

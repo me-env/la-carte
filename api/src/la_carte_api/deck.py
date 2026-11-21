@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from itertools import islice
+from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -17,6 +18,7 @@ import fsrs
 from sqlmodel import Session, col, delete, func, select
 
 from la_carte_api.models import (
+    ACTIVE_REPORT,
     AddCardsResult,
     AddNotesResult,
     Card,
@@ -31,6 +33,11 @@ from la_carte_api.models import (
     NoteType,
     NoteUpdate,
     Rating,
+    Report,
+    ReportCreate,
+    ReportOutcome,
+    ReportRead,
+    ReportStatus,
     ReviewLog,
     utcnow,
 )
@@ -88,6 +95,15 @@ class CardNotFound(NotFound):
 class NoteNotFound(NotFound):
     def __init__(self, note_id: UUID) -> None:
         super().__init__(f"No note with id {note_id}")
+
+
+class ReportNotFound(NotFound):
+    def __init__(self, report_id: UUID) -> None:
+        super().__init__(f"No report with id {report_id}")
+
+
+class InvalidReport(ValueError):
+    pass
 
 
 class InvalidNote(ValueError):
@@ -487,7 +503,11 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
     """The servable queue and the next time a card not servable now becomes servable.
 
     A card is buried while a sibling was reviewed less than `SIBLING_BURY` ago (its own reviews
-    don't bury it). Servable = due, not buried, most overdue first, at most one card per note."""
+    don't bury it). Servable = due, not buried, most overdue first, at most one card per note.
+    Held cards (an active report, spec 015) are left out entirely: they don't bury siblings."""
+    held = set(
+        session.exec(select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))).all()
+    )
     recent: dict[UUID, datetime] = dict(
         session.exec(
             select(ReviewLog.card_id, func.max(ReviewLog.reviewed_at))
@@ -495,7 +515,13 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
             .group_by(col(ReviewLog.card_id))
         ).all()
     )
-    rows = session.exec(select(Card, Note).join(Note, col(Card.note_id) == col(Note.id))).all()
+    rows = [
+        (card, note)
+        for card, note in session.exec(
+            select(Card, Note).join(Note, col(Card.note_id) == col(Note.id))
+        )
+        if card.id not in held
+    ]
     sibling_reviews: dict[UUID, list[tuple[UUID, datetime]]] = {}
     for card, _ in rows:
         if card.id in recent:
@@ -572,6 +598,80 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
             last_day=today if reviewed_today else today - _DAY,  # alive until the end of today
         ),
     )
+
+
+# --- Reports (spec 015) -----------------------------------------------------------------------
+
+
+def _report_read(session: Session, report: Report) -> ReportRead:
+    card = session.get(Card, report.card_id)
+    return ReportRead.of(report, CardRead.of(card, _note(session, card.note_id)) if card else None)
+
+
+def report_card(
+    session: Session, card_id: UUID, body: ReportCreate, now: datetime | None = None
+) -> ReportRead:
+    """Opens a report on the card, which holds it out of study until the report is closed."""
+    now = now or utcnow()
+    card = _card(session, card_id)
+    report = Report(
+        card_id=card.id, note_id=card.note_id, reason=body.reason, comment=body.comment,
+        created_at=now, updated_at=now,
+    )  # fmt: skip
+    session.add(report)
+    session.commit()
+    return _report_read(session, report)
+
+
+ReportFilter = Literal["active", "all"] | ReportStatus
+
+
+def list_reports(session: Session, status: ReportFilter = "active") -> list[ReportRead]:
+    """Oldest first. `active` = open + waiting_user."""
+    statement = select(Report).order_by(col(Report.created_at))
+    if status == "active":
+        statement = statement.where(col(Report.status).in_(ACTIVE_REPORT))
+    elif status != "all":
+        statement = statement.where(Report.status == status)
+    return [_report_read(session, report) for report in session.exec(statement)]
+
+
+_OUTCOME_STATUS = {
+    ReportOutcome.waiting_user: ReportStatus.waiting_user,
+    ReportOutcome.fixed: ReportStatus.resolved,
+    ReportOutcome.kept: ReportStatus.dismissed,
+    ReportOutcome.deleted: ReportStatus.resolved,
+}
+
+
+def update_report(
+    session: Session,
+    report_id: UUID,
+    outcome: ReportOutcome,
+    note: str,
+    now: datetime | None = None,
+) -> ReportRead:
+    """Records the agent's `note` as `resolution` and applies `outcome` (see `_OUTCOME_STATUS`).
+    `deleted` deletes the card like `delete_card` (if it still exists). The card's schedule is
+    never touched."""
+    now = now or utcnow()
+    report = session.get(Report, report_id)
+    if report is None:
+        raise ReportNotFound(report_id)
+    if report.status not in ACTIVE_REPORT:
+        raise InvalidReport(f"Report {report_id} is already {report.status}.")
+    if not note.strip():
+        raise InvalidReport("`note` is required: your question, or what you did.")
+    report.status = _OUTCOME_STATUS[outcome]
+    report.resolution = note.strip()
+    report.updated_at = now
+    if report.status != ReportStatus.waiting_user:
+        report.resolved_at = now
+    session.add(report)
+    if outcome == ReportOutcome.deleted and session.get(Card, report.card_id):
+        delete_card(session, report.card_id)  # commits the report too
+    session.commit()
+    return _report_read(session, report)
 
 
 def _local_midnight(day: date, tz: tzinfo) -> datetime:

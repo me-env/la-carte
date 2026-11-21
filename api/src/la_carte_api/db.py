@@ -54,6 +54,7 @@ def _migrate(engine: Engine) -> None:
     - Spec 014: cards become directions over notes: each card gets a `basic` note with the same
       id holding its front/back, and `card` is rebuilt without front/back.
     - Spec 014a amendment: person `role` and `context` fold into `description` (data only).
+    - Spec 015: the `report` table is created (with a backup, like the rebuilds).
     """
     raw = engine.raw_connection()
     db = raw.driver_connection  # sqlite3: explicit BEGIN/COMMIT, so DDL is transactional too
@@ -66,6 +67,10 @@ def _migrate(engine: Engine) -> None:
             db.execute("ALTER TABLE reviewlog ADD COLUMN confidence FLOAT")
         _rebuild_if(db, engine, "014", lambda: "front" in _columns(db, "card"), _cards_to_notes)
         _rebuild_if(db, engine, "014a", lambda: _has_person_roles(db), _fold_person_roles)
+        _rebuild_if(
+            db, engine, "015", lambda: bool(_columns(db, "card")) and not _columns(db, "report"),
+            _create_reports,
+        )  # fmt: skip
     finally:
         db.execute("PRAGMA foreign_keys=ON")
         db.isolation_level = isolation_level
@@ -192,6 +197,15 @@ def _fold_person_roles(db, dialect) -> None:
                 "UPDATE card SET prompt = ?, answer = ? WHERE id = ?",
                 (json.dumps([first]), json.dumps(answer), card_id),
             )
+
+
+def _create_reports(db, dialect) -> None:
+    from la_carte_api.models import Report
+
+    table = Report.__table__
+    db.execute(str(CreateTable(table).compile(dialect=dialect)))
+    for index in table.indexes:
+        db.execute(str(CreateIndex(index).compile(dialect=dialect)))
 
 
 def sessions(engine: Engine) -> Iterator[Session]:

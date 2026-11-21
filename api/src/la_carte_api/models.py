@@ -3,7 +3,7 @@ from enum import StrEnum
 from uuid import UUID, uuid4
 
 import fsrs
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
 from pydantic import Field as PydanticField
 from sqlmodel import JSON, Column, Field, ForeignKey, SQLModel, Uuid
 
@@ -34,6 +34,31 @@ class CardState(StrEnum):
 class NoteType(StrEnum):
     basic = "basic"
     person = "person"
+
+
+class ReportReason(StrEnum):
+    wrong = "wrong"
+    drop = "drop"
+    doubt = "doubt"
+    rephrase = "rephrase"
+    other = "other"
+
+
+class ReportStatus(StrEnum):
+    open = "open"
+    waiting_user = "waiting_user"
+    resolved = "resolved"
+    dismissed = "dismissed"
+
+
+ACTIVE_REPORT = (ReportStatus.open, ReportStatus.waiting_user)  # these hold the card (spec 015)
+
+
+class ReportOutcome(StrEnum):
+    waiting_user = "waiting_user"
+    fixed = "fixed"
+    kept = "kept"
+    deleted = "deleted"
 
 
 # --- Tables -----------------------------------------------------------------------------------
@@ -107,6 +132,22 @@ class ReviewLog(SQLModel, table=True):
     rating: Rating
     reviewed_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime, index=True)
     confidence: float | None = None  # measured 0-1 drag value (spec 013); not used by FSRS
+
+
+class Report(SQLModel, table=True):
+    """The user flagged a card while studying (spec 015). While `open` or `waiting_user` the card
+    is held out of study. `card_id` / `note_id` have no foreign key: a report outlives its card."""
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    card_id: UUID = Field(sa_column=Column(Uuid, nullable=False, index=True))
+    note_id: UUID = Field(sa_column=Column(Uuid, nullable=False))
+    reason: ReportReason
+    comment: str | None = None
+    status: ReportStatus = ReportStatus.open
+    resolution: str | None = None  # the agent's last note: its question, or what it did
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    updated_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    resolved_at: datetime | None = Field(default=None, sa_type=UTCDateTime)
 
 
 # --- Public schemas (REST + MCP) ---------------------------------------------------------------
@@ -265,3 +306,42 @@ class AddCardsResult(BaseModel):
 class AddNotesResult(BaseModel):
     added: list[NoteRead]
     skipped: list[NoteRead]  # existing notes whose duplicate key matched
+
+
+class ReportCreate(BaseModel):
+    reason: ReportReason
+    comment: str | None = PydanticField(
+        default=None, description="Trimmed, 1-500 chars; required when the reason is other."
+    )
+
+    @field_validator("comment")
+    @classmethod
+    def _trimmed(cls, comment: str | None) -> str | None:
+        comment = (comment or "").strip() or None
+        if comment and len(comment) > 500:
+            raise ValueError("comment is at most 500 characters")
+        return comment
+
+    @model_validator(mode="after")
+    def _other_needs_comment(self) -> "ReportCreate":
+        if self.reason == ReportReason.other and self.comment is None:
+            raise ValueError("a comment is required when the reason is other")
+        return self
+
+
+class ReportRead(BaseModel):
+    id: UUID
+    card_id: UUID
+    note_id: UUID
+    reason: ReportReason
+    comment: str | None
+    status: ReportStatus
+    resolution: str | None
+    created_at: datetime
+    updated_at: datetime
+    resolved_at: datetime | None
+    card: CardRead | None  # null once the card is deleted
+
+    @classmethod
+    def of(cls, report: Report, card: CardRead | None) -> "ReportRead":
+        return cls(**report.model_dump(), card=card)
