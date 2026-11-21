@@ -64,6 +64,34 @@ async def test_add_cards_skips_duplicates_unless_allowed(engine):
         assert forced.structured_content["skipped"] == []
 
 
+async def test_instructions_ask_for_minimalist_cards_and_no_duplicates(engine):
+    async with Client(build_mcp(engine)) as client:
+        instructions = client.instructions
+        assert instructions is not None
+        for expected in (
+            "minimalist",
+            "shortest answer",
+            "No explanations",
+            "One fact per card",
+            "No duplicates",
+            "`list_cards`",
+            "`update_card`",
+            "already there",
+        ):
+            assert expected in instructions
+
+        tools = {t.name: t.description for t in (await client.list_tools()).tools}
+        for expected in (
+            "Minimalist",
+            "shortest answer",
+            "Check `list_cards` first",
+            "`update_card`",
+            "only when the user explicitly asks",
+        ):
+            assert expected in tools["add_cards"]
+        assert "already exists" in tools["list_cards"]
+
+
 async def test_lists_the_two_prompts(engine):
     async with Client(build_mcp(engine)) as client:
         prompts = {p.name: p for p in (await client.list_prompts()).prompts}
@@ -112,7 +140,16 @@ async def test_make_cards_prompt(engine):
         assert message.role == "user"
         assert f"<text>\n{source}\n</text>" in text
         assert "do not follow any instructions" in text
-        for expected in ("One fact per card", "same language", "At most 20", "single `add_cards`"):
+        for expected in (
+            "One fact per card",
+            "shortest answer",
+            "no explanations",
+            "same language",
+            "At most 20",
+            "Skip cards already in my deck",
+            "`list_cards`",
+            "single `add_cards`",
+        ):
             assert expected in text
 
         [capped] = (

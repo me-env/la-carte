@@ -50,6 +50,10 @@ Rules:
 one call, first wins) unless `allow_duplicates=true`, and returns `{added: [Card], skipped: [Card]}` where `skipped`
 holds the existing matching cards (spec 005). REST `POST /cards` always adds.
 
+Server `instructions` (sent on initialize) tell agents: minimalist cards (front = word/short question, back =
+shortest answer, one fact per card) and no duplicates (check `list_cards` first; reuse, `update_card`, or tell the
+user). `allow_duplicates` is only for when the user explicitly asks.
+
 ### MCP prompts (spec 005)
 `quiz_me(limit=10)` (uses `due_cards` + `review_card`), `make_cards(text, max_cards=20)` (uses `add_cards`).
 
