@@ -91,9 +91,9 @@ final class StudyUITests: XCTestCase {
 
     XCTAssertTrue(el(app, "study.add").isHittable, "study.add not hittable")
     el(app, "study.add").tap()
-    waitForLabel(el(app, "editor.title"), "New card")
+    waitForSheet(app, "New card")
     el(app, "editor.close").tap()
-    waitForAbsence(el(app, "editor.title"), "editor still open after editor.close")
+    waitForAbsence(editorBar(app), "editor still open after editor.close")
     assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
   }
 

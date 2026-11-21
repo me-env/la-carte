@@ -25,7 +25,7 @@ extension SettingsUITests {
       snapshot("study-not-set-up" + suffix, appearance: appearance)
 
       el(app, "study.openSettings").tap()
-      waitForLabel(el(app, "settings.title"), "Settings")
+      waitForSheet(app, "Settings")
       setText(app, "settings.url", server.url)
       setText(app, "settings.token", "wrong", secure: true)
       closeSettingsSheet(app)
@@ -53,7 +53,7 @@ extension SettingsUITests {
     assertStudyMessage(app, Self.notSetUp)
 
     el(app, "study.openSettings").tap()
-    waitForLabel(el(app, "settings.title"), "Settings")
+    waitForSheet(app, "Settings")
     XCTAssertFalse(deckTitle(app).exists, "Settings opened via the deck, not directly over Study")
     XCTAssertEqual(el(app, "settings.url").placeholderValue, "Server URL", "settings.url placeholder (#13)")
     XCTAssertEqual(el(app, "settings.token").label, "Token", "settings.token label (#13, #16)")
@@ -66,14 +66,14 @@ extension SettingsUITests {
     XCTAssertTrue(server.requests.isEmpty, "requests sent without a token: \(server.requests.map(\.path))")
 
     el(app, "study.openSettings").tap()
-    waitForLabel(el(app, "settings.title"), "Settings")
+    waitForSheet(app, "Settings")
     XCTAssertEqual(fieldText(app, "settings.url"), server.url, "stored URL not shown")
     setText(app, "settings.token", Self.goodToken, secure: true)
-    for _ in 0..<2 where el(app, "settings.title").exists {  // first drag may only drop the keyboard
-      swipeSheetDown(app, from: el(app, "settings.title"))
+    for _ in 0..<2 where sheetBar(app, "Settings").exists {  // first drag may only drop the keyboard
+      swipeSheetDown(app, from: sheetBar(app, "Settings"))
       Thread.sleep(forTimeInterval: 0.6)
     }
-    waitForAbsence(el(app, "settings.title"), "settings still open after swiping down")
+    waitForAbsence(sheetBar(app, "Settings"), "settings still open after swiping down")
     assertNoSavePasswordPrompt(app)
     waitForLabel(el(app, "study.front"), "alpha", timeout: 15)
     waitForLabel(el(app, "study.remaining"), "2 to review")
@@ -99,7 +99,7 @@ extension SettingsUITests {
       snapshot("deck-not-set-up", appearance: appearance)
       if appearance == .light {
         el(app, "deck.openSettings").tap()
-        waitForLabel(el(app, "settings.title"), "Settings")
+        waitForSheet(app, "Settings")
         XCTAssertTrue(deckTitle(app).exists, "deck.openSettings did not open the deck's Settings sheet")
         setText(app, "settings.url", server.url)
         setText(app, "settings.token", "wrong", secure: true)
@@ -108,7 +108,7 @@ extension SettingsUITests {
         snapshot("deck-token-rejected", appearance: appearance)
 
         el(app, "deck.openSettings").tap()
-        waitForLabel(el(app, "settings.title"), "Settings")
+        waitForSheet(app, "Settings")
         setText(app, "settings.url", unreachableAPIURL)
         setText(app, "settings.token", Self.goodToken, secure: true)
         closeSettingsSheet(app)
@@ -130,7 +130,7 @@ extension SettingsUITests {
     let app = launch(api: .stored)
     clearStoredServer(app)
     el(app, "study.openSettings").tap()
-    waitForLabel(el(app, "settings.title"), "Settings")
+    waitForSheet(app, "Settings")
     setText(app, "settings.url", server.url)
     setText(app, "settings.token", Self.goodToken, secure: true)
     closeSettingsSheet(app)
@@ -164,7 +164,7 @@ extension SettingsUITests {
       let app = launch(api: .stored, theme: theme)
       clearStoredServer(app)
       el(app, "study.openSettings").tap()
-      waitForLabel(el(app, "settings.title"), "Settings")
+      waitForSheet(app, "Settings")
       let token = el(app, "settings.token"), url = el(app, "settings.url"), eye = el(app, "settings.token.reveal")
 
       // Row tap reveals + focuses (inside setText → tapEnd), typing shows plain text.
@@ -206,7 +206,7 @@ extension SettingsUITests {
       closeSettingsSheet(app)
       assertStudyMessage(app, Self.notSetUp)  // URL is empty
       el(app, "study.openSettings").tap()
-      waitForLabel(el(app, "settings.title"), "Settings")
+      waitForSheet(app, "Settings")
       XCTAssertEqual(el(app, "settings.token").value as? String, dots, "saved token not shown masked on reopen")
       app.terminate()
     }
@@ -218,7 +218,7 @@ extension SettingsUITests {
   @MainActor
   func closeSettingsSheet(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     el(app, "settings.close").tap()
-    waitForAbsence(el(app, "settings.title"), file: file, line: line)
+    waitForAbsence(sheetBar(app, "Settings"), file: file, line: line)
     assertNoSavePasswordPrompt(app, file: file, line: line)
   }
 
@@ -240,7 +240,7 @@ extension SettingsUITests {
     let direct = study.waitForExistence(timeout: 3)
     if direct {
       study.tap()
-      waitForLabel(el(app, "settings.title"), "Settings")
+      waitForSheet(app, "Settings")
     } else {
       openDeck(app)
       openSettings(app)
