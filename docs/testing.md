@@ -15,6 +15,18 @@ suite is skipped in normal runs and on CI. It also writes `gallery-<light|dark|f
 the gallery's content without its ScrollView (`DesignSystemGalleryContent`), since `ImageRenderer` draws a
 ScrollView as empty.
 
+## Script output and exit codes
+
+- **Live:** `ios-test.sh`, `ios-ui-test.sh` and `e2e.sh` print each test as it finishes, even redirected to a
+  file or agent log (`NSUnbufferedIO=YES` + `grep --line-buffered`), plus 🔒 lock lines and `error:` lines.
+  `tail -f` the file to follow a long run.
+- **Summary:** the last line is `TESTS: 69 passed, 0 failed, 6 skipped (49.3 min)` (from the xcresult), followed by
+  one `✘ Class/test(): message` line per failed test. `TESTS: none run (exit N…)` means the build failed or a lock timed out.
+- **Exit code** = xcodebuild's: 0 green, 65 build or test failure, 75 lock timeout. Screenshot export, renaming,
+  the summary and the contact sheet only print a ⚠️ warning when they fail. `e2e.sh` exits with `ios-ui-test.sh`'s code.
+- **Contact sheet:** when `uv` is on PATH, `ios-ui-test.sh` runs `scripts/contact-sheet.py` on the run's
+  screenshots after the export (writes `contact-sheet*.png` into `qa/screenshots/<run>/`).
+
 ## UI tests
 
 - Test names: `test<Screen>_<scenario>` (e.g. `testStudy_revealAndRateGood`). Live-API variants end in `_liveAPI`
@@ -51,3 +63,8 @@ Defaults to `iPhone 17 Pro` (same as the user's phone) on the latest installed i
 create that simulator by default; create it once with:
 `xcrun simctl create "iPhone 17 Pro" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimRuntime.iOS-27-0`.
 Override with `SIMULATOR=… OS=…` (CI uses `iPhone 17`).
+
+**Dark on a local iOS 26.5 simulator** (docs/tooling.md P9): the device appearance can't be switched unattended
+(`simctl ui` triggers a macOS privacy prompt). Check dark rendering there with the forced Dark / Forest theme
+(`-theme dark`). "System theme follows device dark" on iOS 26 is checked on CI shards only
+(`ci/boot-simulator.sh`), or locally only with the user at the Mac.

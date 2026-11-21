@@ -19,6 +19,7 @@ export TEST_RUNNER_LA_CARTE_EMPTY_API_URL="http://127.0.0.1:$EMPTY_PORT"
 (cd "$ROOT/api" && LA_CARTE_DATABASE_URL="sqlite:///$TMP/e2e-empty.db" LA_CARTE_PORT="$EMPTY_PORT" \
   exec uv run la-carte-api) >"$TMP/api-empty.log" 2>&1 &
 EMPTY_PID=$!
+# The trap keeps the exit code: e2e.sh exits with ios-ui-test.sh's (xcodebuild's).
 trap 'kill $API_PID $EMPTY_PID 2>/dev/null; rm -rf "$TMP"' EXIT
 for url in "$LA_CARTE_API_URL" "$TEST_RUNNER_LA_CARTE_EMPTY_API_URL"; do
   for _ in $(seq 1 50); do curl -sf "$url/health" >/dev/null && break; sleep 0.2; done

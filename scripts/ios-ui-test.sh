@@ -19,7 +19,7 @@ trap 'rm -rf "$PRODUCTS"' EXIT
 rm -rf "$OUT" "$RESULT" "$PRODUCTS"; mkdir -p "$OUT" "$(dirname "$RESULT")"
 
 cd "$ROOT/ios"
-FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|TEST (SUCCEEDED|FAILED)|^🔒"
+FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|TEST( EXECUTE)? (SUCCEEDED|FAILED)|^🔒"
 export NSUnbufferedIO=YES  # xcodebuild writes each line as it happens, even into a pipe
 set +e
 # 1. Build under the app's DerivedData lock, copying the products out so a later build can't replace them.
@@ -37,7 +37,7 @@ if [ "$STATUS" -eq 0 ]; then
 fi
 set -e
 warn() { echo "⚠️  $1 failed (exit code unchanged: $STATUS)" >&2; }
-if [ ! -d "$RESULT" ]; then echo "TESTS: none run, xcodebuild exited $STATUS"; exit "$STATUS"; fi
+if [ ! -d "$RESULT" ]; then echo "TESTS: none run (exit $STATUS: build failed or lock timeout)"; exit "$STATUS"; fi
 
 xcrun xcresulttool export attachments --path "$RESULT" --output-path "$OUT" >/dev/null || warn "screenshot export"
 # Screenshots → <name>-<light|dark>.png; Xcode's screen recordings → recordings/<test>.mp4
@@ -65,12 +65,15 @@ fi
 echo "📸 screenshots: $OUT  (xcresult: $RESULT)"
 ls -R "$OUT" || true
 # TESTS: 69 passed, 0 failed, 6 skipped (49.3 min), then one line per failed test.
-python3 -I - "$(xcrun xcresulttool get test-results summary --path "$RESULT")" <<'PY' || warn "summary"
+python3 -I - "$(xcrun xcresulttool get test-results summary --path "$RESULT")" "$STATUS" 2>/dev/null <<'PY' || warn "summary"
 import json, sys
 s = json.loads(sys.argv[1])
 t = s["finishTime"] - s["startTime"]
 took = f"{t / 60:.1f} min" if t >= 120 else f"{t:.1f} s"
-print(f"TESTS: {s['passedTests']} passed, {s['failedTests']} failed, {s['skippedTests']} skipped ({took})")
+if s["totalTestCount"] == 0:
+    print(f"TESTS: none run (exit {sys.argv[2]}: build failed or no test matched)")
+else:
+    print(f"TESTS: {s['passedTests']} passed, {s['failedTests']} failed, {s['skippedTests']} skipped ({took})")
 for f in s.get("testFailures", []):
     print(f"  ✘ {f['testIdentifierString']}: {f['failureText'][:200]}")
 PY
