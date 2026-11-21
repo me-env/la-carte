@@ -1,8 +1,13 @@
+from datetime import timedelta
+
 import pytest
 from mcp import Client
 from mcp.shared.exceptions import MCPError
+from sqlmodel import Session
 
+from la_carte_api import deck
 from la_carte_api.mcp_server import build_mcp
+from la_carte_api.models import CardCreate, Rating, utcnow
 
 pytestmark = pytest.mark.anyio
 
@@ -199,3 +204,20 @@ async def test_deck_stats_takes_a_time_zone(client):
         [tool] = [t for t in (await mcp.list_tools()).tools if t.name == "deck_stats"]
         assert "IANA time zone" in tool.description
         assert "`streak`" in tool.description
+
+
+async def test_deck_stats_streak_survives_delete_card(engine):
+    with Session(engine) as session:
+        [card] = deck.add_cards(session, [CardCreate(front="chat", back="cat")]).added
+        deck.review_card(session, card.id, Rating.good, now=utcnow() - timedelta(days=1))
+        deck.review_card(session, card.id, Rating.good)
+
+    async with Client(build_mcp(engine)) as client:
+        assert (await client.call_tool("deck_stats", {})).structured_content["streak"] == 2
+        deleted = await client.call_tool("delete_card", {"card_id": str(card.id)})
+        assert not deleted.is_error
+        stats = (await client.call_tool("deck_stats", {})).structured_content
+        assert (stats["total"], stats["reviewed_today"], stats["streak"]) == (0, 1, 2)
+
+        [tool] = [t for t in (await client.list_tools()).tools if t.name == "delete_card"]
+        assert "review history is kept" in tool.description

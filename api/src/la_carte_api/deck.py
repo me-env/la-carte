@@ -119,6 +119,7 @@ def update_card(session: Session, card_id: UUID, changes: CardUpdate) -> Card:
 
 
 def delete_card(session: Session, card_id: UUID) -> None:
+    # Its ReviewLog rows stay (no foreign key): past study days still count for stats.
     session.delete(get_card(session, card_id))
     session.commit()
 
