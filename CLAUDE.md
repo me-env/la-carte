@@ -54,12 +54,9 @@ for deep dives: research, reading many files, and especially to **verify that so
 done** before saying so. Give a sub-agent a narrow brief and the files to read; you stay accountable for
 its result.
 
-**Asking the user for something** (only after that deep dive). One request at a time, each with:
-1. **What** you want to do.
-2. **Why you can't do it yourself**: what you tried or checked, and the concrete blocker (needs their
-   Apple account / physical device / a secret / a UI only they can reach / their decision). "I didn't
-   try" is not a reason.
-3. **What they should do**: exact steps or the command to paste, and how you'll know it worked.
+**Asking the user for something**: only after that deep dive, and always through the
+`asking-the-user` skill (`.claude/skills/asking-the-user/SKILL.md`): one request at a time, the smallest
+reasonable action on their side, prefer requests that give you durable autonomy.
 
 **English only**: app UI, sample and demo content, docs, commits, test fixtures.
 
