@@ -95,7 +95,9 @@ struct AppFeatureTests {
       $0.apiClient.dueCards = { _ in Array(cards.dropFirst()) }
     }
 
-    await store.send(\.destination.deck.rowSwipedToDelete, cards[0].id)
+    await store.send(\.destination.deck.rowSwipedToDelete, cards[0].id) {
+      $0.destination?.modify(\.deck) { $0.deletions = 1 }
+    }
     await store.receive(\.destination.deck.deleteResponse.success)
     await store.receive(\.destination.deck.delegate.deckChanged)
     await store.receive(\.study.deckChanged)
