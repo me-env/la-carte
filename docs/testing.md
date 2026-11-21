@@ -34,8 +34,9 @@ renders right (layout, colours, light/dark, accessibility sizes), navigation and
 and the app wires to the API end to end (a few `_liveAPI` tests). Reducer logic (state changes, API calls made,
 errors, debounce, in-flight guards, persistence) is a unit test. Before adding a UI test, ask "could a TestStore
 test catch this?" — if yes, write that instead. One UI test per flow, one appearance pass unless the look differs.
-**No Dynamic Type / accessibility-size (XL, XXXL, AX5) UI tests for now** (user, 2026-11-21): revisit before
-publishing. Don't add them, don't block a verdict on text-size layout.
+**No accessibility tests for now** (user, 2026-11-21): no Dynamic Type / text-size (XL, XXXL, AX5) and no
+VoiceOver tests (labels read aloud, custom actions, rotor). Revisit before release. Don't add them, don't block a
+verdict on them. Accessibility identifiers stay: they are how UI tests find elements.
 
 - Test names: `test<Screen>_<scenario>` (e.g. `testStudy_revealAndRateGood`). Live-API variants end in `_liveAPI`
   and `XCTSkip` when `LA_CARTE_API_URL` is unset.
