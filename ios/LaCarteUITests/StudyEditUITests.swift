@@ -71,7 +71,7 @@ final class StudyEditUITests: XCTestCase {
       waitForAbsence(field, "frontField still shown after Done")
       waitForLabel(el(app, "study.front"), Self.front)
       assertRatingsShown(app)
-      XCTAssertTrue(el(app, "study.remaining").waitForExistence(timeout: 3), "counter not back after the edit")
+      XCTAssertTrue(el(app, "study.remaining").waitFor(timeout: 3), "counter not back after the edit")
       app.terminate()
     }
   }
@@ -376,9 +376,9 @@ final class StudyEditUITests: XCTestCase {
                             file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
     el(app, "study.\(side.rawValue)").doubleTap()
     let field = el(app, "study.\(side.rawValue)Field")
-    XCTAssertTrue(field.waitForExistence(timeout: 5), "study.\(side.rawValue)Field missing after double-tap",
+    XCTAssertTrue(field.waitFor(timeout: 5), "study.\(side.rawValue)Field missing after double-tap",
                   file: file, line: line)
-    XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "no keyboard after double-tap",
+    XCTAssertTrue(app.keyboards.firstMatch.waitFor(timeout: 5), "no keyboard after double-tap",
                   file: file, line: line)
     XCTAssertTrue(hasFocus(field), "study.\(side.rawValue)Field not focused", file: file, line: line)
     XCTAssertFalse(el(app, "study.\(side.rawValue)").exists, "study.\(side.rawValue) still shown next to its field",
@@ -406,7 +406,7 @@ final class StudyEditUITests: XCTestCase {
   @MainActor
   private func tapDone(_ app: XCUIApplication) {
     let done = app.keyboards.buttons.matching(NSPredicate(format: "label ==[c] 'done'")).firstMatch
-    XCTAssertTrue(done.waitForExistence(timeout: 3), "keyboard has no Done key (submitLabel(.done) missing?)")
+    XCTAssertTrue(done.waitFor(timeout: 3), "keyboard has no Done key (submitLabel(.done) missing?)")
     done.tap()
   }
 
@@ -452,7 +452,7 @@ final class StudyEditUITests: XCTestCase {
   @MainActor
   private func assertRatingsShown(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     for rating in Self.ratings {
-      XCTAssertTrue(el(app, "study.rate.\(rating)").waitForExistence(timeout: 3), "study.rate.\(rating) missing",
+      XCTAssertTrue(el(app, "study.rate.\(rating)").waitFor(timeout: 3), "study.rate.\(rating) missing",
                     file: file, line: line)
     }
   }

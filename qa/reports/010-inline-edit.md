@@ -1,5 +1,14 @@
 # QA: 010 Inline edit on the revealed card
 
+## Final recheck 2026-11-21 (integrated branch, main merged): **PASS**
+The swipe-down bug below is fixed (any focus loss commits, `.immediately` keyboard dismiss). `StudyEditUITests` 8/8 passed
+(1 live skipped) in `UI_WORKERS=1 scripts/ios-ui-test.sh --split 3 final` (`qa/screenshots/final/study-edit-*`);
+`testStudyEdit_appendToBack_liveAPI` passed in `scripts/e2e.sh final-e2e`. Inline edit stays off on person cards (014d #9:
+unit). Branch-wide blockers are listed in the 014c report (unit tests don't compile after the merge).
+
+---
+
+
 Verdict: **FAIL** (1 bug: swiping the keyboard down no longer commits)
 Date: 2026-11-21 · Simulator: iPhone 17 Pro / iOS 27 · Code: `1ba2dad` (branch `worktree-agent-a49c6e2d8c3e3ec0b`, main merged)
 Runs: `qa/screenshots/study-final/` (StudyEdit + Ratings + Study + Refresh), `qa/screenshots/study-edit-r1..r3/`

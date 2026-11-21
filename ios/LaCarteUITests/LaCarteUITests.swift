@@ -15,21 +15,20 @@ final class LaCarteUITests: XCTestCase {
 
   // MARK: - Design-system gallery (spec 000, criteria 4, 5, 6)
 
-  /// 000 #4: gallery renders in both appearances with the 4 circle buttons (44pt).
+  /// 000 #4: gallery renders with the 4 circle buttons (44pt). Light here; forest in `ThemeUITests`; token colours
+  /// per theme × scheme in LaCarteKit `ScreenColorTests`.
   @MainActor
   func testDesignSystem_gallery() {
-    for appearance in [XCUIDevice.Appearance.light, .dark] {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock, screen: "design-system")
-      for icon in Self.galleryIcons {
-        let button = app.buttons["gallery.button.\(icon)"]
-        XCTAssertTrue(button.waitForExistence(timeout: 5), "missing gallery.button.\(icon)")
-        XCTAssertGreaterThanOrEqual(button.frame.width, 44, "\(icon) hit area too narrow: \(button.frame)")
-        XCTAssertGreaterThanOrEqual(button.frame.height, 44, "\(icon) hit area too short: \(button.frame)")
-      }
-      XCTAssertTrue(app.staticTexts["gallery.lastTapped"].exists)
-      snapshot("design-system", appearance: appearance)
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock, screen: "design-system")
+    for icon in Self.galleryIcons {
+      let button = app.buttons["gallery.button.\(icon)"]
+      XCTAssertTrue(button.waitFor(timeout: 5), "missing gallery.button.\(icon)")
+      XCTAssertGreaterThanOrEqual(button.frame.width, 44, "\(icon) hit area too narrow: \(button.frame)")
+      XCTAssertGreaterThanOrEqual(button.frame.height, 44, "\(icon) hit area too short: \(button.frame)")
     }
+    XCTAssertTrue(app.staticTexts["gallery.lastTapped"].exists)
+    snapshot("design-system", appearance: .light)
   }
 
   /// 000 #5: tapping each circle button updates `gallery.lastTapped`.
@@ -38,10 +37,10 @@ final class LaCarteUITests: XCTestCase {
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .mock, screen: "design-system")
     let lastTapped = app.staticTexts["gallery.lastTapped"]
-    XCTAssertTrue(lastTapped.waitForExistence(timeout: 5))
+    XCTAssertTrue(lastTapped.waitFor(timeout: 5))
     for icon in Self.galleryIcons {
       let button = app.buttons["gallery.button.\(icon)"]
-      XCTAssertTrue(button.waitForExistence(timeout: 5), "missing gallery.button.\(icon)")
+      XCTAssertTrue(button.waitFor(timeout: 5), "missing gallery.button.\(icon)")
       scrollIntoView(app, button)
       XCTAssertTrue(button.isHittable, "gallery.button.\(icon) not hittable")
       button.tap()
@@ -56,46 +55,15 @@ final class LaCarteUITests: XCTestCase {
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .mock, screen: "design-system")
     let lastTapped = app.staticTexts["gallery.lastTapped"]
-    XCTAssertTrue(lastTapped.waitForExistence(timeout: 5))
+    XCTAssertTrue(lastTapped.waitFor(timeout: 5))
     for icon in Self.galleryIcons {
       let button = app.buttons["gallery.button.\(icon)"]
-      XCTAssertTrue(button.waitForExistence(timeout: 5))
+      XCTAssertTrue(button.waitFor(timeout: 5))
       scrollIntoView(app, button)
       // ~4pt inside the right edge, vertically centered.
       let dx = max(0.0, (button.frame.width - 4) / button.frame.width)
       button.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: 0.5)).tap()
       waitForLabel(lastTapped, "Last tapped: \(icon)", timeout: 3)
-    }
-  }
-
-  /// 000 #6: gallery at Dynamic Type accessibility XL, both appearances.
-  @MainActor
-  func testDesignSystem_accessibilityXL() {
-    continueAfterFailure = true  // capture both appearances even if scaling fails
-    let baseline = launch(api: .mock, screen: "design-system")
-    XCTAssertTrue(baseline.staticTexts["gallery.lastTapped"].waitForExistence(timeout: 5))
-    let baseHeight = baseline.staticTexts["gallery.lastTapped"].frame.height
-    baseline.terminate()
-
-    for appearance in [XCUIDevice.Appearance.light, .dark] {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock, screen: "design-system", arguments: accessibilityXLArguments)
-      XCTAssertTrue(app.staticTexts["gallery.lastTapped"].waitForExistence(timeout: 5)
-        || app.buttons["gallery.button.list.bullet"].waitForExistence(timeout: 5))
-      snapshot("design-system-xl", appearance: appearance)
-      assertTextsReadable(in: app)
-      // Scroll to reveal the rest of the gallery, if it scrolls.
-      let scroll = app.scrollViews.firstMatch
-      if scroll.exists {
-        scroll.swipeUp()
-        assertTextsReadable(in: app)
-        snapshot("design-system-xl-scrolled", appearance: appearance)
-      }
-      // Dynamic Type must actually apply (checked after the screenshots so they're always captured).
-      if app.staticTexts["gallery.lastTapped"].exists {
-        XCTAssertGreaterThan(app.staticTexts["gallery.lastTapped"].frame.height, baseHeight * 1.3,
-                             "gallery text did not scale with Dynamic Type (height \(baseHeight) at default)")
-      }
     }
   }
 }

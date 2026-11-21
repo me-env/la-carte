@@ -1,5 +1,17 @@
 # QA: 011 Ratings (two buttons + confidence dots)
 
+## Final recheck 2026-11-21 (integrated branch, main merged): **FAIL** (1 regression)
+`RatingsUITests` 8/8, `StudyUITests` 5/5 (2 live skipped), drag-rated live flow green in `final-e2e`.
+1. **Design-system gallery is shifted left and clipped** since 011 added its "Confidence dots" section
+   (`DesignSystemGallery.swift`, five rings in one row): launch with `LA_CARTE_SCREEN=design-system`. Expected: content
+   inside the screen. Actual: the whole scroll content is offset left ("Design system" title, "LOGO", "CONFIDENCE DOTS"
+   cut at the left edge, `qa/screenshots/final-rerun/design-system-light.png`), and the circle buttons can't be tapped:
+   `LaCarteUITests/testDesignSystem_tapEachButton` and `testDesignSystem_tapButtonEdge` fail in both runs
+   ("Last tapped: none"). Likely the dots row is wider than the screen; wrap it or let it scroll horizontally.
+
+---
+
+
 Verdict: **PASS**
 Date: 2026-11-21 · Simulator: iPhone 17 Pro / iOS 27 · Branch `worktree-agent-a49c6e2d8c3e3ec0b` @ 1ba2dad (main merged)
 Runs: `qa/screenshots/study-final/` (Ratings + Study + Refresh + StudyEdit), `qa/screenshots/study-final-e2e/`;

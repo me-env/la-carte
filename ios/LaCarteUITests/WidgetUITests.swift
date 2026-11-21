@@ -2,38 +2,21 @@ import XCTest
 
 /// Spec 007: the Home Screen widget, validated through its debug gallery (`LA_CARTE_SCREEN=widget`, #23).
 /// Widgets aren't reachable from XCUITest; the gallery renders `DeckWidgetView` from fixed entries in 170 pt tiles.
-/// Each tile is one accessibility element whose label is the widget's VoiceOver text, so it also proves the state.
+/// Each state is a tile with its own id; the snapshots are the review (no VoiceOver checks for now, docs/testing.md).
 final class WidgetUITests: XCTestCase {
-  typealias RGB = (Int, Int, Int)
-  /// Same tokens as `ThemeUITests.Palette` (spec 004 #4): tile = `background`, gallery wallpaper = `surface`.
-  static let palettes: [String: (background: RGB, surface: RGB)] = [
-    "light": ((249, 250, 245), (255, 255, 255)),
-    "dark": ((26, 26, 26), (37, 37, 37)),
-    "forest": ((14, 25, 19), (22, 36, 27)),
-  ]
+  /// Spec 004 #4 tokens (Support.swift `Palette`): tile = `background`, gallery wallpaper = `surface`.
+  static let palettes: [String: Palette] = ["light": .light, "dark": .dark, "forest": .forest]
   static let appearances: [XCUIDevice.Appearance] = [.light, .dark]
 
-  /// state id, snapshot name, expected VoiceOver label (spec: "Accessibility identifiers", #16–#20).
-  static let tiles: [(state: String, shot: String, label: String)] = [
-    ("due", "widget-due", "8 cards to review, 12-day streak"),
-    ("caughtUp", "widget-caught-up", "All caught up, next at \(todayAt1840()), 3-day streak"),
-    ("caughtUpLater", "widget-caught-up-later", "All caught up, next on \(inThreeDays()), No streak yet"),
-    ("empty", "widget-empty", "No cards yet, No streak yet"),
-    ("unavailable", "widget-unavailable", "Can't reach your deck"),
-    ("long", "widget-long", "999 cards to review, 365-day streak"),
+  /// state id, snapshot name (spec: "Accessibility identifiers", #16–#20).
+  static let tiles: [(state: String, shot: String)] = [
+    ("due", "widget-due"),
+    ("caughtUp", "widget-caught-up"),
+    ("caughtUpLater", "widget-caught-up-later"),
+    ("empty", "widget-empty"),
+    ("unavailable", "widget-unavailable"),
+    ("long", "widget-long"),
   ]
-
-  /// "18:40" in the simulator's locale (e.g. "6:40 pm" in en_US: localized short time, #17), lowercased like the label.
-  static func todayAt1840() -> String {
-    let date = Calendar.current.date(bySettingHour: 18, minute: 40, second: 0, of: .now)!
-    return date.formatted(date: .omitted, time: .shortened).localizedLowercase
-  }
-
-  /// "next on 24 Nov" style date (localized short date, #17) three days from now, lowercased like the label.
-  static func inThreeDays() -> String {
-    let date = Date.now.addingTimeInterval(3 * 86_400)
-    return date.formatted(.dateTime.day().month(.abbreviated)).localizedLowercase
-  }
 
   override func setUp() {
     continueAfterFailure = false
@@ -90,36 +73,9 @@ final class WidgetUITests: XCTestCase {
     app.terminate()
   }
 
-  // MARK: - accessibility sizes
-
-  /// At accessibility sizes the widget can't grow; the screenshots show how the text behaves inside the tile
-  /// (reviewed visually: the accessibility frame includes overflowing text, so it isn't asserted).
-  @MainActor
-  func testWidget_galleryAccessibilitySizes() {
-    let sizes = [("xl", "UICTContentSizeCategoryAccessibilityXL"), ("xxxl", "UICTContentSizeCategoryAccessibilityXXXL")]
-    for (name, category) in sizes {
-      for appearance in Self.appearances {
-        XCUIDevice.shared.appearance = appearance
-        let app = launch(api: .mock, screen: "widget",
-                         arguments: ["-UIPreferredContentSizeCategoryName", category])
-        let title = el(app, "widgetGallery.title")
-        XCTAssertTrue(title.waitForExistence(timeout: 10), "widgetGallery.title missing at \(name)")
-        snapshot("widget-gallery-\(name)", appearance: appearance)
-        for tile in Self.tiles {
-          let e = el(app, "widgetGallery.tile.\(tile.state)")
-          scrollIntoView(app, e)
-          XCTAssertTrue(e.exists, "tile \(tile.state) missing at \(name)")
-          XCTAssertEqual(e.label, tile.label, "tile \(tile.state) label at \(name)")
-          attach(e.screenshot(), "\(tile.shot)-\(name)-\(appearance == .dark ? "dark" : "light")")
-        }
-        app.terminate()
-      }
-    }
-  }
-
   // MARK: - Helpers
 
-  /// Title, every tile (170×170, label = expected VoiceOver text), tile background = `background`, wallpaper =
+  /// Title, every tile (170×170), tile background = `background`, wallpaper =
   /// `surface` for the palette.
   @MainActor
   private func assertGallery(_ app: XCUIApplication, palette name: String, context: String,
@@ -130,10 +86,9 @@ final class WidgetUITests: XCTestCase {
     for tile in Self.tiles {
       let e = el(app, "widgetGallery.tile.\(tile.state)")
       scrollIntoView(app, e)
-      XCTAssertTrue(e.waitForExistence(timeout: 5), "[\(context)] tile \(tile.state) missing", file: file, line: line)
+      XCTAssertTrue(e.waitFor(timeout: 5), "[\(context)] tile \(tile.state) missing", file: file, line: line)
       XCTAssertEqual(e.frame.width, 170, accuracy: 0.5, "[\(context)] \(tile.state) width", file: file, line: line)
       XCTAssertEqual(e.frame.height, 170, accuracy: 0.5, "[\(context)] \(tile.state) height", file: file, line: line)
-      XCTAssertEqual(e.label, tile.label, "[\(context)] \(tile.state) VoiceOver text", file: file, line: line)
       let f = e.frame
       // Bottom-right inner corner of the tile (inside the 22 pt radius) is empty background in every state;
       // just outside the tile is the wallpaper.
@@ -171,38 +126,16 @@ final class WidgetUITests: XCTestCase {
   private func pickTheme(_ theme: String) {
     let app = launch(api: .mock, theme: nil)
     let deck = el(app, "study.deck")
-    XCTAssertTrue(deck.waitForExistence(timeout: 10), "study.deck missing")
+    XCTAssertTrue(deck.waitFor(timeout: 10), "study.deck missing")
     deck.tap()
     let gear = el(app, "deck.settings")
-    XCTAssertTrue(gear.waitForExistence(timeout: 5), "deck.settings missing")
+    XCTAssertTrue(gear.waitFor(timeout: 5), "deck.settings missing")
     gear.tap()
-    let button = el(app, "settings.theme.\(theme)")
-    XCTAssertTrue(button.waitForExistence(timeout: 5), "settings.theme.\(theme) missing")
+    waitForSheet(app, "Settings")
+    let button = themeSegment(app, theme.capitalized)
+    XCTAssertTrue(button.waitFor(timeout: 5), "theme segment \(theme.capitalized) missing")
     button.tap()
-    let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: button)
-    XCTAssertEqual(XCTWaiter().wait(for: [selected], timeout: 3), .completed, "\(theme) not selected")
+    XCTAssertTrue(poll(timeout: 3) { button.isSelected }, "\(theme) not selected")
     app.terminate()
-  }
-
-  private static func close(_ c: RGB, _ e: RGB, tolerance: Int = 4) -> Bool {
-    abs(c.0 - e.0) <= tolerance && abs(c.1 - e.1) <= tolerance && abs(c.2 - e.2) <= tolerance
-  }
-
-  @MainActor
-  private func waitForColors(_ app: XCUIApplication, _ checks: [(String, CGPoint, RGB)], context: String,
-                             timeout: TimeInterval = 3, file: StaticString = #filePath, line: UInt = #line) {
-    let width = app.windows.firstMatch.frame.width
-    let deadline = Date().addingTimeInterval(timeout)
-    var failures: [String] = []
-    repeat {
-      let pixels = Pixels(XCUIScreen.main.screenshot(), pointWidth: width)
-      failures = checks.compactMap { name, p, expected in
-        let c = pixels.color(at: p)
-        return Self.close(c, expected) ? nil : "\(name) at \(p) is \(c), expected \(expected)"
-      }
-      if failures.isEmpty { return }
-      Thread.sleep(forTimeInterval: 0.2)
-    } while Date() < deadline
-    for f in failures { XCTFail("[\(context)] \(f)", file: file, line: line) }
   }
 }

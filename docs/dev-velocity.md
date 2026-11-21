@@ -74,6 +74,8 @@ resolves to the same lock as `latest` when 27.0 is the newest runtime.
   (`-parallel-testing-enabled`, `UI_WORKERS`) each boot one more clone, so **`UI_WORKERS` defaults to 1**; set
   `UI_WORKERS=N` only when about N UI slots are idle (e.g. a lone full-suite run), keeping running UI runs ×
   workers + unit runs ≤ 8. All three numbers are env-tunable: `UI_POOL_SIZE`, `UNIT_POOL_SIZE`, `UI_WORKERS`.
+  Workers take whole test classes on clones Xcode creates and deletes per run, so each UI test class stands alone
+  (own stub servers on OS-picked ports, no order between classes).
 - **Bound a run** with `scripts/_timeout.sh <seconds> <command…>` (macOS has no `timeout`): kills the command's
   whole process group (xcodebuild included) and exits 124; its locks drop with it.
 

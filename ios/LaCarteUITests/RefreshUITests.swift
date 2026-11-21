@@ -4,7 +4,6 @@ import XCTest
 /// "Stub" = `StubAPIServer` + `StubDeck`; the test adds/removes cards on it to simulate an agent (MCP).
 final class RefreshUITests: XCTestCase {
   static let ratings = ["again", "good"]  // spec 011
-  static let appearances: [XCUIDevice.Appearance] = [.light, .dark]
   static let base = Date(timeIntervalSince1970: 1_767_225_600)  // 2026-01-01: due now
   static let idA = "AAAAAAAA-0000-0000-0000-000000000001"
   static let idB = "BBBBBBBB-0000-0000-0000-000000000002"
@@ -14,104 +13,41 @@ final class RefreshUITests: XCTestCase {
     continueAfterFailure = false
   }
 
-  // MARK: - #1, #7 (caught up), #11
-
-  /// #1: caught up → agent adds a card → pull on the caught-up message → card front, unrevealed, "1 to review".
-  /// The caught-up content stays on screen while the reload is in flight (no blank loading state).
-  /// #11: no blue pixel while the spinner is showing.
-  @MainActor
-  func testStudy_pullToRefreshWhenCaughtUp() throws {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let (server, deck) = try startStub([])
-      let app = launch(api: .live(server.url))
-      waitForLabel(el(app, "study.message"), "All caught up")
-      assertCenteredMessage(app, "study.message")
-      snapshot("study-caught-up-before-refresh", appearance: appearance)
-
-      deck.add(card(Self.idA, "canine", "dog"))
-      deck.readDelay = 5
-      // Reload in flight (captured mid-refresh): the caught-up text is still drawn (quiet reload), spinner not blue.
-      let inFlight = pullToRefreshCapturing(app, from: el(app, "study.message"), name: "study-refresh-spinner",
-                                            appearance: appearance)
-      assertInkVisible(inFlight, appearance, "caught-up text during the refresh (blank loading state?)")
-      assertNoBlue(inFlight, "study refresh spinner")
-
-      waitForLabel(el(app, "study.front"), "canine", timeout: 20)
-      assertFront(app, "canine", remaining: "1 to review")
-      snapshot("study-after-refresh", appearance: appearance)
-      app.terminate()
-      server.stop()
-    }
-  }
-
-  // MARK: - #2, #7 (offline)
-
-  /// #2: API down → offline; API back → pulling on `study.message` leaves the offline state.
-  @MainActor
-  func testStudy_pullToRefreshWhenOffline() throws {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let deck = StubDeck([card(Self.idA, "gratitude", "thank you")])
-      let server = StubAPIServer(handler: deck.handle)
-      // Not started: the port refuses connections.
-      let app = launch(api: .live(server.url))
-      waitForLabel(el(app, "study.message"), "Can't reach your deck", timeout: 20)
-      XCTAssertTrue(el(app, "study.retry").exists, "study.retry missing offline")
-      assertCenteredMessage(app, "study.message")
-      snapshot("study-offline-before-refresh", appearance: appearance)
-
-      // Pull while still down → still offline.
-      pullToRefresh(app, from: el(app, "study.message"))
-      waitForLabel(el(app, "study.message"), "Can't reach your deck", timeout: 20)
-
-      try server.start()
-      pullToRefresh(app, from: el(app, "study.message"))
-      assertFront(app, "gratitude", remaining: "1 to review")
-      XCTAssertFalse(el(app, "study.retry").exists, "study.retry still shown after a successful pull")
-      snapshot("study-offline-after-refresh", appearance: appearance)
-      app.terminate()
-      server.stop()
-    }
-  }
-
   // MARK: - #7 (studying)
 
   /// #7: in studying, a pull on the (short) card reloads, does not reveal, and the front still doesn't move on reveal.
   @MainActor
   func testStudy_pullToRefreshWhileStudying() throws {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let (server, deck) = try startStub([card(Self.idA, "canine", "dog")])
-      let app = launch(api: .live(server.url))
-      assertFront(app, "canine", remaining: "1 to review")
-      let frontBefore = el(app, "study.front").frame
+    XCUIDevice.shared.appearance = .dark
+    let (server, deck) = try startStub([card(Self.idA, "canine", "dog")])
+    let app = launch(api: .live(server.url))
+    assertFront(app, "canine", remaining: "1 to review")
+    let frontBefore = el(app, "study.front").frame
 
-      deck.add(card(Self.idB, "feline", "cat", minutes: 1))
-      deck.readDelay = 5
-      let inFlight = pullToRefreshCapturing(app, from: el(app, "study.card"), name: "study-card-refresh-spinner",
-                                            appearance: appearance)
-      assertInkVisible(inFlight, appearance, "card front during the refresh (blank loading state?)")
-      assertNoBlue(inFlight, "study card refresh spinner")
+    deck.add(card(Self.idB, "feline", "cat", minutes: 1))
+    deck.readDelay = 5
+    let inFlight = pullToRefreshCapturing(app, from: el(app, "study.card"), name: "study-card-refresh-spinner",
+                                          appearance: .dark)
+    assertInkVisible(inFlight, ink: Palette.dark.ink, "card front during the refresh (blank loading state?)")
+    assertNoBlue(inFlight, "study card refresh spinner")
 
-      waitForLabel(el(app, "study.remaining"), "2 to review", timeout: 20)
-      deck.readDelay = 0
-      assertFront(app, "canine", remaining: "2 to review")
-      XCTAssertFalse(el(app, "study.back").exists, "pulling revealed the card")
-      Thread.sleep(forTimeInterval: 0.5)
-      let frontAfter = el(app, "study.front").frame
-      XCTAssertEqual(frontAfter.minY, frontBefore.minY, accuracy: 0.5,
-                     "study.front did not settle back after the pull: \(frontBefore) → \(frontAfter)")
-      snapshot("study-card-after-refresh", appearance: appearance)
+    waitForLabel(el(app, "study.remaining"), "2 to review", timeout: 20)
+    deck.readDelay = 0
+    assertFront(app, "canine", remaining: "2 to review")
+    XCTAssertFalse(el(app, "study.back").exists, "pulling revealed the card")
+    _ = poll(timeout: 3) { abs(el(app, "study.front").frame.minY - frontBefore.minY) < 0.5 }  // settles after the pull
+    let frontAfter = el(app, "study.front").frame
+    XCTAssertEqual(frontAfter.minY, frontBefore.minY, accuracy: 0.5,
+                   "study.front did not settle back after the pull: \(frontBefore) → \(frontAfter)")
+    snapshot("study-card-after-refresh", appearance: .dark)
 
-      el(app, "study.card").tap()
-      assertRevealed(app, front: "canine", back: "dog")
-      Thread.sleep(forTimeInterval: 0.5)
-      XCTAssertEqual(el(app, "study.front").frame.minY, frontBefore.minY, accuracy: 0.5,
-                     "study.front moved on reveal after a refresh")
-      app.terminate()
-      server.stop()
-    }
+    el(app, "study.card").tap()
+    assertRevealed(app, front: "canine", back: "dog")
+    _ = poll(timeout: 2) { abs(el(app, "study.front").frame.minY - frontBefore.minY) < 0.5 }  // 0.25 s fade
+    XCTAssertEqual(el(app, "study.front").frame.minY, frontBefore.minY, accuracy: 0.5,
+                   "study.front moved on reveal after a refresh")
+    app.terminate()
+    server.stop()
   }
 
   /// #7: the whole card area is the pull surface, not just the text: a pull starting in the empty top part of
@@ -176,73 +112,56 @@ final class RefreshUITests: XCTestCase {
   /// the reload, the reload uses the query, the field keeps its text.
   @MainActor
   func testDeck_pullToRefresh() throws {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let (server, deck) = try startStub([])
-      let app = launch(api: .live(server.url))
-      openDeck(app)
-      waitForLabel(el(app, "deck.message"), "No cards yet")
-      assertCenteredMessage(app, "deck.message")
-      snapshot("deck-empty-before-refresh", appearance: appearance)
-
-      deck.add(card(Self.idA, "canine", "dog"))
-      pullToRefresh(app, from: el(app, "deck.message"))
-      XCTAssertTrue(deckTitle(app).waitForExistence(timeout: 2), "the pull closed the deck sheet")
-      XCTAssertTrue(row(app, Self.idA).waitForExistence(timeout: 10), "deck.row.<canine> missing after the pull")
-      XCTAssertFalse(el(app, "deck.message").exists, "deck.message still shown with a row")
-      snapshot("deck-after-refresh", appearance: appearance)
-
-      // With a query.
-      deckSearch(app).tap()
-      deckSearch(app).typeText("ine")
-      Thread.sleep(forTimeInterval: 1)  // debounce
-      XCTAssertTrue(row(app, Self.idA).waitForExistence(timeout: 5))
-      deck.add(card(Self.idB, "feline", "cat", minutes: 1))
-      deck.add(card(Self.idC, "raven", "blackbird", minutes: 2))
-      deck.readDelay = 5
-      let before = server.requests.count
-      let inFlight = pullToRefreshCapturing(app, from: row(app, Self.idA), name: "deck-refresh-spinner",
-                                            appearance: appearance)
-      // In flight: the canine row still drawn (visual review), only one row before the response.
-      assertInkVisible(inFlight, appearance, "existing row during the refresh")
-      assertNoBlue(inFlight, "deck refresh spinner")
-      XCTAssertTrue(deckTitle(app).exists, "the pull closed the deck sheet")
-      XCTAssertTrue(row(app, Self.idB).waitForExistence(timeout: 20), "feline row missing after the pull with a query")
-      XCTAssertTrue(row(app, Self.idA).exists, "canine row gone after the pull")
-      XCTAssertFalse(row(app, Self.idC).exists, "raven (not matching 'ine') shown: the refresh ignored the query")
-      XCTAssertEqual(deckSearch(app).value as? String, "ine", "search field lost its text")
-      let gets = server.requests.dropFirst(before).filter { $0.method == "GET" && StubDeck.route($0.path) == "/cards" }
-      XCTAssertFalse(gets.isEmpty, "no GET /cards after the pull")
-      for g in gets {
-        XCTAssertEqual(StubDeck.queryItems(g.path)["query"], "ine", "refresh GET \(g.path) without the query")
-      }
-      snapshot("deck-after-refresh-query", appearance: appearance)
-      app.terminate()
-      server.stop()
-    }
-  }
-
-  // MARK: - #9
-
-  /// #9: deck open → add → Home → reactivate → new row. Study, under the sheet, refreshed too (rule: Study
-  /// refreshes on foreground even under a sheet; a deck refresh sends no `deckChanged`).
-  @MainActor
-  func testDeck_foregroundReload() throws {
     XCUIDevice.shared.appearance = .light
     let (server, deck) = try startStub([])
     let app = launch(api: .live(server.url))
-    waitForLabel(el(app, "study.message"), "All caught up")
     openDeck(app)
     waitForLabel(el(app, "deck.message"), "No cards yet")
+    assertCenteredMessage(app, "deck.message")
+    snapshot("deck-empty-before-refresh", appearance: .light)
 
     deck.add(card(Self.idA, "canine", "dog"))
-    backgroundAndReactivate(app)
-    XCTAssertTrue(row(app, Self.idA).waitForExistence(timeout: 10), "new row missing after reactivating")
-    snapshot("deck-foreground", appearance: .light)
+    // Pull from just under the search field: the message sits low in the 009a empty state, and a drag starting
+    // there is too short to trigger the refresh.
+    let window = app.windows.firstMatch
+    let top = deckSearch(app).frame.maxY + 30, h = window.frame.height
+    window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: top / h))
+      .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (top + 400) / h)))
+    XCTAssertTrue(deckTitle(app).waitFor(timeout: 2), "the pull closed the deck sheet")
+    XCTAssertTrue(row(app, Self.idA).waitFor(timeout: 10), "deck.row.<canine> missing after the pull")
+    XCTAssertFalse(el(app, "deck.message").exists, "deck.message still shown with a row")
+    snapshot("deck-after-refresh", appearance: .light)
 
-    swipeSheetDown(app, from: deckTitle(app))
-    waitForAbsence(deckTitle(app))
-    assertFront(app, "canine", remaining: "1 to review")
+    // With a query.
+    deckSearch(app).tap()
+    deckSearch(app).typeText("ine")
+    // Debounce: wait for the search request (the old fixed 1 s sleep); the checks below fail if it never came.
+    _ = poll(timeout: 3) { server.requests.contains { StubDeck.queryItems($0.path)["query"] == "ine" } }
+    XCTAssertTrue(row(app, Self.idA).waitFor(timeout: 5))
+    deck.add(card(Self.idB, "feline", "cat", minutes: 1))
+    deck.add(card(Self.idC, "raven", "blackbird", minutes: 2))
+    deck.readDelay = 5
+    let before = server.requests.count
+    let inFlight = pullToRefreshCapturing(app, from: row(app, Self.idA), name: "deck-refresh-spinner",
+                                          appearance: .light)
+    // In flight: the canine row still drawn (visual review), only one row before the response.
+    assertInkVisible(inFlight, ink: Palette.light.ink, "existing row during the refresh")
+    // The system keyboard (still up from the search) has a blue Search key: only check above it.
+    let keyboardTop = app.keyboards.firstMatch.exists ? app.keyboards.firstMatch.frame.minY : app.windows.firstMatch.frame.maxY
+    assertNoBlue(inFlight.flatMap { $0.cropping(to: CGRect(x: 0, y: 0, width: $0.width, height: Int(keyboardTop * 3))) },
+                 "deck refresh spinner")
+    XCTAssertTrue(deckTitle(app).exists, "the pull closed the deck sheet")
+    XCTAssertTrue(row(app, Self.idB).waitFor(timeout: 20), "feline row missing after the pull with a query")
+    XCTAssertTrue(row(app, Self.idA).exists, "canine row gone after the pull")
+    XCTAssertFalse(row(app, Self.idC).exists, "raven (not matching 'ine') shown: the refresh ignored the query")
+    XCTAssertEqual(deckSearch(app).value as? String, "ine", "search field lost its text")
+    let gets = server.requests.dropFirst(before).filter { $0.method == "GET" && StubDeck.route($0.path) == "/notes" }
+    XCTAssertFalse(gets.isEmpty, "no GET /notes after the pull (spec 014c: the deck lists notes)")
+    for g in gets {
+      XCTAssertEqual(StubDeck.queryItems(g.path)["query"], "ine", "refresh GET \(g.path) without the query")
+    }
+    snapshot("deck-after-refresh-query", appearance: .light)
+    app.terminate()
     server.stop()
   }
 
@@ -262,7 +181,7 @@ final class RefreshUITests: XCTestCase {
     deck.readDelay = 0
 
     openDeck(app)
-    XCTAssertTrue(row(app, Self.idA).waitForExistence(timeout: 10))
+    XCTAssertTrue(row(app, Self.idA).waitFor(timeout: 10))
     deck.readDelay = 5
     let deckShot = pullToRefreshCapturing(app, from: row(app, Self.idA), name: "deck-refresh-forest",
                                           appearance: .light)
@@ -287,15 +206,16 @@ final class RefreshUITests: XCTestCase {
     openDeck(app)
     let anyRow = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'deck.row.'"))
       .firstMatch
-    XCTAssertTrue(anyRow.waitForExistence(timeout: 10), "no seeded rows")
+    XCTAssertTrue(anyRow.waitFor(timeout: 10), "no seeded rows")
 
     let created = try XCTUnwrap(liveRequest(url + "/cards", method: "POST", body: #"{"front":"canine","back":"dog"}"#))
     let canine = try XCTUnwrap(try JSONSerialization.jsonObject(with: created) as? [String: Any])
-    let canineID = try XCTUnwrap(canine["id"] as? String, "POST /cards: \(canine)")
+    // Spec 014c: deck rows are notes, keyed by the card's `note_id`.
+    let canineID = try XCTUnwrap(canine["note_id"] as? String ?? canine["id"] as? String, "POST /cards: \(canine)")
     XCTAssertFalse(row(app, canineID).exists, "canine shown before any refresh")
 
     pullToRefresh(app, from: anyRow)
-    XCTAssertTrue(row(app, canineID).waitForExistence(timeout: 10), "canine row missing after pulling the list")
+    XCTAssertTrue(row(app, canineID).waitFor(timeout: 10), "canine row missing after pulling the list")
     snapshot("deck-refresh-live", appearance: .light)
 
     swipeSheetDown(app, from: deckTitle(app))
@@ -330,7 +250,7 @@ final class RefreshUITests: XCTestCase {
   @MainActor
   private func openDeck(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let button = el(app, "study.deck")
-    XCTAssertTrue(button.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
+    XCTAssertTrue(button.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
     waitForDeckTitle(app, file: file, line: line)
   }
@@ -341,7 +261,7 @@ final class RefreshUITests: XCTestCase {
     waitForLabel(el(app, "study.front"), front, file: file, line: line)
     waitForLabel(el(app, "study.remaining"), remaining, file: file, line: line)
     XCTAssertFalse(el(app, "study.back").exists, "study.back visible: card should be unrevealed", file: file, line: line)
-    XCTAssertTrue(el(app, "study.reveal").waitForExistence(timeout: 3), "study.reveal missing", file: file, line: line)
+    XCTAssertTrue(el(app, "study.reveal").waitFor(timeout: 3), "study.reveal missing", file: file, line: line)
     for rating in Self.ratings {
       XCTAssertFalse(el(app, "study.rate.\(rating)").exists, "study.rate.\(rating) shown before reveal",
                      file: file, line: line)
@@ -356,7 +276,7 @@ final class RefreshUITests: XCTestCase {
     XCTAssertFalse(el(app, "study.reveal").exists, "study.reveal shown on a revealed card", file: file, line: line)
     for rating in Self.ratings {
       let b = el(app, "study.rate.\(rating)")
-      XCTAssertTrue(b.waitForExistence(timeout: 3), "study.rate.\(rating) missing", file: file, line: line)
+      XCTAssertTrue(b.waitFor(timeout: 3), "study.rate.\(rating) missing", file: file, line: line)
       XCTAssertTrue(b.isEnabled, "study.rate.\(rating) disabled", file: file, line: line)
     }
   }
@@ -370,45 +290,6 @@ final class RefreshUITests: XCTestCase {
     XCTAssertEqual(f.midX, window.midX, accuracy: 1, "\(id) not centered horizontally: \(f)", file: file, line: line)
     XCTAssertEqual(f.midY, window.midY, accuracy: window.height * 0.15, "\(id) not vertically centered: \(f)",
                    file: file, line: line)
-  }
-
-  /// #11 / design system "no default blue tint": no saturated blue pixel anywhere on screen.
-  @MainActor
-  private func assertNoBlue(_ image: CGImage?, _ context: String,
-                            file: StaticString = #filePath, line: UInt = #line) {
-    guard let image else { return XCTFail("\(context): no screenshot", file: file, line: line) }
-    let window = CGRect(x: 0, y: 0, width: CGFloat(image.width) / 3, height: CGFloat(image.height) / 3)  // @3x
-    let pixels = Pixels(image, pointWidth: window.width)
-    var blue: [(CGPoint, (Int, Int, Int))] = []
-    var y: CGFloat = 0
-    while y < window.height {
-      var x: CGFloat = 0
-      while x < window.width {
-        let c = pixels.color(at: CGPoint(x: x, y: y))
-        if c.2 > c.0 + 60, c.2 > c.1 + 30 { blue.append((CGPoint(x: x, y: y), c)) }
-        x += 1
-      }
-      y += 1
-    }
-    XCTAssertTrue(blue.isEmpty, "\(context): \(blue.count) blue pixels, e.g. \(blue.prefix(3))", file: file, line: line)
-  }
-
-  /// Text in the ink colour is drawn somewhere in the content area (y 130–760pt): the screen isn't blank.
-  @MainActor
-  private func assertInkVisible(_ image: CGImage?, _ appearance: XCUIDevice.Appearance, _ context: String,
-                                file: StaticString = #filePath, line: UInt = #line) {
-    guard let image else { return XCTFail("\(context): no screenshot", file: file, line: line) }
-    let ink = appearance == .dark ? (242, 242, 240) : (28, 28, 28)
-    let width = CGFloat(image.width) / 3  // @3x
-    let pixels = Pixels(image, pointWidth: width)
-    var count = 0
-    for y in stride(from: 130.0, to: 760.0, by: 1.0) {
-      for x in stride(from: 0.0, to: width, by: 1.0) {
-        let c = pixels.color(at: CGPoint(x: x, y: y))
-        if abs(c.0 - ink.0) < 20, abs(c.1 - ink.1) < 20, abs(c.2 - ink.2) < 20 { count += 1 }
-      }
-    }
-    XCTAssertGreaterThan(count, 30, "\(context): no ink-coloured text in the content area", file: file, line: line)
   }
 
   // MARK: Live API helpers

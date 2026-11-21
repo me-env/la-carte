@@ -58,7 +58,7 @@ final class RatingsUITests: XCTestCase {
         el(app, "study.reveal").tap()
         waitForLabel(el(app, "study.back"), Self.mockBack)
         let r = ring(app)
-        XCTAssertTrue(r.waitForExistence(timeout: 5), "no ring element while held (\(v.name), f=\(h.f))")
+        XCTAssertTrue(r.waitFor(timeout: 5), "no ring element while held (\(v.name), f=\(h.f))")
         if r.identifier != "study.swipeRing" {
           issues.append("ring element identifier is '\(r.identifier)', not 'study.swipeRing' (\(v.name), f=\(h.f))")
         }
@@ -172,7 +172,7 @@ final class RatingsUITests: XCTestCase {
     el(app, "study.card").tap()
     waitForLabel(el(app, "study.back"), "chien")
     el(app, "study.back").doubleTap()
-    XCTAssertTrue(el(app, "study.backField").waitForExistence(timeout: 3), "double-tap did not open study.backField")
+    XCTAssertTrue(el(app, "study.backField").waitFor(timeout: 3), "double-tap did not open study.backField")
     for f in [0.22, -0.22] {
       drag(app, f)
       XCTAssertFalse(ring(app).exists, "ring shown while editing (\(f))")
@@ -192,7 +192,7 @@ final class RatingsUITests: XCTestCase {
       + "menu and the map, the card and the deck, the word and its meaning, the front and the back, the question "
       + "and the answer, the day and the night, until at last, after all of that, it finally ends here: the end"
     let (server, _) = try startReviewStub([.init(id: "CCCCCCCC-1111-1111-1111-111111111111", front: "long", back: back)])
-    let app = launch(api: .live(server.url), arguments: accessibilityXLArguments)
+    let app = launch(api: .live(server.url), arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"])  // long enough to scroll
     waitForLabel(el(app, "study.front"), "long")
     el(app, "study.card").tap()
     waitForLabel(el(app, "study.back"), back)
@@ -233,7 +233,7 @@ final class RatingsUITests: XCTestCase {
       waitForLabel(el(app, "study.back"), Self.mockBack)
       XCTAssertFalse(ring(app).exists, "ring after tap-to-reveal")
       el(app, "study.back").doubleTap()
-      XCTAssertTrue(el(app, "study.backField").waitForExistence(timeout: 3), "double-tap no longer opens study.backField")
+      XCTAssertTrue(el(app, "study.backField").waitFor(timeout: 3), "double-tap no longer opens study.backField")
       XCTAssertFalse(ring(app).exists, "ring after double-tap")
       snapshot("study-doubletap-edit", appearance: appearance)
       app.terminate()
@@ -300,8 +300,8 @@ final class RatingsUITests: XCTestCase {
   private func assertTwoButtons(_ app: XCUIApplication, context: String, checkLeftRight: Bool = true,
                                 file: StaticString = #filePath, line: UInt = #line) {
     let again = el(app, "study.rate.again"), good = el(app, "study.rate.good")
-    XCTAssertTrue(again.waitForExistence(timeout: 3), "study.rate.again missing (\(context))", file: file, line: line)
-    XCTAssertTrue(good.waitForExistence(timeout: 3), "study.rate.good missing (\(context))", file: file, line: line)
+    XCTAssertTrue(again.waitFor(timeout: 3), "study.rate.again missing (\(context))", file: file, line: line)
+    XCTAssertTrue(good.waitFor(timeout: 3), "study.rate.good missing (\(context))", file: file, line: line)
     XCTAssertEqual(again.label, "Forgot", file: file, line: line)
     XCTAssertEqual(good.label, "Got it", file: file, line: line)
     XCTAssertTrue(again.isEnabled && good.isEnabled, "rating buttons disabled (\(context))", file: file, line: line)

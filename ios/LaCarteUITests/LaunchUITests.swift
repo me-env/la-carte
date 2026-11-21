@@ -39,7 +39,7 @@ final class LaunchUITests: XCTestCase {
     let add = el(app, "study.add")
     waitForLabel(el(app, "study.remaining"), "1 to review")
     el(app, "study.reveal").tap()
-    XCTAssertTrue(el(app, "study.rate.good").waitForExistence(timeout: 5), "study.rate.good missing")
+    XCTAssertTrue(el(app, "study.rate.good").waitFor(timeout: 5), "study.rate.good missing")
     let studying = (deck: deckButton.frame, add: add.frame)
 
     deck.readDelay = 2
@@ -66,7 +66,7 @@ final class LaunchUITests: XCTestCase {
   private func assertCornerButtonsStable(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let deck = el(app, "study.deck")
     let add = el(app, "study.add")
-    XCTAssertTrue(deck.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
+    XCTAssertTrue(deck.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
     let early = (deck: deck.frame, add: add.frame)
     _ = XCTWaiter().wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
     let settled = (deck: deck.frame, add: add.frame)
