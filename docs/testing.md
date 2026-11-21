@@ -29,6 +29,12 @@ ScrollView as empty.
 
 ## UI tests
 
+**UI tests test UI, not logic.** A UI test exists only for what a TestStore/unit test can't see: the screen
+renders right (layout, colours, light/dark, accessibility sizes), navigation and gestures work on real UIKit,
+and the app wires to the API end to end (a few `_liveAPI` tests). Reducer logic (state changes, API calls made,
+errors, debounce, in-flight guards, persistence) is a unit test. Before adding a UI test, ask "could a TestStore
+test catch this?" — if yes, write that instead. One UI test per flow, one appearance pass unless the look differs.
+
 - Test names: `test<Screen>_<scenario>` (e.g. `testStudy_revealAndRateGood`). Live-API variants end in `_liveAPI`
   and `XCTSkip` when `LA_CARTE_API_URL` is unset.
 - Find elements **only** by accessibility identifier (`<feature>.<element>`), never by visible text or index.

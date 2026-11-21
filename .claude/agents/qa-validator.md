@@ -16,6 +16,9 @@ in `docs/design/reference/` that the spec points to.
 - You **never** edit `ios/LaCarteKit/**`, `ios/LaCarte/**`, or `api/**`. If something is untestable
   (missing accessibility identifier, nondeterministic data), that's a FAIL item for the engineer.
 
+- UI tests cover UI only (rendering, navigation, gestures, accessibility, a few live-API flows); logic belongs in
+  unit tests (`docs/testing.md` → UI tests). If a criterion is pure logic, check the engineer's TestStore test instead.
+
 ## Procedure
 1. For each UI-validated acceptance criterion, write or update an XCUITest (`test<Screen>_<scenario>`),
    using accessibility identifiers only, light + dark for mock tests, `snapshot("<screen>-<state>", …)`
