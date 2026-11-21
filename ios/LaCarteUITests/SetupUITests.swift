@@ -54,7 +54,7 @@ extension SettingsUITests {
 
     el(app, "study.openSettings").tap()
     waitForSheet(app, "Settings")
-    XCTAssertFalse(el(app, "deck.title").exists, "Settings opened via the deck, not directly over Study")
+    XCTAssertFalse(deckTitle(app).exists, "Settings opened via the deck, not directly over Study")
     XCTAssertEqual(el(app, "settings.url").placeholderValue, "Server URL", "settings.url placeholder (#13)")
     XCTAssertEqual(el(app, "settings.token").label, "Token", "settings.token label (#13, #16)")
     XCTAssertEqual(fieldText(app, "settings.token"), "", "settings.token not empty after clearing")
@@ -100,7 +100,7 @@ extension SettingsUITests {
       if appearance == .light {
         el(app, "deck.openSettings").tap()
         waitForSheet(app, "Settings")
-        XCTAssertTrue(el(app, "deck.title").exists, "deck.openSettings did not open the deck's Settings sheet")
+        XCTAssertTrue(deckTitle(app).exists, "deck.openSettings did not open the deck's Settings sheet")
         setText(app, "settings.url", server.url)
         setText(app, "settings.token", "wrong", secure: true)
         closeSettingsSheet(app)
@@ -142,8 +142,8 @@ extension SettingsUITests {
     setText(app, "settings.token", "", secure: true)
     closeSettingsSheet(app)
     assertDeckMessage(app, Self.notSetUp.message, button: true)
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"))
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app))
     assertStudyMessage(app, Self.notSetUp)
     server.stop()
   }
@@ -249,8 +249,8 @@ extension SettingsUITests {
     setText(app, "settings.token", "", secure: true)
     closeSettingsSheet(app)
     if !direct {
-      swipeSheetDown(app, from: el(app, "deck.title"))
-      waitForAbsence(el(app, "deck.title"))
+      swipeSheetDown(app, from: deckTitle(app))
+      waitForAbsence(deckTitle(app))
     }
   }
 

@@ -14,19 +14,31 @@ public struct DeckView: View {
   }
 
   public var body: some View {
-    VStack(spacing: Theme.Spacing.m) {
-      Group {
-        header
-        searchField
-      }
-      // Not on the list: the swipe action keeps the system's destructive red.
-      .tint(Theme.ink)
+    NavigationStack {
       content
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Rows, menus and swipe-delete keep the system tint; the search cursor's pink is `Theme.tintSearchFields()`.
+        .tint(Color?.none)
+        .background(Theme.background)
         .refreshable { await store.send(.pulledToRefresh).finish() }
+        .navigationTitle("Cards")
+        .toolbar {
+          ToolbarItem(placement: .primaryAction) {
+            Button("Settings", systemImage: "gearshape") { store.send(.settingsButtonTapped) }
+              .tint(Theme.ink)
+              .accessibilityIdentifier("deck.settings")
+          }
+          ToolbarItem(placement: .primaryAction) {
+            Button("Add card", systemImage: "plus") { store.send(.addButtonTapped) }
+              .tint(Theme.ink)
+              .accessibilityIdentifier("deck.add")
+          }
+        }
+        .searchable(text: $store.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
     }
-    .padding(.top, Theme.Spacing.l)
-    .background(Theme.background)
+    .sensoryFeedback(.impact(weight: .light), trigger: store.deletions)
+    .sensoryFeedback(.error, trigger: store.phase) { _, new in new == .offline || new == .unauthorized }
     .onAppear { store.send(.onAppear) }
     .onChange(of: scenePhase) { _, phase in store.send(.scenePhaseChanged(phase)) }
     .sheet(item: $store.scope(\.$destination, action: \.destination).editor) { editorStore in
@@ -37,65 +49,15 @@ public struct DeckView: View {
     }
   }
 
-  private var header: some View {
-    HStack(spacing: Theme.Spacing.s) {
-      Text("Cards")
-        .font(.screenTitle)
-        .foregroundStyle(Theme.ink)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityIdentifier("deck.title")
-      CircleIconButton("gearshape", accessibilityLabel: "Settings") {
-        store.send(.settingsButtonTapped)
-      }
-      .accessibilityIdentifier("deck.settings")
-      CircleIconButton("plus", accessibilityLabel: "Add card") {
-        store.send(.addButtonTapped)
-      }
-      .accessibilityIdentifier("deck.add")
-    }
-    .padding(.horizontal, Theme.Spacing.m)
-  }
-
-  private var searchField: some View {
-    HStack(spacing: Theme.Spacing.s) {
-      Image(systemName: "magnifyingglass")
-        .foregroundStyle(Theme.secondaryInk)
-        .accessibilityHidden(true)
-      TextField("Search", text: $store.query, prompt: Text("Search").foregroundStyle(Theme.secondaryInk))
-        .font(.body)
-        .foregroundStyle(Theme.ink)
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled()
-        .submitLabel(.search)
-        .accessibilityIdentifier("deck.search")
-    }
-    .padding(.horizontal, Theme.Spacing.m)
-    .padding(.vertical, Theme.Spacing.s)
-    .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.row))
-    .padding(.horizontal, Theme.Spacing.m)
-  }
-
   @ViewBuilder private var content: some View {
     if let message = store.message {
       // In a scroll view so the message can be pulled to refresh.
       ScrollView {
-        VStack(spacing: Theme.Spacing.m) {
-          Text(message)
-            .font(.body)
-            .foregroundStyle(Theme.secondaryInk)
-            .multilineTextAlignment(.center)
-            .accessibilityIdentifier("deck.message")
-          if store.showsSettingsButton {
-            Button { store.send(.settingsButtonTapped) } label: {
-              Text("Open Settings")
-                .font(.body)
-                .foregroundStyle(Theme.ink)
-                .frame(minHeight: 44)
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("deck.openSettings")
+        Group {
+          if message == .noMatches {
+            ContentUnavailableView.search(text: store.query)
+          } else {
+            unavailable(message)
           }
         }
         .padding(.horizontal, Theme.Spacing.m)
@@ -116,18 +78,45 @@ public struct DeckView: View {
             .listRowSeparator(.hidden)
             .listRowBackground(Rectangle().fill(Theme.background))
             .swipeActions(edge: .trailing) {
-              Button("Delete", role: .destructive) {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                  _ = store.send(.rowSwipedToDelete(card.id))
-                }
-              }
-              .accessibilityIdentifier("deck.row.\(card.id).delete")
+              Button("Delete", role: .destructive) { delete(card) }
+                .accessibilityIdentifier("deck.row.\(card.id).delete")
+            }
+            .contextMenu {
+              Button("Edit", systemImage: "pencil") { store.send(.rowTapped(card.id)) }
+                .accessibilityIdentifier("deck.row.\(card.id).edit")
+              Button("Delete", systemImage: "trash", role: .destructive) { delete(card) }
+                .accessibilityIdentifier("deck.row.\(card.id).contextDelete")
             }
         }
       }
       .listStyle(.plain)
       .scrollContentBackground(.hidden)
       .scrollDismissesKeyboard(.immediately)
+    }
+  }
+
+  private func unavailable(_ message: DeckFeature.State.Message) -> some View {
+    ContentUnavailableView {
+      Label {
+        Text(message.title)
+          .accessibilityIdentifier("deck.message")
+      } icon: {
+        Image(systemName: message.systemImage)
+      }
+    } actions: {
+      if store.showsSettingsButton {
+        Button("Open Settings") { store.send(.settingsButtonTapped) }
+          .font(.body)
+          .foregroundStyle(Theme.ink)
+          .frame(minHeight: 44)
+          .accessibilityIdentifier("deck.openSettings")
+      }
+    }
+  }
+
+  private func delete(_ card: Card) {
+    withAnimation(.easeInOut(duration: 0.25)) {
+      _ = store.send(.rowSwipedToDelete(card.id))
     }
   }
 

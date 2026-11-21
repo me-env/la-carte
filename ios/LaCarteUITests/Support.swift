@@ -188,6 +188,29 @@ extension XCTestCase {
   }
 }
 
+/// Spec 009a: the deck is a `NavigationStack` titled "Cards" with a system `.searchable` field (no ids of its own).
+extension XCTestCase {
+  /// The deck's navigation bar (`app.navigationBars["Cards"]`): present while the deck sheet is shown.
+  @MainActor
+  func deckTitle(_ app: XCUIApplication) -> XCUIElement { app.navigationBars["Cards"] }
+
+  /// The large/inline "Cards" title text inside the deck's navigation bar.
+  @MainActor
+  func deckTitleText(_ app: XCUIApplication) -> XCUIElement { deckTitle(app).staticTexts["Cards"].firstMatch }
+
+  /// The deck's system search field.
+  @MainActor
+  func deckSearch(_ app: XCUIApplication) -> XCUIElement { app.searchFields.firstMatch }
+
+  /// Waits for the deck sheet ("Cards" navigation bar) to be on screen.
+  @MainActor
+  func waitForDeckTitle(_ app: XCUIApplication, timeout: TimeInterval = 10,
+                        file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertTrue(deckTitle(app).waitForExistence(timeout: timeout), "deck navigation bar \"Cards\" missing",
+                  file: file, line: line)
+  }
+}
+
 // MARK: - Native sheets (spec 009b): the title is the navigation bar's, not an element with an id.
 
 extension XCTestCase {

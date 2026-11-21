@@ -30,7 +30,9 @@ public struct RootView: View {
   @State private var store = Store(initialState: AppFeature.State()) { AppFeature() }
   @Environment(\.scenePhase) private var scenePhase
 
-  public init() {}
+  public init() {
+    Theme.tintSearchFields()
+  }
 
   public var body: some View {
     Group {

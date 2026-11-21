@@ -36,13 +36,13 @@ final class SettingsUITests: XCTestCase {
       // #8: close button.
       el(app, "settings.close").tap()
       waitForAbsence(sheetBar(app, "Settings"), "settings still open after settings.close")
-      waitForLabel(el(app, "deck.title"), "Cards")
+      waitForDeckTitle(app)
 
       // #8: swipe down.
       openSettings(app)
       swipeSheetDown(app, from: sheetBar(app, "Settings"))
       waitForAbsence(sheetBar(app, "Settings"), "settings still open after swiping down")
-      waitForLabel(el(app, "deck.title"), "Cards")
+      waitForDeckTitle(app)
       app.terminate()
     }
   }
@@ -255,8 +255,8 @@ final class SettingsUITests: XCTestCase {
       el(app, "settings.close").tap()
       waitForAbsence(sheetBar(app, "Settings"))
       XCTAssertTrue(el(app, "deck.row.\(uuid(id))").waitForExistence(timeout: 5), "deck doesn't show \(front)")
-      swipeSheetDown(app, from: el(app, "deck.title"))
-      waitForAbsence(el(app, "deck.title"))
+      swipeSheetDown(app, from: deckTitle(app))
+      waitForAbsence(deckTitle(app))
       waitForLabel(el(app, "study.front"), front)
       waitForLabel(el(app, "study.remaining"), "2 to review")
     }
@@ -355,8 +355,8 @@ final class SettingsUITests: XCTestCase {
     waitForLabel(statusText(app), "Connected · 2 cards")
     el(app, "settings.close").tap()
     waitForAbsence(sheetBar(app, "Settings"))
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"))
+    swipeSheetDown(app, from: deckTitle(app))
+    waitForAbsence(deckTitle(app))
     waitForLabel(el(app, "study.front"), "greeting")
     waitForLabel(el(app, "study.remaining"), "2 to review")
     snapshot("study-live-after-settings", appearance: .light)
@@ -401,7 +401,7 @@ final class SettingsUITests: XCTestCase {
     let button = el(app, "study.deck")
     XCTAssertTrue(button.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
-    waitForLabel(el(app, "deck.title"), "Cards", file: file, line: line)
+    waitForDeckTitle(app, file: file, line: line)
   }
 
   @MainActor
@@ -477,19 +477,19 @@ final class SettingsUITests: XCTestCase {
     XCTAssertTrue(condition(), "timed out waiting for: \(what)", file: file, line: line)
   }
 
-  /// Ref 04: gear and add are 44pt circles on the title line, gear left of add, both right of "Cards".
+  /// Spec 009a #2: gear and add are system toolbar buttons on one line in the top-right, gear left of add,
+  /// both above the large "Cards" title.
   @MainActor
   private func assertGearInTitleRow(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
-    let title = el(app, "deck.title").frame, add = el(app, "deck.add").frame, gear = el(app, "deck.settings").frame
+    let title = deckTitleText(app).frame, add = el(app, "deck.add").frame, gear = el(app, "deck.settings").frame
+    let window = app.windows.firstMatch.frame
     for (id, f) in [("deck.settings", gear), ("deck.add", add)] {
-      XCTAssertEqual(f.width, 44, accuracy: 1, "\(id) not 44pt: \(f)", file: file, line: line)
-      XCTAssertEqual(f.height, 44, accuracy: 1, "\(id) not 44pt: \(f)", file: file, line: line)
+      XCTAssertGreaterThanOrEqual(f.height, 43.5, "\(id) hit area under 44pt: \(f)", file: file, line: line)
     }
     XCTAssertEqual(gear.midY, add.midY, accuracy: 0.5, "gear and add not on one line", file: file, line: line)
-    XCTAssertEqual(gear.midY, title.midY, accuracy: 3, "gear not on the title line", file: file, line: line)
-    XCTAssertLessThan(gear.maxX, add.minX, "gear not left of add", file: file, line: line)
-    XCTAssertLessThan(add.minX - gear.maxX, 20, "gear not next to add: \(gear) / \(add)", file: file, line: line)
-    XCTAssertGreaterThan(gear.minX, title.maxX, "gear overlaps the title", file: file, line: line)
+    XCTAssertLessThan(gear.maxX, add.minX + 1, "gear not left of add", file: file, line: line)
+    XCTAssertGreaterThan(add.maxX, window.width - 30, "deck.add not at the right edge: \(add)", file: file, line: line)
+    XCTAssertTrue(gear.intersection(title).isNull, "gear overlaps the title", file: file, line: line)
     XCTAssertEqual(el(app, "deck.settings").label.isEmpty, false, "deck.settings has no accessibility label",
                    file: file, line: line)
   }

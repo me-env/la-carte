@@ -19,6 +19,8 @@ public struct DeckFeature {
     var cards: IdentifiedArrayOf<Card> = []
     var query = ""
     var phase: Phase = .loading
+    /// Haptic trigger: bumps on every row deleted (spec 009a).
+    var deletions = 0
     @Presents var destination: Destination.State?
 
     public init() {}
@@ -27,14 +29,38 @@ public struct DeckFeature {
       case loading, loaded, offline, notSetUp, unauthorized
     }
 
+    enum Message: Equatable {
+      case noCards, noMatches, offline, notSetUp, unauthorized
+
+      var title: String {
+        switch self {
+        case .noCards: "No cards yet"
+        case .noMatches: "No matches"
+        case .offline: "Can't reach your deck"
+        case .notSetUp: "Connect your deck"
+        case .unauthorized: "Token rejected"
+        }
+      }
+
+      var systemImage: String {
+        switch self {
+        case .noCards: "rectangle.stack"
+        case .noMatches: "magnifyingglass"
+        case .offline: "wifi.slash"
+        case .notSetUp: "link"
+        case .unauthorized: "key"
+        }
+      }
+    }
+
     /// What to say instead of rows, if anything.
-    var message: String? {
+    var message: Message? {
       switch phase {
       case .loading: nil
-      case .offline: "Can't reach your deck"
-      case .notSetUp: "Connect your deck"
-      case .unauthorized: "Token rejected"
-      case .loaded where cards.isEmpty: query.isEmpty ? "No cards yet" : "No matches"
+      case .offline: .offline
+      case .notSetUp: .notSetUp
+      case .unauthorized: .unauthorized
+      case .loaded where cards.isEmpty: query.isEmpty ? .noCards : .noMatches
       case .loaded: nil
       }
     }
@@ -100,6 +126,7 @@ public struct DeckFeature {
 
       case let .rowSwipedToDelete(id):
         state.cards.remove(id: id)
+        state.deletions += 1
         // A load still in flight may predate the delete and would bring the row back.
         return .merge(
           .cancel(id: CancelID.load),
