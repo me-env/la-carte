@@ -39,11 +39,15 @@ sheets in the scratchpad, e.g. with `sips`/ImageMagick if installed, or ask a su
 
 ## Measured review (mandatory, every proposal)
 Run on each 1024 render (or its SVG), light and dark:
-`uv run scripts/design-review.py <render-1024.png|.svg> --home` (`--axis y` if the transition is vertical,
-`--region x0,y0,x1,y1` to isolate one part). It checks coverage smoothness at 1024/58/29 px, order
-(|psi6|, NN regularity) along the axis, touching dots, optical centre and dot-size rhythm, and writes a
-sheet (curves under the render, failing spots in red, 58/29 px previews) plus a home-screen mock with
-Apple's real icons. Thresholds are the named constants at the top of the script.
+`uv run scripts/design-review.py <light-1024.png> <dark-1024.png> --home` (`--axis y` if the transition is
+vertical, `--region x0,y0,x1,y1` to isolate one part; `--watch` re-runs on every save with a one-line
+summary). It checks coverage smoothness at 1024/58/29 px; order (|psi6|, NN regularity) along the axis over
+dots AND holes (an AM halftone's paper holes past 50% are marks too); seams: a dots -> holes flip must mix
+over >= 4 pitches and the first holes must continue the last dots (pitch, size, order); touching marks
+(allowed only where local coverage >= 0.65, i.e. closing into solid); optical centre and mark-size rhythm.
+Every line says where (`at x …, y … (band n)`, 1024 px). It writes a sheet (curves under the render,
+failing spots in red, failing marks circled, 58/29 px previews) plus a home-screen mock with Apple's real
+icons. Thresholds are the named constants at the top of the script.
 - Paste its text report **verbatim** into your verdict and open the sheet and home mock yourself.
 - **Any FAIL means ITERATE**, whatever your eye says. A "known limit" in the render script is not an
   exemption; send it back as a design problem. Name the failing metric and where (`at x …`) in Must fix.

@@ -46,6 +46,29 @@ payoff. Measurements are from 2026-11-21 (CI run 44907442393, local `qa/.results
   because raw 8 px columns alias against any lattice; the perceived blur is 0.7 icon px; the order step
   limit is 0.25, not 0.15 (per-band |ψ6| noise is ~0.05, so a smooth 6-band ramp reaches ~0.2); the
   centre check uses the optical centre (midpoint of bbox centre and ink centroid). Revisit after two rounds.
+- **Update 2026-11-21 (round 7 seam; design-critic proposed, manager approved).** Round 7's ±6 px dithered
+  dot → hole flip (now `round7/render_flip.py`) showed a vertical seam at x ≈ 369 and passed 18/18: the tool
+  only saw ink dots, so the holes half was never analysed. Now (775 lines, ~1 s per render):
+  - **Holes are marks.** Small paper components sitting in ink are detected like dots; both are stitched
+    into one point set along the axis for |ψ6|, NN regularity, size and spacing.
+  - **Seam checks.** `seam: polarity mix / pitch` (the zone where dots and holes mix must span ≥ 4 pitches;
+    a flip in one column fails) and `seam: flip continuity step` (pitch, radius and |ψ6| of the last dots vs
+    the first holes, max step ≤ 0.15).
+  - **Touching exemption** `TOUCH_OK_COVERAGE = 0.65`. Below it, nothing may touch: mark to mark is measured
+    on the Delaunay centre line, sub-pixel, using each mark's own extent (the apothem for hexagons), and mark
+    to the rest of its colour (a dot touching the solid, a hole opening into the paper) is measured too.
+    At or above it, marks may close into solid and the coverage profile alone judges that zone. Why 0.65: on
+    a hex lattice, marks that keep gap ≥ 0.2·(r1+r2) top out at a hexagon of apothem ≈ 0.413·pitch, which
+    is ≈ 0.68 coverage (design-lead's derivation).
+  - Every line gives its location (`at x …, y … (band n)`), and the sheet circles failing marks. Several
+    renders can be passed per call, and `--watch` re-runs on save.
+  - `--make-synthetic` is now dots → rounded hexagons → solid, with no flip. The old AM-flip synthetic fails
+    the new seam checks (polarity mix 0.0, continuity 0.161, dots touching the hole web at 0.144). The new
+    one passes 12 of 12 seeds.
+  - Results. round7 `flip-{light,dark}-1024.png`: PASS 18/18 → **FAIL 4/20** (polarity mix 0.0 at x 369,
+    continuity 0.396, |ψ6| drawdown 0.132, NN drawdown 0.129). round7 `card-{light,dark}-1024.png` (fix b,
+    hexagons): FAIL 1/18 (min gap 0.085 under the old dot-only rule) → **PASS 20/20**, but the min gap is
+    0.200, right at the limit, at x 385, y 536. pass5: still FAIL 7/20, with the same values.
 
 **Problem (measured on `round6/pass5/card-light-1024.png`).** The user saw a non-smooth noise→structure
 transition. The critic missed it because it reviews by eye and with zoom crops, and has no numeric test for
