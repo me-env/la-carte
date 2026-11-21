@@ -8,7 +8,8 @@
 # Builds under the app's DerivedData lock into a private copy of the test products, then tests that copy
 # on the first free UI simulator of a pool (scripts/_sim-pool.sh), so other builds and UI runs go meanwhile
 # (docs/dev-velocity.md).
-# Test classes run on UI_WORKERS parallel clones of that simulator (default 1, set in _ios-env.sh).
+# UI_WORKERS=N>1 (default 1) runs as `--split N` over warm pool simulators; Xcode's own parallel clones are never
+# used (they boot cold and crash PosterBoard, one macOS crash pop-up each).
 # Extra env forwarded to the test runner: LA_CARTE_API_URL, LA_CARTE_API_TOKEN (see scripts/e2e.sh).
 # Each finished test prints as it finishes (also into a file), then a `TESTS: …` summary line.
 # Exit code = xcodebuild's (65 test failure, 75 lock timeout); export/summary/contact-sheet failures only warn.
@@ -31,6 +32,9 @@ for a in "$@"; do
   if [ "$a" = --smoke ]; then for t in "${SMOKE[@]}"; do ARGS+=("-only-testing:LaCarteUITests/$t"); done
   else ARGS+=("$a"); fi
 done
+if [ "$UI_WORKERS" -gt 1 ]; then  # full parallel run = split over the warm pool; the split falls back here with 1
+  UI_WORKERS=1 exec "$ROOT/scripts/ios-ui-test-split.sh" "$UI_WORKERS" "$RUN" ${ARGS[@]+"${ARGS[@]}"}
+fi
 OUT="$ROOT/qa/screenshots/$RUN"
 RESULT="$RESULTS_DIR/$RUN.xcresult"   # qa/.results, or $LA_CARTE_SCRATCH/qa-results/<checkout>
 PRODUCTS="$RESULTS_DIR/$RUN.xctestproducts"  # this run's own app + runner; removed on exit
@@ -46,10 +50,9 @@ set +e
   -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER"
 STATUS=${PIPESTATUS[0]}
 # 2. Test the copy on the first free UI simulator ($POOL_DESTINATION), under its lock only.
-# One worker runs serially: classes in alphabetical order, which e2e.sh's live tests rely on (parallel testing
+# Serial run: classes in alphabetical order, which e2e.sh's live tests rely on (parallel testing
 # reorders classes even with a single worker).
-if [ "$UI_WORKERS" -gt 1 ]; then PARALLEL=(-parallel-testing-enabled YES -parallel-testing-worker-count "$UI_WORKERS")
-else PARALLEL=(-parallel-testing-enabled NO); fi
+PARALLEL=(-parallel-testing-enabled NO)
 if [ "$STATUS" -eq 0 ]; then
   TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" \
   TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \

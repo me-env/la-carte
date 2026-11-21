@@ -70,12 +70,13 @@ resolves to the same lock as `latest` when 27.0 is the newest runtime.
   screenshots and pixel checks are identical whichever slot a run gets. Same first-free / retry / `LOCK_TIMEOUT`
   rules as the unit pool. `e2e.sh` gets it through `ios-ui-test.sh`; callers change nothing. `UI_POOL_SIZE=1`
   turns it off (CI does).
-- **Simulator budget: about 8 booted at once** (5 UI slots + 3 unit slots). In-run workers
-  (`-parallel-testing-enabled`, `UI_WORKERS`) each boot one more clone, so **`UI_WORKERS` defaults to 1**; set
+- **Simulator budget: about 8 booted at once** (5 UI slots + 3 unit slots). Parallel workers
+  (`UI_WORKERS`) each use one more pool slot, so **`UI_WORKERS` defaults to 1**; set
   `UI_WORKERS=N` only when about N UI slots are idle (e.g. a lone full-suite run), keeping running UI runs ×
   workers + unit runs ≤ 8. All three numbers are env-tunable: `UI_POOL_SIZE`, `UNIT_POOL_SIZE`, `UI_WORKERS`.
-  Workers take whole test classes on clones Xcode creates and deletes per run, so each UI test class stands alone
-  (own stub servers on OS-picked ports, no order between classes).
+  `UI_WORKERS=N` makes `ios-ui-test.sh` run `--split N` on the warm pool simulators. Xcode's own parallel clones
+  (`-parallel-testing-enabled`) are never used: they boot cold every run and Apple's PosterBoard crashes in them
+  (a macOS crash pop-up each). A new pool slot is booted once when created, so that happens at most once per slot.
 - **Bound a run** with `scripts/_timeout.sh <seconds> <command…>` (macOS has no `timeout`): kills the command's
   whole process group (xcodebuild included) and exits 124; its locks drop with it.
 

@@ -61,6 +61,9 @@ the same as a plain run: screenshots in `qa/screenshots/<run>/`, one merged `<ru
 - **When:** 8+ tests or about 4 min of runtime; below that run plainly (each shard costs ~1 min of fixed overhead).
 - **N** defaults to, and is capped by, the free UI simulators; with one free (busy pool) it is a plain run.
 
+Full parallel runs use `--split` (`UI_WORKERS=N` is shorthand for `--split N`). Xcode's parallel-testing clones are
+not used: they boot cold each run and trigger PosterBoard crash pop-ups.
+
 ## Running the app against a local API
 
 The app has no built-in server (spec 008). To run it from Xcode on the simulator against `scripts/api-dev.sh`,

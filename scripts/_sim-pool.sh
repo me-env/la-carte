@@ -45,6 +45,9 @@ print(next((d["udid"] for d in devices if d["name"] == sys.argv[2] and d["isAvai
     if [ -z "$UDID" ]; then
       echo "📱 creating simulator $NAME ($MODEL, $RUNTIME), about 1.5 GB once used" >&2
       UDID="$(xcrun simctl create "$NAME" "$MODEL" "$RUNTIME")"
+      # First boot once, here, and let it settle (its first-boot crashes happen now, not in a test run)
+      xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1 || true
+      xcrun simctl shutdown "$UDID" >/dev/null 2>&1 || true
     fi
     export POOL_DESTINATION="platform=iOS Simulator,id=$UDID"
   fi
