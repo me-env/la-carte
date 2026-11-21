@@ -1,0 +1,28 @@
+{
+  "_comment": "Demo deck for the launch videos. Seed order = study order for due cards. review: \"easy\" schedules the card days ahead (not due, state review). See docs/marketing/demo-deck.md.",
+  "cards": [
+    { "front": "petrichor", "back": "the smell of rain on dry earth" },
+    { "front": "ubiquitous", "back": "found everywhere", "review": "easy" },
+    { "front": "luminous", "back": "full of light" },
+    { "front": "Capital of Australia?", "back": "Canberra" },
+    { "front": "candor", "back": "honesty", "review": "easy" },
+    { "front": "halcyon", "back": "calm and peaceful" },
+    { "front": "Berlin Wall fell in?", "back": "1989", "review": "easy" },
+    { "front": "Au", "back": "gold" },
+    { "front": "laconic", "back": "using few words", "review": "easy" },
+    { "front": "mellifluous", "back": "sweet-sounding" },
+    { "front": "wistful", "back": "gently longing", "review": "easy" },
+    { "front": "ineffable", "back": "too great for words" },
+    { "front": "Light from the Sun takes?", "back": "8 minutes", "review": "easy" },
+    { "front": "ebullient", "back": "full of energy", "review": "easy" },
+    { "front": "Largest planet?", "back": "Jupiter" },
+    { "front": "sanguine", "back": "hopeful", "review": "easy" },
+    { "front": "equanimity", "back": "calm under stress", "review": "easy" }
+  ],
+  "typed_in_video_a": { "front": "verdant", "back": "green with plants" },
+  "agent_adds": [
+    { "front": "aurora", "back": "dawn light" },
+    { "front": "zenith", "back": "highest point" },
+    { "front": "solace", "back": "comfort" }
+  ]
+}
