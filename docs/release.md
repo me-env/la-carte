@@ -36,8 +36,13 @@ plutil -extract CFBundleIdentifier raw build/unsigned.xcarchive/Products/Applica
 
 Spec 007 (widget) extends the same scheme: the extension is `$(LA_CARTE_BUNDLE_ID_PREFIX).app.widget` and the
 App Group `group.$(LA_CARTE_BUNDLE_ID_PREFIX).app`, both from the xcconfig (entitlements files expand build
-settings). The Swift code must not hard-code `group.fr.lacarte.app`: read it at runtime (e.g. an Info.plist key
-set to `group.$(LA_CARTE_BUNDLE_ID_PREFIX).app`).
+settings). `Signing.xcconfig` defines `LA_CARTE_APP_GROUP = group.$(LA_CARTE_BUNDLE_ID_PREFIX).app`, used by
+`Config/LaCarte.entitlements`, `Config/LaCarteWidget.entitlements` and the `LaCarteAppGroup` key of both Info.plists
+(read by `AppGroup.id`; nothing is hard-coded). The Ad Hoc build signs **two** bundle IDs (app + widget), both
+with that App Group; the App Group also serves as the token's keychain access group (no Keychain Sharing
+capability). Automatic signing with `-allowProvisioningUpdates` should register the widget App ID, the App Group
+and both profiles; if the API key can't create the App Group, create it once at developer.apple.com
+(Identifiers → App Groups) and enable it on both App IDs.
 
 ## How it works
 

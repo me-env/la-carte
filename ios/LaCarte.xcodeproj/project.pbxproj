@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		0000000000000000000000B1 /* AppFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 0000000000000000000000D1 /* AppFeature */; };
+		0000000000000000000000B2 /* DeckWidget in Frameworks */ = {isa = PBXBuildFile; productRef = 0000000000000000000000D2 /* DeckWidget */; };
+		0000000000000000000000B3 /* LaCarteWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 000000000000000000000122 /* LaCarteWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -18,11 +20,33 @@
 			remoteGlobalIDString = 000000000000000100000000;
 			remoteInfo = LaCarte;
 		};
+		0000000000000000000000E2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 000000000000000300000000;
+			remoteInfo = LaCarteWidgetExtension;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		000000000000000150000000 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0000000000000000000000B3 /* LaCarteWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* LaCarte.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LaCarte.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000121 /* LaCarteUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LaCarteUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000122 /* LaCarteWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LaCarteWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000130 /* Config/Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Signing.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -35,6 +59,11 @@
 		000000000000000000000011 /* LaCarteUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = LaCarteUITests;
+			sourceTree = "<group>";
+		};
+		000000000000000000000012 /* LaCarteWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LaCarteWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -55,6 +84,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		000000000000000330000000 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0000000000000000000000B2 /* DeckWidget in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -63,6 +100,7 @@
 			children = (
 				000000000000000000000010 /* LaCarte */,
 				000000000000000000000011 /* LaCarteUITests */,
+				000000000000000000000012 /* LaCarteWidget */,
 				000000000000000000000130 /* Config/Signing.xcconfig */,
 				000000000000000000000020 /* Products */,
 			);
@@ -73,6 +111,7 @@
 			children = (
 				000000000000000000000120 /* LaCarte.app */,
 				000000000000000000000121 /* LaCarteUITests.xctest */,
+				000000000000000000000122 /* LaCarteWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -87,10 +126,12 @@
 				000000000000000120000000 /* Sources */,
 				000000000000000130000000 /* Frameworks */,
 				000000000000000140000000 /* Resources */,
+				000000000000000150000000 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				0000000000000000000000F2 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				000000000000000000000010 /* LaCarte */,
@@ -124,6 +165,29 @@
 			productReference = 000000000000000000000121 /* LaCarteUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		000000000000000300000000 /* LaCarteWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000310000000 /* Build configuration list for PBXNativeTarget "LaCarteWidgetExtension" */;
+			buildPhases = (
+				000000000000000320000000 /* Sources */,
+				000000000000000330000000 /* Frameworks */,
+				000000000000000340000000 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				000000000000000000000012 /* LaCarteWidget */,
+			);
+			name = LaCarteWidgetExtension;
+			packageProductDependencies = (
+				0000000000000000000000D2 /* DeckWidget */,
+			);
+			productName = LaCarteWidgetExtension;
+			productReference = 000000000000000000000122 /* LaCarteWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -140,6 +204,9 @@
 					000000000000000200000000 = {
 						CreatedOnToolsVersion = 26.3;
 						TestTargetID = 000000000000000100000000;
+					};
+					000000000000000300000000 = {
+						CreatedOnToolsVersion = 27.0;
 					};
 				};
 			};
@@ -162,6 +229,7 @@
 			targets = (
 				000000000000000100000000 /* LaCarte */,
 				000000000000000200000000 /* LaCarteUITests */,
+				000000000000000300000000 /* LaCarteWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -175,6 +243,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		000000000000000240000000 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000340000000 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -198,6 +273,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		000000000000000320000000 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -205,6 +287,11 @@
 			isa = PBXTargetDependency;
 			target = 000000000000000100000000 /* LaCarte */;
 			targetProxy = 0000000000000000000000E1 /* PBXContainerItemProxy */;
+		};
+		0000000000000000000000F2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 000000000000000300000000 /* LaCarteWidgetExtension */;
+			targetProxy = 0000000000000000000000E2 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -275,6 +362,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Config/LaCarte.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
@@ -306,6 +394,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Config/LaCarte.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
@@ -365,6 +454,60 @@
 			};
 			name = Release;
 		};
+		000000000000000311000000 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 000000000000000000000130 /* Config/Signing.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/LaCarteWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/LaCarteWidget-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "la carte";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LA_CARTE_BUNDLE_ID_PREFIX).app.widget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		000000000000000312000000 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 000000000000000000000130 /* Config/Signing.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/LaCarteWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/LaCarteWidget-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "la carte";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LA_CARTE_BUNDLE_ID_PREFIX).app.widget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -395,6 +538,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		000000000000000310000000 /* Build configuration list for PBXNativeTarget "LaCarteWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000311000000 /* Debug */,
+				000000000000000312000000 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -408,6 +560,10 @@
 		0000000000000000000000D1 /* AppFeature */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AppFeature;
+		};
+		0000000000000000000000D2 /* DeckWidget */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DeckWidget;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

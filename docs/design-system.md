@@ -81,6 +81,23 @@ Built from shapes in tokens (`ink` front, `secondaryInk` next card and answer, `
 Sources, SVG/PNG exports and the app icon: `docs/design/brand/` (regenerate with `render.sh`). Usage rules for
 everyone, marketing included: `docs/design/brand.md`. Native-feel audit: `docs/design/native-audit.md`.
 
+## Widget (`DeckWidget`, spec 007)
+systemSmall only, system content margins, leading-aligned, no borders or icons, `Theme.background` via
+`containerBackground(for: .widget)`:
+```
+┌───────────────────┐
+│ 8                 │   hero      .cardFace ink, monospaced digits ("All caught up" / "No cards yet": .body medium)
+│ to review         │   detail    .meta secondaryInk ("Next at 18:40", "Next on 24 Nov", "Ask your agent to add some")
+│                   │
+│ 12-day streak     │   streak    .meta ink, the number in Theme.accent ("No streak yet" in secondaryInk)
+└───────────────────┘
+```
+Unavailable: only "Can't reach your deck" (`.meta`, `secondaryInk`). The theme comes from the App Group: System
+follows the Home Screen, Light/Dark force it, Forest = forest palette + dark. Tinted/clear Home Screens
+(`widgetRenderingMode != .fullColor`): the hero and the streak number are `.widgetAccentable()` and the ink tokens
+become `.primary`/`.secondary`. Gallery (`LA_CARTE_SCREEN=widget`): 170 × 170 pt tiles (a systemSmall widget on
+iPhone 17 Pro), `Theme.background`, radius 22, 16 pt padding, on a `Theme.surface` screen so the tiles stand out.
+
 ## Screen patterns from the reference
 | Vyst | la-carte |
 |---|---|

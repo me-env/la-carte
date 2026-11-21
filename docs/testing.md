@@ -22,6 +22,10 @@ ScrollView as empty. Use the UI-test screenshots for the gallery.
 - Mock tests run in **light and dark** (`XCUIDevice.shared.appearance`).
 - Call `snapshot("<screen>-<state>", appearance:)` at every state worth reviewing. Names are stable:
   QA compares runs by filename.
+- Debug galleries (debug builds only, no network): `LA_CARTE_SCREEN=design-system` (tokens and components),
+  `LA_CARTE_SCREEN=widget` (spec 007: every Home Screen widget state in 170 pt tiles, `widgetGallery.title`,
+  `widgetGallery.tile.<due|caughtUp|caughtUpLater|empty|unavailable|long>`). Widgets themselves aren't reachable
+  from XCUITest. Both follow `-theme forest`.
 - Mock data comes from `[Card].fixtures` (`APIClient/InMemoryAPIClient.swift`). Changing fixtures changes
   screenshots — coordinate with qa-validator.
 

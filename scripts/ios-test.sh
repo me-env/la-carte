@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Unit tests: every feature/client in LaCarteKit (TCA TestStore + Swift Testing).
+# Unit tests: every feature/client in LaCarteKit (TCA TestStore + Swift Testing). `LaCarteKit-Package` is the
+# scheme SwiftPM generates once the package has more than one product (AppFeature, DeckWidget).
 # Own DerivedData (LaCarteKit package) and own simulator ($UNIT_SIMULATOR), so it never waits behind an app
 # build or a UI suite; only behind another unit-test run.
 # --render (or LA_CARTE_RENDER_DIR=dir) also writes logo + gallery PNGs (DesignSystemTests/RenderTests).
@@ -19,7 +20,7 @@ if [ -n "${LA_CARTE_RENDER_DIR:-}" ]; then export TEST_RUNNER_LA_CARTE_RENDER_DI
 cd "$ROOT/ios/LaCarteKit"
 set +e
 "$LOCK" "$KIT_BUILD_LOCK" "$LOCK" "$UNIT_SIM_LOCK" \
-  xcodebuild test -scheme LaCarteKit -destination "$UNIT_DESTINATION" -skipMacroValidation ${ARGS[@]+"${ARGS[@]}"} 2>&1 \
+  xcodebuild test -scheme LaCarteKit-Package -destination "$UNIT_DESTINATION" -skipMacroValidation ${ARGS[@]+"${ARGS[@]}"} 2>&1 \
   | grep -E "^(✔|✘|🔒)|error:|TEST (SUCCEEDED|FAILED)"
 STATUS=${PIPESTATUS[0]}
 set -e
