@@ -16,12 +16,16 @@ public struct CardEditorView: View {
   }
 
   public var body: some View {
-    VStack(alignment: .leading, spacing: Theme.Spacing.l) {
-      header
-      ScrollView {
-        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+    NavigationStack {
+      Form {
+        Section("Front") {
           field(.front, caption: "Front", prompt: "Word or question", text: $store.front)
+        }
+        Section {
           field(.back, caption: "Back", prompt: "Answer", text: $store.back)
+        } header: {
+          Text("Back")
+        } footer: {
           if store.saveFailed {
             Text("Couldn't save. Check your connection.")
               .font(.meta)
@@ -29,50 +33,53 @@ public struct CardEditorView: View {
               .accessibilityIdentifier("editor.error")
           }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .scrollBounceBehavior(.basedOnSize)
+      .scrollContentBackground(.hidden)
+      .background(Theme.background)
+      .foregroundStyle(Theme.ink)
+      .navigationTitle(store.card == nil ? "New card" : "Edit card")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button(role: .close) {
+            store.send(.closeButtonTapped)
+          }
+          .accessibilityIdentifier("editor.close")
+        }
+        ToolbarItem(placement: .confirmationAction) {
+          Button(role: .confirm) {
+            store.send(.saveButtonTapped)
+          }
+          .disabled(!store.canSave)
+          .accessibilityLabel("Save")
+          .accessibilityIdentifier("editor.save")
+        }
+      }
+      .confirmationDialog(
+        "Discard changes?", isPresented: $store.isDiscardDialogPresented, titleVisibility: .visible
+      ) {
+        Button("Discard", role: .destructive) {
+          store.send(.discardTapped)
+        }
+        .accessibilityIdentifier("editor.discard")
+        Button("Keep editing", role: .cancel) {}
+          .accessibilityIdentifier("editor.keepEditing")
+      }
     }
-    .padding([.horizontal, .top], Theme.Spacing.l)
-    .background(Theme.background)
     .tint(Theme.ink)
+    .interactiveDismissDisabled(store.hasChanges)
+    .sensoryFeedback(.error, trigger: store.saveFailed) { _, new in new }
     .onAppear {
       if store.card == nil { focusedField = .front }
     }
   }
 
-  private var header: some View {
-    HStack(alignment: .top, spacing: Theme.Spacing.s) {
-      Text(store.card == nil ? "New card" : "Edit card")
-        .font(.screenTitle)
-        .foregroundStyle(Theme.ink)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityIdentifier("editor.title")
-      CircleIconButton("checkmark", accessibilityLabel: "Save") {
-        store.send(.saveButtonTapped)
-      }
-      .disabled(!store.canSave)
-      .accessibilityIdentifier("editor.save")
-      CircleIconButton("xmark", accessibilityLabel: "Close") {
-        store.send(.closeButtonTapped)
-      }
-      .accessibilityIdentifier("editor.close")
-    }
-  }
-
   private func field(_ field: Field, caption: String, prompt: String, text: Binding<String>) -> some View {
-    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-      Text(caption)
-        .font(.meta)
-        .foregroundStyle(Theme.secondaryInk)
-        .accessibilityHidden(true)
-      TextField(caption, text: text, prompt: Text(prompt).foregroundStyle(Theme.secondaryInk), axis: .vertical)
-        .font(.body)
-        .foregroundStyle(Theme.ink)
-        .focused($focusedField, equals: field)
-        .accessibilityIdentifier("editor.\(field.rawValue)")
-    }
+    TextField(caption, text: text, prompt: Text(prompt).foregroundStyle(Theme.secondaryInk), axis: .vertical)
+      .focused($focusedField, equals: field)
+      .tint(Theme.accent)
+      .listRowBackground(Rectangle().fill(Theme.surface))
+      .accessibilityIdentifier("editor.\(field.rawValue)")
   }
 }
 
