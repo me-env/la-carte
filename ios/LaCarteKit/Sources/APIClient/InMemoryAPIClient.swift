@@ -82,13 +82,13 @@ extension APIClient {
       stats: {
         let notes = deck.value
         let cards = cards(notes)
-        let readyAt = cards.map { readyAt($0, notes) }
+        let readyDates = cards.map { readyAt($0, notes) }
         return DeckStats(
           total: cards.count,
-          due: Set(zip(cards, readyAt).filter { $1 <= now }.map(\.0.noteId)).count,
+          due: Set(zip(cards, readyDates).filter { $1 <= now }.map(\.0.noteId)).count,
           new: cards.filter { $0.lastReview == nil }.count,
           reviewedToday: cards.filter { $0.lastReview.map(Calendar.current.isDateInToday) ?? false }.count,
-          nextDue: readyAt.filter { $0 > now }.min()
+          nextDue: readyDates.filter { $0 > now }.min()
         )
       },
       notes: { query in
@@ -109,11 +109,12 @@ extension APIClient {
         deck.withValue { $0.insert(note, at: 0) }
         return note
       },
+      // Ignores `draft.type`: a note's type is fixed at creation, as on the server.
       updateNote: { id, draft in
         try deck.withValue { notes in
           guard let index = notes.firstIndex(where: { $0.id == id }) else { throw notFound }
           let kept = notes[index].cards
-          notes[index].fields.merge(draft.fields) { $1 }
+          notes[index].fields = notes[index].fields.merging(draft.fields) { $1 }.filter { !$0.value.isEmpty }
           notes[index].cards = draft.directions.map { direction in
             kept.first { $0.direction == direction }
               ?? Note.Card(id: UUID(), prompt: direction.prompt, answer: direction.answer, due: now)
@@ -152,7 +153,6 @@ extension Card {
 }
 
 extension Note {
-
   /// Same matching as the API: case-insensitive substring of any field but `photo`.
   func matches(_ query: String?) -> Bool {
     guard let query, !query.isEmpty else { return true }

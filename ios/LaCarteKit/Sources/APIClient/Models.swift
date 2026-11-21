@@ -1,7 +1,6 @@
 import Foundation
 
-/// A flashcard, as returned by the la-carte API. Scheduling (FSRS) is computed server-side.
-/// One direction (`prompt` → `answer` fields) of a note; `front` / `back` are those fields' values joined by "\n".
+/// One direction (`prompt` → `answer` fields) of a note, as `/cards` returns it; scheduling (FSRS) is server-side.
 public struct Card: Codable, Equatable, Identifiable, Sendable {
   public var id: UUID
   public var noteId: UUID

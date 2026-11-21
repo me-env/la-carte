@@ -71,7 +71,7 @@ struct InMemoryAPIClientTests {
       person.id,
       NoteDraft(type: .person, fields: ["role": ""], directions: [person.cards[0].direction])
     )
-    #expect(updated.fields["role"] == "")
+    #expect(updated.fields["role"] == nil)
     #expect(updated.cards.map(\.id) == [person.cards[0].id])
     #expect(updated.cards[0].lastReview == now)
   }
