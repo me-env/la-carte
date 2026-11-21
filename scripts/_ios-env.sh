@@ -32,6 +32,16 @@ fi
 SIM_LOCK="sim-${SIMULATOR// /-}-$LOCK_OS"
 UNIT_SIM_LOCK="sim-${UNIT_SIMULATOR// /-}-$LOCK_OS"   # same name as SIM_LOCK when both are one device
 
+# Machine-wide build cap: at most BUILD_SLOTS xcodebuild build / build-for-testing steps at once, across ALL checkouts
+# and worktrees (lock dir LOCK_DIR, default /tmp/la-carte-locks). Each build gets cores / BUILD_SLOTS jobs.
+# Wrap a build as: "$BUILD_SLOT" xcodebuild build ... $BUILD_JOBS_FLAGS   (docs/dev-velocity.md)
+BUILD_SLOTS="${BUILD_SLOTS:-2}"
+BUILD_JOBS="${BUILD_JOBS:-$(( $(sysctl -n hw.ncpu 2>/dev/null || echo 4) / BUILD_SLOTS ))}"
+[ "$BUILD_JOBS" -ge 1 ] || BUILD_JOBS=1
+BUILD_JOBS_FLAGS="-jobs $BUILD_JOBS"
+BUILD_SLOT="$ROOT/scripts/_lock.sh --slots $BUILD_SLOTS xcodebuild-slot"  # unquoted on purpose: expands to 4 words
+export BUILD_SLOT BUILD_JOBS_FLAGS
+
 # Big, regenerable outputs (xcresults now; per-agent DerivedData/worktrees later) go to $LA_CARTE_SCRATCH, e.g. an
 # external SSD. Set it per machine in scripts/.local.env (gitignored, never read on CI). If its volume isn't
 # mounted, everything falls back to the in-repo paths.

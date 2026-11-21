@@ -8,7 +8,39 @@
 # While waiting it prints who holds the lock. Env: LACARTE_AGENT (your name, shown to waiters),
 # LOCK_TIMEOUT (seconds to wait, default 3600; exits 75 when it gives up), LOCK_DIR (default /tmp/la-carte-locks).
 # Already holding <name> (an outer _lock.sh on the same name)? The command just runs.
+#
+# Semaphore mode: scripts/_lock.sh --slots <N> <name> <command> [args...]  runs the command in one of N slots
+# (locks <name>-1 .. <name>-N), polling every 2 s while all are busy. Used for the machine-wide build cap.
 set -euo pipefail
+if [ "${1:-}" = --slots ]; then
+  [ $# -ge 4 ] || { echo "usage: $0 --slots <N> <name> <command> [args...]" >&2; exit 64; }
+  N="$2"; NAME="$3"; shift 3
+  DIR="${LOCK_DIR:-/tmp/la-carte-locks}"; TIMEOUT="${LOCK_TIMEOUT:-3600}"; mkdir -p "$DIR"
+  case " ${LACARTE_HELD_LOCKS:-} " in *" $NAME-held "*) exec "$@" ;; esac  # an outer caller already holds a slot
+  LABEL="${LACARTE_LOCK_LABEL:-$(ps -o command= -p $PPID | cut -c1-120)}"
+  MARK="$(mktemp)"; trap 'rm -f "$MARK"' EXIT
+  WAITING=""
+  while :; do
+    for k in $(seq 1 "$N"); do
+      FILE="$DIR/$NAME-$k.lock"
+      HOLDER="${LACARTE_AGENT:-unnamed agent} · $LABEL · pid $$ · since $(date +%H:%M:%S)"
+      : >"$MARK"; set +e
+      # shellcheck disable=SC2016
+      LACARTE_HELD_LOCKS="${LACARTE_HELD_LOCKS:-} $NAME-held" lockf -s -k -t 0 "$FILE" \
+        /bin/sh -c 'rm -f "$1"; printf "%s\n" "$2" >"$3.holder"; shift 3; exec "$@"' sh "$MARK" "$HOLDER" "$FILE" "$@"
+      STATUS=$?; set -e
+      [ -e "$MARK" ] || exit "$STATUS"
+    done
+    if [ -z "$WAITING" ]; then
+      WAITING=$SECONDS
+      H=""; for k in $(seq 1 "$N"); do H="$H"$'\n'"  $k: $(cat "$DIR/$NAME-$k.lock.holder" 2>/dev/null || echo '?')"; done
+      echo "🔒 waiting for build slot (all $N '$NAME' slots busy, up to ${TIMEOUT}s), held by:$H" >&2
+    elif [ $((SECONDS - WAITING)) -ge "$TIMEOUT" ]; then
+      echo "🔒 gave up after ${TIMEOUT}s waiting for a build slot" >&2; exit 75
+    fi
+    sleep 2
+  done
+fi
 [ $# -ge 2 ] || { echo "usage: $0 <lock-name> <command> [args...]" >&2; exit 64; }
 NAME="$1"; shift
 DIR="${LOCK_DIR:-/tmp/la-carte-locks}"

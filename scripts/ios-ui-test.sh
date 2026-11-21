@@ -27,7 +27,7 @@ FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|TEST( EXECUTE)? (SUCCEEDED
 export NSUnbufferedIO=YES  # xcodebuild writes each line as it happens, even into a pipe
 set +e
 # 1. Build under the app's DerivedData lock, copying the products out so a later build can't replace them.
-"$LOCK" "$APP_BUILD_LOCK" xcodebuild build-for-testing -project LaCarte.xcodeproj -scheme LaCarte \
+"$LOCK" "$APP_BUILD_LOCK" $BUILD_SLOT xcodebuild build-for-testing $BUILD_JOBS_FLAGS -project LaCarte.xcodeproj -scheme LaCarte \
   -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER"
 STATUS=${PIPESTATUS[0]}
 # 2. Test the copy on the first free UI simulator ($POOL_DESTINATION), under its lock only.

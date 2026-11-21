@@ -47,6 +47,13 @@ resolves to the same lock as `latest` when 27.0 is the newest runtime.
   (`<results>/<run>.xctestproducts`, deleted on exit), then `test-without-building` from that copy
   (simulator lock only). So `ios-build.sh` doesn't wait for a whole QA suite, and nothing it builds can
   replace the app under test.
+- **Maximise simulators, cap builds.** Builds are what overload the Mac (each `xcodebuild` uses every core;
+  26 at once hit load 730). So `_lock.sh --slots` gives a machine-wide semaphore (`BUILD_SLOTS`, default 2, lock
+  dir `LOCK_DIR` = `/tmp/la-carte-locks`, shared by every worktree): `ios-build.sh`, the build step of
+  `ios-ui-test.sh` / `--split`, and `ios-test.sh`'s `xcodebuild test` hold a slot, and a third waits printing
+  `🔒 waiting for build slot`. Each build gets `-jobs cores/BUILD_SLOTS` (7 on 14 cores; `BUILD_JOBS` overrides).
+  Test-without-building steps take no slot: the simulator pools govern them. Worktrees on old branches keep old
+  scripts (uncapped) until they merge main.
 - `e2e.sh` starts its two APIs on free ports picked by the OS (`E2E_PORT` / `E2E_EMPTY_PORT` override),
   so it never clashes with `api-dev.sh` (:8000) or another e2e run. Run names must still be unique
   (`qa/screenshots/<run>`, `<results>/<run>.xcresult`).

@@ -45,7 +45,7 @@ export NSUnbufferedIO=YES
 START=$SECONDS
 set +e
 # Build once under the app's DerivedData lock, into this run's own products copy.
-"$LOCK" "$APP_BUILD_LOCK" xcodebuild build-for-testing -project LaCarte.xcodeproj -scheme LaCarte \
+"$LOCK" "$APP_BUILD_LOCK" $BUILD_SLOT xcodebuild build-for-testing $BUILD_JOBS_FLAGS -project LaCarte.xcodeproj -scheme LaCarte \
   -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER"
 STATUS=${PIPESTATUS[0]}
 set -e
