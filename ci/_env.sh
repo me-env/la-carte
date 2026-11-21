@@ -19,10 +19,26 @@ asc_key_path() {
 }
 
 # Lets xcodebuild create/download the distribution certificate and an Ad Hoc profile
-# (containing every device registered on the team) through the API key.
+# (containing every device registered on the team).
+# - With a key (CI): through the API key. The key needs the Admin role (cloud-managed
+#   distribution certificates), otherwise export fails.
+# - Without a key, locally: through the account signed in to Xcode and its local
+#   Apple Distribution certificate. CI never falls back to this: a missing secret is an error.
+# Call as `flags="$(auth_flags)"` so a failure stops the script under `set -e`.
 auth_flags() {
+  if [ -z "${AC_API_KEY_PATH:-}" ] && [ -z "${AC_API_KEY_BASE64:-}" ]; then
+    if [ -n "${CI:-}" ]; then
+      echo "error: AC_API_KEY_BASE64 is not set (prod environment secret)" >&2
+      return 1
+    fi
+    echo "==> No API key: signing with the Xcode account" >&2
+    echo -allowProvisioningUpdates
+    return
+  fi
+  local key
+  key="$(asc_key_path)" || return 1
   echo -allowProvisioningUpdates \
-    -authenticationKeyPath "$(asc_key_path)" \
+    -authenticationKeyPath "$key" \
     -authenticationKeyID "$ASC_KEY_ID" \
     -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 }
