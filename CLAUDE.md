@@ -62,6 +62,11 @@ for deep dives: research, reading many files, and especially to **verify that so
 done** before saying so. Give a sub-agent a narrow brief and the files to read; you stay accountable for
 its result.
 
+**Ask for better tooling.** If you're judging by eye, repeating manual steps, waiting on slow or flaky
+tools, or lack a capability (a measurement, a reference, an MCP, a test hook), say so in your report under
+`Tooling request:` (what's missing, what it costs you today, what would help). The manager routes it to
+`tooling-lead`. Don't silently work around a missing tool.
+
 **Asking the user for something**: only after that deep dive, and always through the
 `asking-the-user` skill (`.claude/skills/asking-the-user/SKILL.md`): one request at a time, the smallest
 reasonable action on their side, prefer requests that give you durable autonomy.
