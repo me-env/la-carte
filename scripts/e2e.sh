@@ -32,8 +32,10 @@ done
 # study), so it leaves the deck as seeded. XCTest runs classes alphabetically: Deck, Settings, then Study.
 # Spec 004 forest live check only reads (study + deck), so it can run last.
 # Spec 002 #13 adds "chat"/"cat" from study and deletes it again (net zero), so it can run before 001's flow.
+# Spec 006 #12 POSTs "chien"/"dog", pulls deck + study, then DELETEs it (net zero): also before 001's flow.
 "$ROOT/scripts/ios-ui-test.sh" "$RUN" \
   "-only-testing:LaCarteUITests/DeckUITests/testDeck_addFromStudyThenDelete_liveAPI" \
+  "-only-testing:LaCarteUITests/RefreshUITests/testStudy_pullToRefresh_liveAPI" \
   "-only-testing:LaCarteUITests/SettingsUITests/testSettings_setupOnDevice_liveAPI" \
   "-only-testing:LaCarteUITests/StudyUITests/testStudy_revealRateToCaughtUp_liveAPI" \
   "-only-testing:LaCarteUITests/StudyUITests/testStudy_emptyDeck_liveAPI" \

@@ -287,6 +287,144 @@ struct StudyFeatureTests {
     }
   }
 
+  @Test func pullingWhenCaughtUpShowsANewCardWithoutLoading() async {
+    var state = StudyFeature.State()
+    state.phase = .caughtUp(nextDue: nil)
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.dueCards = { _ in [cards[0]] }
+    }
+
+    await store.send(.pulledToRefresh)
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = [self.cards[0]]
+      $0.phase = .studying
+    }
+  }
+
+  @Test func pullingWhenOfflineReloads() async {
+    var state = StudyFeature.State()
+    state.phase = .offline
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.dueCards = { _ in cards }
+    }
+
+    await store.send(.pulledToRefresh)
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = IdentifiedArray(uniqueElements: self.cards)
+      $0.phase = .studying
+    }
+  }
+
+  @Test func refreshKeepsTheRevealWhenTheFirstCardIsUnchanged() async {
+    var state = studying([cards[0]])
+    state.isRevealed = true
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.dueCards = { _ in [cards[0], cards[1]] }
+    }
+
+    await store.send(.scenePhaseChanged(.active))
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = [self.cards[0], self.cards[1]]
+    }
+  }
+
+  @Test func refreshResetsTheRevealWhenTheFirstCardChanged() async {
+    var state = studying(cards)
+    state.isRevealed = true
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.dueCards = { _ in [cards[1], cards[2]] }
+    }
+
+    await store.send(.pulledToRefresh)
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = [self.cards[1], self.cards[2]]
+      $0.isRevealed = false
+    }
+  }
+
+  @Test func refreshIsIgnoredWhileARatingIsInFlight() async {
+    var state = studying(cards)
+    state.isRevealed = true
+    state.isReviewing = true
+    // `dueCards` is unimplemented: calling it fails the test.
+    let store = TestStore(initialState: state) { StudyFeature() }
+
+    await store.send(.pulledToRefresh)
+    await store.send(.scenePhaseChanged(.active))
+  }
+
+  @Test func onlyBecomingActiveReloads() async {
+    let store = TestStore(initialState: studying(cards)) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.dueCards = { _ in cards }
+    }
+
+    await store.send(.scenePhaseChanged(.inactive))
+    await store.send(.scenePhaseChanged(.background))
+    await store.send(.scenePhaseChanged(.active))
+    await store.receive(\.cardsResponse.success)
+  }
+
+  @Test func aNewLoadCancelsTheOneInFlight() async {
+    let clock = TestClock()
+    let loads = LockIsolated(0)
+    let store = TestStore(initialState: StudyFeature.State()) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.dueCards = { _ in
+        let load = loads.withValue { $0 += 1; return $0 }
+        try await clock.sleep(for: .seconds(1))
+        return load == 1 ? [cards[0]] : [cards[1]]
+      }
+    }
+
+    await store.send(.onAppear)
+    await store.send(.pulledToRefresh)
+    await clock.advance(by: .seconds(1))
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = [self.cards[1]]
+      $0.phase = .studying
+    }
+    #expect(loads.value == 2)
+  }
+
+  @Test func ratingCancelsALoadInFlightSoTheRatedCardCantComeBack() async {
+    let clock = TestClock()
+    let store = TestStore(initialState: studying(cards)) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.continuousClock = clock
+      $0.apiClient.dueCards = { _ in
+        try await clock.sleep(for: .seconds(1))
+        return cards
+      }
+      $0.apiClient.review = { _, _ in cards[0] }
+    }
+
+    await store.send(.scenePhaseChanged(.active))
+    await store.send(.revealTapped) {
+      $0.isRevealed = true
+    }
+    await store.send(.ratingTapped(.good)) {
+      $0.isReviewing = true
+    }
+    await store.receive(\.reviewResponse.success) {
+      $0.isReviewing = false
+      $0.isRevealed = false
+      $0.cards.removeFirst()
+    }
+    await clock.run()
+  }
+
   private func studying(_ cards: [Card]) -> StudyFeature.State {
     var state = StudyFeature.State()
     state.cards = IdentifiedArray(uniqueElements: cards)

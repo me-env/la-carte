@@ -171,8 +171,15 @@ final class StubDeck: @unchecked Sendable {
   private var _writeStatus = 0  // 0 = succeed; else the HTTP status returned to writes
   private var _writeDelay: TimeInterval = 0
   private var _listStatus = 200
+  private var _readDelay: TimeInterval = 0
 
   init(_ cards: [Card]) { _cards = cards }
+
+  /// Spec 006: simulates an agent adding / another device removing a card while the app is open.
+  func add(_ card: Card) { lock.withLock { _cards.append(card) } }
+  func remove(id: String) { lock.withLock { _cards.removeAll { $0.id.lowercased() == id.lowercased() } } }
+  /// Delay applied to the GET routes (`/cards`, `/cards/due`, `/stats`), to observe a refresh in flight.
+  var readDelay: TimeInterval { get { lock.withLock { _readDelay } } set { lock.withLock { _readDelay = newValue } } }
 
   var cards: [Card] { lock.withLock { _cards } }
   var writeStatus: Int { get { lock.withLock { _writeStatus } } set { lock.withLock { _writeStatus = newValue } } }
@@ -197,6 +204,14 @@ final class StubDeck: @unchecked Sendable {
     let route = Self.route(request.path)
     let body = (try? JSONSerialization.jsonObject(with: Data(request.body.utf8))) as? [String: Any] ?? [:]
     let now = Date()
+    var response = respond(request, route: route, body: body, now: now)
+    if request.method == "GET" { response.delay = max(response.delay, _readDelay) }
+    return response
+  }
+
+  /// Caller holds `lock`.
+  private func respond(_ request: StubAPIServer.Request, route: String, body: [String: Any],
+                       now: Date) -> StubAPIServer.Response {
     switch (request.method, route) {
     case ("GET", "/cards"):
       guard _listStatus == 200 else { return .init(status: _listStatus, body: #"{"detail":"boom"}"#) }

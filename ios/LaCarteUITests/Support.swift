@@ -104,5 +104,68 @@ extension XCTestCase {
     let end = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98))
     start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
   }
+
+  /// Spec 006: pull-to-refresh starting on `element` (press, then drag ~40% of the window lower, then release).
+  @MainActor
+  func pullToRefresh(_ app: XCUIApplication, from element: XCUIElement) {
+    let window = app.windows.firstMatch.frame
+    let startY = element.frame.midY
+    let endY = min(startY + window.height * 0.4, window.height * 0.92)
+    let start = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY / window.height))
+    let end = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY / window.height))
+    start.press(forDuration: 0.05, thenDragTo: end)
+  }
+
+  /// Spec 006: Home, then bring the app back (scene `.background` → `.active`).
+  @MainActor
+  func backgroundAndReactivate(_ app: XCUIApplication) {
+    XCUIDevice.shared.press(.home)
+    Thread.sleep(forTimeInterval: 1)
+    app.activate()
+  }
+
+  /// Spec 006: pull-to-refresh, plus a screenshot taken `after` seconds into the gesture from a background thread.
+  /// XCUITest only returns from the drag once the app is idle again, i.e. after the refresh finished, so the
+  /// in-flight state (spinner, content kept on screen) can only be captured concurrently. Attached as
+  /// `<name>-<light|dark>`; returns the image for pixel checks.
+  @MainActor
+  @discardableResult
+  func pullToRefreshCapturing(_ app: XCUIApplication, from element: XCUIElement, after: TimeInterval = 2,
+                              name: String, appearance: XCUIDevice.Appearance) -> CGImage? {
+    let box = PNGBox()
+    let thread = Thread {
+      Thread.sleep(forTimeInterval: after)
+      box.set(screenshotPNGOffMain())
+    }
+    thread.start()
+    pullToRefresh(app, from: element)
+    let deadline = Date().addingTimeInterval(after + 5)
+    while box.get() == nil, Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+    guard let png = box.get() else {
+      XCTFail("\(name): no in-flight screenshot captured")
+      return nil
+    }
+    let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+    attachment.name = "\(name)-\(appearance == .dark ? "dark" : "light")"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+    guard let provider = CGDataProvider(data: png as CFData) else { return nil }
+    return CGImage(pngDataProviderSource: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+  }
 }
 
+final class PNGBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var data: Data?
+  nonisolated func set(_ d: Data?) { lock.withLock { data = d } }
+  nonisolated func get() -> Data? { lock.withLock { data } }
+}
+
+/// `XCUIScreen.main.screenshot().pngRepresentation` through the ObjC runtime, callable off the main actor.
+nonisolated func screenshotPNGOffMain() -> Data? {
+  guard let cls = NSClassFromString("XCUIScreen") as? NSObject.Type,
+        let screen = cls.perform(NSSelectorFromString("mainScreen"))?.takeUnretainedValue() as? NSObject,
+        let shot = screen.perform(NSSelectorFromString("screenshot"))?.takeUnretainedValue() as? NSObject
+  else { return nil }
+  return shot.value(forKey: "PNGRepresentation") as? Data
+}

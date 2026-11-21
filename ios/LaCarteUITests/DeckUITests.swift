@@ -884,7 +884,10 @@ struct Pixels {
   private let scale: CGFloat
 
   init(_ screenshot: XCUIScreenshot, pointWidth: CGFloat) {
-    let cg = screenshot.image.cgImage!
+    self.init(screenshot.image.cgImage!, pointWidth: pointWidth)
+  }
+
+  init(_ cg: CGImage, pointWidth: CGFloat) {
     width = cg.width
     height = cg.height
     scale = CGFloat(cg.width) / pointWidth

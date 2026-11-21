@@ -7,6 +7,7 @@ import SwiftUI
 
 public struct DeckView: View {
   @Bindable var store: StoreOf<DeckFeature>
+  @Environment(\.scenePhase) private var scenePhase
 
   public init(store: StoreOf<DeckFeature>) {
     self.store = store
@@ -22,10 +23,12 @@ public struct DeckView: View {
       .tint(Theme.ink)
       content
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable { await store.send(.pulledToRefresh).finish() }
     }
     .padding(.top, Theme.Spacing.l)
     .background(Theme.background)
     .onAppear { store.send(.onAppear) }
+    .onChange(of: scenePhase) { _, phase in store.send(.scenePhaseChanged(phase)) }
     .sheet(item: $store.scope(\.$destination, action: \.destination).editor) { editorStore in
       CardEditorView(store: editorStore)
     }
@@ -75,12 +78,17 @@ public struct DeckView: View {
 
   @ViewBuilder private var content: some View {
     if let message = store.message {
-      Text(message)
-        .font(.body)
-        .foregroundStyle(Theme.secondaryInk)
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, Theme.Spacing.m)
-        .accessibilityIdentifier("deck.message")
+      // In a scroll view so the message can be pulled to refresh.
+      ScrollView {
+        Text(message)
+          .font(.body)
+          .foregroundStyle(Theme.secondaryInk)
+          .multilineTextAlignment(.center)
+          .padding(.horizontal, Theme.Spacing.m)
+          .accessibilityIdentifier("deck.message")
+          .containerRelativeFrame([.horizontal, .vertical])
+      }
+      .scrollDismissesKeyboard(.immediately)
     } else {
       List {
         ForEach(store.cards) { card in

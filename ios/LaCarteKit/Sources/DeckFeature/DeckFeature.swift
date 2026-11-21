@@ -3,6 +3,7 @@ import CardEditorFeature
 import ComposableArchitecture
 import Foundation
 import SettingsFeature
+import SwiftUI
 
 /// Every card in the deck: search, swipe to delete, tap to edit, add (spec 002); hosts Settings (spec 003).
 @Reducer
@@ -44,6 +45,8 @@ public struct DeckFeature {
     case settingsButtonTapped
     case rowTapped(Card.ID)
     case rowSwipedToDelete(Card.ID)
+    case pulledToRefresh
+    case scenePhaseChanged(ScenePhase)
     case cardsResponse(Result<[Card], any Error>)
     case deleteResponse(Result<Card.ID, any Error>)
     case destination(PresentationAction<Destination.Action>)
@@ -69,8 +72,11 @@ public struct DeckFeature {
       case .binding(\.query):
         return loadCards(matching: state.query, after: .seconds(0.3))
 
-      case .onAppear:
+      case .onAppear, .pulledToRefresh, .scenePhaseChanged(.active):
         return loadCards(matching: state.query)
+
+      case .scenePhaseChanged:
+        return .none
 
       case .addButtonTapped:
         state.destination = .editor(CardEditorFeature.State())

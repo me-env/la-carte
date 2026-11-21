@@ -298,6 +298,49 @@ struct DeckFeatureTests {
     }
   }
 
+  @Test func pullingReloadsWithTheQueryKeepingRowsUntilTheResponse() async {
+    let queries = LockIsolated<[String?]>([])
+    var state = loaded(cards)
+    state.query = "ser"
+    let store = TestStore(initialState: state) {
+      DeckFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.cards = { query in
+        queries.withValue { $0.append(query) }
+        return [cards[0]]
+      }
+    }
+
+    // No delegate and no query change: exhaustivity fails the test on either.
+    await store.send(.pulledToRefresh)
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = [self.cards[0]]
+    }
+    #expect(queries.value == ["ser"])
+  }
+
+  @Test func onlyBecomingActiveReloadsWithTheQuery() async {
+    let queries = LockIsolated<[String?]>([])
+    var state = loaded([cards[0]])
+    state.query = "ser"
+    let store = TestStore(initialState: state) {
+      DeckFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.cards = { query in
+        queries.withValue { $0.append(query) }
+        return cards
+      }
+    }
+
+    await store.send(.scenePhaseChanged(.inactive))
+    await store.send(.scenePhaseChanged(.background))
+    await store.send(.scenePhaseChanged(.active))
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = IdentifiedArray(uniqueElements: self.cards)
+    }
+    #expect(queries.value == ["ser"])
+  }
+
   private func loaded(_ cards: [Card]) -> DeckFeature.State {
     var state = DeckFeature.State()
     state.cards = IdentifiedArray(uniqueElements: cards)

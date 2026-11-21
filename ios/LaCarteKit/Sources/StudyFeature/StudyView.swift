@@ -5,6 +5,7 @@ import SwiftUI
 
 public struct StudyView: View {
   let store: StoreOf<StudyFeature>
+  @Environment(\.scenePhase) private var scenePhase
 
   public init(store: StoreOf<StudyFeature>) {
     self.store = store
@@ -15,11 +16,13 @@ public struct StudyView: View {
       topBar
       content
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable { await store.send(.pulledToRefresh).finish() }
     }
     .padding(.horizontal, Theme.Spacing.m)
     .padding(.bottom, Theme.Spacing.m)
     .background(Theme.background)
     .onAppear { store.send(.onAppear) }
+    .onChange(of: scenePhase) { _, phase in store.send(.scenePhaseChanged(phase)) }
   }
 
   private var topBar: some View {
@@ -51,7 +54,7 @@ public struct StudyView: View {
   @ViewBuilder private var content: some View {
     switch store.phase {
     case .loading:
-      Color.clear
+      pullable { Color.clear }
 
     case .studying:
       if let card = store.cards.first {
@@ -59,30 +62,41 @@ public struct StudyView: View {
       }
 
     case let .caughtUp(nextDue):
-      VStack(spacing: Theme.Spacing.s) {
-        Text("All caught up")
-          .font(.cardFace)
-          .foregroundStyle(Theme.ink)
-          .accessibilityIdentifier("study.message")
-        Text(Self.nextDueText(nextDue))
-          .font(.meta)
-          .foregroundStyle(Theme.secondaryInk)
-          .accessibilityIdentifier("study.nextDue")
+      pullable {
+        VStack(spacing: Theme.Spacing.s) {
+          Text("All caught up")
+            .font(.cardFace)
+            .foregroundStyle(Theme.ink)
+            .accessibilityIdentifier("study.message")
+          Text(Self.nextDueText(nextDue))
+            .font(.meta)
+            .foregroundStyle(Theme.secondaryInk)
+            .accessibilityIdentifier("study.nextDue")
+        }
+        .multilineTextAlignment(.center)
       }
-      .multilineTextAlignment(.center)
 
     case .offline:
-      VStack(spacing: Theme.Spacing.m) {
-        Text("Can't reach your deck")
-          .font(.body)
-          .foregroundStyle(Theme.ink)
-          .multilineTextAlignment(.center)
-          .accessibilityIdentifier("study.message")
-        CircleIconButton("arrow.clockwise", accessibilityLabel: "Retry") {
-          store.send(.retryButtonTapped)
+      pullable {
+        VStack(spacing: Theme.Spacing.m) {
+          Text("Can't reach your deck")
+            .font(.body)
+            .foregroundStyle(Theme.ink)
+            .multilineTextAlignment(.center)
+            .accessibilityIdentifier("study.message")
+          CircleIconButton("arrow.clockwise", accessibilityLabel: "Retry") {
+            store.send(.retryButtonTapped)
+          }
+          .accessibilityIdentifier("study.retry")
         }
-        .accessibilityIdentifier("study.retry")
       }
+    }
+  }
+
+  /// A scroll view the size of the content area, so a centered message can be pulled to refresh.
+  private func pullable(@ViewBuilder _ message: () -> some View) -> some View {
+    ScrollView {
+      message().containerRelativeFrame([.horizontal, .vertical])
     }
   }
 
@@ -108,7 +122,6 @@ public struct StudyView: View {
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
       }
       .defaultScrollAnchor(.center, for: .alignment)
-      .scrollBounceBehavior(.basedOnSize)
       .scrollIndicatorsFlash(trigger: store.isRevealed)
       .contentShape(.rect)
       .onTapGesture { reveal() }

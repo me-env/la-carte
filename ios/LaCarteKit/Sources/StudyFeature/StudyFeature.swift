@@ -1,6 +1,7 @@
 import APIClient
 import ComposableArchitecture
 import Foundation
+import SwiftUI
 
 /// The home screen: reviews due cards one at a time, then says when the next one is due (spec 001).
 @Reducer
@@ -27,6 +28,8 @@ public struct StudyFeature {
     case deckButtonTapped
     case addButtonTapped
     case deckChanged
+    case pulledToRefresh
+    case scenePhaseChanged(ScenePhase)
     case cardsResponse(Result<[Card], any Error>)
     case statsResponse(Result<DeckStats, any Error>)
     case reviewResponse(Result<Card, any Error>)
@@ -40,6 +43,8 @@ public struct StudyFeature {
 
   @Dependency(\.apiClient) var apiClient
 
+  private enum CancelID { case load }
+
   public init() {}
 
   public var body: some ReducerOf<Self> {
@@ -47,6 +52,14 @@ public struct StudyFeature {
       switch action {
       case .onAppear, .deckChanged:
         return fetchDueCards()
+
+      case .pulledToRefresh, .scenePhaseChanged(.active):
+        // The review's response updates the queue; a list fetched meanwhile could bring the rated card back.
+        guard !state.isReviewing else { return .none }
+        return fetchDueCards()
+
+      case .scenePhaseChanged:
+        return .none
 
       case .retryButtonTapped:
         state.phase = .loading
@@ -59,9 +72,13 @@ public struct StudyFeature {
       case let .ratingTapped(rating):
         guard !state.isReviewing, let card = state.cards.first else { return .none }
         state.isReviewing = true
-        return .run { [apiClient] send in
-          await send(.reviewResponse(Result { try await apiClient.review(card.id, rating) }))
-        }
+        // A load in flight may predate the review and would bring the rated card back.
+        return .merge(
+          .cancel(id: CancelID.load),
+          .run { [apiClient] send in
+            await send(.reviewResponse(Result { try await apiClient.review(card.id, rating) }))
+          }
+        )
 
       case .deckButtonTapped:
         return .send(.delegate(.deckRequested))
@@ -103,9 +120,11 @@ public struct StudyFeature {
     }
   }
 
+  /// Every load shares one cancel id, so a slow response never overwrites a newer one.
   private func fetchDueCards() -> Effect<Action> {
     .run { [apiClient] send in
       await send(.cardsResponse(Result { try await apiClient.dueCards(100) }))
     }
+    .cancellable(id: CancelID.load, cancelInFlight: true)
   }
 }
