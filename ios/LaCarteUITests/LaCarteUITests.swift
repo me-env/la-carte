@@ -42,6 +42,7 @@ final class LaCarteUITests: XCTestCase {
     for icon in Self.galleryIcons {
       let button = app.buttons["gallery.button.\(icon)"]
       XCTAssertTrue(button.waitForExistence(timeout: 5), "missing gallery.button.\(icon)")
+      scrollIntoView(app, button)
       XCTAssertTrue(button.isHittable, "gallery.button.\(icon) not hittable")
       button.tap()
       waitForLabel(lastTapped, "Last tapped: \(icon)", timeout: 3)
@@ -59,6 +60,7 @@ final class LaCarteUITests: XCTestCase {
     for icon in Self.galleryIcons {
       let button = app.buttons["gallery.button.\(icon)"]
       XCTAssertTrue(button.waitForExistence(timeout: 5))
+      scrollIntoView(app, button)
       // ~4pt inside the right edge, vertically centered.
       let dx = max(0.0, (button.frame.width - 4) / button.frame.width)
       button.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: 0.5)).tap()

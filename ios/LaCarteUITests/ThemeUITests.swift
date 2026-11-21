@@ -332,6 +332,7 @@ final class ThemeUITests: XCTestCase {
       let app = launch(api: .mock, screen: "design-system", theme: "forest")
       let button = app.buttons["gallery.button.plus"]
       XCTAssertTrue(button.waitForExistence(timeout: 5), "gallery missing")
+      scrollIntoView(app, button)
       let window = app.windows.firstMatch.frame
       let f = button.frame
       waitForColors(app, [

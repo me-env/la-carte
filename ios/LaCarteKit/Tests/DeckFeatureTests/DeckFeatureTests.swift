@@ -1,4 +1,4 @@
-import APIClient
+@testable import APIClient
 import ComposableArchitecture
 import Foundation
 import Testing
@@ -17,6 +17,7 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: DeckFeature.State()) {
       DeckFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.isConfigured = { true }
       $0.apiClient.cards = { query in
         #expect(query == nil)
         return cards
@@ -45,6 +46,7 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: loaded(cards)) {
       DeckFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.isConfigured = { true }
       $0.continuousClock = clock
       $0.apiClient.cards = { query in
         queries.withValue { $0.append(query) }
@@ -76,6 +78,41 @@ struct DeckFeatureTests {
     #expect(queries.value == ["ser", nil])
   }
 
+  /// QA ci-ios26-triage D1: deleting "ser" quickly must end on every card, never on the "s" results.
+  @Test func deletingTheQueryQuicklyCancelsPendingSearchesAndShowsEveryCard() async {
+    let clock = TestClock()
+    let queries = LockIsolated<[String?]>([])
+    var state = loaded([cards[0]])
+    state.query = "ser"
+    let store = TestStore(initialState: state) {
+      DeckFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.isConfigured = { true }
+      $0.continuousClock = clock
+      $0.apiClient.cards = { query in
+        queries.withValue { $0.append(query) }
+        return query == "s" ? [cards[0], cards[2]] : cards
+      }
+    }
+
+    await store.send(\.binding.query, "se") {
+      $0.query = "se"
+    }
+    await clock.advance(by: .seconds(0.1))
+    await store.send(\.binding.query, "s") {
+      $0.query = "s"
+    }
+    await clock.advance(by: .seconds(0.29))
+    await store.send(\.binding.query, "") {
+      $0.query = ""
+    }
+    await clock.advance(by: .seconds(0.3))
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = IdentifiedArray(uniqueElements: self.cards)
+    }
+    #expect(queries.value == [nil])
+  }
+
   @Test func emptyListsSayWhy() async {
     var state = DeckFeature.State()
     #expect(state.message == nil)
@@ -87,6 +124,7 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: loaded(cards)) {
       DeckFeature()
     } withDependencies: {
+      $0.apiClient.isConfigured = { true }
       $0.apiClient.cards = { _ in throw Offline() }
     }
 
@@ -103,6 +141,7 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: loaded(cards)) {
       DeckFeature()
     } withDependencies: {
+      $0.apiClient.isConfigured = { true }
       $0.apiClient.deleteCard = { id in deck.withValue { $0.removeAll { $0.id == id } } }
       $0.apiClient.cards = { _ in deck.value }
     }
@@ -120,6 +159,7 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: loaded(cards)) {
       DeckFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.isConfigured = { true }
       $0.apiClient.deleteCard = { _ in throw Offline() }
       $0.apiClient.cards = { _ in cards }
     }
@@ -140,6 +180,7 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: loaded(cards)) {
       DeckFeature()
     } withDependencies: {
+      $0.apiClient.isConfigured = { true }
       $0.continuousClock = clock
       $0.apiClient.cards = { _ in
         // Snapshot before the delete lands, like a slow response from the server.
@@ -169,6 +210,7 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: loaded(cards)) {
       DeckFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.isConfigured = { true }
       $0.continuousClock = clock
       $0.apiClient.cards = { query in
         queries.withValue { $0.append(query) }
@@ -197,6 +239,7 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: loaded(cards)) {
       DeckFeature()
     } withDependencies: {
+      $0.apiClient.isConfigured = { true }
       $0.apiClient.stats = { DeckStats(total: 1, due: 1, new: 1, reviewedToday: 0, nextDue: nil) }
       $0.apiClient.cards = { _ in other }
     }
@@ -222,6 +265,8 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: loaded(cards)) {
       DeckFeature()
     } withDependencies: {
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.cards = { _ in [] }
       $0.tokenStore.save = { token in saved.withValue { $0.append(token) } }
     }
 
@@ -236,6 +281,85 @@ struct DeckFeatureTests {
       $0.destination = nil
     }
     #expect(saved.value == ["s3"])
+    await store.receive(\.delegate.deckChanged)
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = []
+    }
+  }
+
+  @Test func withoutAServerOrTokenTheDeckAsksToConnectWithoutARequest() async {
+    // `cards` is unimplemented: calling it fails the test.
+    let store = TestStore(initialState: loaded(cards)) {
+      DeckFeature()
+    } withDependencies: {
+      $0.apiClient.isConfigured = { false }
+    }
+
+    await store.send(.onAppear) {
+      $0.cards = []
+      $0.phase = .notSetUp
+    }
+    #expect(store.state.message == "Connect your deck")
+    #expect(store.state.showsSettingsButton)
+  }
+
+  @Test func aRejectedTokenSaysSoAndOffersSettings() async {
+    let store = TestStore(initialState: loaded(cards)) {
+      DeckFeature()
+    } withDependencies: {
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.cards = { _ in throw APIError(statusCode: 403, message: "Forbidden") }
+    }
+
+    await store.send(.pulledToRefresh)
+    await store.receive(\.cardsResponse.failure) {
+      $0.cards = []
+      $0.phase = .unauthorized
+    }
+    #expect(store.state.message == "Token rejected")
+    #expect(store.state.showsSettingsButton)
+  }
+
+  @Test func onlySetupProblemsOfferSettings() {
+    var state = DeckFeature.State()
+    for phase in [DeckFeature.State.Phase.loading, .loaded, .offline] {
+      state.phase = phase
+      #expect(!state.showsSettingsButton)
+    }
+  }
+
+  @Test func closingSettingsReloadsWithTheQueryAndTellsTheParent() async {
+    var state = loaded(cards)
+    state.query = "ser"
+    state.destination = .settings(SettingsFeature.State())
+    let store = TestStore(initialState: state) {
+      DeckFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.cards = { query in
+        #expect(query == "ser")
+        return [cards[1]]
+      }
+    }
+
+    await store.send(\.destination.dismiss) {
+      $0.destination = nil
+    }
+    await store.receive(\.delegate.deckChanged)
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = [self.cards[1]]
+    }
+  }
+
+  @Test func closingTheEditorDoesNotReload() async {
+    var state = loaded(cards)
+    state.destination = .editor(CardEditorFeature.State())
+    // `cards` is unimplemented: a reload fails the test.
+    let store = TestStore(initialState: state) { DeckFeature() }
+
+    await store.send(\.destination.dismiss) {
+      $0.destination = nil
+    }
   }
 
   @Test func tappingARowEditsItAndSavingReplacesTheRow() async {
@@ -244,6 +368,7 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: loaded(cards)) {
       DeckFeature()
     } withDependencies: { [updated] in
+      $0.apiClient.isConfigured = { true }
       $0.apiClient.updateCard = { _, _, _ in updated }
     }
 
@@ -273,6 +398,7 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: loaded(cards)) {
       DeckFeature()
     } withDependencies: {
+      $0.apiClient.isConfigured = { true }
       $0.apiClient.addCard = { _, _ in new }
     }
 
@@ -305,6 +431,7 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: state) {
       DeckFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.isConfigured = { true }
       $0.apiClient.cards = { query in
         queries.withValue { $0.append(query) }
         return [cards[0]]
@@ -326,6 +453,7 @@ struct DeckFeatureTests {
     let store = TestStore(initialState: state) {
       DeckFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.isConfigured = { true }
       $0.apiClient.cards = { query in
         queries.withValue { $0.append(query) }
         return cards

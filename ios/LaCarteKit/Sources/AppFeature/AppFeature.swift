@@ -5,13 +5,14 @@ import DesignSystem
 import SettingsFeature
 import StudyFeature
 
-/// Root feature: study is the home; the deck and "add from study" are sheets over it.
+/// Root feature: study is the home; the deck, "add from study" and Settings (spec 008) are sheets over it.
 @Reducer
 struct AppFeature {
   @Reducer
   enum Destination {
     case deck(DeckFeature)
     case addCard(CardEditorFeature)
+    case settings(SettingsFeature)
   }
 
   @ObservableState
@@ -40,8 +41,17 @@ struct AppFeature {
         state.destination = .addCard(CardEditorFeature.State())
         return .none
 
+      case .study(.delegate(.settingsRequested)):
+        state.destination = .settings(SettingsFeature.State())
+        return .none
+
       case .destination(.presented(.addCard(.delegate(.saved)))),
-        .destination(.presented(.deck(.delegate(.deckChanged)))):
+        .destination(.presented(.deck(.delegate(.deckChanged)))),
+        .destination(.presented(.settings(.delegate(.serverChanged)))):
+        return .send(.study(.deckChanged))
+
+      // Closing Settings counts as saving it. Runs before `ifLet` clears the destination.
+      case .destination(.dismiss) where state.destination?.is(\.settings) == true:
         return .send(.study(.deckChanged))
 
       case .study, .destination:

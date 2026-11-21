@@ -24,7 +24,7 @@ public struct DeckFeature {
     public init() {}
 
     enum Phase: Equatable {
-      case loading, loaded, offline
+      case loading, loaded, offline, notSetUp, unauthorized
     }
 
     /// What to say instead of rows, if anything.
@@ -32,9 +32,16 @@ public struct DeckFeature {
       switch phase {
       case .loading: nil
       case .offline: "Can't reach your deck"
+      case .notSetUp: "Connect your deck"
+      case .unauthorized: "Token rejected"
       case .loaded where cards.isEmpty: query.isEmpty ? "No cards yet" : "No matches"
       case .loaded: nil
       }
+    }
+
+    /// Only Settings can fix a missing or rejected token.
+    var showsSettingsButton: Bool {
+      phase == .notSetUp || phase == .unauthorized
     }
   }
 
@@ -70,10 +77,10 @@ public struct DeckFeature {
     Reduce { state, action in
       switch action {
       case .binding(\.query):
-        return loadCards(matching: state.query, after: .seconds(0.3))
+        return loadCards(&state, after: .seconds(0.3))
 
       case .onAppear, .pulledToRefresh, .scenePhaseChanged(.active):
-        return loadCards(matching: state.query)
+        return loadCards(&state)
 
       case .scenePhaseChanged:
         return .none
@@ -113,20 +120,20 @@ public struct DeckFeature {
         state.phase = .loaded
         return .none
 
-      case .cardsResponse(.failure):
+      case let .cardsResponse(.failure(error)):
         state.cards = []
-        state.phase = .offline
+        state.phase = (error as? APIError)?.isUnauthorized == true ? .unauthorized : .offline
         return .none
 
       case .deleteResponse(.success):
         // The swipe cancelled any load in flight, including a debounced search: catch up with the field.
         return .merge(
-          loadCards(matching: state.query),
+          loadCards(&state),
           .send(.delegate(.deckChanged))
         )
 
       case .deleteResponse(.failure):
-        return loadCards(matching: state.query)
+        return loadCards(&state)
 
       case let .destination(.presented(.editor(.delegate(.saved(card))))):
         state.cards.updateOrInsert(card, at: 0)
@@ -134,7 +141,14 @@ public struct DeckFeature {
 
       case .destination(.presented(.settings(.delegate(.serverChanged)))):
         return .merge(
-          loadCards(matching: state.query),
+          loadCards(&state),
+          .send(.delegate(.deckChanged))
+        )
+
+      // Closing Settings counts as saving it. Runs before `ifLet` clears the destination.
+      case .destination(.dismiss) where state.destination?.is(\.settings) == true:
+        return .merge(
+          loadCards(&state),
           .send(.delegate(.deckChanged))
         )
 
@@ -145,9 +159,16 @@ public struct DeckFeature {
     .ifLet(\.$destination, action: \.destination)
   }
 
+  /// Loads the cards matching the search field; without a server URL and a token, makes no request (spec 008).
   /// Every load shares one cancel id, so a slow response never overwrites a newer one.
-  private func loadCards(matching query: String, after delay: Duration = .zero) -> Effect<Action> {
-    .run { [apiClient, clock] send in
+  private func loadCards(_ state: inout State, after delay: Duration = .zero) -> Effect<Action> {
+    guard apiClient.isConfigured() else {
+      state.cards = []
+      state.phase = .notSetUp
+      return .cancel(id: CancelID.load)
+    }
+    let query = state.query
+    return .run { [apiClient, clock] send in
       if delay > .zero {
         try await clock.sleep(for: delay)
       }

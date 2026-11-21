@@ -79,16 +79,45 @@ public struct StudyView: View {
     case .offline:
       pullable {
         VStack(spacing: Theme.Spacing.m) {
-          Text("Can't reach your deck")
-            .font(.body)
-            .foregroundStyle(Theme.ink)
-            .multilineTextAlignment(.center)
-            .accessibilityIdentifier("study.message")
+          message("Can't reach your deck")
           CircleIconButton("arrow.clockwise", accessibilityLabel: "Retry") {
             store.send(.retryButtonTapped)
           }
           .accessibilityIdentifier("study.retry")
         }
+      }
+
+    case .notSetUp:
+      settingsPrompt("Connect your deck", detail: "Add your server URL and token in Settings.")
+
+    case .unauthorized:
+      settingsPrompt("Token rejected", detail: "Check your token in Settings.")
+    }
+  }
+
+  private func message(_ text: String) -> some View {
+    Text(text)
+      .font(.body)
+      .foregroundStyle(Theme.ink)
+      .multilineTextAlignment(.center)
+      .accessibilityIdentifier("study.message")
+  }
+
+  /// "Connect your deck" and "Token rejected": both are fixed in Settings (spec 008).
+  private func settingsPrompt(_ text: String, detail: String) -> some View {
+    pullable {
+      VStack(spacing: Theme.Spacing.m) {
+        VStack(spacing: Theme.Spacing.s) {
+          message(text)
+          Text(detail)
+            .font(.meta)
+            .foregroundStyle(Theme.secondaryInk)
+            .multilineTextAlignment(.center)
+            .accessibilityIdentifier("study.detail")
+        }
+        Button { store.send(.openSettingsTapped) } label: { textButtonLabel("Open Settings") }
+          .buttonStyle(.plain)
+          .accessibilityIdentifier("study.openSettings")
       }
     }
   }
@@ -134,11 +163,8 @@ public struct StudyView: View {
             .disabled(store.isReviewing)
             .transition(.opacity)
         } else {
-          Button("Show answer") { reveal() }
-            .font(.body)
-            .foregroundStyle(Theme.ink)
+          Button { reveal() } label: { textButtonLabel("Show answer") }
             .buttonStyle(.plain)
-            .frame(minHeight: 44)
             .accessibilityIdentifier("study.reveal")
         }
       }
@@ -165,10 +191,16 @@ public struct StudyView: View {
   }
 
   private func ratingLabel(_ rating: Rating) -> some View {
-    Text(rating.rawValue.capitalized)
+    textButtonLabel(rating.rawValue.capitalized)
+  }
+
+  /// A plain button only hit-tests what it draws: the 44pt band must be in the label's shape, not outside the button.
+  private func textButtonLabel(_ title: String) -> some View {
+    Text(title)
       .font(.body)
       .foregroundStyle(Theme.ink)
       .frame(minHeight: 44)
+      .contentShape(.rect)
   }
 
   /// Only the reveal fades; moving to the next card is instant so its back never flashes.
@@ -191,5 +223,11 @@ public struct StudyView: View {
 #Preview("Empty deck") {
   StudyView(store: Store(initialState: StudyFeature.State()) { StudyFeature() } withDependencies: {
     $0.apiClient = .inMemory(cards: [])
+  })
+}
+
+#Preview("Not set up") {
+  StudyView(store: Store(initialState: StudyFeature.State()) { StudyFeature() } withDependencies: {
+    $0.apiClient.isConfigured = { false }
   })
 }

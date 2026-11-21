@@ -80,13 +80,26 @@ public struct DeckView: View {
     if let message = store.message {
       // In a scroll view so the message can be pulled to refresh.
       ScrollView {
-        Text(message)
-          .font(.body)
-          .foregroundStyle(Theme.secondaryInk)
-          .multilineTextAlignment(.center)
-          .padding(.horizontal, Theme.Spacing.m)
-          .accessibilityIdentifier("deck.message")
-          .containerRelativeFrame([.horizontal, .vertical])
+        VStack(spacing: Theme.Spacing.m) {
+          Text(message)
+            .font(.body)
+            .foregroundStyle(Theme.secondaryInk)
+            .multilineTextAlignment(.center)
+            .accessibilityIdentifier("deck.message")
+          if store.showsSettingsButton {
+            Button { store.send(.settingsButtonTapped) } label: {
+              Text("Open Settings")
+                .font(.body)
+                .foregroundStyle(Theme.ink)
+                .frame(minHeight: 44)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("deck.openSettings")
+          }
+        }
+        .padding(.horizontal, Theme.Spacing.m)
+        .containerRelativeFrame([.horizontal, .vertical])
       }
       .scrollDismissesKeyboard(.immediately)
     } else {
@@ -159,6 +172,12 @@ public struct DeckView: View {
 
 #Preview("Deck") {
   DeckView(store: Store(initialState: DeckFeature.State()) { DeckFeature() })
+}
+
+#Preview("Not set up") {
+  DeckView(store: Store(initialState: DeckFeature.State()) { DeckFeature() } withDependencies: {
+    $0.apiClient.isConfigured = { false }
+  })
 }
 
 #Preview("Empty deck") {

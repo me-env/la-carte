@@ -6,7 +6,7 @@ import XCTest
 /// they go through the same path as a real phone: stored URL + Keychain token → live `APIClient`.
 final class SettingsUITests: XCTestCase {
   static let appearances: [XCUIDevice.Appearance] = [.light, .dark]
-  static let urlPlaceholder = "http://127.0.0.1:8000"
+  static let urlPlaceholder = "Server URL"
   static let goodToken = "qa-good-token"
 
   override func setUp() {
@@ -88,7 +88,7 @@ final class SettingsUITests: XCTestCase {
   @MainActor
   func testSettings_checkingThenConnectedThenEditClears() throws {
     XCUIDevice.shared.appearance = .light
-    let deck = StubDeck([card("a1", "alpha", "un"), card("a2", "bravo", "deux")])
+    let deck = StubDeck([card("a1", "alpha", "one"), card("a2", "bravo", "two")])
     let server = try startStub(deck, token: Self.goodToken, statsDelay: 5)
     let app = launch(api: .stored)
     openDeck(app)
@@ -127,7 +127,7 @@ final class SettingsUITests: XCTestCase {
   @MainActor
   func testSettings_wrongToken() throws {
     XCUIDevice.shared.appearance = .light
-    let server = try startStub(StubDeck([card("a1", "alpha", "un")]), token: Self.goodToken)
+    let server = try startStub(StubDeck([card("a1", "alpha", "one")]), token: Self.goodToken)
     let app = launch(api: .stored)
     openDeck(app)
     openSettings(app)
@@ -168,7 +168,7 @@ final class SettingsUITests: XCTestCase {
   @MainActor
   func testSettings_persistAcrossRelaunch() throws {
     XCUIDevice.shared.appearance = .light
-    let deck = StubDeck([card("b1", "persist", "reste")])
+    let deck = StubDeck([card("b1", "persist", "stays")])
     let server = try startStub(deck, token: Self.goodToken)
     var app = launch(api: .stored)
     openDeck(app)
@@ -190,10 +190,10 @@ final class SettingsUITests: XCTestCase {
     openSettings(app)
     XCTAssertEqual(fieldText(app, "settings.url"), server.url, "stored URL not shown after relaunch")
     let token = el(app, "settings.token")
-    XCTAssertEqual(token.elementType, .secureTextField, "settings.token is not a secure field")
     let masked = token.value as? String ?? ""
-    XCTAssertEqual(masked.count, Self.goodToken.count, "stored token not shown (masked) after relaunch: '\(masked)'")
-    XCTAssertFalse(masked.contains(Self.goodToken), "token shown in clear")
+    XCTAssertEqual(masked, String(repeating: "•", count: Self.goodToken.count),
+                   "stored token not shown masked (one dot per character) after relaunch")
+    assertTokenNotOnScreen(app, Self.goodToken)
     snapshot("settings-relaunched", appearance: .light)
     server.stop()
   }
@@ -202,7 +202,7 @@ final class SettingsUITests: XCTestCase {
   @MainActor
   func testSettings_tokenSavedOnSwipeDismiss() throws {
     XCUIDevice.shared.appearance = .light
-    let deck = StubDeck([card("c1", "swiped", "glissé")])
+    let deck = StubDeck([card("c1", "swiped", "slid")])
     let server = try startStub(deck, token: Self.goodToken)
     var app = launch(api: .stored)
     openDeck(app)
@@ -234,7 +234,7 @@ final class SettingsUITests: XCTestCase {
     var extraA = card("e1", "zulu", "z"), extraB = card("e2", "yankee", "y")
     extraA.due = later
     extraB.due = later
-    let deckA = StubDeck([card("d1", "alpha", "un"), extraA]), deckB = StubDeck([card("d2", "bravo", "deux"), extraB])
+    let deckA = StubDeck([card("d1", "alpha", "one"), extraA]), deckB = StubDeck([card("d2", "bravo", "two"), extraB])
     let serverA = try startStub(deckA, token: Self.goodToken), serverB = try startStub(deckB, token: Self.goodToken)
     let app = launch(api: .stored)
 
@@ -328,23 +328,23 @@ final class SettingsUITests: XCTestCase {
     waitForAbsence(el(app, "settings.title"))
     swipeSheetDown(app, from: el(app, "deck.title"))
     waitForAbsence(el(app, "deck.title"))
-    waitForLabel(el(app, "study.front"), "bonjour")
+    waitForLabel(el(app, "study.front"), "greeting")
     waitForLabel(el(app, "study.remaining"), "2 to review")
     snapshot("study-live-after-settings", appearance: .light)
 
     // Same values after a relaunch with no env (the real phone path).
     app.terminate()
     app = launch(api: .stored)
-    waitForLabel(el(app, "study.front"), "bonjour", timeout: 15)
+    waitForLabel(el(app, "study.front"), "greeting", timeout: 15)
   }
 
   // MARK: - Helpers
 
-  private func uuid(_ suffix: String) -> String {
+  func uuid(_ suffix: String) -> String {
     "00000000-0000-0000-0000-" + String(repeating: "0", count: 12 - suffix.count) + suffix.uppercased()
   }
 
-  private func card(_ id: String, _ front: String, _ back: String) -> StubDeck.Card {
+  func card(_ id: String, _ front: String, _ back: String) -> StubDeck.Card {
     .init(id: uuid(id), front: front, back: back)
   }
 
@@ -361,14 +361,14 @@ final class SettingsUITests: XCTestCase {
     }
   }
 
-  private func startStub(_ deck: StubDeck, token: String, statsDelay: TimeInterval = 0) throws -> StubAPIServer {
+  func startStub(_ deck: StubDeck, token: String, statsDelay: TimeInterval = 0) throws -> StubAPIServer {
     let server = StubAPIServer(handler: Self.guarded(deck, token: token, statsDelay: statsDelay))
     try server.start()
     return server
   }
 
   @MainActor
-  private func openDeck(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+  func openDeck(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let button = el(app, "study.deck")
     XCTAssertTrue(button.waitForExistence(timeout: 10), "study.deck missing", file: file, line: line)
     button.tap()
@@ -376,7 +376,7 @@ final class SettingsUITests: XCTestCase {
   }
 
   @MainActor
-  private func openSettings(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+  func openSettings(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let gear = el(app, "deck.settings")
     XCTAssertTrue(gear.waitForExistence(timeout: 5), "deck.settings missing", file: file, line: line)
     gear.tap()
@@ -384,7 +384,7 @@ final class SettingsUITests: XCTestCase {
   }
 
   @MainActor
-  private func statusText(_ app: XCUIApplication) -> XCUIElement { el(app, "settings.status") }
+  func statusText(_ app: XCUIApplication) -> XCUIElement { el(app, "settings.status") }
 
   @MainActor
   private func assertStatusCleared(_ app: XCUIApplication, _ context: String,
@@ -397,28 +397,36 @@ final class SettingsUITests: XCTestCase {
 
   /// Text of a settings field, or "" when it only shows its placeholder.
   @MainActor
-  private func fieldText(_ app: XCUIApplication, _ id: String) -> String {
+  func fieldText(_ app: XCUIApplication, _ id: String) -> String {
     let field = el(app, id)
     let value = field.value as? String ?? ""
-    return value == field.placeholderValue || value == Self.urlPlaceholder || value == "Token (optional)" ? "" : value
+    return value == field.placeholderValue || value == Self.urlPlaceholder || value == "Token" ? "" : value
+  }
+
+  /// No element label or value contains `token` in clear.
+  @MainActor
+  func assertTokenNotOnScreen(_ app: XCUIApplication, _ token: String, file: StaticString = #filePath, line: UInt = #line) {
+    let clear = app.descendants(matching: .any)
+      .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", token, token))
+    XCTAssertEqual(clear.count, 0, "token shown in clear", file: file, line: line)
   }
 
   @MainActor
-  private func hasFocus(_ element: XCUIElement) -> Bool {
+  func hasFocus(_ element: XCUIElement) -> Bool {
     (element.value(forKey: "hasKeyboardFocus") as? Bool) ?? false
   }
 
   /// Taps right of the (short) text so the cursor lands at its end. Not at the far right edge: the last ~10pt of
   /// the row don't focus the field (see report).
   @MainActor
-  private func tapEnd(_ field: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+  func tapEnd(_ field: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
     field.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).tap()
     waitUntil("\(field.identifier) focused", timeout: 5, file: file, line: line) { self.hasFocus(field) }
   }
 
   /// Replaces a field's text: cursor at the end, delete everything, type `text`.
   @MainActor
-  private func setText(_ app: XCUIApplication, _ id: String, _ text: String, secure: Bool = false,
+  func setText(_ app: XCUIApplication, _ id: String, _ text: String, secure: Bool = false,
                        file: StaticString = #filePath, line: UInt = #line) {
     let field = el(app, id)
     XCTAssertTrue(field.waitForExistence(timeout: 5), "\(id) missing", file: file, line: line)
@@ -426,14 +434,14 @@ final class SettingsUITests: XCTestCase {
     tapEnd(field, file: file, line: line)
     field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count + 2) + text)
     if secure {
-      XCTAssertEqual((field.value as? String ?? "").count, text.count, "\(id) length after typing", file: file, line: line)
+      XCTAssertEqual(fieldText(app, id).count, text.count, "\(id) length after typing", file: file, line: line)
     } else {
       XCTAssertEqual(fieldText(app, id), text, "\(id) text after typing", file: file, line: line)
     }
   }
 
   @MainActor
-  private func waitUntil(_ what: String, timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line,
+  func waitUntil(_ what: String, timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line,
                          _ condition: () -> Bool) {
     let deadline = Date().addingTimeInterval(timeout)
     while !condition(), Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
@@ -467,10 +475,11 @@ final class SettingsUITests: XCTestCase {
       XCTAssertTrue(e.waitForExistence(timeout: 5), "\(e.identifier) missing", file: file, line: line)
     }
     XCTAssertEqual(url.elementType, .textField, "settings.url is not a text field", file: file, line: line)
-    XCTAssertEqual(token.elementType, .secureTextField, "settings.token is not a secure field", file: file, line: line)
+    let shown = token.value as? String ?? ""
+    XCTAssertTrue(shown.allSatisfy { $0 == "•" }, "settings.token not masked at rest: '\(shown)'", file: file, line: line)
     XCTAssertEqual(test.label, "Test connection", file: file, line: line)
     XCTAssertTrue(test.isHittable, "settings.test not hittable", file: file, line: line)
-    XCTAssertEqual(token.placeholderValue, "Token (optional)", "settings.token placeholder", file: file, line: line)
+    XCTAssertEqual(token.label, "Token", "settings.token label", file: file, line: line)
     if fieldText(app, "settings.url").isEmpty {
       XCTAssertEqual(url.placeholderValue, Self.urlPlaceholder, "settings.url placeholder", file: file, line: line)
     }
@@ -479,11 +488,15 @@ final class SettingsUITests: XCTestCase {
     XCTAssertEqual(c.height, 44, accuracy: 1, "settings.close not 44pt: \(c)", file: file, line: line)
     XCTAssertLessThan(t.minX, 30, "settings.title not left: \(t)", file: file, line: line)
     XCTAssertGreaterThan(c.maxX, window.width - 30, "settings.close not right: \(c)", file: file, line: line)
-    XCTAssertEqual(t.midY, c.midY, accuracy: 4, "title and close not on one line", file: file, line: line)
+    // iOS 26 triage root cause C: the title must be centred on the close button.
+    XCTAssertEqual(t.midY, c.midY, accuracy: 1.5, "title not centred on the close button: \(t) / \(c)",
+                   file: file, line: line)
     XCTAssertGreaterThanOrEqual(u.minY, max(t.maxY, c.maxY) - 1, "URL field not under the header", file: file, line: line)
     XCTAssertGreaterThanOrEqual(k.minY, u.maxY - 1, "token field not under the URL field", file: file, line: line)
     XCTAssertGreaterThanOrEqual(b.minY, k.maxY - 1, "test button not under the token field", file: file, line: line)
-    for (id, f) in [("settings.url", u), ("settings.token", k)] {
+    // #16: the masked token is a text inside a tappable row; the 44pt eye button spans the row's height.
+    let row = k.union(el(app, "settings.token.reveal").frame)
+    for (id, f) in [("settings.url", u), ("settings.token row", row)] {
       XCTAssertGreaterThanOrEqual(f.height, 43.5, "\(id) row under 44pt: \(f)", file: file, line: line)
       XCTAssertGreaterThanOrEqual(f.minX, 12, "\(id) not inset: \(f)", file: file, line: line)
     }
@@ -539,7 +552,7 @@ final class SettingsUITests: XCTestCase {
     check("sheet background left of the URL row", CGPoint(x: 4, y: url.midY), background)
     check("sheet background between test and bottom", CGPoint(x: window.midX, y: window.maxY - 60), background)
     check("URL row fill", CGPoint(x: url.maxX - 4, y: url.midY), surface)
-    check("token row fill", CGPoint(x: token.maxX - 4, y: token.midY), surface)
+    check("token row fill", CGPoint(x: url.maxX - 4, y: token.midY), surface)  // row spans the URL row's width
     // Darkest/brightest pixel across the test label: must be neutral (ink), not blue.
     var blueish = false
     for x in stride(from: test.minX, to: test.maxX, by: 1) {

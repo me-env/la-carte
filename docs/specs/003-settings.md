@@ -1,9 +1,14 @@
 # 003 — Server settings
 
 Status: done
+
 Owners: ios-engineer
 Depends on: 002 (DeckFeature hosts the settings button)
 Design reference: docs/design/reference/04-list-dark.jpg (gear in the title row), 03-detail-light.jpg (sheet)
+
+> #2 (placeholder) and #6 (localhost default) are superseded by 008: no built-in URL, placeholders "Server URL" / "Token".
+> The token `SecureField` (#1, Screens) is superseded by 008 #16: a masked text field with an eye toggle
+> (`settings.token.reveal`), because iOS showed "Save Password?" for secure entry and blocked taps after closing.
 
 ## Goal
 On a real iPhone the user points the app at their API: they enter the URL and token once, check that the

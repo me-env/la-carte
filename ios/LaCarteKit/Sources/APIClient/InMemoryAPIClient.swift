@@ -52,7 +52,8 @@ extension APIClient {
           reviewedToday: cards.filter { $0.lastReview.map(Calendar.current.isDateInToday) ?? false }.count,
           nextDue: cards.map(\.due).filter { $0 > now }.min()
         )
-      }
+      },
+      isConfigured: { true }
     )
   }
 }

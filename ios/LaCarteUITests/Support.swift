@@ -27,7 +27,9 @@ extension XCTestCase {
       app.launchEnvironment["LA_CARTE_API"] = "mock"
     case let .live(url):
       app.launchEnvironment["LA_CARTE_API_URL"] = url
-      app.launchEnvironment["LA_CARTE_API_TOKEN"] = ProcessInfo.processInfo.environment["LA_CARTE_API_TOKEN"]
+      // Spec 008 #14: the app needs URL + token to be "set up"; unguarded stubs ignore the header.
+      let token = ProcessInfo.processInfo.environment["LA_CARTE_API_TOKEN"] ?? ""
+      app.launchEnvironment["LA_CARTE_API_TOKEN"] = token.isEmpty ? "ui-test-token" : token
     case .stored:
       break
     }
@@ -168,4 +170,18 @@ nonisolated func screenshotPNGOffMain() -> Data? {
         let shot = screen.perform(NSSelectorFromString("screenshot"))?.takeUnretainedValue() as? NSObject
   else { return nil }
   return shot.value(forKey: "PNGRepresentation") as? Data
+}
+
+extension XCTestCase {
+  /// Scrolls the frontmost scroll view up until `element` is hittable (e.g. gallery buttons below the logo).
+  @MainActor
+  func scrollIntoView(_ app: XCUIApplication, _ element: XCUIElement, maxSwipes: Int = 6) {
+    var swipes = 0
+    while !element.isHittable, swipes < maxSwipes {
+      let window = app.windows.firstMatch
+      window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+        .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+      swipes += 1
+    }
+  }
 }

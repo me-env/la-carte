@@ -16,7 +16,7 @@ public struct StudyFeature {
     public init() {}
 
     enum Phase: Equatable {
-      case loading, studying, caughtUp(nextDue: Date?), offline
+      case loading, studying, caughtUp(nextDue: Date?), offline, notSetUp, unauthorized
     }
   }
 
@@ -27,6 +27,7 @@ public struct StudyFeature {
     case retryButtonTapped
     case deckButtonTapped
     case addButtonTapped
+    case openSettingsTapped
     case deckChanged
     case pulledToRefresh
     case scenePhaseChanged(ScenePhase)
@@ -37,7 +38,7 @@ public struct StudyFeature {
 
     @CasePathable
     public enum Delegate {
-      case deckRequested, addCardRequested
+      case deckRequested, addCardRequested, settingsRequested
     }
   }
 
@@ -51,19 +52,19 @@ public struct StudyFeature {
     Reduce { state, action in
       switch action {
       case .onAppear, .deckChanged:
-        return fetchDueCards()
+        return fetchDueCards(&state)
 
       case .pulledToRefresh, .scenePhaseChanged(.active):
         // The review's response updates the queue; a list fetched meanwhile could bring the rated card back.
         guard !state.isReviewing else { return .none }
-        return fetchDueCards()
+        return fetchDueCards(&state)
 
       case .scenePhaseChanged:
         return .none
 
       case .retryButtonTapped:
         state.phase = .loading
-        return fetchDueCards()
+        return fetchDueCards(&state)
 
       case .revealTapped:
         state.isRevealed = true
@@ -86,6 +87,9 @@ public struct StudyFeature {
       case .addButtonTapped:
         return .send(.delegate(.addCardRequested))
 
+      case .openSettingsTapped:
+        return .send(.delegate(.settingsRequested))
+
       case let .cardsResponse(.success(cards)):
         if cards.first?.id != state.cards.first?.id {
           state.isRevealed = false
@@ -107,11 +111,12 @@ public struct StudyFeature {
         state.isReviewing = false
         state.isRevealed = false
         state.cards.remove(id: card.id)
-        return state.cards.isEmpty ? fetchDueCards() : .none
+        return state.cards.isEmpty ? fetchDueCards(&state) : .none
 
-      case .cardsResponse(.failure), .statsResponse(.failure), .reviewResponse(.failure):
+      case let .cardsResponse(.failure(error)), let .statsResponse(.failure(error)),
+        let .reviewResponse(.failure(error)):
         state.isReviewing = false
-        state.phase = .offline
+        state.phase = (error as? APIError)?.isUnauthorized == true ? .unauthorized : .offline
         return .none
 
       case .delegate:
@@ -120,9 +125,16 @@ public struct StudyFeature {
     }
   }
 
+  /// Without a server URL and a token there is nothing to ask, so no request is made (spec 008).
   /// Every load shares one cancel id, so a slow response never overwrites a newer one.
-  private func fetchDueCards() -> Effect<Action> {
-    .run { [apiClient] send in
+  private func fetchDueCards(_ state: inout State) -> Effect<Action> {
+    guard apiClient.isConfigured() else {
+      state.phase = .notSetUp
+      state.cards = []
+      state.isRevealed = false
+      return .cancel(id: CancelID.load)
+    }
+    return .run { [apiClient] send in
       await send(.cardsResponse(Result { try await apiClient.dueCards(100) }))
     }
     .cancellable(id: CancelID.load, cancelInFlight: true)

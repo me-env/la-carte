@@ -7,7 +7,7 @@ extension APIClient: DependencyKey {
 
   /// Launch environment (set by UI tests, or in the Xcode scheme):
   /// - `LA_CARTE_API=mock`      → in-memory deck seeded with `[Card].fixtures` (deterministic screenshots)
-  /// - `LA_CARTE_API_URL=…`     → base URL of the API, wins over the one entered in Settings
+  /// - `LA_CARTE_API_URL=…`     → base URL of the API, wins over the one entered in Settings (no default)
   /// - `LA_CARTE_API_TOKEN=…`   → bearer token, wins over the one entered in Settings
   public static var liveValue: APIClient {
     let environment = ProcessInfo.processInfo.environment
@@ -27,20 +27,18 @@ extension APIClient: DependencyKey {
     )
   }
 
-  /// Launch env > URL stored by Settings (if it is an http(s) URL) > the Mac's `scripts/api-dev.sh`,
-  /// which the simulator reaches over the shared loopback.
-  static func resolvedBaseURL(environment: [String: String], stored: String?) -> URL {
-    if let url = environment["LA_CARTE_API_URL"].flatMap(URL.init(string:)) {
-      return url
-    }
-    if let stored,
-      let url = URL(string: stored.trimmingCharacters(in: .whitespacesAndNewlines)),
+  /// Launch env > URL stored by Settings > none: there is no built-in server (spec 008).
+  /// Only http(s) URLs with a host count; anything else is treated as unset.
+  static func resolvedBaseURL(environment: [String: String], stored: String?) -> URL? {
+    environment["LA_CARTE_API_URL"].flatMap(httpURL) ?? stored.flatMap(httpURL)
+  }
+
+  private static func httpURL(_ string: String) -> URL? {
+    guard let url = URL(string: string.trimmingCharacters(in: .whitespacesAndNewlines)),
       url.scheme == "http" || url.scheme == "https",
       url.host() != nil
-    {
-      return url
-    }
-    return URL(string: "http://127.0.0.1:8000")!
+    else { return nil }
+    return url
   }
 
   /// Launch env > token stored by Settings > none. Empty values count as unset.
@@ -51,9 +49,10 @@ extension APIClient: DependencyKey {
     return stored().flatMap { $0.isEmpty ? nil : $0 }
   }
 
-  /// `baseURL` and `token` are read on every request, so Settings changes apply without a relaunch.
+  /// `baseURL` and `token` are read on every request and every `isConfigured` check,
+  /// so Settings changes apply without a relaunch.
   public static func live(
-    baseURL: @escaping @Sendable () -> URL,
+    baseURL: @escaping @Sendable () -> URL?,
     token: @escaping @Sendable () -> String?
   ) -> APIClient {
     let http = HTTP(baseURL: baseURL, token: token)
@@ -81,6 +80,9 @@ extension APIClient: DependencyKey {
       },
       stats: {
         try await http.send("GET", "stats")
+      },
+      isConfigured: {
+        baseURL() != nil && token() != nil
       }
     )
   }
@@ -89,10 +91,13 @@ extension APIClient: DependencyKey {
 public struct APIError: Error, Equatable {
   public var statusCode: Int
   public var message: String
+
+  /// The server refused the token (or its absence).
+  public var isUnauthorized: Bool { statusCode == 401 || statusCode == 403 }
 }
 
 private struct HTTP: Sendable {
-  let baseURL: @Sendable () -> URL
+  let baseURL: @Sendable () -> URL?
   let token: @Sendable () -> String?
 
   func send<Response: Decodable>(
@@ -111,7 +116,7 @@ private struct HTTP: Sendable {
     query: [String: String] = [:],
     body: [String: String]? = nil
   ) async throws -> Data {
-    var url = baseURL().appending(path: path)
+    guard var url = baseURL()?.appending(path: path) else { throw URLError(.unsupportedURL) }
     if !query.isEmpty {
       url.append(queryItems: query.map { URLQueryItem(name: $0.key, value: $0.value) })
     }

@@ -12,6 +12,8 @@ public struct APIClient: Sendable {
   public var deleteCard: @Sendable (_ id: Card.ID) async throws -> Void
   public var review: @Sendable (_ id: Card.ID, _ rating: Rating) async throws -> Card
   public var stats: @Sendable () async throws -> DeckStats
+  /// False until a server URL and a token are both set: features show "Connect your deck" instead of loading.
+  public var isConfigured: @Sendable () -> Bool = { false }
 }
 
 extension APIClient: TestDependencyKey {

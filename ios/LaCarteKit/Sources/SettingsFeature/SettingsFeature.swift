@@ -91,7 +91,7 @@ public struct SettingsFeature {
         return .send(.delegate(.serverChanged))
 
       case let .statsResponse(.failure(error)):
-        state.connection = (error as? APIError)?.statusCode == 401 ? .unauthorized : .unreachable
+        state.connection = (error as? APIError)?.isUnauthorized == true ? .unauthorized : .unreachable
         return .none
 
       case .binding, .delegate:

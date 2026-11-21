@@ -100,11 +100,11 @@ struct SettingsFeatureTests {
     await store.receive(\.delegate.serverChanged)
   }
 
-  @Test func a401SaysWrongToken() async {
+  @Test(arguments: [401, 403]) func aRejectedTokenSaysWrongToken(statusCode: Int) async {
     let store = TestStore(initialState: SettingsFeature.State()) {
       SettingsFeature()
     } withDependencies: {
-      $0.apiClient.stats = { throw APIError(statusCode: 401, message: "Unauthorized") }
+      $0.apiClient.stats = { throw APIError(statusCode: statusCode, message: "") }
     }
 
     await store.send(.testButtonTapped) {

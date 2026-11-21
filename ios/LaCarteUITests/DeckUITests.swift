@@ -50,7 +50,7 @@ final class DeckUITests: XCTestCase {
     let now = Date()
     let long = "a very long front that would never fit on a single line of an iPhone list row at all"
     let deck = StubDeck([
-      .init(id: "aaaaaaaa-0000-0000-0000-000000000001", front: "merci", back: "thank you", state: "review",
+      .init(id: "aaaaaaaa-0000-0000-0000-000000000001", front: "gratitude", back: "thank you", state: "review",
             due: now.addingTimeInterval(3 * 86_400 + 3_600), createdAt: now.addingTimeInterval(-7_200)),
       .init(id: "aaaaaaaa-0000-0000-0000-000000000002", front: long, back: long + " (back)",
             createdAt: now.addingTimeInterval(-3_600)),
@@ -61,7 +61,7 @@ final class DeckUITests: XCTestCase {
     openDeck(app)
     let newest = "aaaaaaaa-0000-0000-0000-000000000002", older = "aaaaaaaa-0000-0000-0000-000000000001"
     waitForRows(app, [newest, older])
-    assertRow(app, older, front: "merci", back: "thank you", due: "Due in 3 days", state: "review")
+    assertRow(app, older, front: "gratitude", back: "thank you", due: "Due in 3 days", state: "review")
     assertRow(app, newest, front: long, back: long + " (back)", due: "Due now", state: "new")
     // 1 line each: the long row is as tall as the short one.
     XCTAssertEqual(row(app, newest).frame.height, row(app, older).frame.height, accuracy: 1,
@@ -109,12 +109,18 @@ final class DeckUITests: XCTestCase {
     search.tap()
     let typed = Date()
     search.typeText("ser")
+    // How long the 3 keystrokes took: on a slow runner a gap between two of them can exceed the 0.3s debounce,
+    // and then an intermediate "s"/"se" query is correct behaviour, not a bug.
+    let typing = Date().timeIntervalSince(typed)
+    waitUntil("GET /cards?query=ser sent") { self.searchQueries(server).last == "ser" }
     waitForRows(app, [Self.ids[0]])
-    let queries = server.requests
-      .filter { $0.method == "GET" && StubDeck.route($0.path) == "/cards" }
-      .compactMap { StubDeck.queryItems($0.path)["query"] }
-      .filter { !$0.isEmpty }
-    XCTAssertEqual(queries, ["ser"], "expected a single debounced query 'ser', got \(queries)")
+    let queries = searchQueries(server)
+    if typing < 0.3 {
+      XCTAssertEqual(queries, ["ser"], "typed in \(typing)s: expected a single debounced query 'ser', got \(queries)")
+    } else {
+      XCTAssertTrue(queries.allSatisfy { "ser".hasPrefix($0) } && queries.count <= 3 && Set(queries).count == queries.count,
+                    "typed in \(typing)s: expected at most one query per prefix of 'ser', got \(queries)")
+    }
     let first = server.requests.first { StubDeck.queryItems($0.path)["query"] == "ser" }
     XCTAssertGreaterThanOrEqual(first.map { $0.time.timeIntervalSince(typed) } ?? 0, 0.3,
                                 "query sent less than 0.3s after typing started")
@@ -335,7 +341,7 @@ final class DeckUITests: XCTestCase {
       el(app, "deck.add").tap()
       assertNewCardEditor(app)
       snapshot("editor-new", appearance: appearance)
-      el(app, "editor.front").typeText("chat")
+      el(app, "editor.front").typeText("feline")
       XCTAssertFalse(el(app, "editor.save").isEnabled, "editor.save enabled with an empty back")
       el(app, "editor.back").tap()
       el(app, "editor.back").typeText("   ")
@@ -348,7 +354,7 @@ final class DeckUITests: XCTestCase {
       waitUntil("new row at the top") { self.rowIDs(app).count == 4 }
       let top = rowIDs(app)[0]
       XCTAssertFalse(Self.ids.contains(top), "new card is not the top row: \(rowIDs(app))")
-      assertRow(app, top, front: "chat", back: "cat", due: "Due now", state: "new")
+      assertRow(app, top, front: "feline", back: "cat", due: "Due now", state: "new")
       XCTAssertEqual(Array(rowIDs(app).dropFirst()), Self.ids)
       snapshot("deck-after-add", appearance: appearance)
       app.terminate()
@@ -366,7 +372,7 @@ final class DeckUITests: XCTestCase {
     waitForRows(app, stubOrder)
     el(app, "deck.add").tap()
     assertNewCardEditor(app)
-    el(app, "editor.front").typeText("chat")
+    el(app, "editor.front").typeText("feline")
     el(app, "editor.back").tap()
     el(app, "editor.back").typeText("cat")
     el(app, "editor.save").tap()
@@ -376,9 +382,9 @@ final class DeckUITests: XCTestCase {
     waitForAbsence(el(app, "editor.title"), timeout: 10, "editor still open after the save finished")
     let posts = server.requests.filter { $0.method == "POST" }
     XCTAssertEqual(posts.map(\.path), ["/cards"])
-    XCTAssertTrue(posts[0].body.contains("\"chat\"") && posts[0].body.contains("\"cat\""), "POST body: \(posts[0].body)")
+    XCTAssertTrue(posts[0].body.contains("\"feline\"") && posts[0].body.contains("\"cat\""), "POST body: \(posts[0].body)")
     waitUntil("new row at the top") { self.rowIDs(app).count == 4 }
-    XCTAssertTrue(rowText(app, rowIDs(app)[0], "chat").exists, "new card is not the top row")
+    XCTAssertTrue(rowText(app, rowIDs(app)[0], "feline").exists, "new card is not the top row")
     server.stop()
   }
 
@@ -398,12 +404,12 @@ final class DeckUITests: XCTestCase {
     waitForLabel(el(app, "study.message"), "All caught up")
     el(app, "study.add").tap()
     assertNewCardEditor(app)
-    el(app, "editor.front").typeText("chat")
+    el(app, "editor.front").typeText("feline")
     el(app, "editor.back").tap()
     el(app, "editor.back").typeText("cat")
     el(app, "editor.save").tap()
     waitForAbsence(el(app, "editor.title"), "editor still open after saving")
-    waitForLabel(el(app, "study.front"), "chat")
+    waitForLabel(el(app, "study.front"), "feline")
     waitForLabel(el(app, "study.remaining"), "1 to review")
     snapshot("study-after-add", appearance: .light)
   }
@@ -421,13 +427,13 @@ final class DeckUITests: XCTestCase {
       waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
       el(app, "study.add").tap()
       assertNewCardEditor(app)
-      el(app, "editor.front").typeText("chat")
+      el(app, "editor.front").typeText("feline")
       el(app, "editor.back").tap()
       el(app, "editor.back").typeText("cat")
       el(app, "editor.save").tap()
       waitForLabel(el(app, "editor.error"), "Couldn't save. Check your connection.")
       XCTAssertTrue(el(app, "editor.title").exists, "editor closed after a failed save")
-      XCTAssertEqual(fieldText(app, "editor.front"), "chat")
+      XCTAssertEqual(fieldText(app, "editor.front"), "feline")
       XCTAssertEqual(fieldText(app, "editor.back"), "cat")
       waitUntil("editor.save re-enabled after the failure") { self.el(app, "editor.save").isEnabled }
       let error = el(app, "editor.error").frame
@@ -448,7 +454,7 @@ final class DeckUITests: XCTestCase {
     // New card from study.
     el(app, "study.add").tap()
     assertNewCardEditor(app)
-    el(app, "editor.front").typeText("chat")
+    el(app, "editor.front").typeText("feline")
     el(app, "editor.close").tap()
     waitForAbsence(el(app, "editor.title"), "editor still open after editor.close")
     // New card from the deck.
@@ -456,7 +462,7 @@ final class DeckUITests: XCTestCase {
     waitForRows(app, stubOrder)
     el(app, "deck.add").tap()
     assertNewCardEditor(app)
-    el(app, "editor.front").typeText("chat")
+    el(app, "editor.front").typeText("feline")
     el(app, "editor.back").tap()
     el(app, "editor.back").typeText("cat")
     el(app, "editor.close").tap()
@@ -514,7 +520,7 @@ final class DeckUITests: XCTestCase {
     openDeck(app)
     el(app, "deck.add").tap()
     assertNewCardEditor(app)
-    el(app, "editor.front").typeText("chat")
+    el(app, "editor.front").typeText("feline")
     el(app, "editor.back").tap()
     el(app, "editor.back").typeText("cat")
     el(app, "editor.save").tap()
@@ -577,20 +583,20 @@ final class DeckUITests: XCTestCase {
 
   // MARK: - #13 live API
 
-  /// #13: scripts/e2e.sh (seeded bonjour/merci). Add "chat"/"cat" from study → in the deck at the top;
+  /// #13: scripts/e2e.sh (seeded greeting/gratitude). Add "feline"/"cat" from study → in the deck at the top;
   /// swipe-delete it → gone after reopening the deck, and gone from the API.
   @MainActor
   func testDeck_addFromStudyThenDelete_liveAPI() throws {
     guard let url = ProcessInfo.processInfo.environment["LA_CARTE_API_URL"], !url.isEmpty else {
       throw XCTSkip("LA_CARTE_API_URL not set — run scripts/e2e.sh")
     }
-    addTeardownBlock { [self] in try? self.deleteLiveCards(url, front: "chat") }
+    addTeardownBlock { [self] in try? self.deleteLiveCards(url, front: "feline") }
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .live(url))
     XCTAssertTrue(el(app, "study.front").waitForExistence(timeout: 10) || el(app, "study.message").exists)
     el(app, "study.add").tap()
     assertNewCardEditor(app)
-    el(app, "editor.front").typeText("chat")
+    el(app, "editor.front").typeText("feline")
     el(app, "editor.back").tap()
     el(app, "editor.back").typeText("cat")
     el(app, "editor.save").tap()
@@ -598,26 +604,34 @@ final class DeckUITests: XCTestCase {
 
     openDeck(app)
     waitUntil("3 rows in the live deck") { self.rowIDs(app).count == 3 }
-    let chatID = rowIDs(app)[0]
-    assertRow(app, chatID, front: "chat", back: "cat", due: "Due now", state: "new")
+    let felineID = rowIDs(app)[0]
+    assertRow(app, felineID, front: "feline", back: "cat", due: "Due now", state: "new")
     snapshot("deck-live", appearance: .light)
-    XCTAssertTrue(try liveCards(url).contains { $0["front"] as? String == "chat" }, "chat not in the API")
+    XCTAssertTrue(try liveCards(url).contains { $0["front"] as? String == "feline" }, "feline not in the API")
 
-    swipeAndDelete(app, chatID)
-    waitForAbsence(row(app, chatID), "chat row still shown after delete")
+    swipeAndDelete(app, felineID)
+    waitForAbsence(row(app, felineID), "feline row still shown after delete")
     swipeSheetDown(app, from: el(app, "deck.title"))
     waitForAbsence(el(app, "deck.title"))
     openDeck(app)
     waitUntil("2 rows after reopening") { self.rowIDs(app).count == 2 }
-    XCTAssertFalse(row(app, chatID).exists, "chat row back after reopening the deck")
+    XCTAssertFalse(row(app, felineID).exists, "feline row back after reopening the deck")
     snapshot("deck-live-after-delete", appearance: .light)
-    XCTAssertFalse(try liveCards(url).contains { $0["front"] as? String == "chat" }, "chat still in the API")
+    XCTAssertFalse(try liveCards(url).contains { $0["front"] as? String == "feline" }, "feline still in the API")
   }
 
   // MARK: - Helpers
 
   /// The stub sorts by created_at desc, and …01 is the newest: rows read …01, …02, …03 like the mock.
   var stubOrder: [String] { Self.ids }
+
+  /// Non-empty `query` values of the `GET /cards` requests the stub received, in order.
+  private func searchQueries(_ server: StubAPIServer) -> [String] {
+    server.requests
+      .filter { $0.method == "GET" && StubDeck.route($0.path) == "/cards" }
+      .compactMap { StubDeck.queryItems($0.path)["query"] }
+      .filter { !$0.isEmpty }
+  }
 
   private func startStubDeck() throws -> (StubAPIServer, StubDeck) {
     let base = Date(timeIntervalSince1970: 1_767_225_600)

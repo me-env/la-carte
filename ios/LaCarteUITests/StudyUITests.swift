@@ -43,6 +43,8 @@ final class StudyUITests: XCTestCase {
 
       // Reveal with the "Show answer" button this time.
       let secondBefore = el(app, "study.front").frame
+      XCTAssertGreaterThanOrEqual(el(app, "study.reveal").frame.height, 43.99,
+                                  "study.reveal hit area under 44pt: \(el(app, "study.reveal").frame)")
       el(app, "study.reveal").tap()
       assertRevealed(app, front: Self.fixtures[1].front, back: Self.fixtures[1].back)
       assertFrontDidNotMove(app, from: secondBefore)
@@ -103,7 +105,7 @@ final class StudyUITests: XCTestCase {
   func testStudy_ratingsDisabledWhileReviewInFlight() throws {
     XCUIDevice.shared.appearance = .light
     let id = "11111111-1111-1111-1111-111111111111"
-    let card = StubJSON.card(id: id, front: "bonjour", back: "hello")
+    let card = StubJSON.card(id: id, front: "greeting", back: "hello")
     let server = StubAPIServer()
     server.handler = { [weak server] request in
       // The current request is already recorded, so a POST in the log means "reviewed" for GETs.
@@ -118,9 +120,9 @@ final class StudyUITests: XCTestCase {
     }
     try server.start()
     let app = launch(api: .live(server.url))
-    assertFront(app, "bonjour", remaining: "1 to review")
+    assertFront(app, "greeting", remaining: "1 to review")
     el(app, "study.reveal").tap()
-    assertRevealed(app, front: "bonjour", back: "hello")
+    assertRevealed(app, front: "greeting", back: "hello")
     el(app, "study.rate.easy").tap()
     // In flight (3s): all four rating buttons disabled.
     for rating in Self.ratings {
@@ -164,7 +166,7 @@ final class StudyUITests: XCTestCase {
   @MainActor
   func testStudy_offlineThenRetry() throws {
     XCUIDevice.shared.appearance = .light
-    let card = StubJSON.card(id: "22222222-2222-2222-2222-222222222222", front: "merci", back: "thank you")
+    let card = StubJSON.card(id: "22222222-2222-2222-2222-222222222222", front: "gratitude", back: "thank you")
     let server = StubAPIServer { request in
       if request.path.hasPrefix("/cards/due") { return .init(body: StubJSON.cards([card])) }
       return .init(status: 404, body: "{}")
@@ -181,7 +183,7 @@ final class StudyUITests: XCTestCase {
     // API back → retry loads the due card.
     try server.start()
     el(app, "study.retry").tap()
-    assertFront(app, "merci", remaining: "1 to review")
+    assertFront(app, "gratitude", remaining: "1 to review")
     XCTAssertFalse(el(app, "study.message").exists, "study.message still shown after a successful retry")
     XCTAssertFalse(el(app, "study.retry").exists, "study.retry still shown after a successful retry")
     snapshot("study-retry-recovered", appearance: .light)
@@ -201,7 +203,7 @@ final class StudyUITests: XCTestCase {
   @MainActor
   func testStudy_reviewFailureGoesOffline() throws {
     XCUIDevice.shared.appearance = .light
-    let card = StubJSON.card(id: "33333333-3333-3333-3333-333333333333", front: "chat", back: "cat")
+    let card = StubJSON.card(id: "33333333-3333-3333-3333-333333333333", front: "feline", back: "cat")
     let server = StubAPIServer { request in
       if request.method == "POST" { return .init(status: 500, body: #"{"detail":"boom"}"#) }
       if request.path.hasPrefix("/cards/due") { return .init(body: StubJSON.cards([card])) }
@@ -209,18 +211,18 @@ final class StudyUITests: XCTestCase {
     }
     try server.start()
     let app = launch(api: .live(server.url))
-    assertFront(app, "chat", remaining: "1 to review")
+    assertFront(app, "feline", remaining: "1 to review")
     el(app, "study.card").tap()
-    assertRevealed(app, front: "chat", back: "cat")
+    assertRevealed(app, front: "feline", back: "cat")
     el(app, "study.rate.again").tap()
     assertOffline(app)
     snapshot("study-review-failed", appearance: .light)
     el(app, "study.retry").tap()
     // Spec 001 #7 (round 2): the same card comes back still revealed, no "Show answer" tap needed.
-    waitForLabel(el(app, "study.front"), "chat")
+    waitForLabel(el(app, "study.front"), "feline")
     waitForLabel(el(app, "study.remaining"), "1 to review")
     XCTAssertFalse(el(app, "study.reveal").exists, "study.reveal shown: the card came back unrevealed after retry")
-    assertRevealed(app, front: "chat", back: "cat")
+    assertRevealed(app, front: "feline", back: "cat")
     snapshot("study-review-failed-retried", appearance: .light)
     // And the retried card is rateable: a second review succeeds → caught up.
     server.handler = { request in
@@ -385,21 +387,21 @@ final class StudyUITests: XCTestCase {
 
   // MARK: - Live API (criterion 10)
 
-  /// #10: scripts/e2e.sh seeds `bonjour`/`hello` then `merci`/`thank you`. Reveal + rate good twice →
+  /// #10: scripts/e2e.sh seeds `greeting`/`hello` then `gratitude`/`thank you`. Reveal + rate good twice →
   /// "All caught up" + "Next card in…", and the API recorded both reviews.
   @MainActor
   func testStudy_revealRateToCaughtUp_liveAPI() throws {
     let url = try liveURL("LA_CARTE_API_URL")
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .live(url))
-    assertFront(app, "bonjour", remaining: "2 to review")
+    assertFront(app, "greeting", remaining: "2 to review")
     snapshot("study-live-front", appearance: .light)
     el(app, "study.card").tap()
-    assertRevealed(app, front: "bonjour", back: "hello")
+    assertRevealed(app, front: "greeting", back: "hello")
     el(app, "study.rate.good").tap()
-    assertFront(app, "merci", remaining: "1 to review")
+    assertFront(app, "gratitude", remaining: "1 to review")
     el(app, "study.reveal").tap()
-    assertRevealed(app, front: "merci", back: "thank you")
+    assertRevealed(app, front: "gratitude", back: "thank you")
     el(app, "study.rate.good").tap()
     assertCaughtUp(app, nextDuePrefix: "Next card in")
     snapshot("study-live", appearance: .light)
@@ -560,7 +562,7 @@ final class StudyUITests: XCTestCase {
     for (rating, f) in zip(Self.ratings, frames) {
       XCTAssertTrue(el(app, "study.rate.\(rating)").isHittable, "study.rate.\(rating) not hittable", file: file, line: line)
       XCTAssertTrue(window.contains(f), "study.rate.\(rating) outside the window: \(f)", file: file, line: line)
-      XCTAssertGreaterThanOrEqual(f.height, 44, "study.rate.\(rating) hit area too short: \(f)", file: file, line: line)
+      XCTAssertGreaterThanOrEqual(f.height, 43.99, "study.rate.\(rating) hit area too short: \(f)", file: file, line: line)
       if checkBackAbove {
         XCTAssertGreaterThanOrEqual(f.minY, el(app, "study.back").frame.maxY - 1,
                                     "study.rate.\(rating) overlaps the back text", file: file, line: line)

@@ -2,6 +2,7 @@ import CardEditorFeature
 import ComposableArchitecture
 import DeckFeature
 import DesignSystem
+import SettingsFeature
 import StudyFeature
 import SwiftUI
 
@@ -15,6 +16,9 @@ struct AppView: View {
       }
       .sheet(item: $store.scope(\.$destination, action: \.destination).addCard) { editorStore in
         CardEditorView(store: editorStore)
+      }
+      .sheet(item: $store.scope(\.$destination, action: \.destination).settings) { settingsStore in
+        SettingsView(store: settingsStore)
       }
   }
 }

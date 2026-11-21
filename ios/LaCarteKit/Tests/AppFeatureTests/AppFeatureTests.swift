@@ -17,6 +17,7 @@ struct AppFeatureTests {
     let store = TestStore(initialState: AppFeature.State()) {
       AppFeature()
     } withDependencies: {
+      $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in [card] }
     }
 
@@ -44,6 +45,7 @@ struct AppFeatureTests {
     let store = TestStore(initialState: state) {
       AppFeature()
     } withDependencies: {
+      $0.apiClient.isConfigured = { true }
       $0.apiClient.addCard = { _, _ in new }
       $0.apiClient.dueCards = { _ in [new] }
     }
@@ -83,6 +85,7 @@ struct AppFeatureTests {
     let store = TestStore(initialState: state) {
       AppFeature()
     } withDependencies: {
+      $0.apiClient.isConfigured = { true }
       $0.apiClient.deleteCard = { _ in }
       // The deck's reload waits on the clock so the two reloads arrive in a fixed order.
       $0.apiClient.cards = { _ in
@@ -105,6 +108,78 @@ struct AppFeatureTests {
         $0.cards = IdentifiedArray(uniqueElements: cards.dropFirst())
         $0.phase = .loaded
       }
+    }
+  }
+
+  @Test func openSettingsFromStudyPresentsSettingsOverStudy() async {
+    var state = AppFeature.State()
+    state.study.phase = .notSetUp
+    let store = TestStore(initialState: state) { AppFeature() }
+
+    await store.send(\.study.openSettingsTapped)
+    await store.receive(\.study.delegate.settingsRequested) {
+      $0.destination = .settings(SettingsFeature.State())
+    }
+  }
+
+  @Test func closingSettingsReloadsStudy() async {
+    let card = [Card].fixtures[0]
+    let configured = LockIsolated(false)
+    var state = AppFeature.State()
+    state.study.phase = .notSetUp
+    state.destination = .settings(SettingsFeature.State())
+    let store = TestStore(initialState: state) {
+      AppFeature()
+    } withDependencies: {
+      $0.apiClient.isConfigured = { configured.value }
+      $0.apiClient.dueCards = { _ in [card] }
+    }
+
+    // Still missing the token: stays on "Connect your deck" without a request.
+    await store.send(\.destination.dismiss) {
+      $0.destination = nil
+    }
+    await store.receive(\.study.deckChanged)
+
+    await store.send(\.study.openSettingsTapped)
+    await store.receive(\.study.delegate.settingsRequested) {
+      $0.destination = .settings(SettingsFeature.State())
+    }
+    configured.setValue(true)
+    await store.send(\.destination.dismiss) {
+      $0.destination = nil
+    }
+    await store.receive(\.study.deckChanged)
+    await store.receive(\.study.cardsResponse.success) {
+      $0.study.cards = [card]
+      $0.study.phase = .studying
+    }
+  }
+
+  @Test func aSuccessfulConnectionTestReloadsStudyWithTheSheetOpen() async {
+    let card = [Card].fixtures[0]
+    var state = AppFeature.State()
+    state.study.phase = .unauthorized
+    state.destination = .settings(SettingsFeature.State())
+    let store = TestStore(initialState: state) {
+      AppFeature()
+    } withDependencies: {
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.stats = { DeckStats(total: 1, due: 1, new: 1, reviewedToday: 0, nextDue: nil) }
+      $0.apiClient.dueCards = { _ in [card] }
+    }
+
+    await store.send(\.destination.settings.testButtonTapped) {
+      $0.destination?.modify(\.settings) { $0.connection = .checking }
+    }
+    await store.receive(\.destination.settings.statsResponse.success) {
+      $0.destination?.modify(\.settings) { $0.connection = .connected(total: 1) }
+    }
+    await store.receive(\.destination.settings.delegate.serverChanged)
+    await store.receive(\.study.deckChanged)
+    await store.receive(\.study.cardsResponse.success) {
+      $0.study.cards = [card]
+      $0.study.phase = .studying
     }
   }
 

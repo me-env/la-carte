@@ -5,6 +5,7 @@ import SwiftUI
 public struct SettingsView: View {
   @Bindable var store: StoreOf<SettingsFeature>
   @FocusState private var focusedField: Field?
+  @State private var isTokenRevealed = false
 
   private enum Field {
     case url, token
@@ -40,23 +41,16 @@ public struct SettingsView: View {
         .accessibilityAddTraits(.isHeader)
       TextField(
         "API URL", text: $store.apiURL.sending(\.urlChanged),
-        prompt: Text("http://127.0.0.1:8000").foregroundStyle(Theme.secondaryInk)
+        prompt: Text("Server URL").foregroundStyle(Theme.secondaryInk)
       )
       .keyboardType(.URL)
+      .textContentType(.URL)
       .textInputAutocapitalization(.never)
       .autocorrectionDisabled()
       .focused($focusedField, equals: .url)
       .accessibilityIdentifier("settings.url")
       .modifier(SurfaceRow { focusedField = .url })
-      SecureField(
-        "Token", text: $store.token,
-        prompt: Text("Token (optional)").foregroundStyle(Theme.secondaryInk)
-      )
-      .textInputAutocapitalization(.never)
-      .autocorrectionDisabled()
-      .focused($focusedField, equals: .token)
-      .accessibilityIdentifier("settings.token")
-      .modifier(SurfaceRow { focusedField = .token })
+      tokenField
       Button("Test connection") {
         store.send(.testButtonTapped)
       }
@@ -70,6 +64,51 @@ public struct SettingsView: View {
           .foregroundStyle(Theme.secondaryInk)
           .accessibilityIdentifier("settings.status")
       }
+    }
+  }
+
+  /// Masked unless the user reveals it. Not a `SecureField`: iOS offers to save any typed secure text as a password
+  /// when Settings closes, whatever its content type (QA 008 bug 2).
+  private var tokenField: some View {
+    HStack(spacing: Theme.Spacing.s) {
+      Group {
+        if isTokenRevealed {
+          TextField("Token", text: $store.token, prompt: Text("Token").foregroundStyle(Theme.secondaryInk))
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .focused($focusedField, equals: .token)
+            .onAppear { focusedField = .token }
+        } else {
+          // One dot per character, as a secure field shows.
+          let dots = String(repeating: "•", count: store.token.count)
+          Text(store.token.isEmpty ? "Token" : dots)
+            .foregroundStyle(store.token.isEmpty ? Theme.secondaryInk : Theme.ink)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("Token")
+            .accessibilityValue(dots)
+            .accessibilityAddTraits(.isButton)
+        }
+      }
+      .privacySensitive()
+      .accessibilityIdentifier("settings.token")
+      Button {
+        isTokenRevealed.toggle()
+      } label: {
+        Image(systemName: isTokenRevealed ? "eye.slash" : "eye")
+          .foregroundStyle(Theme.secondaryInk)
+          .frame(width: 44, height: 44)
+          .contentShape(.rect)
+      }
+      .buttonStyle(.plain)
+      // The 44pt button spans the row's full height instead of growing it.
+      .padding(.vertical, -Theme.Spacing.s)
+      .accessibilityLabel(isTokenRevealed ? "Hide token" : "Show token")
+      .accessibilityIdentifier("settings.token.reveal")
+    }
+    .modifier(SurfaceRow { isTokenRevealed = true })
+    .onChange(of: focusedField) { old, new in
+      if old == .token, new != .token { isTokenRevealed = false }
     }
   }
 
@@ -107,7 +146,7 @@ public struct SettingsView: View {
   }
 
   private var header: some View {
-    HStack(alignment: .top, spacing: Theme.Spacing.s) {
+    HStack(spacing: Theme.Spacing.s) {
       Text("Settings")
         .font(.screenTitle)
         .foregroundStyle(Theme.ink)
