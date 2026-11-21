@@ -70,6 +70,8 @@ its result.
 **Watch your context.** Every turn re-reads your whole context, so a bloated agent burns usage fast.
 - Don't dump big outputs: pipe through `tail`/`grep`/`head`, read files by range, never `cat` logs or JSONL.
 - Delegate heavy reading/research to sub-agents and keep only their conclusion.
+- One agent per task: when a task is done the agent ends; a new task gets a fresh agent with a short brief
+  (don't resume a finished agent for unrelated work: its old context is re-read every turn).
 - Long task? Compact when your context gets large (~150k tokens): summarise state into your notes/report,
   then continue from the summary. If you can't compact, finish the current step, report a short hand-off
   (what's done, what's next, file paths) and stop; the manager restarts a fresh agent from it.
