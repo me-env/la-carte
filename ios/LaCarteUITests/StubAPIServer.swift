@@ -23,7 +23,7 @@ final class StubAPIServer: @unchecked Sendable {
 
   typealias Handler = @Sendable (Request) -> Response
 
-  /// Picked by the OS when the listener starts (port 0), so parallel test workers never collide.
+  /// Picked by the OS on the first start (port 0), so parallel test workers never collide; a restart reuses it.
   private(set) var port: UInt16 = 0
   var url: String { "http://127.0.0.1:\(port)" }
 
@@ -48,7 +48,7 @@ final class StubAPIServer: @unchecked Sendable {
   func start() throws {
     let params = NWParameters.tcp
     params.allowLocalEndpointReuse = true
-    let listener = try NWListener(using: params, on: .any)
+    let listener = try NWListener(using: params, on: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
     let ready = DispatchSemaphore(value: 0)
     listener.stateUpdateHandler = { state in
       switch state {

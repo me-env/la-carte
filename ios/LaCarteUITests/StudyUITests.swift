@@ -119,7 +119,9 @@ final class StudyUITests: XCTestCase {
       if request.path.hasPrefix("/cards/due") { return .init(body: StubJSON.cards([card])) }
       return .init(status: 404, body: "{}")
     }
-    // Server not started yet: the port refuses connections.
+    // Server down: take an OS-picked port, then close it so it refuses connections.
+    try server.start()
+    server.stop()
     let app = launch(api: .live(server.url))
     assertOffline(app)
     snapshot("study-offline", appearance: .light)
@@ -140,40 +142,18 @@ final class StudyUITests: XCTestCase {
 
   // MARK: - Dynamic Type (criterion 11)
 
-  /// #11 at accessibility XL, three cards in one launch (rated in turn):
-  /// 1. short card: readable, scaled, centered, ratings reachable;
-  /// 2. long text wraps (multi-line), stays centered, nothing clipped. Card text stops growing at `.accessibility2`
-  ///    and the card area scrolls if still too long: every line reachable, never drawn under the rating row;
-  /// 3. text too long for one screen even when capped: the card area scrolls in place and the end is reachable.
+  /// #11: revealed card + rating row at accessibility XL: readable, scaled, centered, ratings reachable.
   @MainActor
-  func testStudy_accessibilityXL() throws {
+  func testStudy_accessibilityXL() {
     XCUIDevice.shared.appearance = .light
     let baseline = launch(api: .mock)
     XCTAssertTrue(el(baseline, "study.front").waitFor(timeout: 5))
     let baseHeight = el(baseline, "study.front").frame.height
     baseline.terminate()
 
-    let long = (front: "the quick brown fox jumps over the lazy dog near the riverbank",
-                back: "a sentence that uses every letter of the alphabet, often used to test typewriters and fonts")
-    let veryLong = (front: "a very long prompt that keeps going so that even with the card text capped it cannot possibly fit",
-                    back: "an equally long answer, several sentences long, written to overflow the card area at accessibility "
-                      + "sizes so that the only way to read its final words is to scroll the card area up: the end")
-    let ids = ["33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444",
-               "55555555-5555-5555-5555-555555555555"]
-    let cards = zip(ids, [Self.fixtures[0], long, veryLong]).map { StubJSON.card(id: $0, front: $1.front, back: $1.back) }
-    let server = StubAPIServer { request in
-      if request.path.hasPrefix("/cards/due") { return .init(body: StubJSON.cards(cards)) }
-      if request.method == "POST", let i = ids.firstIndex(where: { request.path == "/cards/\($0)/review" }) {
-        return .init(body: cards[i])
-      }
-      return .init(status: 404, body: "{}")
-    }
-    try server.start()
-    let app = launch(api: .live(server.url), arguments: accessibilityXLArguments)
-
-    // 1. Short card.
+    let app = launch(api: .mock, arguments: accessibilityXLArguments)
     assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
-    var frontBefore = el(app, "study.front").frame
+    let frontBefore = el(app, "study.front").frame
     el(app, "study.reveal").tap()
     assertRevealed(app, front: Self.fixtures[0].front, back: Self.fixtures[0].back)
     assertFrontDidNotMove(app, from: frontBefore)
@@ -182,21 +162,35 @@ final class StudyUITests: XCTestCase {
     assertRatingRowUsable(app)
     XCTAssertGreaterThan(el(app, "study.front").frame.height, baseHeight * 1.3,
                          "study.front did not scale with Dynamic Type (height \(baseHeight) at default)")
-    el(app, "study.rate.good").tap()
+  }
 
-    // 2. Long text: wraps; the end of the back is reachable (already above the rating row, or after scrolling).
-    assertFront(app, long.front, remaining: "2 to review")
+  /// #11: long text at accessibility XL wraps (multi-line) and stays centered; nothing is clipped. Per the
+  /// layout notes, card text stops growing at `.accessibility2` and the card area scrolls if still too long:
+  /// every line must be visible on screen at some scroll position, never drawn under the rating row.
+  @MainActor
+  func testStudy_accessibilityXLLongText() throws {
+    XCUIDevice.shared.appearance = .light
+    let front = "the quick brown fox jumps over the lazy dog near the riverbank"
+    let back = "a sentence that uses every letter of the alphabet, often used to test typewriters and fonts"
+    let card = StubJSON.card(id: "44444444-4444-4444-4444-444444444444", front: front, back: back)
+    let server = StubAPIServer { request in
+      if request.path.hasPrefix("/cards/due") { return .init(body: StubJSON.cards([card])) }
+      return .init(status: 404, body: "{}")
+    }
+    try server.start()
+    let app = launch(api: .live(server.url), arguments: accessibilityXLArguments)
+    assertFront(app, front, remaining: "1 to review")
     snapshot("study-xl-long-front", appearance: .light)
     let topRowBottom = max(el(app, "study.deck").frame.maxY, el(app, "study.remaining").frame.maxY)
-    frontBefore = el(app, "study.front").frame
+    let frontBefore = el(app, "study.front").frame
     XCTAssertGreaterThanOrEqual(frontBefore.minY, topRowBottom - 1,
                                 "study.front starts under the top row before reveal: \(frontBefore)")
     el(app, "study.card").tap()
-    assertRevealed(app, front: long.front, back: long.back)
+    assertRevealed(app, front: front, back: back)
     assertFrontDidNotMove(app, from: frontBefore)
     snapshot("study-xl-long", appearance: .light)
-    var ratingTop = Self.ratings.map { el(app, "study.rate.\($0)").frame.minY }.min()!
-    var cardFrame = el(app, "study.card").frame
+    let ratingTop = Self.ratings.map { el(app, "study.rate.\($0)").frame.minY }.min()!
+    let cardFrame = el(app, "study.card").frame
     XCTAssertLessThanOrEqual(cardFrame.maxY, ratingTop + 1,
                              "study.card (text area) extends under the rating row: card \(cardFrame), ratings top \(ratingTop)")
     XCTAssertGreaterThanOrEqual(cardFrame.minY, topRowBottom - 1,
@@ -205,32 +199,50 @@ final class StudyUITests: XCTestCase {
       let f = el(app, id).frame
       XCTAssertGreaterThan(f.height, 100, "\(id) should wrap to several lines at XL: \(f)")
     }
+    // The bottom of the back must be reachable: either already above the rating row, or after scrolling.
     if el(app, "study.back").frame.maxY > ratingTop + 1 {
       for _ in 0..<4 where el(app, "study.back").frame.maxY > ratingTop + 1 {
         el(app, "study.card").swipeUp()
       }
       snapshot("study-xl-long-scrolled", appearance: .light)
     }
-    var backEnd = el(app, "study.back").frame
+    let backEnd = el(app, "study.back").frame
     XCTAssertLessThanOrEqual(backEnd.maxY, ratingTop + 1,
                              "end of study.back unreachable: still under the rating row after scrolling: \(backEnd)")
     XCTAssertLessThanOrEqual(backEnd.maxY, cardFrame.maxY + 1, "end of study.back outside the card area: \(backEnd)")
     assertRatingRowUsable(app, checkBackAbove: false)
-    assertRevealed(app, front: long.front, back: long.back)  // scrolling didn't un-reveal
-    el(app, "study.rate.good").tap()
+    // Scrolling must not have revealed/hid anything else: still revealed, ratings still there.
+    assertRevealed(app, front: front, back: back)
+    server.stop()
+  }
 
-    // 3. Very long text: must scroll; the card area itself stays put.
-    assertFront(app, veryLong.front, remaining: "1 to review")
+  /// #11 + layout note "scrolls if it is still too long": text too long for one screen even when capped.
+  /// The card area must scroll, stay between the top row and the rating row, and every line must be reachable.
+  @MainActor
+  func testStudy_accessibilityXLVeryLongTextScrolls() throws {
+    XCUIDevice.shared.appearance = .light
+    let front = "a very long prompt that keeps going so that even with the card text capped it cannot possibly fit"
+    let back = "an equally long answer, several sentences long, written to overflow the card area at accessibility "
+      + "sizes so that the only way to read its final words is to scroll the card area up: the end"
+    let card = StubJSON.card(id: "55555555-5555-5555-5555-555555555555", front: front, back: back)
+    let server = StubAPIServer { request in
+      if request.path.hasPrefix("/cards/due") { return .init(body: StubJSON.cards([card])) }
+      return .init(status: 404, body: "{}")
+    }
+    try server.start()
+    let app = launch(api: .live(server.url), arguments: accessibilityXLArguments)
+    assertFront(app, front, remaining: "1 to review")
     snapshot("study-xl-verylong-front", appearance: .light)
-    frontBefore = el(app, "study.front").frame
+    let topRowBottom = max(el(app, "study.deck").frame.maxY, el(app, "study.remaining").frame.maxY)
+    let frontBefore = el(app, "study.front").frame
     XCTAssertGreaterThanOrEqual(frontBefore.minY, topRowBottom - 1,
                                 "study.front starts under the top row before reveal: \(frontBefore)")
     el(app, "study.reveal").tap()
-    assertRevealed(app, front: veryLong.front, back: veryLong.back)
+    assertRevealed(app, front: front, back: back)
     assertFrontDidNotMove(app, from: frontBefore)
     snapshot("study-xl-verylong", appearance: .light)
-    ratingTop = Self.ratings.map { el(app, "study.rate.\($0)").frame.minY }.min()!
-    cardFrame = el(app, "study.card").frame
+    let ratingTop = Self.ratings.map { el(app, "study.rate.\($0)").frame.minY }.min()!
+    let cardFrame = el(app, "study.card").frame
     XCTAssertLessThanOrEqual(cardFrame.maxY, ratingTop + 1,
                              "study.card extends under the rating row: card \(cardFrame), ratings top \(ratingTop)")
     XCTAssertGreaterThan(el(app, "study.back").frame.maxY, ratingTop,
@@ -239,13 +251,14 @@ final class StudyUITests: XCTestCase {
       el(app, "study.card").swipeUp()
     }
     snapshot("study-xl-verylong-scrolled", appearance: .light)
-    backEnd = el(app, "study.back").frame
+    let backEnd = el(app, "study.back").frame
     XCTAssertLessThanOrEqual(backEnd.maxY, min(ratingTop, cardFrame.maxY) + 1,
                              "end of study.back unreachable by scrolling: \(backEnd)")
     let cardAfter = el(app, "study.card").frame
     XCTAssertEqual(cardAfter.minY, cardFrame.minY, accuracy: 0.5, "the card area itself moved while scrolling")
     XCTAssertEqual(cardAfter.height, cardFrame.height, accuracy: 0.5, "the card area resized while scrolling")
     assertRatingRowUsable(app, checkBackAbove: false)
+    // Still revealed after scrolling; rating still works.
     XCTAssertFalse(el(app, "study.reveal").exists, "scrolling un-revealed the card")
     server.stop()
   }
