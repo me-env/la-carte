@@ -4,6 +4,7 @@ import SwiftUI
 
 /// Every widget state in systemSmall-sized tiles, under the app's theme, for QA screenshots (spec 007 #23).
 /// Widgets aren't reachable from XCUITest; launch the app with `LA_CARTE_SCREEN=widget` (debug builds).
+#if DEBUG
 public struct DeckWidgetGallery: View {
   public init() {}
 
@@ -37,9 +38,10 @@ public struct DeckWidgetGallery: View {
     .background(Theme.surface)  // the "wallpaper", so the background-colored tiles stand out
   }
 }
+#endif
 
 extension DeckWidgetEntry {
-  /// Fixed entries, one per state; "today" times use the current day so "Next at 18:40" reads naturally.
+  /// Fixed entries, one per state (gallery and widget previews); "today" times use the current day so "Next at 18:40" reads naturally.
   static var gallery: [(state: String, name: String, entry: DeckWidgetEntry)] {
     let now = Date.now
     let calendar = Calendar.current
@@ -59,8 +61,4 @@ extension DeckWidgetEntry {
       ("long", "long", .init(date: now, content: stats(total: 1_200, due: 999, streak: 365))),
     ]
   }
-}
-
-#Preview {
-  DeckWidgetGallery()
 }

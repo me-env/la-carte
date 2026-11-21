@@ -16,17 +16,19 @@ public enum AppGroup {
   /// Moves settings stored before spec 007 from the app's own defaults into the suite. Run once at launch, before
   /// the first store; running it again changes nothing.
   public static func migrate(_ keys: [String]) {
-    guard id != nil, let domain = Bundle.main.bundleIdentifier else { return }
-    migrate(keys, from: .standard, domain: domain, to: defaults)
+    guard let id, let domain = Bundle.main.bundleIdentifier else { return }
+    migrate(keys, from: .standard, domain: domain, to: defaults, suite: id)
   }
 
-  /// Copies each key to `new` unless it already has a value, then removes it from `old`. Reads `old`'s persistent
-  /// `domain` only, so a launch argument such as `-theme forest` is never written to disk.
-  static func migrate(_ keys: [String], from old: UserDefaults, domain: String, to new: UserDefaults) {
+  /// Copies each key to `new` unless it already stores a value, then removes it from `old`. Compares persistent
+  /// domains only (`domain` of `old`, `suite` of `new`), so a launch argument such as `-theme forest` is neither
+  /// written to disk nor mistaken for a stored value.
+  static func migrate(_ keys: [String], from old: UserDefaults, domain: String, to new: UserDefaults, suite: String) {
     let stored = old.persistentDomain(forName: domain) ?? [:]
+    let alreadyShared = new.persistentDomain(forName: suite) ?? [:]
     for key in keys {
       guard let value = stored[key] else { continue }
-      if new.object(forKey: key) == nil {
+      if alreadyShared[key] == nil {
         new.set(value, forKey: key)
       }
       old.removeObject(forKey: key)

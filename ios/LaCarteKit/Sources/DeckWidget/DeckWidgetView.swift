@@ -5,17 +5,17 @@ import WidgetKit
 
 /// The small widget's content: one strong line (due count or a short message), a quiet detail, the streak at the
 /// bottom (spec 007). The background is drawn by the caller (`containerBackground` or a gallery tile).
-public struct DeckWidgetView: View {
+struct DeckWidgetView: View {
   let entry: DeckWidgetEntry
   @Environment(\.widgetRenderingMode) private var renderingMode
   @Environment(\.calendar) private var calendar
   @Environment(\.locale) private var locale
 
-  public init(entry: DeckWidgetEntry) {
+  init(entry: DeckWidgetEntry) {
     self.entry = entry
   }
 
-  public var body: some View {
+  var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       switch entry.content {
       case let .stats(stats):

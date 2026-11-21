@@ -34,11 +34,15 @@ public struct RootView: View {
 
   public var body: some View {
     Group {
-      switch galleryScreen {
-      case "design-system": DesignSystemGallery()
-      case "widget": DeckWidgetGallery()
-      default: AppView(store: store)
-      }
+      #if DEBUG
+        switch galleryScreen {
+        case "design-system": DesignSystemGallery()
+        case "widget": DeckWidgetGallery()
+        default: AppView(store: store)
+        }
+      #else
+        AppView(store: store)
+      #endif
     }
     .appTheme(store.theme)
     // Reviews, edits, server and theme changes all happen in the app: refresh the widget when leaving it.
@@ -47,14 +51,12 @@ public struct RootView: View {
     }
   }
 
-  /// `LA_CARTE_SCREEN=design-system` or `widget` (debug builds only) opens a gallery for UI tests.
-  private var galleryScreen: String? {
-    #if DEBUG
+  #if DEBUG
+    /// `LA_CARTE_SCREEN=design-system` or `widget` (debug builds only) opens a gallery for UI tests.
+    private var galleryScreen: String? {
       ProcessInfo.processInfo.environment["LA_CARTE_SCREEN"]
-    #else
-      nil
-    #endif
-  }
+    }
+  #endif
 }
 
 #Preview {

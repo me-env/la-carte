@@ -3,11 +3,11 @@ import Foundation
 import WidgetKit
 
 /// What the widget shows at `date`: the deck's stats, or that the deck can't be reached (spec 007).
-public struct DeckWidgetEntry: TimelineEntry, Equatable, Sendable {
-  public var date: Date
-  public var content: Content
+struct DeckWidgetEntry: TimelineEntry, Equatable, Sendable {
+  var date: Date
+  var content: Content
 
-  public enum Content: Equatable, Sendable {
+  enum Content: Equatable, Sendable {
     case stats(DeckStats)
     case unavailable
 
