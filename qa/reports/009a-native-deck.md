@@ -1,6 +1,6 @@
 # QA: 009a Native polish — Deck sheet
 
-Verdict: FAIL
+Verdict: PASS (re-check de44440 + main merge; #8 fixed)
 Date: 2026-11-21 · Simulator: iPhone 17 Pro / iOS 27
 Runs: `qa/screenshots/009a-deck/` (DeckUITests)
 Commands: `scripts/ios-ui-test.sh 009a-deck -only-testing:LaCarteUITests/DeckUITests` (❌ 27 passed, 1 failed: #8),
@@ -57,3 +57,9 @@ Notes (not blocking):
 - Updated queries in Refresh, Settings, Setup, Study and Theme suites (`deckTitle` / `deckSearch`, new Settings gear and
   Theme deck-colour checks) compile but were not run. Run them with the re-test of bug 1.
 - `testDeck_addFromStudyThenDelete_liveAPI` (e2e) was updated but not run.
+
+## Re-check 009a-recheck (commit de44440 + main)
+Run: `scripts/ios-ui-test.sh --split 3 009a-recheck -only-testing:LaCarteUITests/DeckUITests` -> 28 passed, 0 failed, 1 skipped. No flake recurred.
+- #8 PASS: pink (accent) caret visible in `deck-search-focused-light.png` and `deck-search-dark.png`; `deck-search-focused-dark.png` was captured in the caret blink-off phase (not a defect). Only the caret is accent on the search screen; the keyboard Search key is system blue (not app-controlled).
+- Global effect: `UISearchTextField.appearance().tintColor` also tints search fields elsewhere (accent caret/selection). Acceptable: spec wants the accent as the single tint, consistent with the app.
+- Left unrun: full suite and e2e (post-merge regression run).
