@@ -25,8 +25,10 @@ then run. Never poll `pgrep xcodebuild`, never `sleep` in a loop, never call `xc
 | `sim-<SIMULATOR>-<OS>` | the UI-test simulator (`iPhone 17 Pro`) | `ios-ui-test.sh` **test phase only** |
 | `sim-<UNIT_SIMULATOR>-<OS>` | the unit-test simulator (`iPhone 17`) | `ios-test.sh` |
 
-Order is always build lock, then simulator lock, so no deadlock. `<checkout>` is a hash of the repo path,
-so a future git worktree gets its own build locks but shares the simulator lock.
+Order is always build lock, then simulator lock, so no deadlock. `<checkout>` is a hash of the repo path:
+each git worktree (`.claude/worktrees/*`) has its own DerivedData and build locks, while simulator locks are
+global (`/tmp/la-carte-locks`), so UI runs from several worktrees queue for the same device. `OS=27.0`
+resolves to the same lock as `latest` when 27.0 is the newest runtime.
 
 ## What can run at the same time
 
@@ -37,10 +39,10 @@ so a future git worktree gets its own build locks but shares the simulator lock.
 | `ios-test.sh` | yes | waits | yes | yes |
 | `ios-build.sh` | waits | yes | build waits | yes |
 
-- `ios-ui-test.sh` now runs `build-for-testing` then `test-without-building`, so an engineer's
-  `ios-build.sh` no longer waits for a whole QA suite. Caveat: a build that lands in the few seconds
-  between QA's build and the app install puts that build under test (same working tree, so same code
-  unless files changed meanwhile).
+- `ios-ui-test.sh` runs `build-for-testing` (app lock) into a private copy of the test products
+  (`<results>/<run>.xctestproducts`, deleted on exit), then `test-without-building` from that copy
+  (simulator lock only). So `ios-build.sh` doesn't wait for a whole QA suite, and nothing it builds can
+  replace the app under test.
 - `e2e.sh` starts its two APIs on free ports picked by the OS (`E2E_PORT` / `E2E_EMPTY_PORT` override),
   so it never clashes with `api-dev.sh` (:8000) or another e2e run. Run names must still be unique
   (`qa/screenshots/<run>`, `<results>/<run>.xcresult`).
@@ -51,13 +53,14 @@ so a future git worktree gets its own build locks but shares the simulator lock.
 ## Big outputs: the scratch disk
 
 Large, regenerable outputs go to `$LA_CARTE_SCRATCH` when it is set and its disk is mounted, else to the
-usual in-repo paths. Set it per machine in `scripts/.local.env` (gitignored, never read on CI), e.g.
+usual in-repo paths. Set it per machine in `scripts/.local.env` (gitignored, never read on CI; worktrees read the main
+checkout's copy; results go in a per-checkout subfolder), e.g.
 `LA_CARTE_SCRATCH="${LA_CARTE_SCRATCH:-/Volumes/<ssd>/la-carte}"`. `_ios-env.sh` falls back by itself
 when the parent folder is missing (disk unplugged).
 
 | Output | With scratch | Without |
 |---|---|---|
-| UI-test result bundles (`ios-ui-test.sh`, `e2e.sh`) | `$LA_CARTE_SCRATCH/qa-results/<run>.xcresult` | `qa/.results/<run>.xcresult` |
+| UI-test result bundles (`ios-ui-test.sh`, `e2e.sh`) | `$LA_CARTE_SCRATCH/qa-results/<checkout>/<run>.xcresult` | `qa/.results/<run>.xcresult` |
 | Future per-agent DerivedData / worktrees (plan below) | `$LA_CARTE_SCRATCH/DerivedData-<agent>`, `$LA_CARTE_SCRATCH/worktrees/<agent>` | internal disk |
 
 Screenshots stay in `qa/screenshots/<run>/` (reports link them). Other big outputs (marketing
