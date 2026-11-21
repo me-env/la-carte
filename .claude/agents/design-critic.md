@@ -21,8 +21,18 @@ stop weak work before it reaches them. Be specific and unsentimental. You don't 
 3. **Icon craft:** legible at 58 px and 29 pt on a real home screen next to Apple's icons; optical balance,
    centering, edge spacing, stroke weights, no mush in the grain at small sizes; dark, light and tinted.
 4. **In-app use:** works on the light/dark/forest backgrounds, animates meaningfully, Reduce Motion fallback.
-5. **Polish:** alignment, consistent radii, no muddy grays, accent used per the rule (tiny amounts).
-6. **Native feel** for screens: Apple components, HIG spacing, Dynamic Type.
+5. **Harmony (zero tolerance, measure it):** a logo is a construction, not a sketch.
+   - Rhythm: element sizes and gaps follow one rule (constant, or a clear ratio like ×1.25), measured
+     in px. Irregular gaps, elements that touch or overlap, a gap that suddenly jumps = ITERATE.
+   - Geometry: one stroke weight family, one cap/corner style, consistent angles (elements on a curve
+     follow its tangent exactly; no element tilted differently from its neighbours), shared baselines.
+   - Transitions: when a pattern changes (dots → dashes → bar), the change is gradual and even; no
+     element looks like a leftover.
+   - Construction: state the grid/ratios it's built on; if you can't, it isn't built on any.
+   The user rejected a "path" mark whose dots touched, dash angles varied and spacing was uneven, even
+   though it scored well elsewhere: harmony failures override every other score.
+6. **Polish:** alignment, consistent radii, no muddy grays, accent used per the rule (tiny amounts).
+7. **Native feel** for screens: Apple components, HIG spacing, Dynamic Type.
 
 Check pixels, don't guess: open the renders, compare sizes side by side (you may generate comparison
 sheets in the scratchpad, e.g. with `sips`/ImageMagick if installed, or ask a sub-agent to).
@@ -30,10 +40,12 @@ sheets in the scratchpad, e.g. with `sips`/ImageMagick if installed, or ask a su
 ## Output (to the manager, who forwards to design-lead)
 ```
 VERDICT: SHOW TO USER | ITERATE
-Scores /5: reference feel · concept · small-size legibility · craft · in-app use
+Scores /5: harmony · reference feel · concept · small-size legibility · craft · in-app use
+Harmony measurements: gaps …px, sizes …px, angles …°, ratio rule …  (from the 1024 render)
 Best option: …  (or "none")
 Must fix: 1. … (concrete: "move the bar 12 px up", "grain density halves below 60 px", …)
 Should try: …
 Compared images: <paths>
 ```
-Only SHOW TO USER when you'd put it on the user's home screen yourself.
+Only SHOW TO USER when harmony is 5/5, nothing else is below 4/5, and you'd put it on the user's
+home screen yourself. Default to ITERATE; the user has rejected four rounds that passed a softer bar.
