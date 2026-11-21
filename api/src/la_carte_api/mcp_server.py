@@ -123,9 +123,16 @@ def build_mcp(engine: Engine) -> MCPServer:
         return [CardRead.of(c) for c in run(deck.due_cards, limit)]
 
     @mcp.tool()
-    def review_card(card_id: UUID, rating: Rating) -> CardRead:
-        """Record a review: again (forgot), hard, good, or easy. Returns the rescheduled card."""
-        return CardRead.of(run(deck.review_card, card_id, rating))
+    def review_card(
+        card_id: UUID,
+        rating: Rating,
+        confidence: Annotated[float | None, Field(ge=0, le=1)] = None,
+    ) -> CardRead:
+        """Record a review: again (forgot), hard, good, or easy. Returns the rescheduled card.
+
+        `confidence` is optional: pass it only when you have a measured 0-1 value (e.g. from a
+        slider); never guess one. It is stored with the review; scheduling uses `rating` only."""
+        return CardRead.of(run(partial(deck.review_card, confidence=confidence), card_id, rating))
 
     @mcp.tool()
     def deck_stats(tz: str = "UTC") -> DeckStats:

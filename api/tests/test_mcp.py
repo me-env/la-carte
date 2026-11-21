@@ -3,11 +3,11 @@ from datetime import timedelta
 import pytest
 from mcp import Client
 from mcp.shared.exceptions import MCPError
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from la_carte_api import deck
 from la_carte_api.mcp_server import build_mcp
-from la_carte_api.models import CardCreate, Rating, utcnow
+from la_carte_api.models import CardCreate, Rating, ReviewLog, utcnow
 
 pytestmark = pytest.mark.anyio
 
@@ -221,3 +221,25 @@ async def test_deck_stats_streak_survives_delete_card(engine):
 
         [tool] = [t for t in (await client.list_tools()).tools if t.name == "delete_card"]
         assert "review history is kept" in tool.description
+
+
+async def test_review_card_takes_an_optional_confidence(engine):
+    async with Client(build_mcp(engine)) as client:
+        added = await client.call_tool(
+            "add_cards", {"cards": [{"front": "a", "back": "a"}, {"front": "b", "back": "b"}]}
+        )
+        a, b = added.structured_content["added"]
+        measured = {"card_id": a["id"], "rating": "good", "confidence": 0.72}
+        assert not (await client.call_tool("review_card", measured)).is_error
+        plain = {"card_id": b["id"], "rating": "good"}
+        assert not (await client.call_tool("review_card", plain)).is_error
+        bad = {"card_id": b["id"], "rating": "good", "confidence": 2}
+        assert (await client.call_tool("review_card", bad)).is_error
+
+        [tool] = [t for t in (await client.list_tools()).tools if t.name == "review_card"]
+        assert "optional" in tool.description
+        assert "measured 0-1 value" in tool.description
+
+    with Session(engine) as session:
+        logs = session.exec(select(ReviewLog).order_by(ReviewLog.id)).all()
+        assert [log.confidence for log in logs] == [0.72, None]

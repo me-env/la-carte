@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
+from sqlmodel import Session, select
 
 from la_carte_api.app import create_app
 from la_carte_api.config import Settings
+from la_carte_api.models import ReviewLog
 
 
 def test_card_lifecycle(client):
@@ -78,3 +80,34 @@ def test_deleting_a_card_keeps_stats(client):
     assert client.get("/cards/due").json() == []
     after = client.get("/stats").json()
     assert (after["reviewed_today"], after["streak"]) == (1, before["streak"]) == (1, 1)
+
+
+# --- spec 013: confidence ----------------------------------------------------------------------
+
+
+def _logs(client) -> list[tuple[str, float | None]]:
+    with Session(client.app.state.engine) as session:
+        return [(log.rating, log.confidence) for log in session.exec(select(ReviewLog))]
+
+
+def test_review_stores_an_optional_confidence(client):
+    a, b = (client.post("/cards", json={"front": f, "back": f}).json() for f in ("a", "b"))
+
+    with_confidence = client.post(
+        f"/cards/{a['id']}/review", json={"rating": "good", "confidence": 0.72}
+    )
+    without = client.post(f"/cards/{b['id']}/review", json={"rating": "good"})
+
+    assert (with_confidence.status_code, without.status_code) == (200, 200)
+    assert _logs(client) == [("good", 0.72), ("good", None)]
+
+
+def test_review_rejects_a_confidence_outside_0_1(client):
+    card = client.post("/cards", json={"front": "chat", "back": "cat"}).json()
+    for confidence in (-0.01, 1.01):
+        response = client.post(
+            f"/cards/{card['id']}/review", json={"rating": "good", "confidence": confidence}
+        )
+        assert response.status_code == 422
+    assert client.get(f"/cards/{card['id']}").json() == card  # not rescheduled
+    assert _logs(client) == []

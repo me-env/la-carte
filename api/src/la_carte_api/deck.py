@@ -132,13 +132,18 @@ def due_cards(session: Session, limit: int = 20, now: datetime | None = None) ->
 
 
 def review_card(
-    session: Session, card_id: UUID, rating: Rating, now: datetime | None = None
+    session: Session,
+    card_id: UUID,
+    rating: Rating,
+    now: datetime | None = None,
+    confidence: float | None = None,
 ) -> Card:
+    """Reschedules the card from `rating` alone; `confidence` (0-1, optional) is only stored."""
     now = now or utcnow()
     card = get_card(session, card_id)
     scheduled, _ = _scheduler.review_card(card.to_fsrs(), rating.to_fsrs(), review_datetime=now)
     card.apply_fsrs(scheduled)
-    session.add(ReviewLog(card_id=card.id, rating=rating, reviewed_at=now))
+    session.add(ReviewLog(card_id=card.id, rating=rating, reviewed_at=now, confidence=confidence))
     session.commit()
     session.refresh(card)
     return card

@@ -1,4 +1,4 @@
-"""Spec 012: the startup migration that drops reviewlog's ON DELETE CASCADE foreign key."""
+"""Startup migrations: spec 012 (reviewlog loses its foreign key), 013 (reviewlog.confidence)."""
 
 import sqlite3
 
@@ -55,7 +55,9 @@ def _snapshot(path) -> dict:
         "indexes": sorted(r[1] for r in db.execute("PRAGMA index_list(reviewlog)")),
         "card_id_notnull": [r[3] for r in db.execute("PRAGMA table_info(reviewlog)")][1],
         "sql": sorted(r[0] for r in db.execute("SELECT sql FROM sqlite_master WHERE sql")),
-        "reviews": db.execute("SELECT * FROM reviewlog ORDER BY id").fetchall(),
+        "reviews": db.execute(
+            "SELECT id, card_id, rating, reviewed_at FROM reviewlog ORDER BY id"
+        ).fetchall(),
         "cards": db.execute("SELECT * FROM card").fetchall(),
     }
     db.close()
@@ -139,3 +141,56 @@ def test_failed_rebuild_leaves_the_old_table_intact(tmp_path, monkeypatch):
         make_engine(url)
 
     assert _snapshot(path) == before
+
+
+# --- spec 013: reviewlog.confidence -------------------------------------------------------------
+
+
+def _confidence(path) -> list:
+    db = sqlite3.connect(path)
+    info = {r[1]: r for r in db.execute("PRAGMA table_info(reviewlog)")}["confidence"]
+    rows = db.execute("SELECT confidence FROM reviewlog ORDER BY id").fetchall()
+    db.close()
+    return [(info[2], info[3]), rows]  # (type, notnull), values
+
+
+def _db_012(path) -> str:
+    """A database as created by spec 012's models: reviewlog without a foreign key or confidence."""
+    url = _old_db(path)
+    db = sqlite3.connect(path)
+    with db:
+        db.executescript(
+            "CREATE TABLE r (id INTEGER NOT NULL, card_id CHAR(32) NOT NULL, rating VARCHAR(5) "
+            "NOT NULL, reviewed_at DATETIME NOT NULL, PRIMARY KEY (id));"
+            "INSERT INTO r SELECT * FROM reviewlog; DROP TABLE reviewlog;"
+            "ALTER TABLE r RENAME TO reviewlog;"
+            "CREATE INDEX ix_reviewlog_card_id ON reviewlog (card_id);"
+            "CREATE INDEX ix_reviewlog_reviewed_at ON reviewlog (reviewed_at);"
+        )
+    db.close()
+    return url
+
+
+def test_adds_a_nullable_confidence_column_to_a_012_database(tmp_path):
+    path = tmp_path / "deck.db"
+    url = _db_012(path)
+    before = _snapshot(path)
+
+    make_engine(url).dispose()
+
+    assert _confidence(path) == [("FLOAT", 0), [(None,), (None,)]]
+    assert _snapshot(path)["reviews"] == before["reviews"] == REVIEWS
+    make_engine(url).dispose()  # idempotent
+    assert _confidence(path) == [("FLOAT", 0), [(None,), (None,)]]
+
+
+def test_a_pre_012_database_gets_both_steps(tmp_path):
+    path = tmp_path / "deck.db"
+    make_engine(_old_db(path)).dispose()
+    assert _snapshot(path)["foreign_keys"] == []
+    assert _confidence(path) == [("FLOAT", 0), [(None,), (None,)]]
+
+
+def test_fresh_database_has_the_confidence_column(tmp_path):
+    make_engine(f"sqlite:///{tmp_path / 'deck.db'}").dispose()
+    assert _confidence(tmp_path / "deck.db") == [("FLOAT", 0), []]

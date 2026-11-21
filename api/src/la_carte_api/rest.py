@@ -51,7 +51,9 @@ def delete_card(session: SessionDep, card_id: UUID):
 
 @router.post("/cards/{card_id}/review", response_model=CardRead)
 def review_card(session: SessionDep, card_id: UUID, body: ReviewCreate):
-    return CardRead.of(_or_404(deck.review_card, session, card_id, body.rating))
+    return CardRead.of(
+        _or_404(deck.review_card, session, card_id, body.rating, None, body.confidence)
+    )
 
 
 @router.get("/stats", response_model=DeckStats)

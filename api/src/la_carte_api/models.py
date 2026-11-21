@@ -84,6 +84,7 @@ class ReviewLog(SQLModel, table=True):
     card_id: UUID = Field(sa_column=Column(Uuid, nullable=False, index=True))
     rating: Rating
     reviewed_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime, index=True)
+    confidence: float | None = None  # measured 0-1 drag value (spec 013); not used by FSRS
 
 
 # --- Public schemas (REST + MCP) ---------------------------------------------------------------
@@ -125,6 +126,9 @@ class CardRead(BaseModel):
 
 class ReviewCreate(BaseModel):
     rating: Rating
+    confidence: float | None = PydanticField(
+        default=None, ge=0, le=1, description="Measured 0-1 confidence; stored, not scheduled."
+    )
 
 
 class DeckStats(BaseModel):

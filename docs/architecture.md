@@ -43,13 +43,14 @@ Rules:
 | POST | `/cards` | `{front, back}` | `Card` (201) |
 | GET | `/cards/due` | `?limit=` | `[Card]` most overdue first |
 | GET/PATCH/DELETE | `/cards/{id}` | PATCH `{front?, back?}` | `Card` / 204 |
-| POST | `/cards/{id}/review` | `{rating: again\|hard\|good\|easy}` | rescheduled `Card` |
+| POST | `/cards/{id}/review` | `{rating: again\|hard\|good\|easy, confidence?: 0–1}` (`confidence`: optional measured drag value, stored in `ReviewLog`, not used by FSRS; outside [0, 1] → 422 — spec 013) | rescheduled `Card` |
 | GET | `/stats` | `?tz=` (IANA name, default `UTC`; unknown → 422 `{"detail": "Unknown time zone: <name>"}`) | `{total, due, new, reviewed_today, next_due, streak}` (`next_due`: earliest due after now, or null — spec 001; `reviewed_today` and `streak` (consecutive review days ending today or yesterday) use local days in `tz` — spec 007) |
 
 `Card` = `{id, front, back, state: new|learning|review|relearning, due, last_review, created_at, updated_at}`.
 
 ### MCP tools
-`add_cards`, `list_cards`, `update_card`, `delete_card`, `due_cards`, `review_card`, `deck_stats(tz="UTC")`.
+`add_cards`, `list_cards`, `update_card`, `delete_card`, `due_cards`, `review_card(card_id, rating, confidence=None)`,
+`deck_stats(tz="UTC")`.
 
 `add_cards` skips cards whose front already exists (case-insensitive, surrounding whitespace ignored; also within
 one call, first wins) unless `allow_duplicates=true`, and returns `{added: [Card], skipped: [Card]}` where `skipped`
