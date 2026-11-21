@@ -4,8 +4,8 @@ import XCTest
 /// `-theme <value>` launch argument.
 ///
 /// The stored theme survives between test launches. Every test that taps the picker launches with `theme: nil`
-/// (so the argument domain doesn't mask the picker) and registers `resetThemeOnTeardown()`, which puts the stored
-/// value back to System even when the test fails. Other suites launch with `-theme system` (see `launch`).
+/// (so the argument domain doesn't mask the picker), ends on System, and registers `resetThemeOnTeardown()`,
+/// which puts the stored value back to System when the test fails. Other suites launch with `-theme system` (see `launch`).
 final class ThemeUITests: XCTestCase {
   static let themes = ["system", "light", "dark", "forest"]
   static let mockIDs = (1...3).map { "00000000-0000-0000-0000-00000000000\($0)" }
@@ -127,7 +127,7 @@ final class ThemeUITests: XCTestCase {
 
       // Flip the device while forced: nothing changes.
       XCUIDevice.shared.appearance = device == .dark ? .light : .dark
-      Thread.sleep(forTimeInterval: 1)
+      Thread.sleep(forTimeInterval: 1)  // negative check: give a wrong re-theme time to happen
       assertStudyColors(app, forcedPalette, "\(forced) forced after flipping the device")
       XCUIDevice.shared.appearance = device
 
@@ -202,6 +202,10 @@ final class ThemeUITests: XCTestCase {
     closeDeck(app)
     assertStudyColors(app, .forest, "study, forest from the picker")
     assertStatusBar(app, darkScheme: true, "forest from the picker")
+    openDeck(app)
+    openSettings(app)
+    themeButton(app, "system").tap()
+    assertSelected(app, "system")
   }
 
   // #5 persistence across a relaunch: SettingsUITests.testSettings_persistAcrossRelaunch (with the Keychain token).
@@ -212,7 +216,6 @@ final class ThemeUITests: XCTestCase {
   /// (keyboard dark), Settings (Forest selected), on a light device (forest must win over it). The argument doesn't persist.
   @MainActor
   func testTheme_forestEveryScreen() {
-    resetThemeOnTeardown()
     XCUIDevice.shared.appearance = .light
     var app = launch(api: .mock, theme: "forest")
     let p = Palette.forest
@@ -357,10 +360,12 @@ final class ThemeUITests: XCTestCase {
 
   // MARK: - Helpers
 
-  /// Puts the stored theme back to System after the test, pass or fail.
+  /// Puts the stored theme back to System if the test failed. A passing test ends on System itself (tapped in its
+  /// open Settings sheet), which saves a relaunch per test.
   @MainActor
   private func resetThemeOnTeardown() {
     addTeardownBlock { @MainActor [self] in
+      guard testRun?.hasSucceeded == false else { return }
       XCUIDevice.shared.appearance = .light
       let app = launch(api: .mock, theme: nil)
       openDeck(app)

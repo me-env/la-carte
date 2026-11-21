@@ -35,7 +35,7 @@ final class RefreshUITests: XCTestCase {
     deck.readDelay = 0
     assertFront(app, "canine", remaining: "2 to review")
     XCTAssertFalse(el(app, "study.back").exists, "pulling revealed the card")
-    Thread.sleep(forTimeInterval: 0.5)
+    _ = poll(timeout: 3) { abs(el(app, "study.front").frame.minY - frontBefore.minY) < 0.5 }  // settles after the pull
     let frontAfter = el(app, "study.front").frame
     XCTAssertEqual(frontAfter.minY, frontBefore.minY, accuracy: 0.5,
                    "study.front did not settle back after the pull: \(frontBefore) → \(frontAfter)")
@@ -43,7 +43,7 @@ final class RefreshUITests: XCTestCase {
 
     el(app, "study.card").tap()
     assertRevealed(app, front: "canine", back: "dog")
-    Thread.sleep(forTimeInterval: 0.5)
+    _ = poll(timeout: 2) { abs(el(app, "study.front").frame.minY - frontBefore.minY) < 0.5 }  // 0.25 s fade
     XCTAssertEqual(el(app, "study.front").frame.minY, frontBefore.minY, accuracy: 0.5,
                    "study.front moved on reveal after a refresh")
     app.terminate()
@@ -130,7 +130,8 @@ final class RefreshUITests: XCTestCase {
     // With a query.
     el(app, "deck.search").tap()
     el(app, "deck.search").typeText("ine")
-    Thread.sleep(forTimeInterval: 1)  // debounce
+    XCTAssertTrue(poll(timeout: 5) { server.requests.contains { StubDeck.queryItems($0.path)["query"] == "ine" } },
+                  "no GET /cards?query=ine after the debounce")
     XCTAssertTrue(row(app, Self.idA).waitFor(timeout: 5))
     deck.add(card(Self.idB, "feline", "cat", minutes: 1))
     deck.add(card(Self.idC, "raven", "blackbird", minutes: 2))

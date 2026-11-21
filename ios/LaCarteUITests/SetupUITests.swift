@@ -71,7 +71,7 @@ extension SettingsUITests {
     setText(app, "settings.token", Self.goodToken, secure: true)
     for _ in 0..<2 where el(app, "settings.title").exists {  // first drag may only drop the keyboard
       swipeSheetDown(app, from: el(app, "settings.title"))
-      Thread.sleep(forTimeInterval: 0.6)
+      _ = poll(timeout: 2) { !el(app, "settings.title").exists || !app.keyboards.firstMatch.exists }
     }
     waitForAbsence(el(app, "settings.title"), "settings still open after swiping down")
     assertNoSavePasswordPrompt(app)

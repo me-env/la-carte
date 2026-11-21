@@ -341,7 +341,7 @@ final class StudyUITests: XCTestCase {
                                      file: StaticString = #filePath, line: UInt = #line) {
     // Let the 0.25s fade settle, then compare.
     _ = el(app, "study.rate.easy").waitFor(timeout: 3)
-    Thread.sleep(forTimeInterval: 0.5)
+    _ = poll(timeout: 2) { abs(el(app, "study.front").frame.minY - before.minY) < 0.5 }  // 0.25 s fade
     let after = el(app, "study.front").frame
     XCTAssertEqual(after.minY, before.minY, accuracy: 0.5, "study.front moved on reveal: \(before) → \(after)",
                    file: file, line: line)

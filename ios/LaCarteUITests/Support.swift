@@ -139,7 +139,7 @@ extension XCTestCase {
   @MainActor
   func backgroundAndReactivate(_ app: XCUIApplication) {
     XCUIDevice.shared.press(.home)
-    Thread.sleep(forTimeInterval: 1)
+    _ = poll(timeout: 3) { app.state != .runningForeground }
     app.activate()
   }
 
