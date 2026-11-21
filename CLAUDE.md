@@ -77,6 +77,9 @@ its result.
   then continue from the summary. If you can't compact, finish the current step, report a short hand-off
   (what's done, what's next, file paths) and stop; the manager restarts a fresh agent from it.
 
+**Scratch files go in your own subfolder** of the scratchpad (e.g. `<scratchpad>/<your-agent-name>/`): agents share
+the scratchpad and overwrite each other's `build.log`/`mock.log` otherwise.
+
 **Clean up your shells.** Never wait with `pgrep -f <pattern>` (it matches your own loop and never ends)
 or an unbounded `until` loop: wait for a run with ONE background command that exits when it ends (the harness wakes you; every wake re-reads your whole context, so no short re-armed polls), bound it with a timeout, prefer the scripts' locks, and kill any
 background process you started (servers, watchers, pagers) before you report.

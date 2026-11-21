@@ -22,7 +22,7 @@ the deck when they're done.
   `.onTapGesture(count: 2)` to each text only while `isRevealed && editing == nil`.
 - **One field at a time.** Double-tap front edits the front; double-tap back edits the back.
 - **Commit** = keyboard Done/return, or the field losing focus: tapping the card area outside the field, swiping
-  the keyboard down (`.scrollDismissesKeyboard(.interactively)` on the card's scroll view), or tapping
+  the keyboard down (`.scrollDismissesKeyboard(.immediately)` plus a swipe-down gesture while editing; any focus loss sends one `editEnded` — amended 2026-11-21), or tapping
   `study.deck` / `study.add` (the edit is committed, then the sheet opens).
 - **No cancel gesture** (iOS has no Escape without a hardware keyboard). Leaving the text unchanged commits
   nothing. A text that is empty after trimming is not allowed: the edit ends and the old text comes back, with
@@ -128,7 +128,7 @@ Native first: it's a plain `TextField` that looks exactly like the text it repla
   counter comes back when the edit ends (no animation needed; `Theme.Motion.standard` fade if it's free).
 - **Keyboard (decided):** keep system keyboard avoidance. Don't pin the card. The top bar stays where it is, and the
   card's `ScrollView` shrinks and keeps the field visible: on focus, scroll the field into view
-  (`ScrollViewReader.scrollTo(field, anchor: .center)` or `.scrollPosition(id:)`). `.scrollDismissesKeyboard(.interactively)`
+  (`ScrollViewReader.scrollTo(field, anchor: .center)` or `.scrollPosition(id:)`). `.scrollDismissesKeyboard(.immediately)`
   as specified. Never cover the field with the keyboard at AX sizes (#15).
 - **Affordance:** no border, background, underline or placeholder. The caret is the only sign it's editable. The
   field keeps the text's font, color, centering and Dynamic Type cap (`...accessibility2`). No transition between

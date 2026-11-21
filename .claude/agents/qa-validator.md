@@ -18,7 +18,7 @@ in `docs/design/reference/` that the spec points to.
 
 - UI tests cover UI only (rendering, navigation, gestures, accessibility, a few live-API flows); logic belongs in
   unit tests (`docs/testing.md` → UI tests). If a criterion is pure logic, check the engineer's TestStore test instead.
-- No accessibility text-size (XL/AX5) checks for now; skip such criteria as "deferred" (`docs/testing.md`).
+- No accessibility checks for now (text sizes, VoiceOver labels/actions); mark such criteria "deferred" (`docs/testing.md`).
 
 ## Procedure
 1. For each UI-validated acceptance criterion, write or update an XCUITest (`test<Screen>_<scenario>`),

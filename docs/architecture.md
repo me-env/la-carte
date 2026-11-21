@@ -40,9 +40,15 @@ Rules:
 ### Notes and cards (spec 014)
 - **Note** = one thing the user knows: `type` + named string `fields` (JSON). Types are fixed in `deck.NOTE_TYPES`:
   `basic` (`front`, `back`; both required; key `front`; default direction `front → back`) and `person` (`photo`
-  http(s) URL, `name` required, `role`, `context`; key `name`; no default: directions must be given).
-- **Card** = one direction over its note's fields (`prompt` → `answer`, JSON lists in the type's field order) with
-  its own FSRS state. `card.note_id` → `note.id ON DELETE CASCADE`. Cards of one note are siblings.
+  http(s) URL, `name` required, `description` free text e.g. "Mistral CEO"; key `name`; no default: directions
+  must be given). `role` / `context` were removed (spec 014a amendment): using them is a 422 "… use description".
+- **Card** = one direction over its note's fields with its own FSRS state: **one prompt field → every other field
+  of the type** (`prompt` / `answer`, JSON lists in the type's field order). So a person has at most three:
+  `photo → name + description`, `name → photo + description`, `description → photo + name`; basic has
+  `front → back` and `back → front`. The prompt field must be set and at least one answer field. The stored
+  `answer` is the whole rest; reads (`Note.cards[].answer`, `Card.answer`, `back`) leave out empty fields, so a
+  field set later shows up. Requests may omit `answer`; if given it must be the rest (all, or only the set ones),
+  else 422. `card.note_id` → `note.id ON DELETE CASCADE`. Cards of one note are siblings.
 - Validation lives in `deck` (`InvalidNote`): REST → 422 `{"detail": message}`, MCP → `ToolError`. Messages name the
   field/direction, never a value (photo URLs are private; they're never logged).
 - **Sibling burying**: `deck.SIBLING_BURY = 6 h`. A card is buried while a sibling has a review newer than 6 h (its
@@ -52,6 +58,10 @@ Rules:
 - **Migration 014**: when `card` still has `front`, each card becomes a `basic` note **with the same id** and
   `fields = {front, back}`; `card` is rebuilt with `note_id = id`, `prompt ["front"]`, `answer ["back"]`. Card ids,
   FSRS state and review logs are untouched. Backup `<db>.pre-014-<timestamp>.bak`.
+- **Migration 014a** (data only, `db._fold_person_roles`): a person note with `role` / `context` gets
+  `description = "description — role — context"` (set parts only); each card becomes `prompt → rest` with
+  role/context mapped to `description`; a card duplicating a sibling's direction is deleted (reviews stay). Backup
+  `<db>.pre-014a-<timestamp>.bak`.
 
 ### REST contract
 
@@ -59,7 +69,7 @@ Rules:
 |---|---|---|---|
 | GET | `/health` | — | `{status, build}` (no auth); `build` = 12-hex sha256 of the API's `.py` source (`build.py`) |
 | GET | `/notes` | `?query=&type=basic\|person&limit=` (≤ 500, default 100; `query` = casefolded substring of any field but `photo`) | `[Note]` newest first |
-| POST | `/notes` | `{type, fields, directions?: [{prompt, answer}]}` (no duplicate check) | `Note` (201) |
+| POST | `/notes` | `{type, fields, directions?: [{prompt: [field], answer?: [fields]}]}` (one prompt field, answer = the rest; no duplicate check) | `Note` (201) |
 | GET/PATCH/DELETE | `/notes/{id}` | PATCH `{fields?, directions?}`: `fields` merged key by key (`""` clears); `directions` = the full desired set (kept ones keep card + schedule, new ones due now, missing ones deleted) | `Note` / 204 (note + all its cards) |
 | GET | `/cards` | `?query=&limit=` (matches the card's note) | `[Card]` newest first |
 | POST | `/cards` | `{front, back}` → a `basic` note `front → back` | `Card` (201) |
@@ -77,7 +87,7 @@ by `"\n"` (for old clients).
 Notes: `add_notes(notes, allow_duplicates=False)` → `{added: [Note], skipped: [Note]}` (skips a note whose type +
 key (basic `front`, person `name`; casefolded, trimmed) matches an existing note or an earlier one in the call; all or
 nothing on a validation error), `find_notes(query, type, limit=50)`, `update_note(note_id, fields)`,
-`add_direction(note_id, prompt, answer)`, `remove_direction(card_id)` (refuses the last card), `delete_note(note_id)`.
+`add_direction(note_id, prompt, answer=None)`, `remove_direction(card_id)` (refuses the last card), `delete_note(note_id)`.
 
 Cards (thin wrappers with the `/cards` semantics; docstrings start "Prefer the note tools"): `add_cards` (basic
 notes; same duplicate rule on basic fronts, returns `{added: [Card], skipped: [Card]}`), `list_cards`, `update_card`,
@@ -90,7 +100,9 @@ types, "edit the note, not loose cards", "choose directions deliberately", minim
 
 ### MCP prompts (spec 005, 014)
 `quiz_me(limit=10)` (uses `due_cards` + `review_card`; shows the `prompt` fields, then the `answer` fields),
-`make_cards(text, max_cards=20)` (checks `find_notes`, adds with one `add_notes` call of `basic` notes).
+`make_cards(text, max_cards=20)` (checks `find_notes`, adds with one `add_notes` call of `basic` notes),
+`add_people(text, directions=None)` (person notes from e.g. a team page: name + description, photo only if a URL is
+given; asks which directions when `directions` is not given).
 
 Connect an agent (Claude Code example):
 ```bash

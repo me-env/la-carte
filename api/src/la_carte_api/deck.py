@@ -63,13 +63,17 @@ NOTE_TYPES: dict[NoteType, NoteKind] = {
         directions_hint="e.g. front -> back",
     ),
     NoteType.person: NoteKind(
-        fields=("photo", "name", "role", "context"),
+        fields=("photo", "name", "description"),
         required=frozenset({"name"}),
         key="name",
         default_directions=(),
-        directions_hint="e.g. photo -> name, role -> name",
+        directions_hint="photo -> name + description, name -> photo + description, "
+        "description -> name + photo",
     ),
 }
+
+# Person fields removed by spec 014a's amendment, both folded into `description`.
+REMOVED_FIELDS: dict[NoteType, Side] = {NoteType.person: ("role", "context")}
 
 
 class NotFound(LookupError):
@@ -117,6 +121,7 @@ def _clean_fields(note_type: NoteType, fields: dict[str, str]) -> dict[str, str]
     """Trimmed values in the type's field order; an empty value means absent (rules 1-4)."""
     kind = NOTE_TYPES[note_type]
     for name in fields:
+        _check_not_removed(note_type, name)
         if name not in kind.fields:
             raise InvalidNote(
                 f"Unknown field {name!r} for a {note_type} note; its fields are: "
@@ -140,58 +145,79 @@ def _is_http_url(value: str) -> bool:
         return False
 
 
-def _way(note_type: NoteType, direction: Direction) -> Way:
-    """A direction checked and normalized to the type's field order (rule 5)."""
+def _check_not_removed(note_type: NoteType, name: str) -> None:
+    if name in REMOVED_FIELDS.get(note_type, ()):
+        raise InvalidNote(
+            f"Field {name!r} no longer exists for a {note_type} note: use description."
+        )
+
+
+def _way(note_type: NoteType, direction: Direction, fields: dict[str, str]) -> Way:
+    """A direction checked and normalized (rule 5, amended): exactly one prompt field; the answer
+    is every other field of the type, stored whole so a field set later shows up (empty ones are
+    left out when shown). A given answer must be those fields: all of them, or the set ones."""
     kind = NOTE_TYPES[note_type]
-    shown = _show((tuple(direction.prompt), tuple(direction.answer)))
-    if not direction.prompt or not direction.answer:
-        raise InvalidNote(f"Direction {shown}: prompt and answer each need at least one field.")
-    for name in direction.prompt + direction.answer:
+    answer = direction.answer or []
+    shown = _show((tuple(direction.prompt), tuple(answer)))
+    for name in direction.prompt + answer:
+        _check_not_removed(note_type, name)
         if name not in kind.fields:
             raise InvalidNote(
                 f"Direction {shown}: unknown field {name!r}; a {note_type} note's fields are: "
                 f"{', '.join(kind.fields)}."
             )
-    if shared := set(direction.prompt) & set(direction.answer):
+    if len(direction.prompt) != 1:
         raise InvalidNote(
-            f"Direction {shown}: field {sorted(shared)[0]!r} can't be both prompt and answer."
+            f"Direction {shown}: the prompt is exactly one field ({kind.directions_hint})."
         )
-    return (
-        tuple(f for f in kind.fields if f in direction.prompt),
-        tuple(f for f in kind.fields if f in direction.answer),
-    )
+    rest = tuple(f for f in kind.fields if f not in direction.prompt)
+    way = (tuple(direction.prompt), rest)
+    if direction.answer is not None and set(answer) not in (
+        set(rest),
+        {f for f in rest if f in fields},
+    ):
+        raise InvalidNote(f"Direction {shown}: the answer is every other field: {_show(way)}.")
+    return way
 
 
-def _ways(note_type: NoteType, directions: list[Direction] | None) -> list[Way]:
+def _ways(
+    note_type: NoteType, directions: list[Direction] | None, fields: dict[str, str]
+) -> list[Way]:
     """The note's directions: given ones, or the type's default when None (rules 5 and 7)."""
     kind = NOTE_TYPES[note_type]
     if directions is None:
         if not kind.default_directions:
             raise InvalidNote(
                 f"Choose directions for this {note_type} note ({kind.directions_hint}): "
-                "which fields to show, and which to recall."
+                "which field to show; the others are recalled."
             )
         return list(kind.default_directions)
     ways: list[Way] = []
     for direction in directions:
-        way = _way(note_type, direction)
+        way = _way(note_type, direction, fields)
         if way in ways:
             raise InvalidNote(f"Direction {_show(way)} is listed twice.")
         ways.append(way)
     if not ways:
-        raise InvalidNote("A note needs at least one direction (prompt fields -> answer fields).")
+        raise InvalidNote("A note needs at least one direction (a prompt field).")
     return ways
 
 
 def _check_ways_use_fields(ways: Iterable[Way], fields: dict[str, str]) -> None:
-    """Every field a direction uses is present (rule 6)."""
+    """Every direction's prompt field is set, and at least one of its answer fields (rule 6)."""
     for way in ways:
-        for name in way[0] + way[1]:
+        prompt, answer = way
+        for name in prompt:
             if name not in fields:
                 raise InvalidNote(
                     f"Direction {_show(way)} uses field {name!r}, which is empty: set the "
                     "field, or remove the direction first."
                 )
+        if not any(name in fields for name in answer):
+            raise InvalidNote(
+                f"Direction {_show(way)} has nothing to recall: set {' or '.join(answer)}, "
+                "or remove the direction first."
+            )
 
 
 # --- Reading -----------------------------------------------------------------------------------
@@ -308,7 +334,7 @@ def _add_notes(
     for i, new in enumerate(notes):
         try:
             fields = _clean_fields(new.type, new.fields)
-            ways = _ways(new.type, new.directions)
+            ways = _ways(new.type, new.directions, fields)
             _check_ways_use_fields(ways, fields)
         except InvalidNote as error:
             raise InvalidNote(f"Note {i + 1}: {error}" if len(notes) > 1 else str(error)) from None
@@ -350,7 +376,10 @@ def update_note(
     note = _note(session, note_id)
     cards = {_way_of(card): card for card in _cards_of(session, note)}
     fields = _clean_fields(note.type, {**note.fields, **(changes.fields or {})})
-    ways = list(cards) if changes.directions is None else _ways(note.type, changes.directions)
+    if changes.directions is None:
+        ways = list(cards)
+    else:
+        ways = _ways(note.type, changes.directions, fields)
     _check_ways_use_fields(ways, fields)
 
     note.fields = fields  # a new dict: JSON columns don't track in-place changes
@@ -369,7 +398,7 @@ def add_direction(
     """A new card for the note, due now."""
     note = _note(session, note_id)
     current = [_way_of(card) for card in _cards_of(session, note)]
-    if (way := _way(note.type, direction)) in current:
+    if (way := _way(note.type, direction, note.fields)) in current:
         raise InvalidNote(f"This note already has the direction {_show(way)}.")
     directions = [Direction(prompt=list(p), answer=list(a)) for p, a in [*current, way]]
     return update_note(session, note_id, NoteUpdate(directions=directions), now)
