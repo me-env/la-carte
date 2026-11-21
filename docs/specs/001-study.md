@@ -5,6 +5,7 @@ Owners: api-engineer (small, first) / ios-engineer
 Design reference: docs/design/reference/02-editor-light.jpg, 01-editor-dark.jpg
 Changes (polish after QA): `study.remaining` and the rating row share the card text's `.accessibility2` Dynamic
 Type cap; the card's scroll indicators flash on reveal so a back that runs past the screen shows it can scroll.
+Superseded by 011: the rating row is two buttons ("Forgot" = again, "Got it" = good); hard/easy come from swiping.
 
 ## Goal
 Opening the app drops the user straight into review: the due card's front centered, tap to reveal the
