@@ -219,12 +219,12 @@ extension [Note] {
       fields: [
         "photo": neutralPhoto,
         "name": "Ada Example",
-        "role": "runs the bakery",
-        "context": "met at the climbing gym",
+        "description": "runs the bakery",
       ],
       cards: [
-        Note.Card(id: id(12), prompt: ["photo"], answer: ["name"], due: date),
-        Note.Card(id: id(13), prompt: ["role"], answer: ["name"], due: date),
+        Note.Card(id: id(12), prompt: ["photo"], answer: ["name", "description"], due: date),
+        Note.Card(id: id(13), prompt: ["name"], answer: ["photo", "description"], due: date),
+        Note.Card(id: id(15), prompt: ["description"], answer: ["photo", "name"], due: date),
       ],
       createdAt: date,
       updatedAt: date

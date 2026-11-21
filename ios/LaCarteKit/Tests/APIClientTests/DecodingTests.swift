@@ -26,8 +26,8 @@ struct DecodingTests {
   @Test func decodesNoteCard() throws {
     let json = """
       {"id":"65f15766-7ab3-4c84-bb05-ae180e083bef","note_id":"0b3c8a52-4f43-4a57-9d55-3b0f4c1d9e21",
-       "type":"person","prompt":["photo"],"answer":["name","role"],
-       "fields":{"photo":"https://example.org/p/42.jpg","name":"Ada Example","role":"runs the bakery"},
+       "type":"person","prompt":["photo"],"answer":["name","description"],
+       "fields":{"photo":"https://example.org/p/42.jpg","name":"Ada Example","description":"runs the bakery"},
        "front":"https://example.org/p/42.jpg","back":"Ada Example\\nruns the bakery",
        "state":"new","due":"2026-11-20T22:14:52.426509Z","last_review":null,
        "created_at":"2026-11-20T22:14:52.426509Z","updated_at":"2026-11-20T22:14:52Z"}
@@ -36,15 +36,15 @@ struct DecodingTests {
     #expect(card.noteId == UUID(uuidString: "0b3c8a52-4f43-4a57-9d55-3b0f4c1d9e21"))
     #expect(card.type == .person)
     #expect(card.prompt == ["photo"])
-    #expect(card.answer == ["name", "role"])
-    #expect(card.fields["role"] == "runs the bakery")
+    #expect(card.answer == ["name", "description"])
+    #expect(card.fields["description"] == "runs the bakery")
     #expect(card.back == "Ada Example\nruns the bakery")
   }
 
   @Test func decodesNote() throws {
     let json = """
       {"id":"0b3c8a52-4f43-4a57-9d55-3b0f4c1d9e21","type":"person",
-       "fields":{"photo":"https://example.org/p/42.jpg","name":"Ada Example","role":"runs the bakery"},
+       "fields":{"photo":"https://example.org/p/42.jpg","name":"Ada Example","description":"runs the bakery"},
        "cards":[{"id":"65f15766-7ab3-4c84-bb05-ae180e083bef","prompt":["photo"],"answer":["name"],
                  "state":"new","due":"2026-11-20T22:14:52.426509Z","last_review":null}],
        "created_at":"2026-11-20T22:14:52.426509Z","updated_at":"2026-11-20T22:14:52Z"}

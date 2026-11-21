@@ -24,8 +24,8 @@ struct LiveAPIClientTests {
     _ = try await client.addNote(
       NoteDraft(
         type: .person,
-        fields: ["name": "Ada Example", "role": "runs the bakery"],
-        directions: [Direction(prompt: ["role"], answer: ["name"])]
+        fields: ["name": "Ada Example", "description": "runs the bakery"],
+        directions: [Direction(prompt: ["description"], answer: ["name"])]
       )
     )
 
@@ -35,8 +35,8 @@ struct LiveAPIClientTests {
     #expect(
       try body(request) == [
         "type": "person",
-        "fields": ["name": "Ada Example", "role": "runs the bakery"],
-        "directions": [["prompt": ["role"], "answer": ["name"]]],
+        "fields": ["name": "Ada Example", "description": "runs the bakery"],
+        "directions": [["prompt": ["description"], "answer": ["name"]]],
       ]
     )
   }
@@ -57,7 +57,7 @@ struct LiveAPIClientTests {
     #expect(request.url?.path() == "/notes/\(noteID)")
     #expect(
       try body(request) == [
-        "fields": ["photo": "", "name": "Ada Example", "role": "", "context": ""],
+        "fields": ["photo": "", "name": "Ada Example", "description": ""],
         "directions": [["prompt": ["photo"], "answer": ["name"]]],
       ]
     )
