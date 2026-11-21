@@ -112,6 +112,9 @@ Mock = `LA_CARTE_API=mock`. Stub = `StubAPIServer` (records request bodies). "Do
 at normalized (0.08, 0.08), clear of the text.
 
 ### Acceptance criteria (015b)
+> Amended by [016](016-ask-ai.md) (built together): the dialog has no title and starts with "Ask about this card";
+> `ReportNotice` / `reportNotice` become `Notice` / `notice`.
+
 | # | Criterion (observable) | Validated by |
 |---|---|---|
 | 1 | On a revealed card, double-tapping the card opens a dialog titled "Report this card" with, in this order: "This is wrong", "I don't want this card", "I doubt this is correct", "I want it phrased differently", "Other…", and Cancel | unit + UI (light, dark) |

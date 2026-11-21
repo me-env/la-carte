@@ -54,3 +54,6 @@ work in flight (one git worktree per engineer instance). Groomed 2026-11-21.
 | 32 | **Report a card (iOS)**: double-tap the revealed card → report dialog, "Other…" comment, card leaves the session | Study lane after 010 + 011; `APIClient` edit (coordinate with 014b) | ready (blocked on 010, 011) | ios-engineer | [015](015-report-card.md) (015b) |
 | 33 | Reports screen in the app (+ REST list/close) | Split from 015. Only if the user wants to follow agent fixes in the app | backlog | — | |
 | 34 | MCP prompt `review_reports` (walk through open reports with the user) | Split from 015. Agent ergonomics | backlog | architect → api-engineer | |
+| 35 | **Ask about this card (copy)**: "Ask about this card" in the double-tap menu copies the card as a prompt, "Copied" notice | User request, priority. Build with 015b (same files) | ready (with 015b) | ios-engineer | [016](016-ask-ai.md) (016a) |
+| 36 | **Ask AI app (Settings + open)**: pick Vibe / Claude / ChatGPT / Perplexity / Grok / Copy only; open it via universal link (prefill for Claude, ChatGPT) | After 016a; `SettingsFeature` touch (after 009b) | ready (after 016a) | ios-engineer | [016](016-ask-ai.md) (016b) |
+| 37 | More AI apps (Gemini, Copilot, …) + prefill for Vibe / Grok | Split from 016. Needs a device check of their schemes / `?q=` | backlog | architect | |

@@ -142,6 +142,7 @@ ios/
     │   ├── AppFeature/        root reducer, composes child features, RootView entry point
     │   ├── <Name>Feature/     one module per feature (StudyFeature, DeckFeature, …)
     │   ├── APIClient/         @DependencyClient + live/in-memory implementations + models, AppGroup, TokenStore
+    │   ├── AskAIClient/       copy to clipboard + open the chosen AI app, `AIApp` (spec 016)
     │   ├── DeckWidget/        Home Screen widget + its debug gallery (SwiftUI + WidgetKit, no TCA)
     │   └── DesignSystem/      tokens + reusable views (no TCA)
     └── Tests/<Module>Tests/   TestStore / Swift Testing
