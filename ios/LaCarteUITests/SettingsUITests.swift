@@ -35,13 +35,13 @@ final class SettingsUITests: XCTestCase {
 
       // #8: close button.
       el(app, "settings.close").tap()
-      waitForAbsence(el(app, "settings.title"), "settings still open after settings.close")
+      waitForAbsence(sheetBar(app, "Settings"), "settings still open after settings.close")
       waitForLabel(el(app, "deck.title"), "Cards")
 
       // #8: swipe down.
       openSettings(app)
-      swipeSheetDown(app, from: el(app, "settings.title"))
-      waitForAbsence(el(app, "settings.title"), "settings still open after swiping down")
+      swipeSheetDown(app, from: sheetBar(app, "Settings"))
+      waitForAbsence(sheetBar(app, "Settings"), "settings still open after swiping down")
       waitForLabel(el(app, "deck.title"), "Cards")
       app.terminate()
     }
@@ -56,15 +56,16 @@ final class SettingsUITests: XCTestCase {
     openSettings(app)
     let test = el(app, "settings.test")
     let b = test.frame
-    // The label is ~24pt tall; a 44pt target centred on it extends ~10pt above and below. Tap 9pt below, then
-    // (after editing to clear the status) 9pt above.
-    test.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: b.height / 2 + 9)).tap()
+    // 009b: a Form row button; the whole row (≥ 44pt) is the target. Tap near its bottom, then (after editing to
+    // clear the status) near its top.
+    XCTAssertGreaterThanOrEqual(b.height, 43.5, "settings.test row under 44pt: \(b)")
+    test.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: b.height / 2 - 4)).tap()
     waitForLabel(statusText(app), "Connected · 3 cards", timeout: 3)
     let token = el(app, "settings.token")
     tapEnd(token)
     token.typeText("x")
     assertStatusCleared(app, "after editing the token")
-    test.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: -(b.height / 2 + 9))).tap()
+    test.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: -(b.height / 2 - 4))).tap()
     waitForLabel(statusText(app), "Connected · 3 cards", timeout: 3)
   }
 
@@ -176,7 +177,7 @@ final class SettingsUITests: XCTestCase {
     setText(app, "settings.url", server.url)
     setText(app, "settings.token", Self.goodToken, secure: true)
     el(app, "settings.close").tap()
-    waitForAbsence(el(app, "settings.title"))
+    waitForAbsence(sheetBar(app, "Settings"))
     app.terminate()
 
     let before = server.requests.count
@@ -209,11 +210,11 @@ final class SettingsUITests: XCTestCase {
     openSettings(app)
     setText(app, "settings.url", server.url)
     setText(app, "settings.token", Self.goodToken, secure: true)
-    for _ in 0..<2 where el(app, "settings.title").exists {  // first drag may only drop the keyboard
-      swipeSheetDown(app, from: el(app, "settings.title"))
+    for _ in 0..<2 where sheetBar(app, "Settings").exists {  // first drag may only drop the keyboard
+      swipeSheetDown(app, from: sheetBar(app, "Settings"))
       Thread.sleep(forTimeInterval: 0.6)
     }
-    waitForAbsence(el(app, "settings.title"), "settings still open after swiping down")
+    waitForAbsence(sheetBar(app, "Settings"), "settings still open after swiping down")
     app.terminate()
 
     let before = server.requests.count
@@ -250,9 +251,9 @@ final class SettingsUITests: XCTestCase {
         guard let stats = reqs.lastIndex(where: { StubDeck.route($0.path) == "/stats" }) else { return false }
         return reqs[(stats + 1)...].contains { $0.method == "GET" && StubDeck.route($0.path) == "/cards" }
       }
-      XCTAssertTrue(el(app, "settings.title").exists, "settings closed by itself after the test")
+      XCTAssertTrue(sheetBar(app, "Settings").exists, "settings closed by itself after the test")
       el(app, "settings.close").tap()
-      waitForAbsence(el(app, "settings.title"))
+      waitForAbsence(sheetBar(app, "Settings"))
       XCTAssertTrue(el(app, "deck.row.\(uuid(id))").waitForExistence(timeout: 5), "deck doesn't show \(front)")
       swipeSheetDown(app, from: el(app, "deck.title"))
       waitForAbsence(el(app, "deck.title"))
@@ -276,7 +277,7 @@ final class SettingsUITests: XCTestCase {
       openSettings(app)
       assertSettingsTextsReadable(app)
       let window = app.windows.firstMatch.frame
-      for id in ["settings.title", "settings.url", "settings.token", "settings.test", "settings.close"] {
+      for id in ["settings.url", "settings.token", "settings.test", "settings.close"] {
         let f = el(app, id).frame
         XCTAssertTrue(window.contains(f), "\(id) outside the window at XL: \(f)")
       }
@@ -288,6 +289,34 @@ final class SettingsUITests: XCTestCase {
       snapshot("settings-xl-connected", appearance: appearance)
       app.terminate()
     }
+  }
+
+  /// Spec 009b #9: at AX5 (light) the Settings form doesn't clip; every id stays reachable (scrolling if needed),
+  /// the theme segments stay inside the window with their full labels.
+  @MainActor
+  func testSettings_accessibilityAX5() {
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock, arguments: accessibilityAX5Arguments)
+    openDeck(app)
+    openSettings(app)
+    let window = app.windows.firstMatch.frame
+    XCTAssertTrue(window.contains(sheetTitle(app, "Settings").frame), "title clipped at AX5")
+    for id in ["settings.close", "settings.url", "settings.token", "settings.token.reveal", "settings.test"] {
+      let e = el(app, id)
+      XCTAssertTrue(e.waitForExistence(timeout: 5), "\(id) missing at AX5")
+      XCTAssertTrue(window.contains(e.frame), "\(id) outside the window at AX5: \(e.frame)")
+    }
+    snapshot("settings-ax5", appearance: .light)
+    el(app, "settings.test").tap()
+    waitForLabel(statusText(app), "Connected · 3 cards")
+    scrollIntoView(app, themeSegment(app, "Forest"))
+    for label in ["System", "Light", "Dark", "Forest"] {
+      let s = themeSegment(app, label)
+      XCTAssertTrue(s.isHittable, "theme segment \(label) not reachable at AX5")
+      XCTAssertTrue(window.insetBy(dx: -0.5, dy: -0.5).contains(s.frame), "segment \(label) clipped at AX5: \(s.frame)")
+    }
+    XCTAssertTrue(statusText(app).exists, "settings.status missing at AX5")
+    snapshot("settings-ax5-scrolled", appearance: .light)
   }
 
   // MARK: - #9 live API (scripts/e2e.sh)
@@ -325,7 +354,7 @@ final class SettingsUITests: XCTestCase {
     el(app, "settings.test").tap()
     waitForLabel(statusText(app), "Connected · 2 cards")
     el(app, "settings.close").tap()
-    waitForAbsence(el(app, "settings.title"))
+    waitForAbsence(sheetBar(app, "Settings"))
     swipeSheetDown(app, from: el(app, "deck.title"))
     waitForAbsence(el(app, "deck.title"))
     waitForLabel(el(app, "study.front"), "greeting")
@@ -380,7 +409,7 @@ final class SettingsUITests: XCTestCase {
     let gear = el(app, "deck.settings")
     XCTAssertTrue(gear.waitForExistence(timeout: 5), "deck.settings missing", file: file, line: line)
     gear.tap()
-    waitForLabel(el(app, "settings.title"), "Settings", file: file, line: line)
+    waitForSheet(app, "Settings", file: file, line: line)
   }
 
   @MainActor
@@ -465,15 +494,18 @@ final class SettingsUITests: XCTestCase {
                    file: file, line: line)
   }
 
-  /// Ref 03 sheet: title top-left, close circle top-right on the same line; URL, token, test, in that order.
+  /// Spec 009b #4: native sheet. Inline nav title "Settings", toolbar close (`settings.close`) at the leading edge
+  /// of the bar; Form rows URL, token, test, in that order, under the bar; segmented theme picker below.
   @MainActor
   private func assertSettingsScreen(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let window = app.windows.firstMatch.frame
-    let titleEl = el(app, "settings.title"), url = el(app, "settings.url"), token = el(app, "settings.token")
+    let bar = sheetBar(app, "Settings"), url = el(app, "settings.url"), token = el(app, "settings.token")
     let test = el(app, "settings.test"), close = el(app, "settings.close")
     for e in [url, token, test, close] {
       XCTAssertTrue(e.waitForExistence(timeout: 5), "\(e.identifier) missing", file: file, line: line)
     }
+    XCTAssertTrue(bar.exists, "no navigation bar titled Settings", file: file, line: line)
+    XCTAssertFalse(el(app, "settings.title").exists, "settings.title should be gone (nav title)", file: file, line: line)
     XCTAssertEqual(url.elementType, .textField, "settings.url is not a text field", file: file, line: line)
     let shown = token.value as? String ?? ""
     XCTAssertTrue(shown.allSatisfy { $0 == "•" }, "settings.token not masked at rest: '\(shown)'", file: file, line: line)
@@ -483,21 +515,27 @@ final class SettingsUITests: XCTestCase {
     if fieldText(app, "settings.url").isEmpty {
       XCTAssertEqual(url.placeholderValue, Self.urlPlaceholder, "settings.url placeholder", file: file, line: line)
     }
-    let t = titleEl.frame, c = close.frame, u = url.frame, k = token.frame, b = test.frame
-    XCTAssertEqual(c.width, 44, accuracy: 1, "settings.close not 44pt: \(c)", file: file, line: line)
-    XCTAssertEqual(c.height, 44, accuracy: 1, "settings.close not 44pt: \(c)", file: file, line: line)
-    XCTAssertLessThan(t.minX, 30, "settings.title not left: \(t)", file: file, line: line)
-    XCTAssertGreaterThan(c.maxX, window.width - 30, "settings.close not right: \(c)", file: file, line: line)
-    // iOS 26 triage root cause C: the title must be centred on the close button.
-    XCTAssertEqual(t.midY, c.midY, accuracy: 1.5, "title not centred on the close button: \(t) / \(c)",
-                   file: file, line: line)
-    XCTAssertGreaterThanOrEqual(u.minY, max(t.maxY, c.maxY) - 1, "URL field not under the header", file: file, line: line)
+    for label in ["System", "Light", "Dark", "Forest"] {
+      XCTAssertTrue(themeSegment(app, label).exists, "theme segment \(label) missing", file: file, line: line)
+    }
+    let t = sheetTitle(app, "Settings").frame, c = close.frame, u = url.frame, k = token.frame, b = test.frame
+    // System toolbar glass button: 36pt frame, hit area extended by iOS (009b: native toolbar).
+    XCTAssertGreaterThanOrEqual(c.width, 35.5, "settings.close smaller than a system toolbar button: \(c)", file: file, line: line)
+    XCTAssertGreaterThanOrEqual(c.height, 35.5, "settings.close smaller than a system toolbar button: \(c)", file: file, line: line)
+    XCTAssertLessThan(c.minX, window.width / 4, "settings.close not in the leading toolbar slot: \(c)", file: file, line: line)
+    XCTAssertEqual(t.midX, window.midX, accuracy: 4, "inline title not centred: \(t)", file: file, line: line)
+    XCTAssertEqual(t.midY, c.midY, accuracy: 3, "title not on the close button's line: \(t) / \(c)", file: file, line: line)
+    XCTAssertGreaterThanOrEqual(u.minY, max(t.maxY, c.maxY) - 1, "URL field not under the bar", file: file, line: line)
     XCTAssertGreaterThanOrEqual(k.minY, u.maxY - 1, "token field not under the URL field", file: file, line: line)
     XCTAssertGreaterThanOrEqual(b.minY, k.maxY - 1, "test button not under the token field", file: file, line: line)
-    // #16: the masked token is a text inside a tappable row; the 44pt eye button spans the row's height.
+    XCTAssertGreaterThan(themeSegment(app, "Forest").frame.minY, b.maxY, "theme picker not under Server", file: file, line: line)
+    // 008 #16: the masked token is a text inside a tappable row; the 44pt eye button spans the row's height.
     let row = k.union(el(app, "settings.token.reveal").frame)
+    // 009b: native Form rows (≥ 44pt by the system); the URL element is the text itself, the token row is the
+    // text + the 44pt eye.
+    XCTAssertGreaterThanOrEqual(row.height, 43.5, "settings.token row under 44pt: \(row)", file: file, line: line)
+    XCTAssertGreaterThanOrEqual(k.minY - u.maxY, 12, "URL and token rows too tight (row < 44pt?)", file: file, line: line)
     for (id, f) in [("settings.url", u), ("settings.token row", row)] {
-      XCTAssertGreaterThanOrEqual(f.height, 43.5, "\(id) row under 44pt: \(f)", file: file, line: line)
       XCTAssertGreaterThanOrEqual(f.minX, 12, "\(id) not inset: \(f)", file: file, line: line)
     }
   }
@@ -507,10 +545,11 @@ final class SettingsUITests: XCTestCase {
   @MainActor
   private func assertSettingsTextsReadable(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let window = app.windows.firstMatch.frame
-    let ids = ["settings.title", "settings.test", "settings.status", "settings.url", "settings.token", "settings.close"]
+    let ids = ["settings.test", "settings.status", "settings.url", "settings.token", "settings.close"]
     var frames: [(String, CGRect)] = ids.map { ($0, el(app, $0)) }.filter { $0.1.exists }.map { ($0.0, $0.1.frame) }
-    // The "Server" caption has no identifier: the static text between the title and the URL field.
-    let title = el(app, "settings.title").frame, url = el(app, "settings.url").frame
+    frames.append(("title", sheetTitle(app, "Settings").frame))
+    // The "Server" caption has no identifier: the static text between the bar and the URL field.
+    let title = sheetBar(app, "Settings").frame, url = el(app, "settings.url").frame
     for t in app.staticTexts.allElementsBoundByIndex where t.identifier.isEmpty
       && t.frame.minY >= title.maxY - 1 && t.frame.maxY <= url.minY + 1 && t.frame.minX < window.midX {
       frames.append(("caption '\(t.label)'", t.frame))
