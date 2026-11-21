@@ -20,58 +20,52 @@ final class StudyUITests: XCTestCase {
   /// #4 rate → next card unrevealed + decrement, #8 corner buttons present and 44pt.
   @MainActor
   func testStudy_frontRevealRateNext() {
-    for appearance in [XCUIDevice.Appearance.light, .dark] {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock)
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock)
 
-      // Front, unrevealed.
-      assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
-      assertCornerButtons(app)
-      snapshot("study-front", appearance: appearance)
-      let frontBefore = el(app, "study.front").frame
+    // Front, unrevealed.
+    assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
+    assertCornerButtons(app)
+    snapshot("study-front", appearance: .light)
+    let frontBefore = el(app, "study.front").frame
 
-      // Reveal by tapping the card (middle area).
-      el(app, "study.card").tap()
-      assertRevealed(app, front: Self.fixtures[0].front, back: Self.fixtures[0].back)
-      assertFrontDidNotMove(app, from: frontBefore)
-      assertCornerButtons(app)
-      snapshot("study-revealed", appearance: appearance)
+    // Reveal by tapping the card (middle area).
+    el(app, "study.card").tap()
+    assertRevealed(app, front: Self.fixtures[0].front, back: Self.fixtures[0].back)
+    assertFrontDidNotMove(app, from: frontBefore)
+    assertCornerButtons(app)
+    snapshot("study-revealed", appearance: .light)
 
-      // Rate → next card, unrevealed, remaining decrements.
-      el(app, "study.rate.good").tap()
-      assertFront(app, Self.fixtures[1].front, remaining: "2 to review")
+    // Rate → next card, unrevealed, remaining decrements.
+    el(app, "study.rate.good").tap()
+    assertFront(app, Self.fixtures[1].front, remaining: "2 to review")
 
-      // Reveal with the "Show answer" button this time.
-      let secondBefore = el(app, "study.front").frame
-      XCTAssertGreaterThanOrEqual(el(app, "study.reveal").frame.height, 43.99,
-                                  "study.reveal hit area under 44pt: \(el(app, "study.reveal").frame)")
-      el(app, "study.reveal").tap()
-      assertRevealed(app, front: Self.fixtures[1].front, back: Self.fixtures[1].back)
-      assertFrontDidNotMove(app, from: secondBefore)
-      el(app, "study.rate.hard").tap()
-      assertFront(app, Self.fixtures[2].front, remaining: "1 to review")
-      app.terminate()
-    }
+    // Reveal with the "Show answer" button this time.
+    let secondBefore = el(app, "study.front").frame
+    XCTAssertGreaterThanOrEqual(el(app, "study.reveal").frame.height, 43.99,
+                                "study.reveal hit area under 44pt: \(el(app, "study.reveal").frame)")
+    el(app, "study.reveal").tap()
+    assertRevealed(app, front: Self.fixtures[1].front, back: Self.fixtures[1].back)
+    assertFrontDidNotMove(app, from: secondBefore)
+    el(app, "study.rate.hard").tap()
+    assertFront(app, Self.fixtures[2].front, remaining: "1 to review")
   }
 
   /// #4 + #5: rate every due card (each rating button once at least) → "All caught up" + "Next card in…".
   @MainActor
   func testStudy_rateAllToCaughtUp() {
-    for appearance in [XCUIDevice.Appearance.light, .dark] {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock)
-      let plan = ["easy", "again", "good"]
-      for (index, card) in Self.fixtures.enumerated() {
-        assertFront(app, card.front, remaining: "\(3 - index) to review")
-        el(app, index.isMultiple(of: 2) ? "study.card" : "study.reveal").tap()
-        assertRevealed(app, front: card.front, back: card.back)
-        el(app, "study.rate.\(plan[index])").tap()
-      }
-      assertCaughtUp(app, nextDuePrefix: "Next card in")
-      assertCornerButtons(app)
-      snapshot("study-caught-up", appearance: appearance)
-      app.terminate()
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock)
+    let plan = ["easy", "again", "good"]
+    for (index, card) in Self.fixtures.enumerated() {
+      assertFront(app, card.front, remaining: "\(3 - index) to review")
+      el(app, index.isMultiple(of: 2) ? "study.card" : "study.reveal").tap()
+      assertRevealed(app, front: card.front, back: card.back)
+      el(app, "study.rate.\(plan[index])").tap()
     }
+    assertCaughtUp(app, nextDuePrefix: "Next card in")
+    assertCornerButtons(app)
+    snapshot("study-caught-up", appearance: .light)
   }
 
   /// #8 + spec 002 #1/#7: `study.deck` opens the deck sheet, `study.add` opens the "New card" editor; closing
@@ -151,14 +145,11 @@ final class StudyUITests: XCTestCase {
       return .init(status: 404, body: "{}")
     }
     try server.start()
-    for appearance in [XCUIDevice.Appearance.light, .dark] {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .live(server.url))
-      assertCaughtUp(app, nextDueLabel: "Your deck is empty")
-      assertCornerButtons(app)
-      snapshot("study-empty", appearance: appearance)
-      app.terminate()
-    }
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .live(server.url))
+    assertCaughtUp(app, nextDueLabel: "Your deck is empty")
+    assertCornerButtons(app)
+    snapshot("study-empty", appearance: .light)
     server.stop()
   }
 

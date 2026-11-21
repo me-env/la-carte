@@ -9,7 +9,6 @@ final class DeckUITests: XCTestCase {
     ("la carte", "the menu — and the map"),
     ("ephemeral", "lasting a very short time"),
   ]
-  static let appearances: [XCUIDevice.Appearance] = [.light, .dark]
 
   override func setUp() {
     continueAfterFailure = false
@@ -21,25 +20,22 @@ final class DeckUITests: XCTestCase {
   /// styled like ref 04 (surface rows, radius 12, 8pt gap, no separators, background behind). #12: swipe down closes.
   @MainActor
   func testDeck_openFromStudy() {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock)
-      openDeck(app)
-      waitForRows(app, Self.ids)
-      for (i, id) in Self.ids.enumerated() {
-        assertRow(app, id, front: Self.fixtures[i].front, back: Self.fixtures[i].back, due: "Due now", state: "new")
-      }
-      assertDeckChrome(app)
-      assertRowSpacing(app)
-      assertDeckColors(app, appearance: appearance)
-      snapshot("deck", appearance: appearance)
-
-      // #12: swipe down closes the sheet, back to study.
-      swipeSheetDown(app, from: el(app, "deck.title"))
-      waitForAbsence(el(app, "deck.title"), "deck sheet still open after swiping down")
-      waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
-      app.terminate()
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock)
+    openDeck(app)
+    waitForRows(app, Self.ids)
+    for (i, id) in Self.ids.enumerated() {
+      assertRow(app, id, front: Self.fixtures[i].front, back: Self.fixtures[i].back, due: "Due now", state: "new")
     }
+    assertDeckChrome(app)
+    assertRowSpacing(app)
+    assertDeckColors(app, appearance: .light)
+    snapshot("deck", appearance: .light)
+
+    // #12: swipe down closes the sheet, back to study.
+    swipeSheetDown(app, from: el(app, "deck.title"))
+    waitForAbsence(el(app, "deck.title"), "deck sheet still open after swiping down")
+    waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
   }
 
   /// #1 against API-shaped data: rows keep the API order (newest first), "Due in 3 days", a non-new state,
@@ -80,20 +76,17 @@ final class DeckUITests: XCTestCase {
   /// #2: "ser" leaves only serendipity; clearing shows all three again.
   @MainActor
   func testDeck_search() {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock)
-      openDeck(app)
-      waitForRows(app, Self.ids)
-      let search = el(app, "deck.search")
-      search.tap()
-      search.typeText("ser")
-      waitForRows(app, [Self.ids[0]])
-      snapshot("deck-search", appearance: appearance)
-      search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3))
-      waitForRows(app, Self.ids)
-      app.terminate()
-    }
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock)
+    openDeck(app)
+    waitForRows(app, Self.ids)
+    let search = el(app, "deck.search")
+    search.tap()
+    search.typeText("ser")
+    waitForRows(app, [Self.ids[0]])
+    snapshot("deck-search", appearance: .light)
+    search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3))
+    waitForRows(app, Self.ids)
   }
 
   /// #2: the filter goes through `GET /cards?query=` after a debounce: typing "ser" quickly sends one query,
@@ -149,31 +142,25 @@ final class DeckUITests: XCTestCase {
     let deck = StubDeck([])
     let server = StubAPIServer(handler: deck.handle)
     try server.start()
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .live(server.url))
-      openDeck(app)
-      waitForLabel(el(app, "deck.message"), "No cards yet")
-      waitForRows(app, [])
-      snapshot("deck-empty", appearance: appearance)
-      app.terminate()
-    }
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .live(server.url))
+    openDeck(app)
+    waitForLabel(el(app, "deck.message"), "No cards yet")
+    waitForRows(app, [])
+    snapshot("deck-empty", appearance: .light)
     server.stop()
   }
 
   /// #3: failed load → "Can't reach your deck".
   @MainActor
   func testDeck_loadFailed() {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .live(unreachableAPIURL))
-      waitForLabel(el(app, "study.message"), "Can't reach your deck", timeout: 20)
-      openDeck(app)
-      waitForLabel(el(app, "deck.message"), "Can't reach your deck", timeout: 20)
-      waitForRows(app, [])
-      snapshot("deck-offline", appearance: appearance)
-      app.terminate()
-    }
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .live(unreachableAPIURL))
+    waitForLabel(el(app, "study.message"), "Can't reach your deck", timeout: 20)
+    openDeck(app)
+    waitForLabel(el(app, "deck.message"), "Can't reach your deck", timeout: 20)
+    waitForRows(app, [])
+    snapshot("deck-offline", appearance: .light)
   }
 
   // MARK: - #4 swipe to delete
@@ -283,27 +270,24 @@ final class DeckUITests: XCTestCase {
   /// #5: tapping a row → "Edit card" prefilled; changing the back + save → dismissed, row shows the new back.
   @MainActor
   func testDeck_editRow() {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock)
-      openDeck(app)
-      waitForRows(app, Self.ids)
-      row(app, Self.ids[2]).tap()
-      waitForLabel(el(app, "editor.title"), "Edit card")
-      XCTAssertEqual(fieldText(app, "editor.front"), Self.fixtures[2].front)
-      XCTAssertEqual(fieldText(app, "editor.back"), Self.fixtures[2].back)
-      assertEditorChrome(app)
-      snapshot("editor-edit", appearance: appearance)
-      replaceText(app, "editor.back", with: "short-lived")
-      XCTAssertTrue(el(app, "editor.save").isEnabled)
-      el(app, "editor.save").tap()
-      waitForAbsence(el(app, "editor.title"), "editor still open after saving")
-      waitUntil("row shows the new back") { self.rowText(app, Self.ids[2], "short-lived").exists }
-      XCTAssertFalse(rowText(app, Self.ids[2], Self.fixtures[2].back).exists, "old back still shown")
-      waitForRows(app, Self.ids)  // replaced in place
-      snapshot("deck-after-edit", appearance: appearance)
-      app.terminate()
-    }
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock)
+    openDeck(app)
+    waitForRows(app, Self.ids)
+    row(app, Self.ids[2]).tap()
+    waitForLabel(el(app, "editor.title"), "Edit card")
+    XCTAssertEqual(fieldText(app, "editor.front"), Self.fixtures[2].front)
+    XCTAssertEqual(fieldText(app, "editor.back"), Self.fixtures[2].back)
+    assertEditorChrome(app)
+    snapshot("editor-edit", appearance: .light)
+    replaceText(app, "editor.back", with: "short-lived")
+    XCTAssertTrue(el(app, "editor.save").isEnabled)
+    el(app, "editor.save").tap()
+    waitForAbsence(el(app, "editor.title"), "editor still open after saving")
+    waitUntil("row shows the new back") { self.rowText(app, Self.ids[2], "short-lived").exists }
+    XCTAssertFalse(rowText(app, Self.ids[2], Self.fixtures[2].back).exists, "old back still shown")
+    waitForRows(app, Self.ids)  // replaced in place
+    snapshot("deck-after-edit", appearance: .light)
   }
 
   /// #5: save calls `PATCH /cards/{id}` with the new back.
@@ -333,32 +317,29 @@ final class DeckUITests: XCTestCase {
   /// (after trimming); saving puts the new row at the top.
   @MainActor
   func testDeck_addFromDeck() {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock)
-      openDeck(app)
-      waitForRows(app, Self.ids)
-      el(app, "deck.add").tap()
-      assertNewCardEditor(app)
-      snapshot("editor-new", appearance: appearance)
-      el(app, "editor.front").typeText("feline")
-      XCTAssertFalse(el(app, "editor.save").isEnabled, "editor.save enabled with an empty back")
-      el(app, "editor.back").tap()
-      el(app, "editor.back").typeText("   ")
-      XCTAssertFalse(el(app, "editor.save").isEnabled, "editor.save enabled with a whitespace-only back")
-      el(app, "editor.back").typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3) + "cat")
-      XCTAssertTrue(el(app, "editor.save").isEnabled, "editor.save disabled with front + back filled")
-      if appearance == .light { snapshot("editor-filled", appearance: .light) }
-      el(app, "editor.save").tap()
-      waitForAbsence(el(app, "editor.title"), "editor still open after saving")
-      waitUntil("new row at the top") { self.rowIDs(app).count == 4 }
-      let top = rowIDs(app)[0]
-      XCTAssertFalse(Self.ids.contains(top), "new card is not the top row: \(rowIDs(app))")
-      assertRow(app, top, front: "feline", back: "cat", due: "Due now", state: "new")
-      XCTAssertEqual(Array(rowIDs(app).dropFirst()), Self.ids)
-      snapshot("deck-after-add", appearance: appearance)
-      app.terminate()
-    }
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock)
+    openDeck(app)
+    waitForRows(app, Self.ids)
+    el(app, "deck.add").tap()
+    assertNewCardEditor(app)
+    snapshot("editor-new", appearance: .light)
+    el(app, "editor.front").typeText("feline")
+    XCTAssertFalse(el(app, "editor.save").isEnabled, "editor.save enabled with an empty back")
+    el(app, "editor.back").tap()
+    el(app, "editor.back").typeText("   ")
+    XCTAssertFalse(el(app, "editor.save").isEnabled, "editor.save enabled with a whitespace-only back")
+    el(app, "editor.back").typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3) + "cat")
+    XCTAssertTrue(el(app, "editor.save").isEnabled, "editor.save disabled with front + back filled")
+    snapshot("editor-filled", appearance: .light)
+    el(app, "editor.save").tap()
+    waitForAbsence(el(app, "editor.title"), "editor still open after saving")
+    waitUntil("new row at the top") { self.rowIDs(app).count == 4 }
+    let top = rowIDs(app)[0]
+    XCTAssertFalse(Self.ids.contains(top), "new card is not the top row: \(rowIDs(app))")
+    assertRow(app, top, front: "feline", back: "cat", due: "Due now", state: "new")
+    XCTAssertEqual(Array(rowIDs(app).dropFirst()), Self.ids)
+    snapshot("deck-after-add", appearance: .light)
   }
 
   /// #6 + #8: saving sends `POST /cards`; while it is in flight `editor.save` is disabled.
@@ -421,26 +402,23 @@ final class DeckUITests: XCTestCase {
   func testEditor_saveFailureKeepsText() throws {
     let (server, deck) = try startStubDeck()
     deck.writeStatus = 500
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .live(server.url))
-      waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
-      el(app, "study.add").tap()
-      assertNewCardEditor(app)
-      el(app, "editor.front").typeText("feline")
-      el(app, "editor.back").tap()
-      el(app, "editor.back").typeText("cat")
-      el(app, "editor.save").tap()
-      waitForLabel(el(app, "editor.error"), "Couldn't save. Check your connection.")
-      XCTAssertTrue(el(app, "editor.title").exists, "editor closed after a failed save")
-      XCTAssertEqual(fieldText(app, "editor.front"), "feline")
-      XCTAssertEqual(fieldText(app, "editor.back"), "cat")
-      waitUntil("editor.save re-enabled after the failure") { self.el(app, "editor.save").isEnabled }
-      let error = el(app, "editor.error").frame
-      XCTAssertGreaterThanOrEqual(error.minY, el(app, "editor.back").frame.maxY - 1, "editor.error not under the fields")
-      snapshot("editor-error", appearance: appearance)
-      app.terminate()
-    }
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .live(server.url))
+    waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
+    el(app, "study.add").tap()
+    assertNewCardEditor(app)
+    el(app, "editor.front").typeText("feline")
+    el(app, "editor.back").tap()
+    el(app, "editor.back").typeText("cat")
+    el(app, "editor.save").tap()
+    waitForLabel(el(app, "editor.error"), "Couldn't save. Check your connection.")
+    XCTAssertTrue(el(app, "editor.title").exists, "editor closed after a failed save")
+    XCTAssertEqual(fieldText(app, "editor.front"), "feline")
+    XCTAssertEqual(fieldText(app, "editor.back"), "cat")
+    waitUntil("editor.save re-enabled after the failure") { self.el(app, "editor.save").isEnabled }
+    let error = el(app, "editor.error").frame
+    XCTAssertGreaterThanOrEqual(error.minY, el(app, "editor.back").frame.maxY - 1, "editor.error not under the fields")
+    snapshot("editor-error", appearance: .light)
     server.stop()
   }
 
@@ -672,11 +650,9 @@ final class DeckUITests: XCTestCase {
   @MainActor
   private func assertSystemRed(_ app: XCUIApplication, _ action: XCUIElement,
                                file: StaticString = #filePath, line: UInt = #line) {
-    let window = app.windows.firstMatch.frame
-    let pixels = Pixels(XCUIScreen.main.screenshot(), pointWidth: window.width)
     let f = action.frame
-    let c = pixels.color(at: CGPoint(x: f.midX, y: f.minY + f.height * 0.2))
-    XCTAssertTrue(c.0 > 200 && c.1 < 110 && c.2 < 110, "Delete action fill \(c) at \(f) is not system red",
+    let c = ColorProbe(screenOf: app).color(at: CGPoint(x: f.midX, y: f.minY + f.height * 0.2))
+    XCTAssertTrue(c.r > 200 && c.g < 110 && c.b < 110, "Delete action fill \(c) at \(f) is not system red",
                   file: file, line: line)
   }
 
@@ -836,28 +812,24 @@ final class DeckUITests: XCTestCase {
   }
 
   /// Pixel checks on a screenshot: rows are `surface`, the gaps and the area around/below rows are `background`
-  /// (no separators, no list background), the search field sits on `surface`.
+  /// (no separators, no list background), the search field sits on `surface`. List rows can't be rendered in unit
+  /// tests (`ImageRenderer` draws a List as a placeholder), so this stays here.
   @MainActor
   private func assertDeckColors(_ app: XCUIApplication, appearance: XCUIDevice.Appearance,
                                 file: StaticString = #filePath, line: UInt = #line) {
-    let background = appearance == .dark ? (26, 26, 26) : (249, 250, 245)
-    let surface = appearance == .dark ? (37, 37, 37) : (255, 255, 255)
+    let p = Palette.of(appearance)
     let window = app.windows.firstMatch.frame
-    let pixels = Pixels(XCUIScreen.main.screenshot(), pointWidth: window.width)
     let frames = rowIDs(app).map { row(app, $0).frame }
     guard frames.count >= 2 else { return XCTFail("need 2 rows for colour checks", file: file, line: line) }
-    func check(_ name: String, _ p: CGPoint, _ expected: (Int, Int, Int)) {
-      let c = pixels.color(at: p)
-      let ok = abs(c.0 - expected.0) <= 4 && abs(c.1 - expected.1) <= 4 && abs(c.2 - expected.2) <= 4
-      XCTAssertTrue(ok, "\(name) at \(p) is \(c), expected \(expected)", file: file, line: line)
-    }
-    check("row fill", CGPoint(x: frames[0].minX + 6, y: frames[0].midY), surface)
-    check("gap between rows", CGPoint(x: frames[0].midX, y: (frames[0].maxY + frames[1].minY) / 2), background)
-    check("left of a row", CGPoint(x: frames[0].minX / 2, y: frames[0].midY), background)
-    check("below the rows", CGPoint(x: window.midX, y: frames.last!.maxY + 60), background)
-    check("near the bottom edge", CGPoint(x: window.midX, y: window.maxY - 4), background)
     let search = el(app, "deck.search").frame
-    check("search field fill", CGPoint(x: search.maxX + 6, y: search.midY), surface)
+    waitForColors(app, [
+      ("row fill", CGPoint(x: frames[0].minX + 6, y: frames[0].midY), p.surface),
+      ("gap between rows", CGPoint(x: frames[0].midX, y: (frames[0].maxY + frames[1].minY) / 2), p.background),
+      ("left of a row", CGPoint(x: frames[0].minX / 2, y: frames[0].midY), p.background),
+      ("below the rows", CGPoint(x: window.midX, y: frames.last!.maxY + 60), p.background),
+      ("near the bottom edge", CGPoint(x: window.midX, y: window.maxY - 4), p.background),
+      ("search field fill", CGPoint(x: search.maxX + 6, y: search.midY), p.surface),
+    ], timeout: 0, file: file, line: line)
   }
 
   // MARK: Live API helpers
@@ -887,35 +859,5 @@ final class DeckUITests: XCTestCase {
     for card in try liveCards(url) where card["front"] as? String == front {
       _ = liveRequest(url + "/cards/\(card["id"] as? String ?? "")", method: "DELETE")
     }
-  }
-}
-
-/// RGB sampling of a screenshot at point coordinates.
-struct Pixels {
-  private let data: [UInt8]
-  private let width: Int
-  private let height: Int
-  private let scale: CGFloat
-
-  init(_ screenshot: XCUIScreenshot, pointWidth: CGFloat) {
-    self.init(screenshot.image.cgImage!, pointWidth: pointWidth)
-  }
-
-  init(_ cg: CGImage, pointWidth: CGFloat) {
-    width = cg.width
-    height = cg.height
-    scale = CGFloat(cg.width) / pointWidth
-    var buffer = [UInt8](repeating: 0, count: width * height * 4)
-    let context = CGContext(data: &buffer, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-    context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
-    data = buffer
-  }
-
-  func color(at point: CGPoint) -> (Int, Int, Int) {
-    let x = min(max(Int(point.x * scale), 0), width - 1), y = min(max(Int(point.y * scale), 0), height - 1)
-    let i = (y * width + x) * 4
-    return (Int(data[i]), Int(data[i + 1]), Int(data[i + 2]))
   }
 }

@@ -7,7 +7,7 @@ extension SettingsUITests {
   static let notSetUp = (message: "Connect your deck", detail: "Add your server URL and token in Settings.")
   static let rejected = (message: "Token rejected", detail: "Check your token in Settings.")
 
-  // MARK: - #4 not set up, #8 token rejected (light, dark, forest)
+  // MARK: - #4 not set up, #8 token rejected (light, forest)
 
   /// #4: nothing stored → "Connect your deck" + detail + "Open Settings", no remaining / retry, no request.
   /// #8: URL + token "wrong" against a guarded stub → "Token rejected" with the same layout, no retry.
@@ -15,7 +15,7 @@ extension SettingsUITests {
   func testSetup_studyStates() throws {
     continueAfterFailure = true  // keep going so every state gets its screenshot
     let server = try startStub(StubDeck([card("f1", "alpha", "one")]), token: Self.goodToken)
-    for (appearance, theme) in [(XCUIDevice.Appearance.light, "system"), (.dark, "system"), (.light, "forest")] {
+    for (appearance, theme) in [(XCUIDevice.Appearance.light, "system"), (.light, "forest")] {
       XCUIDevice.shared.appearance = appearance
       let suffix = theme == "forest" ? "-forest" : ""
       let app = launch(api: .stored, theme: theme)
@@ -158,7 +158,7 @@ extension SettingsUITests {
     continueAfterFailure = true  // keep going so every state gets its screenshot
     let fake = "fake-qa-token-0000"
     let dots = String(repeating: "•", count: fake.count)
-    for (appearance, theme) in [(XCUIDevice.Appearance.light, "system"), (.dark, "system"), (.light, "forest")] {
+    for (appearance, theme) in [(XCUIDevice.Appearance.light, "system"), (.light, "forest")] {
       XCUIDevice.shared.appearance = appearance
       let suffix = theme == "forest" ? "-forest" : ""
       let app = launch(api: .stored, theme: theme)

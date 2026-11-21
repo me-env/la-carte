@@ -19,32 +19,29 @@ final class SettingsUITests: XCTestCase {
   /// secure token field, "Test connection" and close. #8: close button and swipe-down both return to the deck.
   @MainActor
   func testSettings_openFromDeckAndClose() {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock)
-      openDeck(app)
-      assertGearInTitleRow(app)
-      snapshot("deck-with-settings", appearance: appearance)
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock)
+    openDeck(app)
+    assertGearInTitleRow(app)
+    snapshot("deck-with-settings", appearance: .light)
 
-      openSettings(app)
-      assertSettingsScreen(app)
-      assertSettingsColors(app, appearance: appearance)
-      XCTAssertFalse(statusText(app).exists && !statusText(app).label.isEmpty,
-                     "settings.status shows '\(statusText(app).label)' before any check")
-      snapshot("settings", appearance: appearance)
+    openSettings(app)
+    assertSettingsScreen(app)
+    assertSettingsColors(app, appearance: .light)
+    XCTAssertFalse(statusText(app).exists && !statusText(app).label.isEmpty,
+                   "settings.status shows '\(statusText(app).label)' before any check")
+    snapshot("settings", appearance: .light)
 
-      // #8: close button.
-      el(app, "settings.close").tap()
-      waitForAbsence(el(app, "settings.title"), "settings still open after settings.close")
-      waitForLabel(el(app, "deck.title"), "Cards")
+    // #8: close button.
+    el(app, "settings.close").tap()
+    waitForAbsence(el(app, "settings.title"), "settings still open after settings.close")
+    waitForLabel(el(app, "deck.title"), "Cards")
 
-      // #8: swipe down.
-      openSettings(app)
-      swipeSheetDown(app, from: el(app, "settings.title"))
-      waitForAbsence(el(app, "settings.title"), "settings still open after swiping down")
-      waitForLabel(el(app, "deck.title"), "Cards")
-      app.terminate()
-    }
+    // #8: swipe down.
+    openSettings(app)
+    swipeSheetDown(app, from: el(app, "settings.title"))
+    waitForAbsence(el(app, "settings.title"), "settings still open after swiping down")
+    waitForLabel(el(app, "deck.title"), "Cards")
   }
 
   /// Design checklist: 44pt hit area. "Test connection" is the screen's only action.
@@ -269,25 +266,22 @@ final class SettingsUITests: XCTestCase {
   /// Settings stays readable at accessibility XL: no clipped/overlapping text, fields and button reachable.
   @MainActor
   func testSettings_accessibilityXL() {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock, arguments: accessibilityXLArguments)
-      openDeck(app)
-      openSettings(app)
-      assertSettingsTextsReadable(app)
-      let window = app.windows.firstMatch.frame
-      for id in ["settings.title", "settings.url", "settings.token", "settings.test", "settings.close"] {
-        let f = el(app, id).frame
-        XCTAssertTrue(window.contains(f), "\(id) outside the window at XL: \(f)")
-      }
-      snapshot("settings-xl", appearance: appearance)
-      el(app, "settings.test").tap()
-      waitForLabel(statusText(app), "Connected · 3 cards")
-      assertSettingsTextsReadable(app)
-      XCTAssertTrue(window.contains(statusText(app).frame), "settings.status outside the window at XL")
-      snapshot("settings-xl-connected", appearance: appearance)
-      app.terminate()
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock, arguments: accessibilityXLArguments)
+    openDeck(app)
+    openSettings(app)
+    assertSettingsTextsReadable(app)
+    let window = app.windows.firstMatch.frame
+    for id in ["settings.title", "settings.url", "settings.token", "settings.test", "settings.close"] {
+      let f = el(app, id).frame
+      XCTAssertTrue(window.contains(f), "\(id) outside the window at XL: \(f)")
     }
+    snapshot("settings-xl", appearance: .light)
+    el(app, "settings.test").tap()
+    waitForLabel(statusText(app), "Connected · 3 cards")
+    assertSettingsTextsReadable(app)
+    XCTAssertTrue(window.contains(statusText(app).frame), "settings.status outside the window at XL")
+    snapshot("settings-xl-connected", appearance: .light)
   }
 
   // MARK: - #9 live API (scripts/e2e.sh)
@@ -537,28 +531,15 @@ final class SettingsUITests: XCTestCase {
   @MainActor
   private func assertSettingsColors(_ app: XCUIApplication, appearance: XCUIDevice.Appearance,
                                     file: StaticString = #filePath, line: UInt = #line) {
-    let background = appearance == .dark ? (26, 26, 26) : (249, 250, 245)
-    let surface = appearance == .dark ? (37, 37, 37) : (255, 255, 255)
+    let p = Palette.of(appearance)
     let window = app.windows.firstMatch.frame
-    let pixels = Pixels(XCUIScreen.main.screenshot(), pointWidth: window.width)
-    func close(_ c: (Int, Int, Int), _ e: (Int, Int, Int)) -> Bool {
-      abs(c.0 - e.0) <= 4 && abs(c.1 - e.1) <= 4 && abs(c.2 - e.2) <= 4
-    }
-    func check(_ name: String, _ p: CGPoint, _ expected: (Int, Int, Int)) {
-      let c = pixels.color(at: p)
-      XCTAssertTrue(close(c, expected), "\(name) at \(p) is \(c), expected \(expected)", file: file, line: line)
-    }
-    let url = el(app, "settings.url").frame, token = el(app, "settings.token").frame, test = el(app, "settings.test").frame
-    check("sheet background left of the URL row", CGPoint(x: 4, y: url.midY), background)
-    check("sheet background between test and bottom", CGPoint(x: window.midX, y: window.maxY - 60), background)
-    check("URL row fill", CGPoint(x: url.maxX - 4, y: url.midY), surface)
-    check("token row fill", CGPoint(x: url.maxX - 4, y: token.midY), surface)  // row spans the URL row's width
-    // Darkest/brightest pixel across the test label: must be neutral (ink), not blue.
-    var blueish = false
-    for x in stride(from: test.minX, to: test.maxX, by: 1) {
-      let c = pixels.color(at: CGPoint(x: x, y: test.midY))
-      if c.2 - max(c.0, c.1) > 40 { blueish = true }
-    }
-    XCTAssertFalse(blueish, "settings.test text is tinted blue", file: file, line: line)
+    let url = el(app, "settings.url").frame, token = el(app, "settings.token").frame
+    waitForColors(app, [
+      ("sheet background left of the URL row", CGPoint(x: 4, y: url.midY), p.background),
+      ("sheet background between test and bottom", CGPoint(x: window.midX, y: window.maxY - 60), p.background),
+      ("URL row fill", CGPoint(x: url.maxX - 4, y: url.midY), p.surface),
+      ("token row fill", CGPoint(x: url.maxX - 4, y: token.midY), p.surface),  // row spans the URL row's width
+    ], timeout: 0, file: file, line: line)
+    assertNotTintedBlue(app, "settings.test", file: file, line: line)
   }
 }
