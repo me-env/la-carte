@@ -99,7 +99,8 @@ public struct DeckView: View {
           }
         }
         .padding(.horizontal, Theme.Spacing.m)
-        .containerRelativeFrame([.horizontal, .vertical])
+        .frame(maxWidth: .infinity)
+        .containerRelativeFrame(.vertical)
       }
       .scrollDismissesKeyboard(.immediately)
     } else {
