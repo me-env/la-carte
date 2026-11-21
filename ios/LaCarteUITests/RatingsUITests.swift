@@ -270,28 +270,7 @@ final class RatingsUITests: XCTestCase {
     server.stop()
   }
 
-  // MARK: - #19 Dynamic Type accessibility XL
-
-  @MainActor
-  func testRatings_accessibilityXL() {
-    XCUIDevice.shared.appearance = .light
-    let app = launch(api: .mock, arguments: accessibilityXLArguments)
-    waitForLabel(el(app, "study.front"), Self.mockFront)
-    el(app, "study.reveal").tap()
-    waitForLabel(el(app, "study.back"), Self.mockBack)
-    assertTwoButtons(app, context: "AX XL", checkLeftRight: false)
-    let window = app.windows.firstMatch.frame
-    let a = el(app, "study.rate.again").frame, g = el(app, "study.rate.good").frame
-    for (id, f) in [("again", a), ("good", g)] {
-      XCTAssertTrue(window.contains(f), "study.rate.\(id) outside the window at AX XL: \(f)")
-      XCTAssertGreaterThanOrEqual(f.height, 43.99, "study.rate.\(id) under 44pt at AX XL: \(f)")
-      XCTAssertGreaterThanOrEqual(f.minY, el(app, "study.card").frame.maxY - 1, "study.rate.\(id) over the card: \(f)")
-    }
-    let overlap = a.intersection(g)
-    XCTAssertTrue(overlap.isNull || overlap.width < 1 || overlap.height < 1, "buttons overlap at AX XL: \(a) / \(g)")
-    assertTextsReadable(in: app)
-    shot("study-revealed-xl", "light")
-  }
+  // Dynamic Type accessibility-size tests: deferred until before publishing (user rule).
 
   // MARK: - Helpers
 

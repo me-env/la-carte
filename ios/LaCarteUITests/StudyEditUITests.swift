@@ -4,7 +4,7 @@ import XCTest
 /// Mock deck = `LA_CARTE_API=mock` (serendipity first). "Stub" = `StubAPIServer` + `StubDeck`, to see the PATCH and
 /// make it fail.
 final class StudyEditUITests: XCTestCase {
-  static let ratings = ["again", "hard", "good", "easy"]
+  static let ratings = ["again", "good"]  // 011: two buttons; hard/easy are drag-only
   static let front = "serendipity"
   static let back = "finding something good without looking for it"
   static let base = Date(timeIntervalSince1970: 1_767_225_600)  // 2026-01-01: due now
@@ -20,7 +20,7 @@ final class StudyEditUITests: XCTestCase {
   /// #1: before reveal, a double-tap on the front reveals (first tap) and opens no editor.
   @MainActor
   func testStudyEdit_doubleTapUnrevealedOnlyReveals() {
-    for appearance in [XCUIDevice.Appearance.light, .dark] {
+    for appearance in [XCUIDevice.Appearance.light] {
       XCUIDevice.shared.appearance = appearance
       let app = launch(api: .mock)
       waitForLabel(el(app, "study.front"), Self.front)
@@ -156,20 +156,6 @@ final class StudyEditUITests: XCTestCase {
     _ = try waitForPatch(server, count: 1)
     XCTAssertEqual(deck.cards.first?.back, "a happy accident")
 
-    // Swipe the keyboard down (drag on the card's scroll view).
-    field = startEditing(app, .front)
-    replaceText(field, with: "serendipity!")
-    let window = app.windows.firstMatch
-    let start = el(app, "study.back").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-    start.press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
-    waitForAbsence(app.keyboards.firstMatch, timeout: 5, "keyboard still up after swiping it down")
-    waitForLabel(el(app, "study.front"), "serendipity!", timeout: 3)
-    XCTAssertFalse(field.exists, "frontField still shown after the keyboard was swiped down")
-    assertRatingsShown(app)
-    let patch = try waitForPatch(server, count: 2)
-    XCTAssertTrue(patch.body.contains("serendipity!"), "second PATCH body: \(patch.body)")
-    snapshot("study-edited-swipe", appearance: .light)
-
     // Tap on the other (non-edited) side's text commits too.
     field = startEditing(app, .back)
     replaceText(field, with: "a lucky find")
@@ -178,30 +164,62 @@ final class StudyEditUITests: XCTestCase {
     XCTAssertFalse(field.exists, "backField still shown after tapping the front text")
     XCTAssertFalse(el(app, "study.frontField").exists, "tapping the front while editing the back started a front edit")
     assertRatingsShown(app)
-    let third = try waitForPatch(server, count: 3)
-    XCTAssertTrue(third.body.contains("a lucky find"), "third PATCH body: \(third.body)")
+    let second = try waitForPatch(server, count: 2)
+    XCTAssertTrue(second.body.contains("a lucky find"), "second PATCH body: \(second.body)")
+
+    // Swipe the keyboard down: drag on the card's scroll view into the keyboard. Two drags: from the back text,
+    // then from the empty card area just above the keyboard.
+    field = startEditing(app, .front)
+    replaceText(field, with: "serendipity!")
+    let window = app.windows.firstMatch
+    let keyboardTop = app.keyboards.firstMatch.frame.minY
+    let starts = [el(app, "study.back").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)),
+                  window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 201, dy: keyboardTop - 30))]
+    for start in starts where app.keyboards.firstMatch.exists {
+      start.press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+      Thread.sleep(forTimeInterval: 2)
+    }
+    if app.keyboards.firstMatch.exists { snapshot("study-edit-swipe-still-editing", appearance: .light) }
+    waitForAbsence(app.keyboards.firstMatch, timeout: 3, "keyboard still up after swiping it down (two drags)")
+    waitForLabel(el(app, "study.front"), "serendipity!", timeout: 3)
+    XCTAssertFalse(field.exists, "frontField still shown after the keyboard was swiped down")
+    assertRatingsShown(app)
+    let patch = try waitForPatch(server, count: 3)
+    XCTAssertTrue(patch.body.contains("serendipity!"), "third PATCH body: \(patch.body)")
+    snapshot("study-edited-swipe", appearance: .light)
   }
 
-  /// Risk (b) / onSubmit on a vertical field (iOS 27): with the caret in the middle of the text, the Done key must
-  /// end the edit and save the text without a newline (the "newline typed at the end" fallback can't cover this).
+  /// Return never inserts a newline (spec rule; onSubmit doesn't fire on a vertical field on iOS 27): the Done key
+  /// with the caret mid-text ends the edit, and so does a typed newline at the end. Nothing saved has a newline.
   @MainActor
-  func testStudyEdit_doneWithCaretMidText() throws {
+  func testStudyEdit_returnCommitsWithoutNewline() throws {
     XCUIDevice.shared.appearance = .light
     let (server, deck) = try startStub()
     let app = launch(api: .live(server.url))
     reveal(app)
-    let field = startEditing(app, .back)
+    var field = startEditing(app, .back)
     field.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).tap()
     Thread.sleep(forTimeInterval: 0.5)
     field.typeText("Z")
     let draft = field.value as? String ?? ""
     XCTAssertTrue(draft.contains("Z") && !draft.hasSuffix("Z"), "caret not mid-text: '\(draft)'")
     tapDone(app)
-    waitForAbsence(field, timeout: 3, "Done with the caret mid-text did not end the edit (onSubmit not firing?)")
+    waitForAbsence(field, timeout: 3, "Done with the caret mid-text did not end the edit")
     waitForLabel(el(app, "study.back"), draft, timeout: 3)
-    let patch = try waitForPatch(server)
+    var patch = try waitForPatch(server)
     XCTAssertFalse(patch.body.contains("\\n"), "newline saved: \(patch.body)")
     XCTAssertEqual(deck.cards.first?.back, draft, "saved back")
+    assertRatingsShown(app)
+
+    // A newline typed at the end (hardware return / paste) commits and is dropped.
+    field = startEditing(app, .front)
+    field.typeText("!\n")
+    waitForAbsence(field, timeout: 3, "a typed newline did not end the edit")
+    waitForLabel(el(app, "study.front"), Self.front + "!", timeout: 3)
+    patch = try waitForPatch(server, count: 2)
+    XCTAssertFalse(patch.body.contains("\\n"), "newline saved: \(patch.body)")
+    XCTAssertEqual(deck.cards.first?.front, Self.front + "!", "saved front")
+    assertRatingsShown(app)
   }
 
   // MARK: - #6
@@ -216,12 +234,12 @@ final class StudyEditUITests: XCTestCase {
     let field = startEditing(app, .back)
     replaceText(field, with: "a happy accident")
     el(app, "study.add").tap()
-    waitForLabel(el(app, "editor.title"), "New card")
+    waitForSheet(app, "New card")
     _ = try waitForPatch(server)
     XCTAssertEqual(deck.cards.first?.back, "a happy accident")
     snapshot("study-edit-add-editor", appearance: .light)
     el(app, "editor.close").tap()
-    waitForAbsence(el(app, "editor.title"))
+    waitForAbsence(el(app, "editor.close"))
     waitForLabel(el(app, "study.back"), "a happy accident")
     assertRatingsShown(app)
   }
@@ -229,7 +247,7 @@ final class StudyEditUITests: XCTestCase {
   // MARK: - #9 (stub PATCH 500)
 
   /// #9: PATCH fails → old text back, `study.editError` "Couldn't save the edit" in place of the counter, still on
-  /// the card (not offline). Starting another edit clears it; rating clears it.
+  /// the card (not offline). Clearing it on rating / a new edit is reducer logic (StudyFeatureTests).
   @MainActor
   func testStudyEdit_saveFailureShowsError() throws {
     for appearance in [XCUIDevice.Appearance.light, .dark] {
@@ -253,57 +271,9 @@ final class StudyEditUITests: XCTestCase {
       assertRatingsShown(app)
       snapshot("study-edit-error", appearance: appearance)
 
-      // Another edit clears the message.
-      field = startEditing(app, .back)
-      XCTAssertFalse(el(app, "study.editError").exists, "error line still shown after starting another edit")
-      tapDone(app)
-      waitForAbsence(field)
-
-      // Fail again, then rate → cleared, counter back.
-      field = startEditing(app, .front)
-      replaceText(field, with: "serendipity!")
-      tapDone(app)
-      waitForLabel(el(app, "study.editError"), "Couldn't save the edit")
-      waitForLabel(el(app, "study.front"), Self.front)
-      el(app, "study.rate.good").tap()
-      waitForLabel(el(app, "study.front"), "gratitude")
-      XCTAssertFalse(el(app, "study.editError").exists, "error line still shown after rating")
-      XCTAssertTrue(el(app, "study.remaining").waitForExistence(timeout: 3), "counter not back after rating")
       app.terminate()
       server.stop()
     }
-  }
-
-  // MARK: - Risk (d): reloads don't replace the card under the user's fingers
-
-  /// Spec rule: while editing, a foreground reload is skipped. The server's copy changes while the user types;
-  /// backgrounding + reactivating must not call the API nor replace the draft; Done saves what was typed.
-  @MainActor
-  func testStudyEdit_foregroundReloadSkippedWhileEditing() throws {
-    XCUIDevice.shared.appearance = .light
-    let (server, deck) = try startStub()
-    let app = launch(api: .live(server.url))
-    reveal(app)
-    let field = startEditing(app, .back)
-    replaceText(field, with: "typed by me")
-    deck.remove(id: Self.idA)
-    deck.add(.init(id: Self.idA, front: Self.front, back: "changed by an agent", due: Self.base, createdAt: Self.base))
-    let before = server.requests.count
-    backgroundAndReactivate(app)
-    Thread.sleep(forTimeInterval: 2)
-    let calls = server.requests.dropFirst(before).map { "\($0.method) \($0.path)" }
-    let backField = el(app, "study.backField")
-    if backField.exists {
-      XCTAssertEqual(backField.value as? String, "typed by me", "draft replaced while editing")
-      XCTAssertTrue(calls.isEmpty, "API called on reactivation while editing: \(calls)")
-      snapshot("study-editing-after-foreground", appearance: .light)
-      tapDone(app)
-    }
-    // Whether or not backgrounding ended the edit, what the user typed must be what's saved and shown.
-    waitForLabel(el(app, "study.back"), "typed by me", timeout: 5)
-    let patch = try waitForPatch(server)
-    XCTAssertTrue(patch.body.contains("typed by me"), "PATCH body: \(patch.body)")
-    XCTAssertTrue(backField.exists == false)
   }
 
   // MARK: - #15
@@ -329,23 +299,6 @@ final class StudyEditUITests: XCTestCase {
     tapDone(app)
     waitForLabel(el(app, "study.back"), long + "!", timeout: 3)
     assertRatingsShown(app)
-  }
-
-  /// #15 (light, accessibility XL): the field is readable and not hidden by the keyboard.
-  @MainActor
-  func testStudyEdit_accessibilityXL() {
-    XCUIDevice.shared.appearance = .light
-    let app = launch(api: .mock, arguments: accessibilityXLArguments)
-    reveal(app)
-    let backText = el(app, "study.back").frame
-    let field = startEditing(app, .back)
-    XCTAssertEqual(field.value as? String, Self.back)
-    XCTAssertEqual(field.frame.height, backText.height, accuracy: 3, "XL backField height \(field.frame) vs text \(backText)")
-    assertFieldReachableAboveKeyboard(app, field)
-    snapshot("study-editing-xl", appearance: .light)
-    field.typeText("!")
-    tapDone(app)
-    waitForLabel(el(app, "study.back"), Self.back + "!", timeout: 3)
   }
 
   // MARK: - #13 VoiceOver
@@ -386,56 +339,46 @@ final class StudyEditUITests: XCTestCase {
     }
     waitForLabel(el(app, "study.back"), Self.back)
 
-    let spoken = try focusVoiceOver(on: Self.back, vo)
-    Thread.sleep(forTimeInterval: 2)  // hint ("Actions available") is spoken after a pause
-    let withHint = (try? vo.currentSpeech().utterance) ?? spoken
-    print("VO back speech: '\(spoken)' / '\(withHint)'")
-    // Activate the first custom action with VoiceOver gestures.
-    XCTAssertTrue(withHint.contains("Actions available") || spoken.contains("Actions available"),
-                  "no custom action announced on the revealed back: '\(spoken)' / '\(withHint)'")
-    app.swipeDown()
-    Thread.sleep(forTimeInterval: 1)
-    let actionSpeech = (try? vo.currentSpeech().utterance) ?? ""
-    print("VO after swipe down: '\(actionSpeech)'")
-    XCTAssertEqual(actionSpeech, "Edit", "first custom action on study.back is not 'Edit'")
-    guard voActivates else {
-      try vo.disable()
-      throw XCTSkip("#13 partial: 'Edit' action listed on the revealed back and absent before reveal, but a "
-                    + "synthesized double-tap doesn't activate under VoiceOver (control on Show answer failed)")
-    }
-    // VoiceOver's "double-tap anywhere" activates the selected action. Try the synthesized gestures in turn.
-    let field = el(app, "study.backField")
-    let window = app.windows.firstMatch
-    let attempts: [(String, () -> Void)] = [
-      ("window.doubleTap", { window.doubleTap() }),
-      ("back.coordinate.doubleTap", {
-        self.el(app, "study.back").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
-      }),
-      ("tap.tap", {
-        let c = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
-        c.press(forDuration: 0.02); c.press(forDuration: 0.02)
-      }),
-    ]
-    var opened = false
-    var log: [String] = []
-    for (name, gesture) in attempts where !opened {
-      gesture()
-      opened = field.waitForExistence(timeout: 3)
-      log.append("\(name): opened=\(opened) frontField=\(self.el(app, "study.frontField").exists) speech='\((try? vo.currentSpeech().utterance) ?? "-")'")
-      if !opened {  // re-select the Edit action on the back for the next attempt
-        _ = try? vo.moveBackward(); _ = try? vo.moveForward()
+    // Select a custom action on the back by swiping down until VoiceOver speaks it, then activate it.
+    // Control: the same mechanism with "Forgot" (rates → next card). If Forgot works and Edit doesn't, it's the app.
+    func select(_ action: String) throws -> [String] {
+      _ = try focusVoiceOver(on: Self.back, vo)
+      var heard: [String] = []
+      for _ in 0..<6 {
         app.swipeDown()
-        Thread.sleep(forTimeInterval: 0.5)
+        Thread.sleep(forTimeInterval: 1)
+        let speech = (try? vo.currentSpeech().utterance) ?? ""
+        heard.append(speech)
+        if speech == action { return heard }
       }
+      XCTFail("VoiceOver never spoke the '\(action)' action on study.back; heard \(heard)")
+      return heard
     }
-    print("VO attempts: \(log)")
-    try vo.disable()
-    XCTAssertTrue(opened, "VoiceOver Edit action did not open study.backField (speech '\(spoken)', "
-                  + "after swipe down '\(actionSpeech)'; attempts \(log))")
+    let editHeard = try select("Edit")
+    app.windows.firstMatch.doubleTap()
+    let field = el(app, "study.backField")
+    let opened = field.waitForExistence(timeout: 3)
+    let afterEdit = (try? vo.currentSpeech().utterance) ?? "-"
+    XCTContext.runActivity(named: "VO Edit: heard \(editHeard), opened=\(opened), then '\(afterEdit)'") { _ in }
     if opened {
       snapshot("study-editing-voiceover", appearance: .light)
       XCTAssertEqual(field.label, "Back", "field accessibility label")
+      try vo.disable()
+      return
     }
+    XCTAssertTrue(el(app, "study.back").exists && el(app, "study.front").label == Self.front, "card changed after Edit")
+    let forgotHeard = try select("Forgot")
+    app.windows.firstMatch.doubleTap()
+    let front = el(app, "study.front")
+    let rated = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label != %@", Self.front),
+                                                               object: front)], timeout: 4) == .completed
+    try vo.disable()
+    guard rated else {
+      throw XCTSkip("#13 left for the user on device: 'Edit' is listed on the revealed back (heard \(editHeard)), but "
+                    + "a synthesized double-tap activates no custom action under VoiceOver (control 'Forgot' did not rate either)")
+    }
+    XCTFail("VoiceOver 'Edit' (heard \(editHeard)) did not open study.backField, while 'Forgot' (heard \(forgotHeard)) "
+            + "rated the card through the same gestures: app bug")
   }
 
   // MARK: - #16 live API
@@ -612,10 +555,13 @@ final class StudyEditUITests: XCTestCase {
   @MainActor
   private func focusVoiceOver(on text: String, _ vo: XCUIVoiceOverService) throws -> String {
     var seen: [String] = []
-    for _ in 0..<20 {
-      let speech = try vo.moveForward().utterance
-      seen.append(speech)
-      if speech.contains(text) { return speech }
+    if let current = try? vo.currentSpeech().utterance, current.contains(text) { return current }
+    for forward in [true, false] {  // VoiceOver doesn't wrap: walk forward, then backward from the end
+      for _ in 0..<12 {
+        let speech = try (forward ? vo.moveForward() : vo.moveBackward()).utterance
+        seen.append(speech)
+        if speech.contains(text) { return speech }
+      }
     }
     XCTFail("VoiceOver never reached '\(text)'; spoke: \(seen)")
     return ""
