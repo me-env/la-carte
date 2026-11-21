@@ -135,15 +135,12 @@ struct SettingsFeatureTests {
   @Test func editingAfterACheckClearsTheStatus() async {
     var state = SettingsFeature.State()
     state.connection = .unauthorized
-    let clock = TestClock()
     let store = TestStore(initialState: state) {
       SettingsFeature()
-    } withDependencies: { [stats] in
+    } withDependencies: {
       $0.tokenStore.save = { _ in }
-      $0.apiClient.stats = {
-        try await clock.sleep(for: .seconds(1))
-        return stats
-      }
+      // Only cancellation ends this check: if editing didn't cancel it, the store would finish with it in flight.
+      $0.apiClient.stats = { try await Task.never() }
     }
 
     await store.send(\.binding.token, "right") {
@@ -160,7 +157,6 @@ struct SettingsFeatureTests {
       $0.$apiURL.withLock { $0 = "http://10.0.0.2:8000" }
       $0.connection = .idle
     }
-    await clock.run()
   }
 
   @Test func themeDefaultsToSystem() {
