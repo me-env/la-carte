@@ -111,12 +111,13 @@ async def test_instructions_explain_notes_cards_and_directions(engine):
         assert "6 hours" in tools["due_cards"]
 
 
-async def test_lists_the_two_prompts(engine):
+async def test_lists_the_prompts(engine):
     async with Client(build_mcp(engine)) as client:
         prompts = {p.name: p for p in (await client.list_prompts()).prompts}
         assert {name: p.title for name, p in prompts.items()} == {
             "quiz_me": "Quiz me",
             "make_cards": "Make cards from text",
+            "add_people": "Add people",
         }
         assert all(p.description for p in prompts.values())
         assert [(a.name, a.required) for a in prompts["make_cards"].arguments] == [
@@ -262,3 +263,13 @@ async def test_review_card_takes_an_optional_confidence(engine):
     with Session(engine) as session:
         logs = session.exec(select(ReviewLog).order_by(ReviewLog.id)).all()
         assert [log.confidence for log in logs] == [0.72, None]
+
+
+async def test_add_people_prompt(engine):
+    async with Client(build_mcp(engine)) as client:
+        asked = (await client.get_prompt("add_people", {"text": "Ada, CEO {x}"})).messages[0]
+        text = asked.content.text
+        for expected in ("<text>\nAda, CEO {x}\n</text>", "`description`", "ask me before"):
+            assert expected in text
+        told = await client.get_prompt("add_people", {"text": "Ada", "directions": "photo"})
+        assert "Which directions I want: photo" in told.messages[0].content.text

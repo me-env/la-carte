@@ -1,3 +1,4 @@
+import json
 import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -52,6 +53,7 @@ def _migrate(engine: Engine) -> None:
     - Spec 013: `reviewlog.confidence` (nullable REAL) is added; existing rows read NULL.
     - Spec 014: cards become directions over notes: each card gets a `basic` note with the same
       id holding its front/back, and `card` is rebuilt without front/back.
+    - Spec 014a amendment: person `role` and `context` fold into `description` (data only).
     """
     raw = engine.raw_connection()
     db = raw.driver_connection  # sqlite3: explicit BEGIN/COMMIT, so DDL is transactional too
@@ -63,6 +65,7 @@ def _migrate(engine: Engine) -> None:
         if (columns := _columns(db, "reviewlog")) and "confidence" not in columns:
             db.execute("ALTER TABLE reviewlog ADD COLUMN confidence FLOAT")
         _rebuild_if(db, engine, "014", lambda: "front" in _columns(db, "card"), _cards_to_notes)
+        _rebuild_if(db, engine, "014a", lambda: _has_person_roles(db), _fold_person_roles)
     finally:
         db.execute("PRAGMA foreign_keys=ON")
         db.isolation_level = isolation_level
@@ -150,6 +153,45 @@ def _cards_to_notes(db, dialect) -> None:
         db.execute(str(CreateIndex(index).compile(dialect=dialect)))
     if db.execute("PRAGMA foreign_key_check").fetchall():  # never expected: abort, roll back
         raise RuntimeError("cards-to-notes migration left a card without its note")
+
+
+_PERSON_ROLES = (
+    "SELECT id, fields FROM note WHERE type = 'person' AND "
+    "(json_type(fields, '$.role') IS NOT NULL OR json_type(fields, '$.context') IS NOT NULL)"
+)
+
+
+def _has_person_roles(db) -> bool:
+    return bool(_columns(db, "note")) and bool(db.execute(_PERSON_ROLES).fetchone())
+
+
+def _fold_person_roles(db, dialect) -> None:
+    """Person notes: `description` = "role — context" (the set ones, after any description), and
+    each card becomes `prompt -> every other field`, its prompt mapped role/context ->
+    description. A card that duplicates a sibling's direction is deleted (its reviews stay)."""
+    fields_order = ("photo", "name", "description")
+    for note_id, raw in db.execute(_PERSON_ROLES).fetchall():
+        fields = json.loads(raw)
+        parts = [fields.pop(f, "").strip() for f in ("description", "role", "context")]
+        if description := " — ".join(part for part in parts if part):
+            fields["description"] = description
+        db.execute("UPDATE note SET fields = ? WHERE id = ?", (json.dumps(fields), note_id))
+        seen: set[str] = set()
+        cards = db.execute(
+            "SELECT id, prompt FROM card WHERE note_id = ? ORDER BY created_at", (note_id,)
+        ).fetchall()
+        for card_id, prompt in cards:
+            mapped = [f if f in fields_order else "description" for f in json.loads(prompt)]
+            first = min(mapped, key=fields_order.index) if mapped else "name"
+            if first in seen:
+                db.execute("DELETE FROM card WHERE id = ?", (card_id,))
+                continue
+            seen.add(first)
+            answer = [f for f in fields_order if f != first]
+            db.execute(
+                "UPDATE card SET prompt = ?, answer = ? WHERE id = ?",
+                (json.dumps([first]), json.dumps(answer), card_id),
+            )
 
 
 def sessions(engine: Engine) -> Iterator[Session]:

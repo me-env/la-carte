@@ -10,6 +10,7 @@ from sqlmodel import Session
 from la_carte_api import db as migration
 from la_carte_api import deck
 from la_carte_api.db import make_engine
+from la_carte_api.models import Direction, NoteCreate, NoteType
 
 # The schema as created before spec 012 (`.schema` of a database made by the old models).
 OLD_SCHEMA = """
@@ -309,3 +310,49 @@ def test_failed_notes_migration_leaves_the_old_tables_intact(tmp_path, monkeypat
     monkeypatch.undo()  # the next start migrates normally
     make_engine(url).dispose()
     assert len(_notes_snapshot(path)["notes"]) == 2
+
+
+# --- spec 014a amendment: person role/context fold into description ---------------------------
+
+
+def test_person_role_and_context_fold_into_description(tmp_path):
+    path = tmp_path / "deck.db"
+    url = f"sqlite:///{path}"
+    engine = make_engine(url)
+    with Session(engine) as session:
+        person = NoteCreate(
+            type=NoteType.person,
+            fields={"name": "Ada Example", "photo": "https://example.org/a.jpg"},
+            directions=[Direction(prompt=["photo"]), Direction(prompt=["name"])],
+        )
+        [note] = deck.add_notes(session, [person]).added
+    engine.dispose()
+    photo, name = (card.id.hex for card in note.cards)
+    old = sqlite3.connect(path)  # as written before the amendment: role, context, partial answers
+    old.execute(
+        "UPDATE note SET fields = json_set(fields, '$.role', 'CEO', '$.context', 'met in Paris')"
+    )
+    old.execute(
+        """UPDATE card SET prompt = '["role"]', answer = '["name"]' WHERE id = ?""", (name,)
+    )
+    old.execute("""UPDATE card SET answer = '["name"]' WHERE id = ?""", (photo,))
+    old.commit()
+    old.close()
+
+    engine = make_engine(url)
+
+    with Session(engine) as session:
+        folded = deck.get_note(session, note.id)
+    assert folded.fields == {
+        "name": "Ada Example",
+        "photo": "https://example.org/a.jpg",
+        "description": "CEO — met in Paris",
+    }
+    assert [(c.id.hex, c.prompt, c.answer) for c in folded.cards] == [
+        (photo, ["photo"], ["name", "description"]),
+        (name, ["description"], ["photo", "name"]),
+    ]
+    assert len(list(tmp_path.glob("deck.db.pre-014a-*.bak"))) == 1
+    engine.dispose()
+    make_engine(url).dispose()  # idempotent: no second backup
+    assert len(list(tmp_path.glob("*.bak"))) == 1
