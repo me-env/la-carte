@@ -711,30 +711,14 @@ struct StudyFeatureTests {
     #expect(updates.value == 1)
   }
 
-  @Test func tappingTheCardWhileEditingCommits() async {
+  @Test func tappingTheCardWhileEditingLeavesTheEditToFocus() async {
     var state = revealed(cards)
     state.editing = .front
     state.draft = "serendipitous"
-    let store = TestStore(initialState: state) {
-      StudyFeature()
-    } withDependencies: { [cards] in
-      $0.apiClient.updateCard = { _, front, _ in
-        var card = cards[0]
-        card.front = front
-        return card
-      }
-    }
+    let store = TestStore(initialState: state) { StudyFeature() }
 
-    await store.send(.cardTapped) {
-      $0.editing = nil
-      $0.cards[0].front = "serendipitous"
-      $0.isSavingEdit = true
-    }
-    await store.receive(\.editSaveResponse) {
-      $0.isSavingEdit = false
-    }
-    // Focus loss after the tap ends the same edit again: nothing happens.
-    await store.send(.editEnded)
+    // The view drops focus on a tap outside the field; that focus loss alone ends the edit (`editEnded`).
+    await store.send(.cardTapped)
   }
 
   @Test func anUnchangedOrBlankEditSendsNothing() async {

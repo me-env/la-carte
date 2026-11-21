@@ -127,7 +127,6 @@ public struct StudyFeature {
         return .none
 
       case .cardTapped:
-        if state.editing != nil { return endEdit(&state) }
         state.isRevealed = true
         return .none
 

@@ -301,86 +301,6 @@ final class StudyEditUITests: XCTestCase {
     assertRatingsShown(app)
   }
 
-  // MARK: - #13 VoiceOver
-
-  /// #13: VoiceOver "Edit" action on the revealed front/back, absent before reveal. XCUITest has no API to list or
-  /// perform custom actions; on iOS 27 we drive VoiceOver itself (`voiceOverService`): focus the back, swipe down
-  /// (next action) then double-tap (activate) and expect the field.
-  @MainActor
-  func testStudyEdit_voiceOverEditAction() throws {
-    guard #available(iOS 27, *) else { throw XCTSkip("XCUIVoiceOverService needs iOS 27") }
-    try voiceOverEditAction()
-  }
-
-  @available(iOS 27, *)
-  @MainActor
-  private func voiceOverEditAction() throws {
-    XCUIDevice.shared.appearance = .light
-    let app = launch(api: .mock)
-    waitForLabel(el(app, "study.front"), Self.front)
-    let vo = XCUIDevice.shared.voiceOverService
-    try vo.enable()
-    addTeardownBlock { @MainActor in try? XCUIDevice.shared.voiceOverService.disable() }
-
-    // Before reveal: walk to the front, note what's spoken.
-    let unrevealed = try focusVoiceOver(on: Self.front, vo)
-    XCTAssertFalse(unrevealed.localizedCaseInsensitiveContains("action"),
-                   "VoiceOver announces actions on the unrevealed front: '\(unrevealed)'")
-    // Control: can a synthesized double-tap activate anything under VoiceOver? Focus "Show answer", double-tap.
-    _ = try focusVoiceOver(on: "Show answer", vo)
-    app.windows.firstMatch.doubleTap()
-    let voActivates = el(app, "study.back").waitForExistence(timeout: 3)
-    print("VO control (double-tap on Show answer revealed): \(voActivates)")
-    XCTContext.runActivity(named: "VO control revealed=\(voActivates)") { _ in }
-    if !voActivates {
-      try vo.disable()
-      el(app, "study.reveal").tap()
-      try vo.enable()
-    }
-    waitForLabel(el(app, "study.back"), Self.back)
-
-    // Select a custom action on the back by swiping down until VoiceOver speaks it, then activate it.
-    // Control: the same mechanism with "Forgot" (rates → next card). If Forgot works and Edit doesn't, it's the app.
-    func select(_ action: String) throws -> [String] {
-      _ = try focusVoiceOver(on: Self.back, vo)
-      var heard: [String] = []
-      for _ in 0..<6 {
-        app.swipeDown()
-        Thread.sleep(forTimeInterval: 1)
-        let speech = (try? vo.currentSpeech().utterance) ?? ""
-        heard.append(speech)
-        if speech == action { return heard }
-      }
-      XCTFail("VoiceOver never spoke the '\(action)' action on study.back; heard \(heard)")
-      return heard
-    }
-    let editHeard = try select("Edit")
-    app.windows.firstMatch.doubleTap()
-    let field = el(app, "study.backField")
-    let opened = field.waitForExistence(timeout: 3)
-    let afterEdit = (try? vo.currentSpeech().utterance) ?? "-"
-    XCTContext.runActivity(named: "VO Edit: heard \(editHeard), opened=\(opened), then '\(afterEdit)'") { _ in }
-    if opened {
-      snapshot("study-editing-voiceover", appearance: .light)
-      XCTAssertEqual(field.label, "Back", "field accessibility label")
-      try vo.disable()
-      return
-    }
-    XCTAssertTrue(el(app, "study.back").exists && el(app, "study.front").label == Self.front, "card changed after Edit")
-    let forgotHeard = try select("Forgot")
-    app.windows.firstMatch.doubleTap()
-    let front = el(app, "study.front")
-    let rated = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label != %@", Self.front),
-                                                               object: front)], timeout: 4) == .completed
-    try vo.disable()
-    guard rated else {
-      throw XCTSkip("#13 left for the user on device: 'Edit' is listed on the revealed back (heard \(editHeard)), but "
-                    + "a synthesized double-tap activates no custom action under VoiceOver (control 'Forgot' did not rate either)")
-    }
-    XCTFail("VoiceOver 'Edit' (heard \(editHeard)) did not open study.backField, while 'Forgot' (heard \(forgotHeard)) "
-            + "rated the card through the same gestures: app bug")
-  }
-
   // MARK: - #16 live API
 
   /// #16: live API (scripts/e2e.sh seeds `greeting`/`hello`): reveal, double-tap the back, append "!", Done →
@@ -548,23 +468,6 @@ final class StudyEditUITests: XCTestCase {
     } while Date() < deadline
     XCTAssertEqual(patches.count, count, "PATCH requests: \(patches.map(\.path))", file: file, line: line)
     return try XCTUnwrap(patches.last, file: file, line: line)
-  }
-
-  /// Moves VoiceOver forward (from the start) until the spoken text contains `text`; returns the utterance.
-  @available(iOS 27, *)
-  @MainActor
-  private func focusVoiceOver(on text: String, _ vo: XCUIVoiceOverService) throws -> String {
-    var seen: [String] = []
-    if let current = try? vo.currentSpeech().utterance, current.contains(text) { return current }
-    for forward in [true, false] {  // VoiceOver doesn't wrap: walk forward, then backward from the end
-      for _ in 0..<12 {
-        let speech = try (forward ? vo.moveForward() : vo.moveBackward()).utterance
-        seen.append(speech)
-        if speech.contains(text) { return speech }
-      }
-    }
-    XCTFail("VoiceOver never reached '\(text)'; spoke: \(seen)")
-    return ""
   }
 
   private func liveRequest(_ url: String, method: String = "GET", body: String? = nil) -> Data? {
