@@ -39,8 +39,9 @@ public struct StudyFeature {
     }
   }
 
-  public enum Action: BindableAction {
-    case binding(BindingAction<State>)
+  public enum Action {
+    /// Not a binding: ending the edit on a typed newline needs the draft before and after.
+    case draftChanged(String)
     case onAppear
     case revealTapped
     case cardTapped
@@ -94,17 +95,16 @@ public struct StudyFeature {
   }
 
   public var body: some ReducerOf<Self> {
-    BindingReducer()
     Reduce { state, action in
       switch action {
-      case .binding(\.draft):
-        // A vertical field may type return instead of submitting it: a trailing newline ends the edit.
-        guard state.draft.hasSuffix("\n") else { return .none }
-        state.draft.removeLast()
+      case let .draftChanged(draft):
+        // A vertical field types return instead of submitting (iOS 27): a typed newline ends the edit.
+        guard let kept = Self.droppingTypedNewlines(old: state.draft, new: draft) else {
+          state.draft = draft
+          return .none
+        }
+        state.draft = kept
         return endEdit(&state)
-
-      case .binding:
-        return .none
 
       case .onAppear, .deckChanged:
         return fetchDueCards(&state)
@@ -231,6 +231,15 @@ public struct StudyFeature {
 
   /// Saves the edited side optimistically: the trimmed text shows at once and the server's card replaces it.
   /// An unchanged or blank text just ends the edit. Idempotent, since focus loss can follow Done.
+  /// `new` without the newlines typed since `old` (the card's own newlines stay), or nil if none were typed.
+  static func droppingTypedNewlines(old: String, new: String) -> String? {
+    let prefix = zip(old, new).prefix { $0 == $1 }.count
+    let suffix = zip(old.dropFirst(prefix).reversed(), new.dropFirst(prefix).reversed()).prefix { $0 == $1 }.count
+    let typed = new.dropFirst(prefix).dropLast(suffix)
+    guard typed.contains(where: \.isNewline) else { return nil }
+    return String(new.prefix(prefix)) + typed.filter { !$0.isNewline } + String(new.suffix(suffix))
+  }
+
   private func endEdit(_ state: inout State) -> Effect<Action> {
     guard let field = state.editing, let previous = state.cards.first else { return .none }
     state.editing = nil

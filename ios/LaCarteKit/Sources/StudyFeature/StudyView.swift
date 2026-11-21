@@ -11,6 +11,8 @@ public struct StudyView: View {
   /// Where the rating drag came down, in the card's coordinates: the ring's center. Visual only.
   @State private var touchDown: CGPoint?
   @State private var cardSize = CGSize.zero
+  /// The edit field's frame in the card, so a tap inside it moves the caret instead of committing.
+  @State private var fieldFrame = CGRect.zero
 
   public init(store: StoreOf<StudyFeature>) {
     self.store = store
@@ -178,22 +180,23 @@ public struct StudyView: View {
         .defaultScrollAnchor(.center, for: .alignment)
         .scrollIndicatorsFlash(trigger: store.isRevealed)
         .scrollDismissesKeyboard(.interactively)
-        .background {
-          // While editing, the commit tap sits behind the field so taps that move the cursor never reach it.
-          if store.editing != nil {
-            Color.clear.contentShape(.rect).onTapGesture { store.send(.cardTapped) }
-          }
-        }
         .onChange(of: focusedField) { _, field in
           if let field {
-            withAnimation(Theme.Motion.standard) { proxy.scrollTo(field, anchor: .center) }
+            // Not animated: an animated scroll can read as a drag and dismiss the keyboard (interactively).
+            proxy.scrollTo(field, anchor: .center)
           } else {
             store.send(.editEnded)
           }
         }
       }
       .contentShape(.rect)
-      .gesture(TapGesture().onEnded { sendAnimated(.cardTapped) }, isEnabled: store.editing == nil)
+      .gesture(
+        SpatialTapGesture(coordinateSpace: .named(Self.cardSpace)).onEnded { tap in
+          guard store.editing == nil || !fieldFrame.contains(tap.location) else { return }
+          sendAnimated(.cardTapped)
+        }
+      )
+      .coordinateSpace(.named(Self.cardSpace))
       // Off unless `canRate` (so never while editing); a pan needs movement, so taps pass through.
       .gesture(
         HorizontalPan(isEnabled: store.canRate) { start, translation in
@@ -239,7 +242,7 @@ public struct StudyView: View {
     let name = field == .front ? "front" : "back"
     let canEdit = store.isRevealed && store.editing == nil
     if store.editing == field {
-      TextField("", text: $store.draft, axis: .vertical)
+      TextField("", text: $store.draft.sending(\.draftChanged), axis: .vertical)
         .font(font)
         .foregroundStyle(color)
         .textFieldStyle(.plain)
@@ -248,6 +251,7 @@ public struct StudyView: View {
         .focused($focusedField, equals: field)
         .onSubmit { store.send(.editEnded) }
         .onAppear { focusedField = field }
+        .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(Self.cardSpace)) }) { fieldFrame = $0 }
         .id(field)
         .accessibilityLabel(field == .front ? "Front" : "Back")
         .accessibilityIdentifier("study.\(name)Field")
@@ -289,6 +293,8 @@ public struct StudyView: View {
   private func ratingLabel(_ rating: Rating) -> some View {
     textButtonLabel(Self.title(rating))
   }
+
+  private nonisolated static let cardSpace = "study.card"
 
   static func title(_ rating: Rating) -> String {
     switch rating {

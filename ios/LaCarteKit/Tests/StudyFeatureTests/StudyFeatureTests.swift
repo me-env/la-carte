@@ -608,7 +608,7 @@ struct StudyFeatureTests {
       $0.editing = .back
       $0.draft = "finding something good without looking for it"
     }
-    await store.send(\.binding.draft, "a happy accident") {
+    await store.send(.draftChanged("a happy accident")) {
       $0.draft = "a happy accident"
     }
     await store.send(.editEnded) {
@@ -639,7 +639,7 @@ struct StudyFeatureTests {
       }
     }
 
-    await store.send(\.binding.draft, "a happy accident\n") {
+    await store.send(.draftChanged("a happy accident\n")) {
       $0.draft = "a happy accident"
       $0.editing = nil
       $0.cards[0].back = "a happy accident"
@@ -648,6 +648,37 @@ struct StudyFeatureTests {
     await store.receive(\.editSaveResponse) {
       $0.isSavingEdit = false
     }
+  }
+
+  @Test func aNewlineTypedMidTextEndsTheEditAndIsDropped() async {
+    var state = revealed(cards)
+    state.editing = .back
+    state.draft = "a happy accident"
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.updateCard = { _, _, back in
+        var card = cards[0]
+        card.back = back
+        return card
+      }
+    }
+
+    await store.send(.draftChanged("a happy\n accident")) {
+      $0.draft = "a happy accident"
+      $0.editing = nil
+      $0.cards[0].back = "a happy accident"
+      $0.isSavingEdit = true
+    }
+    await store.receive(\.editSaveResponse) {
+      $0.isSavingEdit = false
+    }
+  }
+
+  @Test func theCardsOwnNewlinesAreNotTyped() {
+    #expect(StudyFeature.droppingTypedNewlines(old: "one\ntwo", new: "one\ntwos") == nil)
+    #expect(StudyFeature.droppingTypedNewlines(old: "one\ntwo", new: "one\nt\nwo") == "one\ntwo")
+    #expect(StudyFeature.droppingTypedNewlines(old: "ab", new: "a\nb") == "ab")
   }
 
   @Test func addingOrOpeningTheDeckWhileEditingCommitsFirst() async {
@@ -714,7 +745,7 @@ struct StudyFeatureTests {
       $0.editing = .front
       $0.draft = "serendipity"
     }
-    await store.send(\.binding.draft, " serendipity ") {
+    await store.send(.draftChanged(" serendipity ")) {
       $0.draft = " serendipity "
     }
     await store.send(.editEnded) {
@@ -724,10 +755,8 @@ struct StudyFeatureTests {
       $0.editing = .back
       $0.draft = "finding something good without looking for it"
     }
-    await store.send(\.binding.draft, "  \n ") {
-      $0.draft = "  \n "
-    }
-    await store.send(.editEnded) {
+    await store.send(.draftChanged("  \n ")) {
+      $0.draft = "   "
       $0.editing = nil
     }
   }
@@ -785,7 +814,7 @@ struct StudyFeatureTests {
       $0.draft = "serendipity"
       $0.editFailed = false
     }
-    await store.send(\.binding.draft, "serendipitous") {
+    await store.send(.draftChanged("serendipitous")) {
       $0.draft = "serendipitous"
     }
     await store.send(.editEnded) {
