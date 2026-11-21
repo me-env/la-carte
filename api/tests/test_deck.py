@@ -211,3 +211,21 @@ def test_deleting_a_card_keeps_its_review_history(session):
     assert (after.total, after.reviewed_today, after.streak) == (0, 1, 2)
     logs = session.exec(select(ReviewLog).order_by(col(ReviewLog.reviewed_at))).all()
     assert [(log.card_id, log.rating) for log in logs] == [(card.id, Rating.good)] * 2
+
+
+def test_confidence_is_stored_and_does_not_change_scheduling(session):
+    now = utcnow()
+    plain, measured = deck.add_cards(
+        session, [CardCreate(front="a", back="a"), CardCreate(front="b", back="b")], now=now
+    ).added
+    for rating in (Rating.good, Rating.again):
+        later = now + timedelta(days=1)
+        a = deck.review_card(session, plain.id, rating, now=later)
+        b = deck.review_card(session, measured.id, rating, now=later, confidence=0.3)
+        assert (a.due, a.last_review, a.state) == (
+            b.due, b.last_review, b.state,
+        )  # fmt: skip
+        now = later
+
+    logs = session.exec(select(ReviewLog).order_by(col(ReviewLog.id))).all()
+    assert [log.confidence for log in logs] == [None, 0.3, None, 0.3]

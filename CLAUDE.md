@@ -21,6 +21,7 @@ scripts/api-dev.sh           # API on :8000 (REST + /mcp), auto-reload
 scripts/ios-build.sh         # build app for simulator
 scripts/ios-test.sh          # LaCarteKit unit tests (TestStore)
 scripts/ios-ui-test.sh <run> # XCUITest (mock API) → qa/screenshots/<run>/
+scripts/ios-ui-test.sh --split [N] <run> [-only-testing:…]  # same, sharded over free pool simulators (docs/testing.md)
 scripts/e2e.sh <run>         # fresh API + seeded deck → live UI tests → qa/screenshots/<run>/
 uv run scripts/design-review.py <render> --home  # measured logo/visual review (design-critic gates on it)
 scripts/ios-adhoc.sh         # signed Ad Hoc .ipa (same steps as CI)
@@ -55,7 +56,7 @@ account or installing on the iPhone. No CodeGraph in this repo: don't offer to i
 | `secrets-guard` | Read-only check that no credentials or private data reach the public repo (tree + history) | Edits files; prints secret values |
 | `marketing` | Demo deck content, demo videos (app + widget, agent-adds-cards via MCP), README visuals (`docs/marketing/`, `marketing/`) | Touches app/API code; shows real URLs, tokens or personal data |
 
-`scripts/` owners: dev-velocity `_ios-env.sh` `_lock.sh` `ios-build.sh` `ios-test.sh` · qa-validator `ios-ui-test.sh`
+`scripts/` owners: dev-velocity `_ios-env.sh` `_lock.sh` `ios-build.sh` `ios-test.sh` · qa-validator `ios-ui-test.sh` `ios-ui-test-split.sh`
 `e2e.sh` (lock/scratch mechanics agreed with dev-velocity) · api-engineer `api-*.sh` · release-engineer `ios-adhoc.sh`
 `ios-install-device.sh` · tooling-lead `design-review.py` `brandkit.py` (render methods agreed with design-lead) ·
 design-lead `fetch-design-refs.sh`.
@@ -70,12 +71,14 @@ its result.
 **Watch your context.** Every turn re-reads your whole context, so a bloated agent burns usage fast.
 - Don't dump big outputs: pipe through `tail`/`grep`/`head`, read files by range, never `cat` logs or JSONL.
 - Delegate heavy reading/research to sub-agents and keep only their conclusion.
+- One agent per task: when a task is done the agent ends; a new task gets a fresh agent with a short brief
+  (don't resume a finished agent for unrelated work: its old context is re-read every turn).
 - Long task? Compact when your context gets large (~150k tokens): summarise state into your notes/report,
   then continue from the summary. If you can't compact, finish the current step, report a short hand-off
   (what's done, what's next, file paths) and stop; the manager restarts a fresh agent from it.
 
 **Clean up your shells.** Never wait with `pgrep -f <pattern>` (it matches your own loop and never ends)
-or an unbounded `until` loop: bound every wait with a timeout, prefer the scripts' locks, and kill any
+or an unbounded `until` loop: wait for a run with ONE background command that exits when it ends (the harness wakes you; every wake re-reads your whole context, so no short re-armed polls), bound it with a timeout, prefer the scripts' locks, and kill any
 background process you started (servers, watchers, pagers) before you report.
 
 **Ask for better tooling.** If you're judging by eye, repeating manual steps, waiting on slow or flaky

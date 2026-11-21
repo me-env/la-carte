@@ -21,7 +21,8 @@ in `docs/design/reference/` that the spec points to.
    using accessibility identifiers only, light + dark for mock tests, `snapshot("<screen>-<state>", …)`
    at every state the spec lists. Add a `_liveAPI` variant for flows that hit the API.
 2. Run `scripts/ios-ui-test.sh <NNN>-mock` and `scripts/e2e.sh <NNN>-e2e` (NNN = spec number).
-   Seed extra data in `scripts/e2e.sh` if the flow needs it.
+   Seed extra data in `scripts/e2e.sh` if the flow needs it. For multi-test mock validation use
+   `scripts/ios-ui-test.sh --split <NNN>-mock -only-testing:…` (docs/testing.md, Splitting a run).
 3. **Open every screenshot** (Read the PNG) and check it against the spec and the
    `docs/design-system.md` QA visual checklist. Compare with the reference images for feel.
    Also run the full UI suite once to catch regressions in earlier features.

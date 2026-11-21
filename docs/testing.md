@@ -38,6 +38,16 @@ ScrollView as empty.
 - Mock data comes from `[Card].fixtures` (`APIClient/InMemoryAPIClient.swift`). Changing fixtures changes
   screenshots — coordinate with qa-validator.
 
+## Splitting a run
+
+`scripts/ios-ui-test.sh --split [N] <run> [-only-testing:LaCarteUITests/<Class>[/<test>] …]` builds once, deals
+the selected test methods into N shards (balanced by the last measured durations in
+`<results dir>/ui-test-durations.tsv`, else by count) and runs them at once, one UI pool simulator each. Output is
+the same as a plain run: screenshots in `qa/screenshots/<run>/`, one merged `<run>.xcresult`, one `TESTS: …` line
+(wall time), exit code non-zero if any shard fails. Shard lines are prefixed `[k]`.
+- **When:** 8+ tests or about 4 min of runtime; below that run plainly (each shard costs ~1 min of fixed overhead).
+- **N** defaults to, and is capped by, the free UI simulators; with one free (busy pool) it is a plain run.
+
 ## Running the app against a local API
 
 The app has no built-in server (spec 008). To run it from Xcode on the simulator against `scripts/api-dev.sh`,
