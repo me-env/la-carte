@@ -75,7 +75,7 @@ its result.
   (what's done, what's next, file paths) and stop; the manager restarts a fresh agent from it.
 
 **Clean up your shells.** Never wait with `pgrep -f <pattern>` (it matches your own loop and never ends)
-or an unbounded `until` loop: bound every wait with a timeout, prefer the scripts' locks, and kill any
+or an unbounded `until` loop: wait for a run with ONE background command that exits when it ends (the harness wakes you; every wake re-reads your whole context, so no short re-armed polls), bound it with a timeout, prefer the scripts' locks, and kill any
 background process you started (servers, watchers, pagers) before you report.
 
 **Ask for better tooling.** If you're judging by eye, repeating manual steps, waiting on slow or flaky
