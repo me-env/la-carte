@@ -417,15 +417,13 @@ struct StudyFeatureTests {
   }
 
   @Test func ratingCancelsALoadInFlightSoTheRatedCardCantComeBack() async {
-    let clock = TestClock()
     let store = TestStore(initialState: studying(cards)) {
       StudyFeature()
     } withDependencies: { [cards] in
       $0.apiClient.isConfigured = { true }
-      $0.continuousClock = clock
+      // Only cancellation ends this load: if rating didn't cancel it, the store would finish with it in flight.
       $0.apiClient.dueCards = { _ in
-        try await clock.sleep(for: .seconds(1))
-        return cards
+        try await Task.never()
       }
       $0.apiClient.review = { _, _ in cards[0] }
     }
@@ -442,7 +440,6 @@ struct StudyFeatureTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
-    await clock.run()
   }
 
   @Test func withoutAServerOrTokenAppearingAsksToConnectWithoutARequest() async {
