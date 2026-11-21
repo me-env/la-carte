@@ -137,7 +137,8 @@ value). Light only: `study-revealed-xl` (AX XL, #19).
 from a DEBUG-only launch argument `-studySwipePreview <f>` (UserDefaults argument domain, like `-theme`; `f` in
 card-width fractions, the same unit as the drags). When it is set and `canRate` becomes true, `StudyView` acts as if
 a finger came down at the card's center and is held at `f`: it draws the real dots and sends
-`swipeChanged(f)` once. It never releases. Use the five `f` values above.
+`swipeChanged(f)` once. It never releases. Use the five `f` values above. A negative value must be passed as
+`"<real>-0.13</real>"` or `" -0.13"` (leading space): a bare `-0.13` is read as another flag and the preview is off.
 
 ## TCA shape (iOS)
 No new module, no new dependency. `StudyFeature` + `StudyView`, plus a dots view in `DesignSystem` (design-lead).

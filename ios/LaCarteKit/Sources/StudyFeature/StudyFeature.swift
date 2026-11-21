@@ -205,6 +205,8 @@ public struct StudyFeature {
       case let .cardsResponse(.failure(error)), let .statsResponse(.failure(error)),
         let .reviewResponse(.failure(error)):
         state.isReviewing = false
+        // The card and its pan leave the screen, so a held drag may never send its release.
+        state.swipeEase = nil
         state.phase = (error as? APIError)?.isUnauthorized == true ? .unauthorized : .offline
         return .none
 

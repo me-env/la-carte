@@ -28,9 +28,6 @@ public struct StudyView: View {
     .background(Theme.background)
     .onAppear { store.send(.onAppear) }
     .onChange(of: scenePhase) { _, phase in store.send(.scenePhaseChanged(phase)) }
-    .onChange(of: focusedField) { _, field in
-      if field == nil { store.send(.editEnded) }
-    }
     .onChange(of: store.editFailed) { _, failed in
       if failed { AccessibilityNotification.Announcement("Couldn't save the edit").post() }
     }
@@ -179,15 +176,23 @@ public struct StudyView: View {
         .defaultScrollAnchor(.center, for: .alignment)
         .scrollIndicatorsFlash(trigger: store.isRevealed)
         .scrollDismissesKeyboard(.interactively)
+        .background {
+          // While editing, the commit tap sits behind the field so taps that move the cursor never reach it.
+          if store.editing != nil {
+            Color.clear.contentShape(.rect).onTapGesture { store.send(.cardTapped) }
+          }
+        }
         .onChange(of: focusedField) { _, field in
-          guard let field else { return }
-          withAnimation(Theme.Motion.standard) { proxy.scrollTo(field, anchor: .center) }
+          if let field {
+            withAnimation(Theme.Motion.standard) { proxy.scrollTo(field, anchor: .center) }
+          } else {
+            store.send(.editEnded)
+          }
         }
       }
       .contentShape(.rect)
-      .onTapGesture {
-        withAnimation(.easeInOut(duration: 0.25)) { _ = store.send(.cardTapped) }
-      }
+      .gesture(TapGesture().onEnded { sendAnimated(.cardTapped) }, isEnabled: store.editing == nil)
+      // Off unless `canRate` (so never while editing); a pan needs movement, so taps pass through.
       .gesture(
         HorizontalPan(isEnabled: store.canRate) { start, translation in
           touchDown = start
@@ -215,7 +220,7 @@ public struct StudyView: View {
               .disabled(store.isReviewing)
               .transition(.opacity)
           } else {
-            Button { reveal() } label: { textButtonLabel("Show answer") }
+            Button { sendAnimated(.revealTapped) } label: { textButtonLabel("Show answer") }
               .buttonStyle(.plain)
               .accessibilityIdentifier("study.reveal")
           }
@@ -248,6 +253,7 @@ public struct StudyView: View {
         .font(font)
         .foregroundStyle(color)
         .id(field)
+        .allowsHitTesting(store.editing == nil)
         .gesture(TapGesture(count: 2).onEnded { store.send(.textDoubleTapped(field)) }, isEnabled: canEdit)
         .accessibilityActions {
           if canEdit {
@@ -343,9 +349,9 @@ public struct StudyView: View {
   }
 
   /// Only the reveal fades; moving to the next card is instant so its back never flashes.
-  private func reveal() {
-    withAnimation(.easeInOut(duration: 0.25)) {
-      _ = store.send(.revealTapped)
+  private func sendAnimated(_ action: StudyFeature.Action) {
+    withAnimation(Theme.Motion.standard) {
+      _ = store.send(action)
     }
   }
 

@@ -1115,6 +1115,23 @@ struct StudyFeatureTests {
     }
   }
 
+  @Test func aLoadFailingMidDragClearsTheRing() async {
+    var state = revealed(cards)
+    state.swipeEase = 0.76
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: {
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.dueCards = { _ in throw Offline() }
+    }
+
+    await store.send(.scenePhaseChanged(.active))
+    await store.receive(\.cardsResponse.failure) {
+      $0.phase = .offline
+      $0.swipeEase = nil
+    }
+  }
+
   @Test func aReleaseAfterTheDragLostItsCardClearsTheRingWithoutAReview() async {
     var state = revealed(cards)
     state.swipeEase = 1
