@@ -30,7 +30,7 @@ struct DesignSystemGalleryContent: View {
       section("Confidence dots") {
         HStack(spacing: Theme.Spacing.s) {
           ForEach([0, 0.25, 0.5, 0.75, 1], id: \.self) { order in
-            ConfidenceDots(order: order, radius: 24)
+            ConfidenceDots(order: order, radius: 16)
           }
         }
         .accessibilityIdentifier("gallery.confidenceDots")

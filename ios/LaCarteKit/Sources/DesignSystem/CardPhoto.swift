@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A person's photo from a public URL (spec 014) in a fixed frame, so loading or failing never moves the layout.
 public struct CardPhoto: View {
@@ -15,6 +16,7 @@ public struct CardPhoto: View {
   let style: Style
   let onFailure: (() -> Void)?
 
+  @State private var image: Image?
   @State private var failed = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -27,33 +29,42 @@ public struct CardPhoto: View {
   }
 
   public var body: some View {
-    AsyncImage(url: url, transaction: Transaction(animation: reduceMotion ? nil : Theme.Motion.standard)) { phase in
-      switch phase {
-      case let .success(image):
+    ZStack {
+      if let image {
         image
           .resizable()
           .scaledToFill()
           .transition(.opacity)
-      case .failure:
+      } else if url == nil || failed {
         symbol
-          .onAppear {
-            failed = true
-            onFailure?()
-          }
-      case .empty:
-        if url == nil { symbol } else { Rectangle().fill(Theme.hairline) }
-      @unknown default:
-        symbol
+      } else {
+        Rectangle().fill(Theme.hairline)
       }
     }
     .frame(width: size.width, height: size.height)
     // A 2 pt stroke on the edge, clipped to its inner 1 pt: white photos don't bleed into the paper.
     .overlay(shape.stroke(Theme.hairline, lineWidth: 2))
     .clipShape(shape)
-    .onChange(of: url) { failed = false }
+    .task(id: url) { await load() }
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(failed ? "Photo, not loaded" : "Photo")
     .accessibilityAddTraits(.isImage)
+  }
+
+  /// Not `AsyncImage`: it can stay on its empty phase when a load fails, and it has no timeout.
+  private func load() async {
+    image = nil
+    failed = false
+    guard let url else { return }
+    do {
+      let (data, _) = try await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 10))
+      guard let uiImage = UIImage(data: data) else { throw URLError(.cannotDecodeContentData) }
+      withAnimation(reduceMotion ? nil : Theme.Motion.standard) { image = Image(uiImage: uiImage) }
+    } catch {
+      guard !Task.isCancelled else { return }
+      failed = true
+      onFailure?()
+    }
   }
 
   private var symbol: some View {

@@ -5,9 +5,9 @@ import SwiftUI
 import Testing
 import UIKit
 
-@testable import CardEditorFeature
 @testable import DeckFeature
 @testable import DesignSystem
+@testable import NoteEditorFeature
 @testable import SettingsFeature
 @testable import StudyFeature
 
@@ -65,7 +65,7 @@ struct ScreenColorTests {
   @Test(arguments: looks)
   func deck(_ look: Look) throws {
     var state = DeckFeature.State()
-    state.cards = IdentifiedArray(uniqueElements: [Card].fixtures)
+    state.notes = IdentifiedArray(uniqueElements: [Note].fixtures)
     state.phase = .loaded
     let screen = try Screen(DeckView(store: Store(initialState: state) { EmptyReducer() }), look)
 
@@ -85,8 +85,8 @@ struct ScreenColorTests {
 
   @Test(arguments: looks)
   func editor(_ look: Look) throws {
-    let state = CardEditorFeature.State(card: [Card].fixtures[2])
-    let screen = try Screen(CardEditorView(store: Store(initialState: state) { EmptyReducer() }), look)
+    let state = NoteEditorFeature.State(note: [Note].fixtures.first { $0.type == .basic })
+    let screen = try Screen(NoteEditorView(store: Store(initialState: state) { EmptyReducer() }), look)
 
     screen.expectBackground()
     #expect(screen.share(of: screen.palette.surface) > 0.02, "editor fields on \(Screen.hex(screen.palette.surface))")

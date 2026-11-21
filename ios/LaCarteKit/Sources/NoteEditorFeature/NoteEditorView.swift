@@ -38,7 +38,7 @@ public struct NoteEditorView: View {
           photoSection
           Section {
             field("name", prompt: "Name")
-            field("description", prompt: "Who they are, e.g. what they do")
+            field("description", prompt: "Role, or how you know them")
               .lineLimit(1...3)
           }
         }
@@ -163,22 +163,22 @@ public struct NoteEditorView: View {
     .accessibilityIdentifier("editor.direction.\(Self.identifier(direction, type: store.type))")
   }
 
-  /// A person's directions read as their prompt ("Photo"); others as "Front → Back" ("Front to Back" for VoiceOver).
+  /// "Front → Back" ("Front to Back" for VoiceOver). A catalog direction names every other field of the type, so its
+  /// label and id don't change while fields are typed: "Photo → Name + Description", `photo-name+description`.
   static func label(_ direction: Direction, type: NoteType, side: String, join: String) -> String {
-    if type == .person, type.isCatalogPrompt(direction.prompt) {
-      return direction.prompt[0].capitalized
-    }
-    return [direction.prompt, direction.answer]
+    [direction.prompt, answer(direction, type: type)]
       .map { $0.map(\.capitalized).joined(separator: join) }
       .joined(separator: side)
   }
 
-  /// `<prompt>-<answer>`, fields joined by `+`. A catalog direction names every other field of the type, so its id
-  /// doesn't change while fields are typed: `front-back`, `photo-name+description`.
+  /// `<prompt>-<answer>`, fields joined by `+`.
   static func identifier(_ direction: Direction, type: NoteType) -> String {
-    let answer =
-      type.isCatalogPrompt(direction.prompt) ? type.fields.filter { $0 != direction.prompt[0] } : direction.answer
-    return "\(direction.prompt.joined(separator: "+"))-\(answer.joined(separator: "+"))"
+    "\(direction.prompt.joined(separator: "+"))-\(answer(direction, type: type).joined(separator: "+"))"
+  }
+
+  private static func answer(_ direction: Direction, type: NoteType) -> [String] {
+    guard type.isCatalogPrompt(direction.prompt) else { return direction.answer }
+    return type.answerOrder.filter { $0 != direction.prompt[0] }
   }
 
   private func field(_ name: String, prompt: String) -> some View {
@@ -203,4 +203,14 @@ public struct NoteEditorView: View {
   NoteEditorView(
     store: Store(initialState: NoteEditorFeature.State(note: [Note].fixtures[0])) { NoteEditorFeature() }
   )
+}
+
+extension NoteType {
+  /// The order of a catalog direction's answer fields in its label and id (spec 014c): name before photo.
+  fileprivate var answerOrder: [String] {
+    switch self {
+    case .basic: fields
+    case .person: ["name", "photo", "description"]
+    }
+  }
 }
