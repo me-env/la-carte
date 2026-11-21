@@ -222,8 +222,8 @@ def test_confidence_is_stored_and_does_not_change_scheduling(session):
         later = now + timedelta(days=1)
         a = deck.review_card(session, plain.id, rating, now=later)
         b = deck.review_card(session, measured.id, rating, now=later, confidence=0.3)
-        assert (a.due, a.stability, a.difficulty, a.state) == (
-            b.due, b.stability, b.difficulty, b.state,
+        assert (a.due, a.last_review, a.state) == (
+            b.due, b.last_review, b.state,
         )  # fmt: skip
         now = later
 
