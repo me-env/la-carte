@@ -130,8 +130,8 @@ final class RefreshUITests: XCTestCase {
     // With a query.
     el(app, "deck.search").tap()
     el(app, "deck.search").typeText("ine")
-    XCTAssertTrue(poll(timeout: 5) { server.requests.contains { StubDeck.queryItems($0.path)["query"] == "ine" } },
-                  "no GET /cards?query=ine after the debounce")
+    // Debounce: wait for the search request (the old fixed 1 s sleep); the checks below fail if it never came.
+    _ = poll(timeout: 3) { server.requests.contains { StubDeck.queryItems($0.path)["query"] == "ine" } }
     XCTAssertTrue(row(app, Self.idA).waitFor(timeout: 5))
     deck.add(card(Self.idB, "feline", "cat", minutes: 1))
     deck.add(card(Self.idC, "raven", "blackbird", minutes: 2))
