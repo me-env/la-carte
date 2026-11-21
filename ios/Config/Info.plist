@@ -8,5 +8,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- The App Group shared with the widget (spec 007), read by AppGroup.id (LaCarteKit/APIClient). -->
+	<key>LaCarteAppGroup</key>
+	<string>$(LA_CARTE_APP_GROUP)</string>
 </dict>
 </plist>

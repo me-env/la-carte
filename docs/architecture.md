@@ -102,15 +102,18 @@ claude mcp add --transport http la-carte http://127.0.0.1:8000/mcp \
 
 ```
 ios/
-├── LaCarte.xcodeproj          app target + UI-test target (shared scheme "LaCarte")
-├── LaCarte/                   thin shell: @main App → RootView(). Nothing else goes here.
+├── LaCarte.xcodeproj          app, widget extension and UI-test targets (shared scheme "LaCarte")
+├── LaCarte/                   thin shell: @main App → bootstrap() + RootView(). Nothing else goes here.
+├── LaCarteWidget/             thin shell: @main WidgetBundle { DeckWidget() } (spec 007)
 ├── LaCarteUITests/            XCUITest, owned by qa-validator
-├── Config/Info.plist          merged into the generated plist (ATS local networking)
+├── Config/                    Info.plists (ATS local networking, `LaCarteAppGroup`), entitlements (App Group),
+│                              Signing.xcconfig
 └── LaCarteKit/                Swift package — all real code
     ├── Sources/
     │   ├── AppFeature/        root reducer, composes child features, RootView entry point
     │   ├── <Name>Feature/     one module per feature (StudyFeature, DeckFeature, …)
-    │   ├── APIClient/         @DependencyClient + live/in-memory implementations + models
+    │   ├── APIClient/         @DependencyClient + live/in-memory implementations + models, AppGroup, TokenStore
+    │   ├── DeckWidget/        Home Screen widget + its debug gallery (SwiftUI + WidgetKit, no TCA)
     │   └── DesignSystem/      tokens + reusable views (no TCA)
     └── Tests/<Module>Tests/   TestStore / Swift Testing
 ```
@@ -118,8 +121,9 @@ ios/
 Module dependency rule (no cycles, arrows point down):
 ```
 AppFeature → <Name>Feature → APIClient
-                           → DesignSystem
+           → DeckWidget    → DesignSystem
 ```
+`DeckWidget` (deps `APIClient`, `DesignSystem`) is also the only product the widget extension links.
 Feature tree (specs 001–004):
 ```
 AppFeature ── study: StudyFeature                      (home, always on screen)
@@ -140,10 +144,16 @@ Changes flow up as delegates: `CardEditor.saved` → Deck/App; `Settings.serverC
 | `LA_CARTE_API_URL` | API base URL (no default: without it or a stored URL the app shows "Connect your deck") |
 | `LA_CARTE_API_TOKEN` | Bearer token |
 
-On device (spec 003) the URL is stored in `UserDefaults` key `apiURL` (`@Shared(.appStorage)`) and the token in
-the Keychain (`TokenStore`). The live `APIClient` resolves both **per request**:
+On device the URL (`apiURL`) and the theme live in the **App Group suite** `UserDefaults(suiteName: AppGroup.id)`
+(spec 007): `bootstrap()` sets `defaultAppStorage` to it, so `@Shared(.appStorage)` reads and writes there, and the
+widget reads the same values. `AppGroup.id` = `group.$(LA_CARTE_BUNDLE_ID_PREFIX).app`, from the `LaCarteAppGroup`
+Info.plist key (`.standard` when absent, e.g. unit tests). The token is in the Keychain (`TokenStore`, service
+`la-carte`, account `api-token`) in the App Group's **access group**, `kSecAttrAccessibleAfterFirstUnlock`.
+`bootstrap()` migrates pre-007 values once (defaults from `.standard`, the token from the default access group).
+The widget fetches `/stats?tz=<device zone>` itself, caches the last result under `widget.lastStats`, and the app
+reloads its timeline when it goes to the background. The live `APIClient` resolves URL and token **per request**:
 launch env > stored value > none. Without both a URL and a token the app shows "Connect your deck" and makes
 no request (`APIClient.isConfigured`, spec 008); a 401/403 shows "Token rejected".
 
-Theme (spec 004): `@Shared(.appStorage("theme"))`, `system|light|dark|forest`; launch argument `-theme forest`
+Theme (spec 004): `@Shared(.appStorage(AppTheme.storageKey))` (`"theme"`), `system|light|dark|forest`; launch argument `-theme forest`
 overrides it for screenshots.

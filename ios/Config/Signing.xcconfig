@@ -1,4 +1,4 @@
-// Signing for the app and UI-test targets (base configuration of both, Debug and Release).
+// Signing for the app, widget and UI-test targets (base configuration of all three, Debug and Release).
 // These are this project's values. To build with your own Apple team, don't edit this file:
 // copy Signing.local.xcconfig.example to Signing.local.xcconfig (gitignored) and set yours there.
 // ci/_env.sh reads DEVELOPMENT_TEAM from these files too, so CI and ExportOptions follow.
@@ -6,9 +6,11 @@
 // Bundle IDs derive from the prefix:
 //   app        $(LA_CARTE_BUNDLE_ID_PREFIX).app
 //   UI tests   $(LA_CARTE_BUNDLE_ID_PREFIX).app.uitests
-//   (spec 007) widget $(LA_CARTE_BUNDLE_ID_PREFIX).app.widget, App Group group.$(LA_CARTE_BUNDLE_ID_PREFIX).app
+//   widget     $(LA_CARTE_BUNDLE_ID_PREFIX).app.widget
+//   App Group  group.$(LA_CARTE_BUNDLE_ID_PREFIX).app (entitlements of app + widget, `LaCarteAppGroup` Info.plist key)
 
 DEVELOPMENT_TEAM = 5X9ZWT7KT3
 LA_CARTE_BUNDLE_ID_PREFIX = fr.lacarte
+LA_CARTE_APP_GROUP = group.$(LA_CARTE_BUNDLE_ID_PREFIX).app
 
 #include? "Signing.local.xcconfig"

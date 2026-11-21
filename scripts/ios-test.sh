@@ -26,7 +26,7 @@ set +e
 # First free unit-test simulator of the pool ($POOL_DESTINATION). No failure diagnostics: `simctl diagnose`
 # kept the simulator for up to 10 min after a failing run (measured 2026-11-21, docs/dev-velocity.md).
 "$LOCK" "$KIT_BUILD_LOCK" "$ROOT/scripts/_sim-pool.sh" \
-  /bin/sh -c 'exec xcodebuild test -scheme LaCarteKit -destination "$POOL_DESTINATION" "$@"' sh \
+  /bin/sh -c 'exec xcodebuild test -scheme LaCarteKit-Package -destination "$POOL_DESTINATION" "$@"' sh \
   -skipMacroValidation -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} 2>&1 \
   | grep --line-buffered -E "^(✔|✘|🔒)|Test [Cc]ase .*(passed|failed|skipped)|error:|TEST( EXECUTE)? (SUCCEEDED|FAILED)"
 STATUS=${PIPESTATUS[0]}

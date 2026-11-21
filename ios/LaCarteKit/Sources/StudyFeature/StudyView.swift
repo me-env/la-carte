@@ -20,6 +20,8 @@ public struct StudyView: View {
     }
     .padding(.horizontal, Theme.Spacing.m)
     .padding(.bottom, Theme.Spacing.m)
+    // While the content is empty (last card rated, caught-up not loaded yet) the stack would shrink to the top bar.
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Theme.background)
     .onAppear { store.send(.onAppear) }
     .onChange(of: scenePhase) { _, phase in store.send(.scenePhaseChanged(phase)) }

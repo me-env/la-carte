@@ -17,6 +17,14 @@ struct InMemoryAPIClientTests {
     #expect(try await client.stats().nextDue == now.addingTimeInterval(600))
   }
 
+  @Test func streakIsOneOnceACardWasReviewedToday() async throws {
+    let client = APIClient.inMemory(cards: .fixtures, now: .now)
+    #expect(try await client.stats().streak == 0)
+
+    _ = try await client.review([Card].fixtures[0].id, .good)
+    #expect(try await client.stats().streak == 1)
+  }
+
   @Test func dueCardsKeepFixtureOrderAfterAReview() async throws {
     let client = APIClient.inMemory(cards: .fixtures, now: now)
     let cards = [Card].fixtures

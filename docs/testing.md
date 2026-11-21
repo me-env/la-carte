@@ -29,14 +29,34 @@ ScrollView as empty.
 
 ## UI tests
 
+**UI tests test UI, not logic.** A UI test exists only for what a TestStore/unit test can't see: the screen
+renders right (layout, colours, light/dark, accessibility sizes), navigation and gestures work on real UIKit,
+and the app wires to the API end to end (a few `_liveAPI` tests). Reducer logic (state changes, API calls made,
+errors, debounce, in-flight guards, persistence) is a unit test. Before adding a UI test, ask "could a TestStore
+test catch this?" — if yes, write that instead. One UI test per flow, one appearance pass unless the look differs.
+
 - Test names: `test<Screen>_<scenario>` (e.g. `testStudy_revealAndRateGood`). Live-API variants end in `_liveAPI`
   and `XCTSkip` when `LA_CARTE_API_URL` is unset.
 - Find elements **only** by accessibility identifier (`<feature>.<element>`), never by visible text or index.
 - Mock tests run in **light and dark** (`XCUIDevice.shared.appearance`).
 - Call `snapshot("<screen>-<state>", appearance:)` at every state worth reviewing. Names are stable:
   QA compares runs by filename.
+- Debug galleries (debug builds only, no network): `LA_CARTE_SCREEN=design-system` (tokens and components),
+  `LA_CARTE_SCREEN=widget` (spec 007: every Home Screen widget state in 170 pt tiles, `widgetGallery.title`,
+  `widgetGallery.tile.<due|caughtUp|caughtUpLater|empty|unavailable|long>`). Widgets themselves aren't reachable
+  from XCUITest. Both follow `-theme forest`.
 - Mock data comes from `[Card].fixtures` (`APIClient/InMemoryAPIClient.swift`). Changing fixtures changes
   screenshots — coordinate with qa-validator.
+
+## Splitting a run
+
+`scripts/ios-ui-test.sh --split [N] <run> [-only-testing:LaCarteUITests/<Class>[/<test>] …]` builds once, deals
+the selected test methods into N shards (balanced by the last measured durations in
+`<results dir>/ui-test-durations.tsv`, else by count) and runs them at once, one UI pool simulator each. Output is
+the same as a plain run: screenshots in `qa/screenshots/<run>/`, one merged `<run>.xcresult`, one `TESTS: …` line
+(wall time), exit code non-zero if any shard fails. Shard lines are prefixed `[k]`.
+- **When:** 8+ tests or about 4 min of runtime; below that run plainly (each shard costs ~1 min of fixed overhead).
+- **N** defaults to, and is capped by, the free UI simulators; with one free (busy pool) it is a plain run.
 
 ## Running the app against a local API
 

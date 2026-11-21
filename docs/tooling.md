@@ -329,6 +329,54 @@ XCUITest keeps navigation, E2E and one appearance-switch smoke test.
   dark" on iOS 26: CI shards only (`ci/boot-simulator.sh`), or locally with the user at the Mac running
   `SIMULATOR=… OS=26.5 ci/boot-simulator.sh` once. (3) P8c moves most colour checks off the device appearance.
 
+## UI suite speed (audit 2026-11-21, tooling-lead)
+
+Target: full UI suite < 10 min locally, PR smoke < 3 min. Read-only audit, no runs.
+
+**Evidence (008-r4.xcresult, Xcode 27, 69 passed, 49.2 min serial on one simulator).** I parsed the activity timelines of all 69 tests:
+- `waitForExistence`: 923 calls, 1,463 s. 896 of them took 1.0-1.5 s, and the first existence check lands at a median of
+  1.037 s (p5 1.012 s) even when the element is already on screen. XCTWaiter polls once per second and that interval
+  can't be configured (see the Wealthfront write-up). **About 15 min of the suite is this 1 s floor.**
+- App launch/terminate: 115 launches + terminates, 586 s (about 4.5 s per launch). 46 of those launches are extra, beyond one per test.
+- Taps/typing/gestures: 567 s. Element queries: 170 s. Screenshots: 2 s, so not a cost. Appearance switches: 5 s.
+- Long timeouts (20 s on the closed port) are not a cost: only 27 waits went over 2 s (60 s total). Fixed `Thread.sleep`
+  calls add up to about 15 s.
+- Time per class: Settings+Setup 14.8 min (16 tests), Theme 10.4 (10), Deck 9.2 (22), Study 7.6 (14), Refresh 5.2 (9), DesignSystem 1.9 (4).
+- No `.xctestplan`, no parallel testing, and no attachment/recording settings in `LaCarte.xcscheme`.
+
+**Ranked changes.** Minutes are measured on 008-r4 and adjusted for P8 (branch `tooling/p8-colour-checks`, about -11 min, still unmeasured).
+
+1. **Fast wait helper** (qa-validator, `Support.swift`): one `waitFor(_:timeout:)` that checks `exists` right away and then
+   polls every 0.1 s. Replace the 61 `waitForExistence` call sites and the existence step inside `waitForLabel` with it.
+   Saves about 0.75 s × 923 ≈ **11 min** (about **8-9 min** after P8). Loses no coverage. Risk: more frequent accessibility queries. Rollback: one helper.
+2. **Parallel workers** (qa-validator for `ios-ui-test.sh`; dev-velocity owns the policy and the "one UI device" rule
+   in dev-velocity.md): `-parallel-testing-enabled YES -parallel-testing-worker-count 3`. Xcode makes temporary clones
+   of the destination. Workers take whole classes, so split `SetupUITests` out of `SettingsUITests` into its own class.
+   StubAPIServer already picks a random port (20k-50k); binding port 0 would rule out collisions entirely. On 14 cores /
+   48 GB: about **÷2.5** on what is left after 1+3, roughly **-12 min**. Cost: about 1 min to boot the clones, and a few GB of transient clones in
+   `~/Library/Developer/XCTestDevices`, created and removed by Xcode (the user manages disk). Measure first with one parallel run on a quiet Mac.
+3. **Delete logic duplicates** (qa-validator; ios-engineer confirms the unit coverage), **about -10 min**:
+   - Deck: searchDebounced, swipeToDeleteCallsAPI, deleteReloadsWithQuery, deleteFailureReloads, editRowCallsPATCH,
+     noMatches, addCallsPOSTAndDisablesSaveInFlight, testEditor_saveFailureKeepsText, testEditor_closeWithoutSaving,
+     swipeToDeleteDark (181 s). Covered by DeckFeatureTests and CardEditorFeatureTests.
+   - Study: ratingsDisabledWhileReviewInFlight, reviewFailureGoesOffline, apiUnreachable (74 s). Keep offlineThenRetry
+     as the one offline screen. Merge accessibilityXL, XLLongText and XLVeryLongTextScrolls into one test (about 45 s).
+   - Refresh: pullToRefreshWhenOffline, pullToRefreshWhenCaughtUp, testDeck_foregroundReload (109 s). Keep one pull test
+     per screen and testStudy_foregroundReload, because that is the real scene-phase path.
+   - Settings: wrongToken, unreachable, successReloadsDeckAndStudy (118 s). Keep checkingThenConnected, connectFromStudy and clearTokenFromDeck.
+   - Merge Settings persistAcrossRelaunch and Theme persistsAcrossRelaunch into one relaunch test (about 60 s); it keeps the Keychain round-trip.
+   - testSetup_deckStates: drop the dark pass and the offline state, which loadFailed already covers (about 60 s).
+   - Coverage lost: none at the reducer level. These flows also lose their end-to-end check on real UIKit chrome; the kept tests cover each screen once.
+4. **Smoke list** (qa-validator; cicd-lead wires it into PR CI): `scripts/ios-ui-test.sh <run> --smoke` expands to `-only-testing`
+   for about 6 tests: frontRevealRateNext, addFromDeck, connectFromStudy, forcedSchemesAndBackToSystem (one pass),
+   pullToRefreshWhileStudying, testDesignSystem_tapEachButton. Today about 6 min serial; with 1 + 2, **< 3 min**. The list lives in the script, with no test-plan file.
+5. **Small fixes** (qa-validator), **about -1 min**: Theme `resetThemeOnTeardown` relaunches about 8 times (about 40 s). Drop it for tests that
+   already launch with `-theme system`. Replace the fixed sleeps with waits (about 15 s).
+
+**Projection:** 49 → about 38 (P8) → about 29 (1) → about 19 (3, 5) → **about 8 min** with 3 workers (2). Smoke about 2-3 min.
+Verify each step with `TESTS: … (x min)` from a full run, in order 1 → 3 → 2.
+**Status:** proposed to qa-validator and dev-velocity via the manager, 2026-11-21; no answer yet.
+
 ## Decisions log
 
 | Date | Proposal | Owner answer | Result |

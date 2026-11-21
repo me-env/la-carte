@@ -5,11 +5,15 @@
 #
 # Screenshots (XCTAttachments named in the tests) land in qa/screenshots/<run-name>/.
 # Builds under the app's DerivedData lock into a private copy of the test products, then tests that copy
-# under the simulator lock only, so other builds can run meanwhile (docs/dev-velocity.md).
+# on the first free UI simulator of a pool (scripts/_sim-pool.sh), so other builds and UI runs go meanwhile
+# (docs/dev-velocity.md).
 # Extra env forwarded to the test runner: LA_CARTE_API_URL, LA_CARTE_API_TOKEN (see scripts/e2e.sh).
 # Each finished test prints as it finishes (also into a file), then a `TESTS: …` summary line.
 # Exit code = xcodebuild's (65 test failure, 75 lock timeout); export/summary/contact-sheet failures only warn.
 set -euo pipefail
+if [ "${1:-}" = --split ]; then  # one run over several pool simulators: scripts/ios-ui-test-split.sh
+  exec "$(dirname "$0")/ios-ui-test-split.sh" "$@"
+fi
 source "$(dirname "$0")/_ios-env.sh"
 RUN="${1:-$(date +%Y%m%d-%H%M%S)}"; shift || true
 OUT="$ROOT/qa/screenshots/$RUN"
@@ -26,12 +30,12 @@ set +e
 "$LOCK" "$APP_BUILD_LOCK" xcodebuild build-for-testing -project LaCarte.xcodeproj -scheme LaCarte \
   -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER"
 STATUS=${PIPESTATUS[0]}
-# 2. Test the copy under the simulator lock only.
+# 2. Test the copy on the first free UI simulator ($POOL_DESTINATION), under its lock only.
 if [ "$STATUS" -eq 0 ]; then
   TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" \
   TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \
-  "$LOCK" "$SIM_LOCK" xcodebuild test-without-building -testProductsPath "$PRODUCTS" \
-    -destination "$DESTINATION" -collect-test-diagnostics never -resultBundlePath "$RESULT" "$@" 2>&1 \
+  SIM_POOL=ui "$ROOT/scripts/_sim-pool.sh" /bin/sh -c 'exec xcodebuild test-without-building -destination "$POOL_DESTINATION" "$@"' \
+    sh -testProductsPath "$PRODUCTS" -collect-test-diagnostics never -resultBundlePath "$RESULT" "$@" 2>&1 \
     | grep --line-buffered -E "$FILTER"
   STATUS=${PIPESTATUS[0]}
 fi
