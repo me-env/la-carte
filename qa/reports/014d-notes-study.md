@@ -1,5 +1,8 @@
 # QA: 014d Study a note's direction (photo on the card face)
 
+## Recheck 2026-11-22: **PASS**. Unreachable photo shows the person.fill placeholder (`qa/screenshots/recheck-e2e/study-photo-failed-light.png`); e2e 9/9.
+
+
 Verdict: **FAIL** (an unreachable photo never shows the failure placeholder)
 Date: 2026-11-21 · Simulator: iPhone 17 Pro / iOS 27 · Branch `worktree-agent-a49c6e2d8c3e3ec0b` (82895e0 + main merged)
 Runs: `qa/screenshots/final/`, `qa/screenshots/final-e2e/`

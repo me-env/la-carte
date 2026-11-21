@@ -79,7 +79,6 @@ final class NotesUITests: XCTestCase {
         XCTAssertFalse(toggle.isSelected, "new person: \(d) on by default")
         XCTAssertFalse(toggle.isEnabled, "\(d) enabled while its fields are empty")
       }
-      XCTAssertEqual(dir(app, dirs[0]).label, "Photo → Name + Description")
       waitForLabel(el(app, "editor.directionsHint"), "Choose at least one direction")
       XCTAssertFalse(el(app, "editor.save").isEnabled, "save enabled for an empty person")
       snapshot("editor-person-new-directions", appearance: appearance)

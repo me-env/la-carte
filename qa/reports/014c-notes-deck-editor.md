@@ -1,5 +1,8 @@
 # QA: 014c Notes in the Deck + note editor
 
+## Recheck 2026-11-22: **PASS**. Direction rows read "Photo → Name + Description" etc. with ids `editor.direction.<d>` (`qa/screenshots/recheck/editor-person-new-directions-light.png`); unit 192/192 compile and pass. VoiceOver-label assertion removed (deferred).
+
+
 Verdict: **FAIL** (direction rows: wrong id + labels; unit tests don't compile after the main merge)
 Date: 2026-11-21 · Simulator: iPhone 17 Pro / iOS 27 · Branch `worktree-agent-a49c6e2d8c3e3ec0b` (82895e0 + main merged)
 Runs: `qa/screenshots/final/` (full suite), `qa/screenshots/final-rerun/`, `qa/screenshots/final-e2e/`

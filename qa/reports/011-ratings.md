@@ -1,5 +1,8 @@
 # QA: 011 Ratings (two buttons + confidence dots)
 
+## Recheck 2026-11-22 (HEAD 9de7f98+): **PASS**. Gallery dots fit the screen (`qa/screenshots/recheck/design-system-light.png`); design-system tap tests green; full UI suite green (`recheck`).
+
+
 ## Final recheck 2026-11-21 (integrated branch, main merged): **FAIL** (1 regression)
 `RatingsUITests` 8/8, `StudyUITests` 5/5 (2 live skipped), drag-rated live flow green in `final-e2e`.
 1. **Design-system gallery is shifted left and clipped** since 011 added its "Confidence dots" section
