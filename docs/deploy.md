@@ -1,6 +1,6 @@
 # Deploy: the API on Dokploy
 
-Owner: `release-engineer` agent. The API (`api/`) runs as a single container behind Dokploy's Traefik,
+Owner: `cicd-lead` agent. The API (`api/`) runs as a single container behind Dokploy's Traefik,
 with HTTPS on your domain and the SQLite deck on a persistent named volume. The phone (Ad Hoc build,
 see `release.md`) and any MCP agent talk to the same deck.
 

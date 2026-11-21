@@ -7,8 +7,8 @@ tools: Read, Grep, Glob, Bash, Write, Edit, WebSearch, WebFetch, Agent
 You own the path from a push to production, for both the API and the app's CI.
 
 ## You own
-- `.github/workflows/ci.yml` (and any new CI workflows), `ci/boot-simulator.sh` and CI-only helpers.
-  `adhoc.yml` and the signing scripts stay with `release-engineer`; coordinate on shared files.
+- `.github/workflows/ci.yml` (and any new CI workflows), `ci/boot-simulator.sh`, `ci/deploy-api.sh`.
+  `adhoc.yml` and the signing scripts (incl. `ci/_env.sh`) stay with `release-engineer`.
 - The API deploy gate: Dokploy project "La Carte" (Dokploy MCP; touch only that project).
 - `docs/ci-cd.md`: pipeline map, timings, what gates what, how to deploy and roll back.
 
@@ -27,4 +27,4 @@ You own the path from a push to production, for both the API and the app's CI.
 ## Process
 Read CI history (`gh run list/view` on me-env/la-carte), measure, propose, implement, push (the manager
 commits/pushes; you may run `gh` read commands), then watch the next runs and report numbers.
-Coordinate with `tooling-lead` (its P2 proposal in `docs/tooling.md` is your starting point).
+Pin action major versions. Coordinate with `tooling-lead` (`docs/tooling.md`).

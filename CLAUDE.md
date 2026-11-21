@@ -10,7 +10,7 @@ so any agent can say "add these words to my deck". Monorepo:
 | `docs/` | Architecture, conventions, design system, specs | — |
 | `qa/` | QA reports + exported UI-test screenshots | — |
 | `scripts/` | The only way to build/test (agents: use these, don't improvise xcodebuild) | bash |
-| `ci/`, `.github/` | CI + Ad Hoc .ipa for the iPhone (see `docs/release.md`) | GitHub Actions |
+| `ci/`, `.github/` | CI (`docs/ci-cd.md`) + Ad Hoc .ipa for the iPhone (`docs/release.md`) | GitHub Actions |
 | `docker-compose.yml`, `api/Dockerfile` | Production API on Dokploy (see `docs/deploy.md`) | Docker Compose |
 
 ## Commands
@@ -44,7 +44,7 @@ account or installing on the iPhone. No CodeGraph in this repo: don't offer to i
 | `api-engineer` | `api/**` (REST, MCP, scheduling) + pytest | Touches `ios/` |
 | `code-reviewer` | Read-only review for simplicity/clarity/conventions | Edits code |
 | `qa-validator` | **Independent** E2E: `ios/LaCarteUITests/**`, `qa/**`, screenshots, verdict | Edits app or API code |
-| `release-engineer` | Signing, Ad Hoc builds (`adhoc.yml`, signing `ci/` scripts), installing on the iPhone; CI pipelines belong to `cicd-lead` | Changes features; touches the Apple account/repo without the user's OK |
+| `release-engineer` | Signing, Ad Hoc builds (`adhoc.yml`, signing `ci/` scripts), installing on the iPhone | Changes features; touches the Apple account/repo without the user's OK |
 | `design-lead` | Design system + brand: native feel (Apple components first), `docs/design-system.md`, `DesignSystem` module, dynamic SwiftUI logo, app icon, brand kit (`docs/design/brand*`) for marketing | Edits feature code (writes design notes into specs instead) |
 | `design-critic` | Independent judge of design-lead's visuals (logo, icon, screens) against the reference app (Vyst) and Apple apps; feedback to design-lead until it's good enough to show the user | Designs or edits files |
 | `dev-velocity` | Parallel agents don't block each other: build/simulator lock, per-agent clones, worktrees, disk; `docs/dev-velocity.md` | Skips tests or weakens safety to go faster |
@@ -54,6 +54,11 @@ account or installing on the iPhone. No CodeGraph in this repo: don't offer to i
 | `instructions-keeper` | Sanity of all agent instructions (`CLAUDE.md`s, `.claude/agents/`, skills, docs agents read): correct, useful, not duplicated, no slop | Touches product code; weakens safety rules |
 | `secrets-guard` | Read-only check that no credentials or private data reach the public repo (tree + history) | Edits files; prints secret values |
 | `marketing` | Demo deck content, demo videos (app + widget, agent-adds-cards via MCP), README visuals (`docs/marketing/`, `marketing/`) | Touches app/API code; shows real URLs, tokens or personal data |
+
+`scripts/` owners: dev-velocity `_ios-env.sh` `_lock.sh` `ios-build.sh` `ios-test.sh` · qa-validator `ios-ui-test.sh`
+`e2e.sh` (lock/scratch mechanics agreed with dev-velocity) · api-engineer `api-*.sh` · release-engineer `ios-adhoc.sh`
+`ios-install-device.sh` · tooling-lead `design-review.py` `brandkit.py` (render methods agreed with design-lead) ·
+design-lead `fetch-design-refs.sh`.
 
 The repo is public: run `secrets-guard` before every push, and whenever CI, signing, deploy or config files change.
 

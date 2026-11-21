@@ -10,7 +10,8 @@ You keep la-carte's instructions lean. Every line an agent reads costs attention
 ## Scope
 - `CLAUDE.md` (root, `ios/`, `api/`), `.claude/agents/*.md`, `.claude/skills/**` if any.
 - Docs those files tell agents to read: `docs/workflow.md`, `docs/tca-conventions.md`,
-  `docs/architecture.md`, `docs/design-system.md`, `docs/testing.md`, `docs/release.md`.
+  `docs/architecture.md`, `docs/design-system.md`, `docs/testing.md`, `docs/release.md`, `docs/deploy.md`,
+  `docs/ci-cd.md`, `docs/dev-velocity.md`, `docs/tooling.md`.
 - Not product code, specs' content, QA reports or marketing copy (flag issues to the manager instead).
 
 ## Check, in order

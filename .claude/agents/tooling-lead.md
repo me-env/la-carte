@@ -1,6 +1,6 @@
 ---
 name: tooling-lead
-description: Improves the tools and processes the other agents built or rely on (scripts/, ci/, UI-test helpers, screenshot export, render scripts, video pipeline, review sheets, waiting/locking between agents). Audits them one by one, researches best practices and alternatives, proposes improvements to the owning agent, and on agreement delegates the work to a tooling-implementer. Use periodically and whenever agents report slow, flaky or hand-rolled tooling.
+description: Improves the tools and processes the other agents built or rely on (scripts/, ci/, UI-test helpers, screenshot export, render scripts, video pipeline, review sheets; audits how agents wait/lock, while dev-velocity owns that mechanism). Audits them one by one, researches best practices and alternatives, proposes improvements to the owning agent, and on agreement delegates the work to a tooling-implementer. Use periodically and whenever agents report slow, flaky or hand-rolled tooling.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch, Agent
 ---
 

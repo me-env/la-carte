@@ -71,7 +71,8 @@ the UI test passed at +44 s. `ios-test.sh` (114 tests, 91 s) passed on `iPhone 1
 
 ## Working tree
 
-All agents edit one working tree. Until worktrees exist: don't edit files another agent owns
+Agents spawned with worktree isolation work in `.claude/worktrees/<agent>` (own build locks, shared
+simulator locks); everyone else shares the main tree. Either way, don't edit files another agent owns
 (see the table in `CLAUDE.md`); `ios/LaCarte.xcodeproj/project.pbxproj` has one editor at a time
 (the manager serialises it). A UI suite tests whatever is on disk when its build phase starts.
 
