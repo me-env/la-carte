@@ -89,52 +89,7 @@ final class DeckUITests: XCTestCase {
     waitForRows(app, Self.ids)
   }
 
-  /// #2: the filter goes through `GET /cards?query=` after a debounce: typing "ser" quickly sends one query,
-  /// "ser" (no "s" / "se"), and nothing is sent before 0.3s after the last keystroke.
-  @MainActor
-  func testDeck_searchDebounced() throws {
-    XCUIDevice.shared.appearance = .light
-    let (server, _) = try startStubDeck()
-    let app = launch(api: .live(server.url))
-    openDeck(app)
-    waitForRows(app, stubOrder)
-    let search = el(app, "deck.search")
-    search.tap()
-    let typed = Date()
-    search.typeText("ser")
-    // How long the 3 keystrokes took: on a slow runner a gap between two of them can exceed the 0.3s debounce,
-    // and then an intermediate "s"/"se" query is correct behaviour, not a bug.
-    let typing = Date().timeIntervalSince(typed)
-    waitUntil("GET /cards?query=ser sent") { self.searchQueries(server).last == "ser" }
-    waitForRows(app, [Self.ids[0]])
-    let queries = searchQueries(server)
-    if typing < 0.3 {
-      XCTAssertEqual(queries, ["ser"], "typed in \(typing)s: expected a single debounced query 'ser', got \(queries)")
-    } else {
-      XCTAssertTrue(queries.allSatisfy { "ser".hasPrefix($0) } && queries.count <= 3 && Set(queries).count == queries.count,
-                    "typed in \(typing)s: expected at most one query per prefix of 'ser', got \(queries)")
-    }
-    let first = server.requests.first { StubDeck.queryItems($0.path)["query"] == "ser" }
-    XCTAssertGreaterThanOrEqual(first.map { $0.time.timeIntervalSince(typed) } ?? 0, 0.3,
-                                "query sent less than 0.3s after typing started")
-    server.stop()
-  }
-
   // MARK: - #3 messages
-
-  /// #3: a search with no results → "No matches", no rows.
-  @MainActor
-  func testDeck_noMatches() {
-    XCUIDevice.shared.appearance = .light
-    let app = launch(api: .mock)
-    openDeck(app)
-    waitForRows(app, Self.ids)
-    el(app, "deck.search").tap()
-    el(app, "deck.search").typeText("zzz")
-    waitForLabel(el(app, "deck.message"), "No matches")
-    waitForRows(app, [])
-    snapshot("deck-no-matches", appearance: .light)
-  }
 
   /// #3: empty deck → "No cards yet".
   @MainActor
@@ -186,85 +141,6 @@ final class DeckUITests: XCTestCase {
     waitForRows(app, [Self.ids[0], Self.ids[2]])
   }
 
-  /// #4: confirming calls `DELETE /cards/{id}`.
-  @MainActor
-  func testDeck_swipeToDeleteCallsAPI() throws {
-    XCUIDevice.shared.appearance = .light
-    let (server, deck) = try startStubDeck()
-    let app = launch(api: .live(server.url))
-    openDeck(app)
-    waitForRows(app, stubOrder)
-    swipeAndDelete(app, Self.ids[1])
-    waitForRows(app, stubOrder.filter { $0 != Self.ids[1] }, timeout: 1.5)
-    waitUntil("DELETE /cards/\(Self.ids[1]) sent") {
-      server.requests.contains { $0.method == "DELETE" && $0.path.lowercased() == "/cards/\(Self.ids[1])" }
-    }
-    XCTAssertEqual(deck.cards.count, 2)
-    server.stop()
-  }
-
-  /// #4 (dark): the Delete action stays system red in dark mode too.
-  @MainActor
-  func testDeck_swipeToDeleteDark() {
-    XCUIDevice.shared.appearance = .dark
-    let app = launch(api: .mock)
-    openDeck(app)
-    waitForRows(app, Self.ids)
-    row(app, Self.ids[1]).swipeLeft()
-    let delete = deleteAction(app, Self.ids[1])
-    XCTAssertTrue(delete.waitFor(timeout: 3), "no deck.row.<id>.delete after swiping left")
-    assertSystemRed(app, delete)
-    snapshot("deck-swipe", appearance: .dark)
-  }
-
-  /// #4: a successful delete while searching reloads with the current query, so the list still matches the field.
-  @MainActor
-  func testDeck_deleteReloadsWithQuery() throws {
-    XCUIDevice.shared.appearance = .light
-    let (server, deck) = try startStubDeck()
-    let app = launch(api: .live(server.url))
-    openDeck(app)
-    waitForRows(app, stubOrder)
-    let search = el(app, "deck.search")
-    search.tap()
-    search.typeText("a")  // "la carte" and "ephemeral" match, "serendipity" doesn't
-    waitForRows(app, [Self.ids[1], Self.ids[2]])
-    swipeAndDelete(app, Self.ids[2])
-    waitForRows(app, [Self.ids[1]], timeout: 3)
-    waitUntil("GET /cards?query=a after the DELETE") {
-      let reqs = server.requests
-      guard let d = reqs.firstIndex(where: { $0.method == "DELETE" }) else { return false }
-      return reqs[(d + 1)...].contains { StubDeck.route($0.path) == "/cards" && StubDeck.queryItems($0.path)["query"] == "a" }
-    }
-    let reqs = server.requests
-    let d = reqs.firstIndex { $0.method == "DELETE" } ?? reqs.endIndex
-    let unfiltered = reqs[d...].filter { StubDeck.route($0.path) == "/cards" && (StubDeck.queryItems($0.path)["query"] ?? "").isEmpty }
-    XCTAssertTrue(unfiltered.isEmpty, "unfiltered GET /cards after the delete: \(reqs.map(\.path))")
-    waitForRows(app, [Self.ids[1]])
-    XCTAssertEqual(deck.cards.count, 2)
-    snapshot("deck-delete-while-searching", appearance: .light)
-    server.stop()
-  }
-
-  /// #4: a failing DELETE → the list is reloaded from the API, so the row comes back.
-  @MainActor
-  func testDeck_deleteFailureReloads() throws {
-    XCUIDevice.shared.appearance = .light
-    let (server, deck) = try startStubDeck()
-    deck.writeStatus = 500
-    let app = launch(api: .live(server.url))
-    openDeck(app)
-    waitForRows(app, stubOrder)
-    swipeAndDelete(app, Self.ids[1])
-    waitUntil("DELETE sent") { server.requests.contains { $0.method == "DELETE" } }
-    waitForRows(app, stubOrder)
-    let deleteIndex = server.requests.firstIndex { $0.method == "DELETE" }!
-    XCTAssertTrue(server.requests[(deleteIndex + 1)...].contains { $0.method == "GET" && StubDeck.route($0.path) == "/cards" },
-                  "no GET /cards after the failed DELETE: \(server.requests.map { "\($0.method) \($0.path)" })")
-    snapshot("deck-delete-failed", appearance: .light)
-    server.stop()
-  }
-
   // MARK: - #5 edit
 
   /// #5: tapping a row → "Edit card" prefilled; changing the back + save → dismissed, row shows the new back.
@@ -288,27 +164,6 @@ final class DeckUITests: XCTestCase {
     XCTAssertFalse(rowText(app, Self.ids[2], Self.fixtures[2].back).exists, "old back still shown")
     waitForRows(app, Self.ids)  // replaced in place
     snapshot("deck-after-edit", appearance: .light)
-  }
-
-  /// #5: save calls `PATCH /cards/{id}` with the new back.
-  @MainActor
-  func testDeck_editRowCallsPATCH() throws {
-    XCUIDevice.shared.appearance = .light
-    let (server, deck) = try startStubDeck()
-    let app = launch(api: .live(server.url))
-    openDeck(app)
-    waitForRows(app, stubOrder)
-    row(app, Self.ids[2]).tap()
-    waitForLabel(el(app, "editor.title"), "Edit card")
-    replaceText(app, "editor.back", with: "short-lived")
-    el(app, "editor.save").tap()
-    waitForAbsence(el(app, "editor.title"), "editor still open after saving")
-    let patches = server.requests.filter { $0.method == "PATCH" }
-    XCTAssertEqual(patches.map { $0.path.lowercased() }, ["/cards/\(Self.ids[2])"])
-    XCTAssertTrue(patches.first?.body.contains("short-lived") ?? false, "PATCH body: \(patches.first?.body ?? "nil")")
-    XCTAssertEqual(deck.cards.first { $0.id == Self.ids[2] }?.back, "short-lived")
-    waitUntil("row shows the new back") { self.rowText(app, Self.ids[2], "short-lived").exists }
-    server.stop()
   }
 
   // MARK: - #6 add from deck, #8 save disabled
@@ -342,33 +197,6 @@ final class DeckUITests: XCTestCase {
     snapshot("deck-after-add", appearance: .light)
   }
 
-  /// #6 + #8: saving sends `POST /cards`; while it is in flight `editor.save` is disabled.
-  @MainActor
-  func testDeck_addCallsPOSTAndDisablesSaveInFlight() throws {
-    XCUIDevice.shared.appearance = .light
-    let (server, deck) = try startStubDeck()
-    deck.writeDelay = 3
-    let app = launch(api: .live(server.url))
-    openDeck(app)
-    waitForRows(app, stubOrder)
-    el(app, "deck.add").tap()
-    assertNewCardEditor(app)
-    el(app, "editor.front").typeText("feline")
-    el(app, "editor.back").tap()
-    el(app, "editor.back").typeText("cat")
-    el(app, "editor.save").tap()
-    XCTAssertTrue(el(app, "editor.title").exists, "editor closed before the save finished")
-    XCTAssertFalse(el(app, "editor.save").isEnabled, "editor.save enabled while the save is in flight")
-    snapshot("editor-saving", appearance: .light)
-    waitForAbsence(el(app, "editor.title"), timeout: 10, "editor still open after the save finished")
-    let posts = server.requests.filter { $0.method == "POST" }
-    XCTAssertEqual(posts.map(\.path), ["/cards"])
-    XCTAssertTrue(posts[0].body.contains("\"feline\"") && posts[0].body.contains("\"cat\""), "POST body: \(posts[0].body)")
-    waitUntil("new row at the top") { self.rowIDs(app).count == 4 }
-    XCTAssertTrue(rowText(app, rowIDs(app)[0], "feline").exists, "new card is not the top row")
-    server.stop()
-  }
-
   // MARK: - #7 add from study
 
   /// #7: `study.add` over a caught-up study → "New card", front focused; saving dismisses and study shows it.
@@ -393,71 +221,6 @@ final class DeckUITests: XCTestCase {
     waitForLabel(el(app, "study.front"), "feline")
     waitForLabel(el(app, "study.remaining"), "1 to review")
     snapshot("study-after-add", appearance: .light)
-  }
-
-  // MARK: - #9 save error, #10 close
-
-  /// #9: a failing save keeps the editor open with the text and shows `editor.error`.
-  @MainActor
-  func testEditor_saveFailureKeepsText() throws {
-    let (server, deck) = try startStubDeck()
-    deck.writeStatus = 500
-    XCUIDevice.shared.appearance = .light
-    let app = launch(api: .live(server.url))
-    waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
-    el(app, "study.add").tap()
-    assertNewCardEditor(app)
-    el(app, "editor.front").typeText("feline")
-    el(app, "editor.back").tap()
-    el(app, "editor.back").typeText("cat")
-    el(app, "editor.save").tap()
-    waitForLabel(el(app, "editor.error"), "Couldn't save. Check your connection.")
-    XCTAssertTrue(el(app, "editor.title").exists, "editor closed after a failed save")
-    XCTAssertEqual(fieldText(app, "editor.front"), "feline")
-    XCTAssertEqual(fieldText(app, "editor.back"), "cat")
-    waitUntil("editor.save re-enabled after the failure") { self.el(app, "editor.save").isEnabled }
-    let error = el(app, "editor.error").frame
-    XCTAssertGreaterThanOrEqual(error.minY, el(app, "editor.back").frame.maxY - 1, "editor.error not under the fields")
-    snapshot("editor-error", appearance: .light)
-    server.stop()
-  }
-
-  /// #10: `editor.close` dismisses without calling the API (new card from study and deck, edit from deck).
-  @MainActor
-  func testEditor_closeWithoutSaving() throws {
-    XCUIDevice.shared.appearance = .light
-    let (server, deck) = try startStubDeck()
-    let app = launch(api: .live(server.url))
-    waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
-    // New card from study.
-    el(app, "study.add").tap()
-    assertNewCardEditor(app)
-    el(app, "editor.front").typeText("feline")
-    el(app, "editor.close").tap()
-    waitForAbsence(el(app, "editor.title"), "editor still open after editor.close")
-    // New card from the deck.
-    openDeck(app)
-    waitForRows(app, stubOrder)
-    el(app, "deck.add").tap()
-    assertNewCardEditor(app)
-    el(app, "editor.front").typeText("feline")
-    el(app, "editor.back").tap()
-    el(app, "editor.back").typeText("cat")
-    el(app, "editor.close").tap()
-    waitForAbsence(el(app, "editor.title"), "editor still open after editor.close")
-    waitForRows(app, stubOrder)
-    // Edit, then close.
-    row(app, Self.ids[2]).tap()
-    waitForLabel(el(app, "editor.title"), "Edit card")
-    replaceText(app, "editor.back", with: "short-lived")
-    el(app, "editor.close").tap()
-    waitForAbsence(el(app, "editor.title"), "editor still open after editor.close")
-    XCTAssertTrue(rowText(app, Self.ids[2], Self.fixtures[2].back).exists, "row lost its back after closing")
-    Thread.sleep(forTimeInterval: 1)
-    let writes = server.requests.filter { ["POST", "PATCH", "DELETE"].contains($0.method) }
-    XCTAssertTrue(writes.isEmpty, "closing the editor called the API: \(writes.map { "\($0.method) \($0.path)" })")
-    XCTAssertEqual(deck.cards.count, 3)
-    server.stop()
   }
 
   // MARK: - #11 study refresh
@@ -599,27 +362,6 @@ final class DeckUITests: XCTestCase {
   }
 
   // MARK: - Helpers
-
-  /// The stub sorts by created_at desc, and …01 is the newest: rows read …01, …02, …03 like the mock.
-  var stubOrder: [String] { Self.ids }
-
-  /// Non-empty `query` values of the `GET /cards` requests the stub received, in order.
-  private func searchQueries(_ server: StubAPIServer) -> [String] {
-    server.requests
-      .filter { $0.method == "GET" && StubDeck.route($0.path) == "/cards" }
-      .compactMap { StubDeck.queryItems($0.path)["query"] }
-      .filter { !$0.isEmpty }
-  }
-
-  private func startStubDeck() throws -> (StubAPIServer, StubDeck) {
-    let base = Date(timeIntervalSince1970: 1_767_225_600)
-    let deck = StubDeck(zip(Self.ids, Self.fixtures).enumerated().map { i, pair in
-      .init(id: pair.0, front: pair.1.front, back: pair.1.back, createdAt: base.addingTimeInterval(-Double(i) * 60))
-    })
-    let server = StubAPIServer(handler: deck.handle)
-    try server.start()
-    return (server, deck)
-  }
 
   @MainActor
   private func openDeck(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {

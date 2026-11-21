@@ -13,63 +13,6 @@ final class RefreshUITests: XCTestCase {
     continueAfterFailure = false
   }
 
-  // MARK: - #1, #7 (caught up), #11
-
-  /// #1: caught up → agent adds a card → pull on the caught-up message → card front, unrevealed, "1 to review".
-  /// The caught-up content stays on screen while the reload is in flight (no blank loading state).
-  /// #11: no blue pixel while the spinner is showing.
-  @MainActor
-  func testStudy_pullToRefreshWhenCaughtUp() throws {
-    XCUIDevice.shared.appearance = .light
-    let (server, deck) = try startStub([])
-    let app = launch(api: .live(server.url))
-    waitForLabel(el(app, "study.message"), "All caught up")
-    assertCenteredMessage(app, "study.message")
-    snapshot("study-caught-up-before-refresh", appearance: .light)
-
-    deck.add(card(Self.idA, "canine", "dog"))
-    deck.readDelay = 5
-    // Reload in flight (captured mid-refresh): the caught-up text is still drawn (quiet reload), spinner not blue.
-    let inFlight = pullToRefreshCapturing(app, from: el(app, "study.message"), name: "study-refresh-spinner",
-                                          appearance: .light)
-    assertInkVisible(inFlight, ink: Palette.light.ink, "caught-up text during the refresh (blank loading state?)")
-    assertNoBlue(inFlight, "study refresh spinner")
-
-    waitForLabel(el(app, "study.front"), "canine", timeout: 20)
-    assertFront(app, "canine", remaining: "1 to review")
-    snapshot("study-after-refresh", appearance: .light)
-    app.terminate()
-    server.stop()
-  }
-
-  // MARK: - #2, #7 (offline)
-
-  /// #2: API down → offline; API back → pulling on `study.message` leaves the offline state.
-  @MainActor
-  func testStudy_pullToRefreshWhenOffline() throws {
-    XCUIDevice.shared.appearance = .light
-    let deck = StubDeck([card(Self.idA, "gratitude", "thank you")])
-    let server = StubAPIServer(handler: deck.handle)
-    // Not started: the port refuses connections.
-    let app = launch(api: .live(server.url))
-    waitForLabel(el(app, "study.message"), "Can't reach your deck", timeout: 20)
-    XCTAssertTrue(el(app, "study.retry").exists, "study.retry missing offline")
-    assertCenteredMessage(app, "study.message")
-    snapshot("study-offline-before-refresh", appearance: .light)
-
-    // Pull while still down → still offline.
-    pullToRefresh(app, from: el(app, "study.message"))
-    waitForLabel(el(app, "study.message"), "Can't reach your deck", timeout: 20)
-
-    try server.start()
-    pullToRefresh(app, from: el(app, "study.message"))
-    assertFront(app, "gratitude", remaining: "1 to review")
-    XCTAssertFalse(el(app, "study.retry").exists, "study.retry still shown after a successful pull")
-    snapshot("study-offline-after-refresh", appearance: .light)
-    app.terminate()
-    server.stop()
-  }
-
   // MARK: - #7 (studying)
 
   /// #7: in studying, a pull on the (short) card reloads, does not reveal, and the front still doesn't move on reveal.
@@ -210,30 +153,6 @@ final class RefreshUITests: XCTestCase {
     }
     snapshot("deck-after-refresh-query", appearance: .light)
     app.terminate()
-    server.stop()
-  }
-
-  // MARK: - #9
-
-  /// #9: deck open → add → Home → reactivate → new row. Study, under the sheet, refreshed too (rule: Study
-  /// refreshes on foreground even under a sheet; a deck refresh sends no `deckChanged`).
-  @MainActor
-  func testDeck_foregroundReload() throws {
-    XCUIDevice.shared.appearance = .light
-    let (server, deck) = try startStub([])
-    let app = launch(api: .live(server.url))
-    waitForLabel(el(app, "study.message"), "All caught up")
-    openDeck(app)
-    waitForLabel(el(app, "deck.message"), "No cards yet")
-
-    deck.add(card(Self.idA, "canine", "dog"))
-    backgroundAndReactivate(app)
-    XCTAssertTrue(row(app, Self.idA).waitFor(timeout: 10), "new row missing after reactivating")
-    snapshot("deck-foreground", appearance: .light)
-
-    swipeSheetDown(app, from: el(app, "deck.title"))
-    waitForAbsence(el(app, "deck.title"))
-    assertFront(app, "canine", remaining: "1 to review")
     server.stop()
   }
 

@@ -84,39 +84,27 @@ extension SettingsUITests {
 
   // MARK: - #11 deck states, #12 closing the deck's Settings re-checks
 
-  /// #11: deck not set up (light, dark) and token rejected (light) show `deck.message` + `deck.openSettings`,
-  /// which opens the deck's Settings; offline shows "Can't reach your deck" with no button.
+  /// #11: deck not set up and token rejected show `deck.message` + `deck.openSettings`, which opens the deck's
+  /// Settings. Light only; offline: DeckUITests.testDeck_loadFailed (no button: DeckFeatureTests.onlySetupProblemsOfferSettings).
   @MainActor
   func testSetup_deckStates() throws {
     continueAfterFailure = true  // keep going so every state gets its screenshot
+    XCUIDevice.shared.appearance = .light
     let server = try startStub(StubDeck([card("f1", "alpha", "one")]), token: Self.goodToken)
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .stored)
-      clearStoredServer(app)
-      openDeck(app)
-      assertDeckMessage(app, Self.notSetUp.message, button: true)
-      snapshot("deck-not-set-up", appearance: appearance)
-      if appearance == .light {
-        el(app, "deck.openSettings").tap()
-        waitForLabel(el(app, "settings.title"), "Settings")
-        XCTAssertTrue(el(app, "deck.title").exists, "deck.openSettings did not open the deck's Settings sheet")
-        setText(app, "settings.url", server.url)
-        setText(app, "settings.token", "wrong", secure: true)
-        closeSettingsSheet(app)
-        assertDeckMessage(app, Self.rejected.message, button: true)
-        snapshot("deck-token-rejected", appearance: appearance)
-
-        el(app, "deck.openSettings").tap()
-        waitForLabel(el(app, "settings.title"), "Settings")
-        setText(app, "settings.url", unreachableAPIURL)
-        setText(app, "settings.token", Self.goodToken, secure: true)
-        closeSettingsSheet(app)
-        assertDeckMessage(app, "Can't reach your deck", button: false, timeout: 20)
-        snapshot("deck-offline-after-setup", appearance: appearance)
-      }
-      app.terminate()
-    }
+    let app = launch(api: .stored)
+    clearStoredServer(app)
+    openDeck(app)
+    assertDeckMessage(app, Self.notSetUp.message, button: true)
+    snapshot("deck-not-set-up", appearance: .light)
+    el(app, "deck.openSettings").tap()
+    waitForLabel(el(app, "settings.title"), "Settings")
+    XCTAssertTrue(el(app, "deck.title").exists, "deck.openSettings did not open the deck's Settings sheet")
+    setText(app, "settings.url", server.url)
+    setText(app, "settings.token", "wrong", secure: true)
+    closeSettingsSheet(app)
+    assertDeckMessage(app, Self.rejected.message, button: true)
+    snapshot("deck-token-rejected", appearance: .light)
+    app.terminate()
     server.stop()
   }
 

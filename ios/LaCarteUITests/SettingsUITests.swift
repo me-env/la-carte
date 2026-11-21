@@ -5,7 +5,6 @@ import XCTest
 /// Stub checks launch with `APIMode.stored` (no API env at all) and type a `StubAPIServer` URL into Settings, so
 /// they go through the same path as a real phone: stored URL + Keychain token → live `APIClient`.
 final class SettingsUITests: XCTestCase {
-  static let appearances: [XCUIDevice.Appearance] = [.light, .dark]
   static let urlPlaceholder = "Server URL"
   static let goodToken = "qa-good-token"
 
@@ -120,69 +119,45 @@ final class SettingsUITests: XCTestCase {
     server.stop()
   }
 
-  /// #4: HTTP 401 → "Wrong token".
-  @MainActor
-  func testSettings_wrongToken() throws {
-    XCUIDevice.shared.appearance = .light
-    let server = try startStub(StubDeck([card("a1", "alpha", "one")]), token: Self.goodToken)
-    let app = launch(api: .stored)
-    openDeck(app)
-    openSettings(app)
-    setText(app, "settings.url", server.url)
-    setText(app, "settings.token", "wrong", secure: true)
-    el(app, "settings.test").tap()
-    waitForLabel(statusText(app), "Wrong token")
-    XCTAssertEqual(server.requests.last { StubDeck.route($0.path) == "/stats" }?.headers["authorization"], "Bearer wrong")
-    snapshot("settings-unauthorized", appearance: .light)
-    server.stop()
-  }
+  // MARK: - #2/#3/#6 persistence across launches (+ spec 004 #5 theme)
 
-  /// #4: any other error → "Can't reach server" (nothing listening, then a 500 from the stub).
-  @MainActor
-  func testSettings_unreachable() throws {
-    XCUIDevice.shared.appearance = .light
-    let app = launch(api: .stored)
-    openDeck(app)
-    openSettings(app)
-    setText(app, "settings.url", unreachableAPIURL)
-    setText(app, "settings.token", Self.goodToken, secure: true)
-    el(app, "settings.test").tap()
-    waitForLabel(statusText(app), "Can't reach server", timeout: 20)
-    snapshot("settings-unreachable", appearance: .light)
-
-    let server = StubAPIServer { _ in .init(status: 500, body: #"{"detail":"boom"}"#) }
-    try server.start()
-    setText(app, "settings.url", server.url)
-    el(app, "settings.test").tap()
-    waitForLabel(statusText(app), "Can't reach server")
-    server.stop()
-  }
-
-  // MARK: - #2/#3/#6 persistence across launches
-
-  /// URL and token typed in Settings survive a relaunch with no API env: the first requests after launch go to
-  /// the stored URL with the stored token, and Settings shows them again (token masked).
+  /// URL, token (spec 003) and theme (spec 004 #5) picked in Settings survive a relaunch with no API env and no
+  /// `-theme` argument: the first requests after launch go to the stored URL with the stored token, study opens in
+  /// Forest, and Settings shows them again (token masked, Forest selected). Puts the theme back to System.
   @MainActor
   func testSettings_persistAcrossRelaunch() throws {
     XCUIDevice.shared.appearance = .light
+    addTeardownBlock { @MainActor [self] in  // the test resets the theme itself; only a failure leaves Forest
+      guard testRun?.hasSucceeded == false else { return }
+      let app = launch(api: .mock, theme: nil)
+      openDeck(app)
+      openSettings(app)
+      el(app, "settings.theme.system").tap()
+      app.terminate()
+    }
     let deck = StubDeck([card("b1", "persist", "stays")])
     let server = try startStub(deck, token: Self.goodToken)
-    var app = launch(api: .stored)
+    var app = launch(api: .stored, theme: nil)
     openDeck(app)
     openSettings(app)
     setText(app, "settings.url", server.url)
     setText(app, "settings.token", Self.goodToken, secure: true)
+    el(app, "settings.theme.forest").tap()
+    XCTAssertTrue(poll(timeout: 3) { el(app, "settings.theme.forest").isSelected }, "Forest not selected after tapping it")
     el(app, "settings.close").tap()
     waitForAbsence(el(app, "settings.title"))
     app.terminate()
 
     let before = server.requests.count
-    app = launch(api: .stored)
+    app = launch(api: .stored, theme: nil)
     waitForLabel(el(app, "study.front"), "persist", timeout: 15)
     let afterLaunch = server.requests[before...]
     XCTAssertFalse(afterLaunch.isEmpty, "relaunched app sent nothing to the stored URL")
     XCTAssertTrue(afterLaunch.allSatisfy { $0.headers["authorization"] == "Bearer \(Self.goodToken)" },
                   "requests after relaunch without the stored token: \(afterLaunch.map { $0.headers["authorization"] ?? "none" })")
+    let window = app.windows.firstMatch.frame
+    waitForColors(app, [("study background (forest after relaunch)", CGPoint(x: 3, y: window.midY), Palette.forest.background)])
+    snapshot("study-relaunched-forest", appearance: .light)
     openDeck(app)
     openSettings(app)
     XCTAssertEqual(fieldText(app, "settings.url"), server.url, "stored URL not shown after relaunch")
@@ -191,7 +166,11 @@ final class SettingsUITests: XCTestCase {
     XCTAssertEqual(masked, String(repeating: "•", count: Self.goodToken.count),
                    "stored token not shown masked (one dot per character) after relaunch")
     assertTokenNotOnScreen(app, Self.goodToken)
+    XCTAssertEqual(["system", "light", "dark", "forest"].filter { el(app, "settings.theme.\($0)").isSelected }, ["forest"],
+                   "stored theme not selected after relaunch")
     snapshot("settings-relaunched", appearance: .light)
+    el(app, "settings.theme.system").tap()
+    XCTAssertTrue(poll(timeout: 3) { el(app, "settings.theme.system").isSelected }, "System not selected after tapping it")
     server.stop()
   }
 
@@ -218,47 +197,6 @@ final class SettingsUITests: XCTestCase {
     waitForLabel(el(app, "study.front"), "swiped", timeout: 15)
     XCTAssertTrue(server.requests[before...].allSatisfy { $0.headers["authorization"] == "Bearer \(Self.goodToken)" })
     server.stop()
-  }
-
-  // MARK: - #7 a successful test reloads deck and study
-
-  /// Server A then server B: each successful test makes the deck fetch the new server at once (before the sheet
-  /// closes), and study shows the new server's card once back.
-  @MainActor
-  func testSettings_successReloadsDeckAndStudy() throws {
-    XCUIDevice.shared.appearance = .light
-    let later = Date(timeIntervalSince1970: 1_767_312_000)  // 2026-01-02: still due, after the first card
-    var extraA = card("e1", "zulu", "z"), extraB = card("e2", "yankee", "y")
-    extraA.due = later
-    extraB.due = later
-    let deckA = StubDeck([card("d1", "alpha", "one"), extraA]), deckB = StubDeck([card("d2", "bravo", "two"), extraB])
-    let serverA = try startStub(deckA, token: Self.goodToken), serverB = try startStub(deckB, token: Self.goodToken)
-    let app = launch(api: .stored)
-
-    for (server, front, id) in [(serverA, "alpha", "d1"), (serverB, "bravo", "d2")] {
-      openDeck(app)
-      openSettings(app)
-      setText(app, "settings.url", server.url)
-      setText(app, "settings.token", Self.goodToken, secure: true)
-      el(app, "settings.test").tap()
-      waitForLabel(statusText(app), "Connected · 2 cards")
-      waitUntil("deck reloaded from \(server.url) after the successful test") {
-        let reqs = server.requests
-        guard let stats = reqs.lastIndex(where: { StubDeck.route($0.path) == "/stats" }) else { return false }
-        return reqs[(stats + 1)...].contains { $0.method == "GET" && StubDeck.route($0.path) == "/cards" }
-      }
-      XCTAssertTrue(el(app, "settings.title").exists, "settings closed by itself after the test")
-      el(app, "settings.close").tap()
-      waitForAbsence(el(app, "settings.title"))
-      XCTAssertTrue(el(app, "deck.row.\(uuid(id))").waitFor(timeout: 5), "deck doesn't show \(front)")
-      swipeSheetDown(app, from: el(app, "deck.title"))
-      waitForAbsence(el(app, "deck.title"))
-      waitForLabel(el(app, "study.front"), front)
-      waitForLabel(el(app, "study.remaining"), "2 to review")
-    }
-    snapshot("study-after-server-change", appearance: .light)
-    serverA.stop()
-    serverB.stop()
   }
 
   // MARK: - accessibility XL

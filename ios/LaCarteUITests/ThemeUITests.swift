@@ -204,33 +204,7 @@ final class ThemeUITests: XCTestCase {
     assertStatusBar(app, darkScheme: true, "forest from the picker")
   }
 
-  // MARK: - #5 persistence
-
-  /// #5: Forest survives a relaunch (no launch argument): study opens in forest and the picker shows Forest; then
-  /// Light survives too.
-  @MainActor
-  func testTheme_persistsAcrossRelaunch() {
-    resetThemeOnTeardown()
-    XCUIDevice.shared.appearance = .light
-    for (theme, palette) in [("forest", Palette.forest), ("light", .light)] {
-      if theme == "light" { XCUIDevice.shared.appearance = .dark }  // Light must still win on a dark device
-      var app = launch(api: .mock, theme: nil)
-      openDeck(app)
-      openSettings(app)
-      themeButton(app, theme).tap()
-      assertSelected(app, theme)
-      app.terminate()
-
-      app = launch(api: .mock, theme: nil)
-      waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
-      assertStudyColors(app, palette, "\(theme) after relaunch")
-      snapshot("study-relaunched-\(theme)", appearance: XCUIDevice.shared.appearance)
-      openDeck(app)
-      openSettings(app)
-      assertSelected(app, theme)
-      app.terminate()
-    }
-  }
+  // #5 persistence across a relaunch: SettingsUITests.testSettings_persistAcrossRelaunch (with the Keychain token).
 
   // MARK: - #4 + #6 forest on every screen via `-theme forest`
 
