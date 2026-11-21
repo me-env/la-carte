@@ -23,11 +23,13 @@ then run. Never poll `pgrep xcodebuild`, never `sleep` in a loop, never call `xc
 | `build-LaCarte-<checkout>` | `ios/LaCarte.xcodeproj` DerivedData ("database is locked" if shared) | `ios-build.sh`; `ios-ui-test.sh` **build phase only** |
 | `build-LaCarteKit-<checkout>` | `ios/LaCarteKit` DerivedData (a different folder from the app's) | `ios-test.sh` |
 | `sim-<SIMULATOR>-<OS>` | the UI-test simulator (`iPhone 17 Pro`) | `ios-ui-test.sh` **test phase only** |
-| `sim-<UNIT_SIMULATOR>-<OS>` | the unit-test simulator (`iPhone 17`) | `ios-test.sh` |
+| `sim-<UNIT_SIMULATOR>-<OS>` | unit-test pool slot 1 (`iPhone 17`) | `ios-test.sh` (via `_sim-pool.sh`; older scripts take it directly) |
+| `sim-la-carte-unit-<n>-<OS>` | unit-test pool slots 2..3 (`la-carte-unit-2`, `-3`) | `ios-test.sh` via `_sim-pool.sh` |
 
 Order is always build lock, then simulator lock, so no deadlock. `<checkout>` is a hash of the repo path:
 each git worktree (`.claude/worktrees/*`) has its own DerivedData and build locks, while simulator locks are
-global (`/tmp/la-carte-locks`), so UI runs from several worktrees queue for the same device. `OS=27.0`
+global (`/tmp/la-carte-locks`), so UI runs from several worktrees queue for the same device; unit runs take
+the first free device of the unit pool (below). `OS=27.0`
 resolves to the same lock as `latest` when 27.0 is the newest runtime.
 
 ## What can run at the same time
@@ -36,7 +38,7 @@ resolves to the same lock as `latest` when 27.0 is the newest runtime.
 |---|---|---|---|---|
 | `ios-ui-test.sh` / `e2e.sh`, building (~1–3 min) | waits | **yes** | waits | yes |
 | `ios-ui-test.sh` / `e2e.sh`, testing (~20–30 min) | **yes** | **yes** | waits | yes |
-| `ios-test.sh` | yes | waits | yes | yes |
+| `ios-test.sh` | yes | yes, up to 3 at once (same checkout: waits) | yes | yes |
 | `ios-build.sh` | waits | yes | build waits | yes |
 
 - `ios-ui-test.sh` runs `build-for-testing` (app lock) into a private copy of the test products
@@ -46,9 +48,15 @@ resolves to the same lock as `latest` when 27.0 is the newest runtime.
 - `e2e.sh` starts its two APIs on free ports picked by the OS (`E2E_PORT` / `E2E_EMPTY_PORT` override),
   so it never clashes with `api-dev.sh` (:8000) or another e2e run. Run names must still be unique
   (`qa/screenshots/<run>`, `<results>/<run>.xcresult`).
-- Unit tests run on their own simulator, `UNIT_SIMULATOR` (default `iPhone 17`, iOS 27; on CI it is
-  `$SIMULATOR`, the one CI boots), so `ios-test.sh` never waits behind a UI suite. Set `UNIT_SIMULATOR=…`
-  to override; if it names the UI simulator, the two scripts share one lock again and queue.
+- Unit tests run on a **pool of simulators** (`scripts/_sim-pool.sh`), never the UI one: slot 1 is
+  `UNIT_SIMULATOR` (default `iPhone 17`, iOS 27, same lock as before, so worktrees with older scripts share it
+  correctly); slots 2..`UNIT_POOL_SIZE` (default 3) are `la-carte-unit-2`, `la-carte-unit-3`, same device type
+  and runtime, created by the script on first use (about 2 GB each once used). A run takes the first free slot
+  without waiting; if all are busy it prints the holders and retries every 2 s up to `LOCK_TIMEOUT`. Runs from
+  one checkout still queue on that checkout's DerivedData lock. `UNIT_POOL_SIZE=1` turns the pool off (CI does).
+- `ios-test.sh` passes `-collect-test-diagnostics never`: after a failing or crashing test, Xcode otherwise runs
+  `simctl diagnose` (up to 10 min) while still holding the simulator.
+- UI suites stay on one device: no UI pool until two UI suites at once are measured to be fine (see Plan 1).
 
 ## Big outputs: the scratch disk
 
@@ -72,6 +80,19 @@ Measured 2026-11-21: one `-only-testing` UI run plus two `ios-build.sh` started 
 waited about 20 s for the UI build phase, then ran one after the other (+23 s, +33 s) while the UI test ran;
 the UI test passed at +44 s. `ios-test.sh` (114 tests, 91 s) passed on `iPhone 17` during a UI suite.
 
+### Unit-test pool: before / after (2026-11-21)
+
+Before (one unit simulator, 17:30–17:46): 6 worktree/main runs of `ios-test.sh` queued. Slot holder acquired
+17:35:16 after waiting 2 min 41 s; its tests took about 55 s, then `simctl diagnose` held the device another
+10 min. At 17:46 four runs had waited 9–13 min for `sim-iPhone-17-latest` and two more 10–14 min for their
+checkout's DerivedData lock behind them. A test phase is 36–61 s (5 xcresults), incremental build about 15 s,
+so the device, not the build, was the bottleneck. The UI simulator had 1 run waiting 8 min.
+Machine at the peak: load average 46 (14 cores), 45 GB RAM used, 12 GB compressed.
+
+After: with slot 1 still busy and 4 runs queued on it (older scripts), a new `ios-test.sh` took slot 2 at once:
+101 passed in 91.9 s, 102 s end to end, 0 s wait. Three concurrent dummy holders: the third saw "all 3 busy" and
+timed out with exit 75 as configured. Disk: `la-carte-unit-2` 2.0 GB after one run, `-3` 17 MB until used.
+
 ## Working tree
 
 Agents spawned with worktree isolation work in `.claude/worktrees/<agent>` (own build locks, shared
@@ -86,7 +107,9 @@ DerivedData 1.7 GB app + 1.0 GB kit, `qa/.results` 1.1 GB. 48 GB RAM, 14 cores. 
 
 1. **Per-agent simulator clones** for UI work (`xcrun simctl clone "iPhone 17 Pro" "iPhone 17 Pro <agent>"`,
    `SIMULATOR=` per agent). About 2–5 GB each as they get used (they must live on the internal disk). It
-   lets two UI suites run at once; CPU allows about 2. Worth it only if QA and another agent often need UI
+   lets two UI suites run at once; CPU allows about 2, but on 2026-11-21 load hit 46 on 14 cores with 12 GB of
+   memory compressed while 5 worktrees built, so measure two suites on a quiet machine first (`_sim-pool.sh` can
+   grow a UI pool then). Worth it only if QA and another agent often need UI
    runs at the same time.
 2. **Git worktrees** per engineer (`git worktree add "$LA_CARTE_SCRATCH/worktrees/<agent>" -b
    <agent>/<feature>`). Each brings its own DerivedData (about 2.7 GB, on the scratch disk) and its own

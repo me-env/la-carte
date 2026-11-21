@@ -7,6 +7,9 @@ DESTINATION="platform=iOS Simulator,name=$SIMULATOR,OS=$OS"
 # CI boots only $SIMULATOR, so it keeps using that one.
 if [ -n "${CI:-}" ]; then UNIT_SIMULATOR="${UNIT_SIMULATOR:-$SIMULATOR}"; else UNIT_SIMULATOR="${UNIT_SIMULATOR:-iPhone 17}"; fi
 UNIT_DESTINATION="platform=iOS Simulator,name=$UNIT_SIMULATOR,OS=$OS"
+# Unit tests take the first free device of a small pool (scripts/_sim-pool.sh): slot 1 is $UNIT_SIMULATOR, slots 2..N
+# are "la-carte-unit-<n>" clones created on first use. 1 = no pool (CI boots only one simulator).
+if [ -n "${CI:-}" ]; then UNIT_POOL_SIZE="${UNIT_POOL_SIZE:-1}"; else UNIT_POOL_SIZE="${UNIT_POOL_SIZE:-3}"; fi
 
 # Locks (scripts/_lock.sh, rules in docs/dev-velocity.md). Always take the DerivedData lock before the
 # simulator lock, so two scripts can never deadlock. DerivedData is per checkout (Xcode hashes the path).
@@ -27,7 +30,7 @@ UNIT_SIM_LOCK="sim-${UNIT_SIMULATOR// /-}-$LOCK_OS"   # same name as SIM_LOCK wh
 # external SSD. Set it per machine in scripts/.local.env (gitignored, never read on CI). If its volume isn't
 # mounted, everything falls back to the in-repo paths.
 # A git worktree reads the main checkout's .local.env; results are kept per checkout so worktrees never collide.
-MAIN_ROOT="$(cd "$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null || echo "$ROOT/.git")/.." && pwd)"
+MAIN_ROOT="$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo "$ROOT/.git")/.." && pwd)"
 for f in "$ROOT/scripts/.local.env" "$MAIN_ROOT/scripts/.local.env"; do
   if [ -z "${CI:-}" ] && [ -f "$f" ]; then source "$f"; break; fi
 done
