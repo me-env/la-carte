@@ -19,17 +19,18 @@ struct DecodingTests {
   }
 
   @Test func decodesStatsWithNextDue() throws {
-    let json = #"{"total":2,"due":0,"new":0,"reviewed_today":2,"next_due":"2026-11-20T23:24:08.477041Z"}"#
+    let json = #"{"total":2,"due":0,"new":0,"reviewed_today":2,"next_due":"2026-11-20T23:24:08.477041Z","streak":12}"#
     let stats = try JSONDecoder.api.decode(DeckStats.self, from: Data(json.utf8))
     #expect(stats.total == 2)
     #expect(stats.reviewedToday == 2)
+    #expect(stats.streak == 12)
     let nextDue = try #require(stats.nextDue)
     #expect(abs(nextDue.timeIntervalSince1970 - 1_795_217_048.477) < 0.001)
   }
 
   @Test func decodesStatsWithoutNextDue() throws {
-    let json = #"{"total":0,"due":0,"new":0,"reviewed_today":0,"next_due":null}"#
+    let json = #"{"total":0,"due":0,"new":0,"reviewed_today":0,"next_due":null,"streak":0}"#
     let stats = try JSONDecoder.api.decode(DeckStats.self, from: Data(json.utf8))
-    #expect(stats == DeckStats(total: 0, due: 0, new: 0, reviewedToday: 0, nextDue: nil))
+    #expect(stats == DeckStats(total: 0, due: 0, new: 0, reviewedToday: 0, nextDue: nil, streak: 0))
   }
 }

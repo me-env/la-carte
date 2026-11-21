@@ -5,7 +5,8 @@ let package = Package(
   name: "LaCarteKit",
   platforms: [.iOS(.v26)],
   products: [
-    .library(name: "AppFeature", targets: ["AppFeature"])
+    .library(name: "AppFeature", targets: ["AppFeature"]),
+    .library(name: "DeckWidget", targets: ["DeckWidget"]),
   ],
   dependencies: [
     .package(
@@ -22,6 +23,7 @@ let package = Package(
       dependencies: [
         "CardEditorFeature",
         "DeckFeature",
+        "DeckWidget",
         "DesignSystem",
         "SettingsFeature",
         "StudyFeature",
@@ -83,6 +85,10 @@ let package = Package(
       ]
     ),
     .testTarget(name: "APIClientTests", dependencies: ["APIClient"]),
+
+    // MARK: Widget (plain SwiftUI + WidgetKit, no TCA; spec 007)
+    .target(name: "DeckWidget", dependencies: ["APIClient", "DesignSystem"]),
+    .testTarget(name: "DeckWidgetTests", dependencies: ["DeckWidget", "APIClient"]),
 
     // MARK: UI foundation (no TCA)
     .target(name: "DesignSystem"),

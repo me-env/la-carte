@@ -41,3 +41,6 @@ docs/design/brand/explorations/round9/**
 !docs/design/brand/explorations/round9/README.md
 docs/design/brand/explorations/*/frames/
 docs/design/brand/explorations/*/*.npy
+docs/design/brand/explorations/round10/**
+!docs/design/brand/explorations/round10/render.py
+!docs/design/brand/explorations/round10/README.md

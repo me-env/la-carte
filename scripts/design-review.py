@@ -13,6 +13,8 @@
     uv run scripts/design-review.py <render-1024.png|.svg>... [--home] [--axis x|y] [--region x0,y0,x1,y1] [--out sheet.png]
     uv run scripts/design-review.py card-light-1024.png card-dark-1024.png --watch   # re-run on every save
     uv run scripts/design-review.py --make-synthetic out.png     # a smooth reference ramp that must PASS
+    uv run scripts/design-review.py <render> --screen stochastic # a blue-noise (random, evenly spaced) screen
+    uv run scripts/design-review.py --make-synthetic out.png --screen stochastic   # its reference, must PASS
     uv run scripts/design-review.py --frames round8/frames/  (or --frames 'round8/card-frame-*.png')   # an animation
 
 Prints PASS/FAIL per metric (value vs limit, and WHERE: `at x 385, y 535 (band 5)` in the render's own 1024 px
@@ -25,13 +27,26 @@ Exit code 1 on any FAIL. Several renders: each is reviewed. `--watch`: re-runs w
 fill moves the ink centroid; the still icon is reviewed on its own).
 All lengths are in px of a 1024 tile; other sizes are resampled to 1024 first. SVGs go through rsvg-convert.
 
+Screens (`--screen`, the critic picks it per proposal from the render's construction):
+- `lattice` (default): the marks settle onto a hex lattice; order must RISE (checks 3), touching from coverage 0.65.
+- `stochastic`: a blue-noise screen (random but evenly spaced; |psi6| stays ~0.3-0.5 by design). Order must not
+  fall and must stay even instead of rising: 1 - CV(NN) drawdown and a floor, no clumped marks, no voids (3s); the
+  |psi6| drawdown is INFO. Touching from coverage TOUCH_OK_COVERAGE_STOCHASTIC (0.35). The closing holes are the
+  random gaps between merging disks, so their size / spacing metrics are INFO; the per-row front swing is replaced
+  by an INFO hole-area front, and the edge spread at 58/29 px (6b) judges the edge. Everything else is the same.
+
 Marks are dots (small ink components: SVG circles or PNG connected components) AND holes (small paper
 components sitting in ink: the inverted image). An AM halftone flips from ink dots to paper holes at 50%
 coverage; both halves are marks, stitched into one point set along the axis. Local coverage = the grain-blurred
 coverage profile at the mark's x, measured inside the mark's silhouette only (normalised convolution
 blur(ink*mask)/blur(mask), mask = convex hull of the ink), so cells at the card's edge aren't diluted by the
-background. Where it is >= TOUCH_OK_COVERAGE (0.65) marks may touch and close into solid, so marks there are not
-analysed (the coverage profile and checks 5-6 judge that zone; the header line counts them).
+background. Where it is >= the touching exemption (TOUCH_OK_COVERAGE 0.65, stochastic 0.35) marks may touch and
+close into solid: dots there are judged by coverage only (checks 1-2, 5-6), and holes there are measured on their
+own (5b), not stitched into the dot order bands: a web closing puts them on the cell corners, a honeycomb of pitch
+A/sqrt(3), which would read as an order drop. (Before 2026-11-21 they were dropped altogether: round 8b's ~300
+closing holes were never measured and every hole/seam check passed on nothing.) The header line gives both counts.
+0. Guard: every 32 px band of the ramp whose local coverage is 0.05-0.95 must hold detected marks (dots or holes);
+   a band with none means nothing was measured there, which fails instead of passing.
 
 What it measures, along the transition axis (default x; the direction of rising ink is auto-detected):
 1. Coverage profile at 1024: ink per 8 px column over the middle 60% of the mark's height (avoids rounded
@@ -42,6 +57,11 @@ What it measures, along the transition axis (default x; the direction of rising 
 3. Order along the axis, per 32 px band of marks (dots and holes together): hexatic order |psi6| over
    Delaunay neighbours, and regularity 1 - CV(nearest-neighbour distance). Both must rise without an
    adjacent-band step or a drop: "random, then suddenly a lattice" fails here.
+3s. Stochastic only (`--screen stochastic`), on the same bands, with l = the band's median NN distance (the density
+   follows the ramp, so distances are scaled per band): 1 - CV(NN) must not fall (drawdown) and stays above
+   NN_FLOOR_STOCHASTIC (Poisson-disc ~0.80-0.85, uniform random ~0.5); clumped marks (NN < 0.6 l: the pair
+   correlation g(r) must be ~0 below the min distance) <= 2%; the largest empty circle (Delaunay circumradius away
+   from the hull) <= 1.5 l (no voids).
 4. Seam (a straight line across the axis where the pattern changes, even if coverage is smooth):
    - polarity mix: if both dots and holes exist, the zone where they mix (95th-percentile dot x minus
      5th-percentile hole x) must span >= POLARITY_MIN_MIX pitches; a dots -> holes flip in one column is a
@@ -55,11 +75,19 @@ What it measures, along the transition axis (default x; the direction of rising 
    - hairline walls: % of pixels in ink or paper walls thinner than 2 px (4x upsample; a disk just under 2 px
      doesn't fit: grey top-hat > 0.25), counting only runs >= 6 px long (corner tips and the last specks of a
      closing hole are not walls). A web of 1 px walls between closing hexagons fails both.
+5b. Closing holes (coverage >= the touching exemption), per 32 px band: size CV (one size per position), median
+   radius must not rise into the solid, 1 - CV(NN) >= 0.80. INFO on a stochastic screen.
 6. Front into the solid. Per row (middle 80% of the height), where coverage boxed over one pitch (inside the
    silhouette) stays at the plateau into the solid; a running mean over 3 pitches removes the lattice zigzag.
    - swing: max - min of that front (a "bitten", swinging front fails; round 7: 41 px).
    - raw step: max |step| per 2 px column of the raw (unblurred) profile, boxed over exactly one lattice period
-     (autocorrelation) so the lattice doesn't alias, from coverage 0.5 into the solid: a gap or jump at the joint.
+     (autocorrelation; 2 pitches on a stochastic screen) so the lattice doesn't alias, from coverage 0.5 into the
+     solid: a gap or jump at the joint.
+   - stochastic: no per-row swing (50-70 px on any random screen); INFO: per 64 px strip, where the paper falls
+     below 2% for good (max - min). It can't tell random from ragged (synthetic 16-56 px, round 7's bitten front 33).
+6b. Edge into the solid at icon size (both screens; the guard behind the looser stochastic front): on the 58 and
+   29 px perceived images, per column the std across rows of the ink, max over columns at >= 0.8 coverage. Lattice
+   synthetic 0.003, round 8b 0.010, round 7's rejected bitten edge 0.055 / 0.032 (fails), round 9 0.061 (fails).
 7. Geometry: merged (elongated) marks and the smallest gap / (r1+r2), both polarities: mark to mark along
    Delaunay edges (sub-pixel on the centre line; r = each mark's own extent along it, so facing hexagons
    use their apothem), and mark to the rest of its colour (a dot touching the solid or the ink between
@@ -81,6 +109,14 @@ edge into the cell corners (Y-shaped holes, then small holes shrinking to nothin
 2 px. Coverage is continuous 0 -> 1 with no flip, no gap column and no jump into the solid. (The earlier
 AM-halftone version, dots inverting to holes in one column at 50%, fails `seam: polarity mix`; the round-7-style
 version, walls thinning to 0, fails the hairline checks.)
+
+Stochastic reference (`--make-synthetic --screen stochastic`, function `synthetic_stochastic`), design-lead's plan:
+one progressively ranked blue-noise set (brandkit.progressive_blue_noise: min distance D = 2.5 R0, every prefix
+evenly spread); the density follows c(x) at radius R0 up to the full set, then the dots grow (radius calibrated so
+the column coverage follows the smoothstep) and merge; radii are capped at the gap rule (D / 2.4) until coverage
+0.41, then a morphological closing of radius 1.1 px fills every paper gap thinner than 2.2 px; whole dots only below
+that, clipped to the card. PASSES 11 of 12 seeds (seed 1 fails the 58 px edge spread at 0.053: a random edge's
+mottle can come close to round 7's bitten edge at icon size, so check a stochastic render's seed); the default passes.
 """
 import argparse, json, math, os, re, subprocess, sys, tempfile, urllib.request
 from pathlib import Path
@@ -93,6 +129,7 @@ from scipy.spatial import Delaunay, cKDTree
 
 # ---- Thresholds (calibrated 2026-11-21 on round6/pass5, round7 flip-*-1024.png and round7 card-* (hairline
 # walls, bitten front: the critic's eye), which must FAIL, and --make-synthetic (12 of 12 seeds), which PASSES;
+# stochastic ones on --make-synthetic --screen stochastic (11 of 12 seeds), round 9 and a uniform-random control;
 # revisit after two rounds). Units: coverage fraction 0..1 per column of the given size.
 TILE = 1024
 COL_PX = 8                      # profile column width at 1024
@@ -115,6 +152,11 @@ TOUCH_OK_COVERAGE = 0.65        # touching / merging is allowed only where local
                                 # rule (gap >= 0.2*(r1+r2)) top out at a pure hexagon of apothem A/2.4 ~ 0.413*A, which
                                 # covers (0.413/0.5)^2 ~ 0.68 of its cell; a closing band above ~0.68 can never pass
                                 # the gap rule, so the exemption must start just below it.
+TOUCH_OK_COVERAGE_STOCHASTIC = 0.35   # the same exemption under --screen stochastic (design-lead, measured on round 9):
+                                # the closest blue-noise pairs sit at the min distance d; gap >= 0.2*(r1+r2) needs
+                                # d >= 2.4*r; at density ~0.68/d^2 the max coverage that keeps every gap is
+                                # 0.68*pi/2.4^2 ~ 0.37, and with d = 2.5*R0 the dots start growing past R0 at
+                                # 0.68*pi/2.5^2 ~ 0.34, so the exemption starts just below 0.37
 POLARITY_MIN_MIX = 4.0          # dots -> holes: the zone where both polarities mix must span >= 4 pitches, else
                                 # the flip is a straight front (a seam), whatever the coverage does
 FLIP_STEP_MAX = 0.15            # last dots vs first holes (2 pitches each side of the flip): max of |d pitch|/pitch,
@@ -123,6 +165,26 @@ CENTROID_TOL = 0.03             # optical centre (midpoint of bbox centre and in
                                 # tile (31 px) of the tile centre, per axis
 SIZE_CV_MAX = 0.20              # mark radius CV inside one band (one size per position)
 SIZE_STEP_MAX = 0.20            # change of median mark radius between adjacent bands, as a fraction of the max
+# Stochastic screen (--screen stochastic: blue noise, |psi6| low by design). Order must not fall, and the marks must
+# stay evenly spaced, neither clumped nor with holes in the point set. Per 32 px band, scaled by the band's median NN
+# distance l (the density follows the ramp, so a global g(r) would mix scales):
+NN_FLOOR_STOCHASTIC = 0.65      # min 1 - CV(NN) per band (Bridson Poisson-disc points ~0.91, uniform random points
+                                # ~0.48; on rendered marks the stochastic synthetic's bands read 0.73-0.87, and a
+                                # uniform-random version 0.70, because overlapping random dots merge into one mark:
+                                # it fails on voids, merged blobs and gaps instead)
+CLUMP_RATIO = 0.6               # a mark whose NN distance < 0.6 l is clumped: the pair correlation g(r) must be ~0
+                                # below the min distance (blue noise ~0%, uniform random ~20% of marks)
+CLUMP_MAX = 2.0                 # % of marks clumped (synthetic 0%; touching random dots merge into one mark, so a
+                                # uniform-random render shows 1.4% here and fails `touching: merged blobs` instead)
+VOID_MAX = 1.5                  # largest empty circle (Delaunay circumradius inside the analysed marks) / l
+                                # (synthetic 1.19-1.41 over 12 seeds, round 9 1.46, uniform random 2.33)
+# Closing marks (local coverage >= the touching exemption): holes are measured on their own (a web closing puts them
+# on the cell corners, a honeycomb of pitch A/sqrt(3), so they are not stitched into the dot order bands). Per band:
+CLOSING_HOLE_RISE_MAX = 0.10    # holes shrink into the solid: max rise of the band's median hole radius, / max radius
+CLOSING_HOLE_NN_FLOOR = 0.80    # min 1 - CV(NN) of the holes (lattice; on a stochastic screen the three closing-hole
+                                # metrics are INFO: holes between merging random disks vary by design)
+MARKS_MIN_COVERAGE = (0.05, 0.95)   # a 32 px band whose local coverage is in this range must contain detected marks:
+                                    # nothing detected there means nothing measured, which is not a pass
 # Closing zone (local coverage >= CLOSING_COVERAGE, up to the solid plateau): hairlines and grey mush.
 CLOSING_COVERAGE = 0.5
 GREY_INK = (0.216, 0.765)       # "grey" = luminance 60..200 of 8 bit on the render normalised to paper 255 / ink 0
@@ -140,6 +202,20 @@ FRONT_ROW_BAND = 0.8
 FRONT_SWING_MAX = 8.0           # px: max - min of the smoothed front (synthetic ~1, round 7's bitten front ~41)
 FRONT_RAW_STEP_MAX = 0.06       # max |step| per 2 px column of the raw profile (no blur; only a box of one lattice
                                 # period, which removes the lattice's own aliasing) from coverage 0.5 into the solid
+
+# Stochastic front (--screen stochastic): the per-row swing is 50-70 px on any random screen (round 9, the synthetic),
+# so the front is taken per strip: where the paper (hole) area falls below FRONT_HOLE_FRAC for good.
+FRONT_HOLE_FRAC = 0.02
+FRONT_STRIP_PX = 64
+FRONT_SPREAD_MAX = 24.0         # px: max - min of the strip fronts (8 px columns). INFO only: on a random screen the
+                                # strip front is ill-conditioned (coverage is flat near the solid) and spreads 16-56 px
+                                # on the passing synthetic, 31 px on round 9, vs 33 px on round 7's rejected bitten
+                                # front: it can't tell random from ragged. The edge spread (below) can, in coverage.
+# Edge guard (both screens): a ragged edge into the solid reads at icon size even when a front metric passes.
+# Perceived image (58 / 29 px, as in check 2); columns at >= EDGE_MIN_COVERAGE; std across rows. Calibration:
+# lattice synthetic 0.003 / 0.002, round 8b 0.010 / 0.004; round 7's rejected bitten front 0.055 / 0.032.
+EDGE_MIN_COVERAGE = 0.8
+EDGE_SPREAD_MAX = {58: 0.045, 29: 0.025}
 
 ICON_IDS = [1110145109, 1108187841, 1108185179, 1069512882, 1584215688, 915056765]   # Notes, Reminders,
 # Calendar, Stocks, Clock, Maps: Apple's own apps via the public iTunes lookup API (no personal data).
@@ -231,9 +307,9 @@ def detect_marks(ink, circles):
     return marks, labels, ids
 
 
-def mark_gaps(ink, marks, labels, ids, cov):
+def mark_gaps(ink, marks, labels, ids, cov, touch):
     """Smallest gap / (r1 + r2) per mark (np.inf if none measured), exempt where local coverage cov(x) >=
-    TOUCH_OK_COVERAGE. Mark to mark: along Delaunay edges between marks of the same polarity, sub-pixel on the
+    touch (TOUCH_OK_COVERAGE, or TOUCH_OK_COVERAGE_STOCHASTIC). Mark to mark: along Delaunay edges between marks of the same polarity, sub-pixel on the
     centre line, r1 and r2 = each mark's extent along that line. Mark to the rest of its colour (the solid, the ink web between holes, the paper ground):
     pixel distance transform, against a partner of the same radius."""
     ratio = np.full(len(marks), np.inf)
@@ -261,7 +337,7 @@ def mark_gaps(ink, marks, labels, ids, cov):
             ra = np.argmax(other, axis=1) / (len(t) - 1) * L
             rb = np.argmax(other[:, ::-1], axis=1) / (len(t) - 1) * L
             ext = np.where(other.any(axis=1), ra + rb, rs)
-            ok = cov(((a + b) / 2)[:, 0]) >= TOUCH_OK_COVERAGE
+            ok = cov(((a + b) / 2)[:, 0]) >= touch
             with np.errstate(divide="ignore"):
                 g = np.where(ok, np.inf, gap / ext)
             np.minimum.at(ratio, sel[e[:, 0]], g); np.minimum.at(ratio, sel[e[:, 1]], g)
@@ -270,7 +346,7 @@ def mark_gaps(ink, marks, labels, ids, cov):
         dist = ndimage.distance_transform_edt(~rest)
         d = np.asarray(ndimage.minimum(dist, lab, ids[pol]))
         g = np.maximum(d - 1, 0) / (2 * m[:, 2])
-        ok = cov(m[:, 0]) >= TOUCH_OK_COVERAGE
+        ok = cov(m[:, 0]) >= touch
         ratio[sel] = np.minimum(ratio[sel], np.where(ok, np.inf, g))
     return ratio
 
@@ -350,6 +426,65 @@ def flip_metrics(marks, psi, nn, pitch):
     return xf, mix, steps[worst], note
 
 
+def band_scale(marks, nn):
+    """Per mark, l = the median NN distance of the marks within half a band (16 px) of it along the axis."""
+    x = marks[:, 0]
+    o = np.argsort(x)
+    lo = np.searchsorted(x[o], x - ORDER_BAND_PX / 2)
+    hi = np.searchsorted(x[o], x + ORDER_BAND_PX / 2)
+    return np.array([np.median(nn[o[a:b]]) for a, b in zip(lo, hi)])
+
+
+def stochastic_spacing(marks, nn, x0, x1):
+    """Blue-noise evenness of the marks between x0 and x1 (the ramp). Returns (clumped %, clumped xy,
+    max void / l, void x, void y): clumped = NN distance < CLUMP_RATIO * l; void = the largest Delaunay circumcircle
+    (an empty circle) whose centre lies inside the marks' extent by at least l, with no vertex on the hull."""
+    if len(marks) < 8:
+        return 0.0, np.zeros((0, 2)), 0.0, float(x0), float(TILE / 2)
+    l = band_scale(marks, nn)
+    inr = (marks[:, 0] >= x0) & (marks[:, 0] < x1)
+    cl = inr & (nn < CLUMP_RATIO * l)
+    xy = marks[:, :2]
+    tri = delaunay(xy)
+    P = xy[tri.simplices]                                   # (n, 3, 2)
+    a, b, c = P[:, 0], P[:, 1], P[:, 2]
+    d = 2 * (a[:, 0] * (b[:, 1] - c[:, 1]) + b[:, 0] * (c[:, 1] - a[:, 1]) + c[:, 0] * (a[:, 1] - b[:, 1]))
+    sq = lambda p: (p ** 2).sum(axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ux = (sq(a) * (b[:, 1] - c[:, 1]) + sq(b) * (c[:, 1] - a[:, 1]) + sq(c) * (a[:, 1] - b[:, 1])) / d
+        uy = (sq(a) * (c[:, 0] - b[:, 0]) + sq(b) * (a[:, 0] - c[:, 0]) + sq(c) * (b[:, 0] - a[:, 0])) / d
+    R = np.hypot(ux - a[:, 0], uy - a[:, 1])
+    hull = np.zeros(len(xy), bool); hull[tri.convex_hull.ravel()] = True
+    lc = np.interp(ux, np.sort(marks[:, 0]), l[np.argsort(marks[:, 0])])
+    (mx0, my0), (mx1, my1) = xy.min(axis=0), xy.max(axis=0)
+    ok = (~hull[tri.simplices].any(axis=1) & np.isfinite(R) & (ux >= max(x0, mx0) + lc) & (ux <= min(x1, mx1) - lc)
+          & (uy >= my0 + lc) & (uy <= my1 - lc))
+    if not ok.any():
+        return 100 * cl.sum() / max(inr.sum(), 1), xy[cl], 0.0, float(x0), float(TILE / 2)
+    v = np.where(ok, R / lc, 0)
+    j = int(np.argmax(v))
+    return 100 * cl.sum() / max(inr.sum(), 1), xy[cl], float(v[j]), float(ux[j]), float(uy[j])
+
+
+def closing_hole_bands(holes):
+    """Holes in the closing zone, per 32 px band with >= ORDER_MIN_DOTS of them: centre x, median r, CV(r),
+    1 - CV(NN) (NN among the closing holes)."""
+    if len(holes) < ORDER_MIN_DOTS:
+        return np.zeros((0, 4))
+    nn = cKDTree(holes[:, :2]).query(holes[:, :2], k=2)[0][:, 1]
+    rows = []
+    for b0 in np.arange(holes[:, 0].min(), holes[:, 0].max() + 1, ORDER_BAND_PX):
+        sel = (holes[:, 0] >= b0) & (holes[:, 0] < b0 + ORDER_BAND_PX)
+        if sel.sum() >= ORDER_MIN_DOTS:
+            r = holes[sel, 2]
+            rows.append([b0 + ORDER_BAND_PX / 2, np.median(r), r.std() / r.mean(), 1 - nn[sel].std() / nn[sel].mean()])
+    return np.array(rows) if rows else np.zeros((0, 4))
+
+
+def higher_is_better(metric):
+    return "min gap" in metric or "polarity mix" in metric or "floor" in metric
+
+
 # ---------------------------------------------------------------- profiles
 def profile(ink, y0, y1, sigma):
     band = ink[y0:y1]
@@ -418,9 +553,9 @@ def closing_metrics(ink, covn, y0, y1, x0, x1):
     return a, b, excess.mean() * 100, grey.mean() * 100, thin.mean() * 100, a + wx, y0 + wy, thin
 
 
-def front_metrics(ink, mask, covp, pitch, y0, y1, x0, x1):
+def front_metrics(ink, mask, covp, pitch, y0, y1, x0, x1, stochastic=False):
     """The front into the solid. Returns None (no solid front) or (swing px, std px, worst x, worst y,
-    raw step per 2 px, raw step x)."""
+    raw step per 2 px, raw step x). stochastic: the raw profile is boxed over 2 pitches (no lattice period)."""
     h = y1 - y0
     fr0, fr1 = int(y0 + h * (1 - FRONT_ROW_BAND) / 2), int(y1 - h * (1 - FRONT_ROW_BAND) / 2)
     c = covp[x0:x1]
@@ -449,7 +584,9 @@ def front_metrics(ink, mask, covp, pitch, y0, y1, x0, x1):
     seg = raw[lo:hi] - ndimage.uniform_filter1d(raw[lo:hi], int(2 * pitch) | 1)
     lags = np.arange(max(2, int(0.4 * pitch)), int(1.2 * pitch) + 1)
     period = int(pitch)
-    if len(seg) > 3 * pitch:
+    if stochastic:
+        period = int(2 * pitch)
+    elif len(seg) > 3 * pitch:
         ac = [np.dot(seg[:-L], seg[L:]) / (len(seg) - L) for L in lags]
         period = int(lags[int(np.argmax(ac))])
     box = ndimage.uniform_filter1d(raw, period)
@@ -457,6 +594,44 @@ def front_metrics(ink, mask, covp, pitch, y0, y1, x0, x1):
     st = np.abs(np.diff(box[cols])) if len(cols) > 1 else np.zeros(1)
     i = int(np.argmax(st))
     return swing, std, float(sm[j]), float(rows[ok][j]), float(st[i]), float(cols[min(i, len(cols) - 1)] + 1)
+
+
+def hole_area_front(ink, mask, y0, y1, x1):
+    """Stochastic front: the middle FRONT_ROW_BAND of the height in FRONT_STRIP_PX strips; per strip, the paper
+    fraction (inside the silhouette) per 8 px column; the strip's front = the end of the last column with paper >=
+    FRONT_HOLE_FRAC. Returns (max - min of the fronts, furthest x, its strip's centre y)."""
+    h = y1 - y0
+    F, Y = [], []
+    for s0 in range(int(y0 + h * (1 - FRONT_ROW_BAND) / 2), int(y1 - h * (1 - FRONT_ROW_BAND) / 2) - FRONT_STRIP_PX + 1,
+                    FRONT_STRIP_PX):
+        m = mask[s0:s0 + FRONT_STRIP_PX]
+        pap = ((1 - ink[s0:s0 + FRONT_STRIP_PX]) * m).sum(axis=0) / np.maximum(m.sum(axis=0), 1)
+        n = (x1 - COL_PX) // COL_PX * COL_PX
+        cols = pap[:n].reshape(-1, COL_PX).mean(axis=1)
+        above = np.nonzero(cols >= FRONT_HOLE_FRAC)[0]
+        F.append(float((above.max() + 1) * COL_PX) if len(above) else 0.0)
+        Y.append(s0 + FRONT_STRIP_PX / 2)
+    if len(F) < 2:
+        return 0.0, float(x1), float((y0 + y1) / 2)
+    F = np.array(F)
+    j = int(np.argmax(np.abs(F - np.median(F))))
+    return float(F.max() - F.min()), F[j], Y[j]
+
+
+def edge_spread(small, size, y0, y1, x0, x1):
+    """Perceived image at `size` px: per column, the std across the rows (middle 70% of the mark's height) of the
+    ink; max over columns whose mean is in [EDGE_MIN_COVERAGE, 0.99). Returns (value, x at 1024)."""
+    k = TILE / size
+    h = y1 - y0
+    r0, r1 = int((y0 + 0.15 * h) / k) + 1, int((y1 - 0.15 * h) / k) - 1
+    c0, c1 = int(x0 / k) + 1, int(x1 / k) - 1
+    band = small[r0:r1, c0:c1]
+    m, s = band.mean(axis=0), band.std(axis=0)
+    sel = (m >= EDGE_MIN_COVERAGE) & (m < 0.99)
+    if not sel.any():
+        return 0.0, float(x1)
+    j = int(np.argmax(np.where(sel, s, -1)))
+    return float(s[j]), (c0 + j + 0.5) * k
 
 
 def ramp_metrics(p):
@@ -471,9 +646,11 @@ def ramp_metrics(p):
 
 
 # ---------------------------------------------------------------- review
-def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame=False):
+def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame=False, screen="lattice"):
     """Prints the report (or, quiet, nothing) and writes the sheet. Returns (fail count, results).
-    frame: an animation frame; the optical centre is reported but not counted (a fill moves the ink centroid)."""
+    frame: an animation frame; the optical centre is reported but not counted (a fill moves the ink centroid).
+    screen: "lattice" (order must rise to a hex lattice) or "stochastic" (blue noise: order must stay even)."""
+    touch = TOUCH_OK_COVERAGE if screen == "lattice" else TOUCH_OK_COVERAGE_STOCHASTIC
     img, rgb, circles = load(path, axis)
     ink, bg, inkc = ink_map(rgb)
     if region:
@@ -503,12 +680,16 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
     mask = silhouette(ink)
     covn = local_coverage(ink, mask, ry0, ry1, sigma)
     cov = lambda x: covn[np.clip(np.asarray(x).astype(int), 0, TILE - 1)]
-    gaps = mark_gaps(ink, marks, labels, ids, cov)
+    gaps = mark_gaps(ink, marks, labels, ids, cov, touch)
     mcov = cov(marks[:, 0])
-    merged_xy = marks[(marks[:, 4] > 0) & (mcov < TOUCH_OK_COVERAGE), :2]
+    merged_xy = marks[(marks[:, 4] > 0) & (mcov < touch), :2]
     merged = len(merged_xy)
-    closing = int((in_rows & (mcov >= TOUCH_OK_COVERAGE)).sum())   # marks may touch there: coverage judges it
-    keep = in_rows & (mcov < TOUCH_OK_COVERAGE)
+    detected = marks[in_rows]                          # every mark, for the "nothing measured" guard
+    # where marks may touch (coverage >= touch) dots are judged by coverage only; holes are measured on their own
+    # (closing: hole ...), not stitched into the dot order bands (a web closing puts them on the cell corners)
+    closing_dots = int((in_rows & (mcov >= touch) & (marks[:, 3] > 0)).sum())
+    choles = marks[in_rows & (mcov >= touch) & (marks[:, 3] < 0)]
+    keep = in_rows & (mcov < touch)
     marks, gaps = marks[keep], gaps[keep]
 
     results, curves = [], {}
@@ -520,11 +701,11 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
     curves[1024] = (cols + COL_PX / 2, p, rawc, ramp_metrics(p))
     # 2. perceived at 58 / 29 px
     work = Image.fromarray((np.clip(ink, 0, 1) * 255).astype(np.uint8)).convert("RGB")  # 0 = bg, 255 = ink
-    previews = {}
+    previews, smalls = {}, {}
     for size in (58, 29):
         previews[size] = img.resize((size, size), Image.BOX)
         small = np.asarray(work.resize((size, size), Image.BOX), dtype=float)[:, :, 0] / 255
-        small = ndimage.gaussian_filter(small, PERCEIVED_BLUR)
+        small = smalls[size] = ndimage.gaussian_filter(small, PERCEIVED_BLUR)
         k = TILE / size
         sp = profile(small, int(ry0 / k), max(int(ry0 / k) + 1, int(round(ry1 / k))), 0)
         lo, hi = int(x0 / k), int(math.ceil(x1 / k))
@@ -557,6 +738,18 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
 
     results = [(m, v, lim, ok, at(note)) for m, v, lim, ok, note in results]   # coverage spots, now with bands
 
+    # 0. guard: every band of intermediate coverage holds detected marks (nothing measured is not a pass)
+    empty = []
+    for b0 in np.arange(ramp[0], ramp[1], ORDER_BAND_PX):
+        cb = covn[int(b0):int(b0) + ORDER_BAND_PX].mean()
+        if MARKS_MIN_COVERAGE[0] <= cb < MARKS_MIN_COVERAGE[1] and not (
+                (detected[:, 0] >= b0) & (detected[:, 0] < b0 + ORDER_BAND_PX)).any():
+            empty.append(b0 + ORDER_BAND_PX / 2)
+    results.append(("marks: empty coverage bands", len(empty), 0, not empty,
+                    f"{ORDER_BAND_PX} px bands with local coverage {MARKS_MIN_COVERAGE[0]}-{MARKS_MIN_COVERAGE[1]} "
+                    "and no detected mark" + (f"; first {at(empty[0])}" if empty else "")))
+    bad_x += empty
+
     # 3. order along the axis
     psi, nn = psi6(marks[:, :2]) if len(marks) >= 8 else (np.zeros(0), np.zeros(0))
     bands = order_bands(marks, psi, nn, ramp[0], ramp[1])
@@ -564,25 +757,49 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
         v = bands[:, col] if len(bands) else np.zeros(0)
         v = v[~np.isnan(v)]
         if len(v) < 2:
-            results.append((f"{name} band step", 0, ORDER_MAX_STEP, True, "fewer than 2 mark bands"))
+            if screen == "lattice":
+                results.append((f"{name} band step", 0, ORDER_MAX_STEP, True, "fewer than 2 mark bands"))
+            results.append((f"{name} drawdown", 0, ORDER_DRAWDOWN, True, "fewer than 2 mark bands"))
             continue
         bx_ = bands[~np.isnan(bands[:, col]), 0]
         st = np.abs(np.diff(v)); dd = np.maximum.accumulate(v) - v
         j, k = int(np.argmax(st)), int(np.argmax(dd))
-        results.append((f"{name} band step", st[j], ORDER_MAX_STEP, st[j] <= ORDER_MAX_STEP,
-                        f"{v.min():.2f} -> {v.max():.2f}, {len(v)} bands of {ORDER_BAND_PX} px; worst "
-                        + at(bx_[j] + ORDER_BAND_PX / 2)))
-        results.append((f"{name} drawdown", dd.max(), ORDER_DRAWDOWN, dd.max() <= ORDER_DRAWDOWN,
-                        "must rise; worst " + at(bx_[k])))
-        bad_x += [float(bx_[i] + ORDER_BAND_PX / 2) for i in np.nonzero(st > ORDER_MAX_STEP)[0]]
-        bad_x += [float(bx_[i]) for i in np.nonzero(dd > ORDER_DRAWDOWN)[0]]
+        span = f"{v.min():.2f} -> {v.max():.2f}, {len(v)} bands of {ORDER_BAND_PX} px"
+        if screen == "lattice":
+            results.append((f"{name} band step", st[j], ORDER_MAX_STEP, st[j] <= ORDER_MAX_STEP,
+                            f"{span}; worst " + at(bx_[j] + ORDER_BAND_PX / 2)))
+            bad_x += [float(bx_[i] + ORDER_BAND_PX / 2) for i in np.nonzero(st > ORDER_MAX_STEP)[0]]
+        info = screen == "stochastic" and col == 1         # blue noise: |psi6| ~0.3-0.5 per band by design, noisy
+        results.append((f"{name} drawdown", dd.max(), ORDER_DRAWDOWN, info or dd.max() <= ORDER_DRAWDOWN,
+                        ("INFO, not counted on a stochastic screen; " if info else "")
+                        + ("must rise" if screen == "lattice" else f"must not fall; {span}") + "; worst " + at(bx_[k])))
+        if not info:
+            bad_x += [float(bx_[i]) for i in np.nonzero(dd > ORDER_DRAWDOWN)[0]]
+    if screen == "stochastic":                        # evenly spaced: no clumps, no voids, regularity above a floor
+        v = bands[:, 2] if len(bands) else np.ones(1)
+        j = int(np.argmin(v))
+        results.append(("order 1-CV(NN) floor", v[j], NN_FLOOR_STOCHASTIC, v[j] >= NN_FLOOR_STOCHASTIC,
+                        "blue noise ~0.8, uniform random ~0.5" + (f"; lowest {at(bands[j, 0])}" if len(bands) else "")))
+        if len(bands) and v[j] < NN_FLOOR_STOCHASTIC:
+            bad_x.append(float(bands[j, 0]))
+        clump, cxy, void, vx, vy = stochastic_spacing(marks, nn, ramp[0], ramp[1])
+        results.append(("stochastic: clumped marks %", clump, CLUMP_MAX, clump <= CLUMP_MAX,
+                        f"NN < {CLUMP_RATIO} x the band's median NN (g(r) below the min distance)"
+                        + (f"; first {at(*cxy[0])}" if len(cxy) else "")))
+        results.append(("stochastic: max void / NN", void, VOID_MAX, void <= VOID_MAX,
+                        f"largest empty circle radius / the band's median NN; {at(vx, vy)}"))
+        if clump > CLUMP_MAX:
+            bad_pts += [tuple(p_) for p_ in cxy]
+        if void > VOID_MAX:
+            bad_pts.append((vx, vy))
 
     # 4. seam: dots -> holes flip
     flip_x = None
     fm = flip_metrics(marks, psi, nn, pitch) if len(marks) >= 8 else None
     if fm is None:
-        results.append(("seam: polarity mix / pitch", POLARITY_MIN_MIX, POLARITY_MIN_MIX, True, "no dots -> holes flip"))
-        results.append(("seam: flip continuity step", 0, FLIP_STEP_MAX, True, "no dots -> holes flip"))
+        why = f"no dots -> holes flip below coverage {touch} ({len(choles)} closing holes: see closing: hole ...)"
+        results.append(("seam: polarity mix / pitch", POLARITY_MIN_MIX, POLARITY_MIN_MIX, True, why))
+        results.append(("seam: flip continuity step", 0, FLIP_STEP_MAX, True, why))
     else:
         flip_x, mix, step, note = fm
         results.append(("seam: polarity mix / pitch", mix, POLARITY_MIN_MIX, mix >= POLARITY_MIN_MIX,
@@ -606,25 +823,73 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
         if excess > GREY_EXCESS_MAX or thin > THIN_WALL_MAX:
             bad_x.append(float(wx)); bad_pts.append((float(wx), float(wy)))
 
+    # 5b. holes in the closing zone (coverage >= the touching exemption): one size per position, shrinking into the
+    # solid, evenly spaced
+    hb = closing_hole_bands(choles)
+    hole_note = f"{len(choles)} holes at coverage >= {touch}"
+    if not len(hb):
+        for m_, lim in (("closing: hole size CV within band", SIZE_CV_MAX), ("closing: hole size rise", CLOSING_HOLE_RISE_MAX)):
+            results.append((m_, 0, lim, True, f"{hole_note}: fewer than {ORDER_MIN_DOTS} per band"))
+        results.append(("closing: hole 1-CV(NN) floor", 1, CLOSING_HOLE_NN_FLOOR, True,
+                        f"{hole_note}: fewer than {ORDER_MIN_DOTS} per band"))
+    else:
+        # a stochastic closing's holes are the random gaps between merging disks: their sizes and spacing vary by
+        # design, so these three are INFO there; the hole-area front and the edge spread (6) judge that zone
+        info = screen == "stochastic"
+        pre = "INFO, not counted on a stochastic screen; " if info else ""
+        j = int(np.argmax(hb[:, 2]))
+        results.append(("closing: hole size CV within band", hb[j, 2], SIZE_CV_MAX, info or hb[j, 2] <= SIZE_CV_MAX,
+                        f"{pre}{hole_note}, {len(hb)} bands; worst {at(hb[j, 0])}"))
+        rise = hb[:, 1] - np.minimum.accumulate(hb[:, 1])   # above the smallest hole so far
+        k = int(np.argmax(rise))
+        rel = rise[k] / hb[:, 1].max()
+        results.append(("closing: hole size rise", rel, CLOSING_HOLE_RISE_MAX, info or rel <= CLOSING_HOLE_RISE_MAX,
+                        f"{pre}median r {hb[0, 1]:.1f} -> {hb[-1, 1]:.1f} px, must shrink into the solid; worst {at(hb[k, 0])}"))
+        f = CLOSING_HOLE_NN_FLOOR
+        k2 = int(np.argmin(hb[:, 3]))
+        results.append(("closing: hole 1-CV(NN) floor", hb[k2, 3], f, info or hb[k2, 3] >= f, f"{pre}lowest {at(hb[k2, 0])}"))
+        if not info:
+            bad_x += [float(x) for x in hb[hb[:, 2] > SIZE_CV_MAX, 0]] + [float(hb[k2, 0])] * int(hb[k2, 3] < f)
+            if rel > CLOSING_HOLE_RISE_MAX:
+                bad_x.append(float(hb[k, 0]))
+
     # 6. front into the solid: straightness and the unblurred step
-    fm2 = front_metrics(ink, mask, covp, pitch, y0, y1, x0, x1)
+    fm2 = front_metrics(ink, mask, covp, pitch, y0, y1, x0, x1, stochastic=screen == "stochastic")
+    if screen == "stochastic":                        # per-row swing is large by nature: per-strip hole-area front
+        spread, sx, sy = hole_area_front(ink, mask, y0, y1, x1)
+        results.append(("front: hole-area front spread px", spread, FRONT_SPREAD_MAX, True,
+                        f"INFO, not counted (see FRONT_SPREAD_MAX; edge: row spread judges the edge); where paper < "
+                        f"{FRONT_HOLE_FRAC:.0%} for good, per {FRONT_STRIP_PX} px strip of the middle "
+                        f"{FRONT_ROW_BAND:.0%}; furthest {at(sx, sy)}"))
     if fm2 is None:
-        results.append(("front: swing px", 0, FRONT_SWING_MAX, True, "no solid front"))
+        if screen == "lattice":
+            results.append(("front: swing px", 0, FRONT_SWING_MAX, True, "no solid front"))
         results.append(("front: raw step / 2 px", 0, FRONT_RAW_STEP_MAX, True, "no solid front"))
     else:
         swing, fstd, fx, fy, rstep, rx = fm2
-        results.append(("front: swing px", swing, FRONT_SWING_MAX, swing <= FRONT_SWING_MAX,
-                        f"std {fstd:.1f} px over the middle {FRONT_ROW_BAND:.0%} of the height; furthest {at(fx, fy)}"))
+        if screen == "lattice":
+            results.append(("front: swing px", swing, FRONT_SWING_MAX, swing <= FRONT_SWING_MAX,
+                            f"std {fstd:.1f} px over the middle {FRONT_ROW_BAND:.0%} of the height; furthest {at(fx, fy)}"))
         results.append(("front: raw step / 2 px", rstep, FRONT_RAW_STEP_MAX, rstep <= FRONT_RAW_STEP_MAX,
-                        f"unblurred, boxed over one lattice period; worst {at(rx)}"))
-        if swing > FRONT_SWING_MAX:
+                        f"unblurred, boxed over {'one lattice period' if screen == 'lattice' else '2 pitches'}; worst {at(rx)}"))
+        if screen == "lattice" and swing > FRONT_SWING_MAX:
             bad_x.append(fx); bad_pts.append((fx, fy))
         if rstep > FRONT_RAW_STEP_MAX:
             bad_x.append(rx)
 
+    # 6b. edge into the solid as the eye sees it at icon size (both screens: the guard that a looser front metric
+    # can't let a ragged edge through): row-to-row spread of perceived coverage where the column is nearly solid
+    for size in (58, 29):
+        es, ex = edge_spread(smalls[size], size, y0, y1, x0, x1)
+        results.append((f"edge: row spread at {size:>2} px", es, EDGE_SPREAD_MAX[size], es <= EDGE_SPREAD_MAX[size],
+                        f"std across rows of perceived coverage, columns at >= {EDGE_MIN_COVERAGE} (a ragged edge); "
+                        f"worst {at(ex)}"))
+        if es > EDGE_SPREAD_MAX[size]:
+            bad_x.append(ex)
+
     # 7. geometry
     results.append(("touching: merged blobs", merged, 0, merged == 0,
-                    f"count where coverage < {TOUCH_OK_COVERAGE}" + (f"; first {at(*merged_xy[0])}" if merged else "")))
+                    f"count where coverage < {touch}" + (f"; first {at(*merged_xy[0])}" if merged else "")))
     bad_pts += [tuple(p_) for p_ in merged_xy]
     if np.isfinite(gaps).any():
         j = int(np.argmin(gaps))
@@ -671,13 +936,13 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
     sheet(img, curves, bands, ramp, (ry0, ry1), bad_x, bad_pts, flip, axis, previews, results, out, home_img)
     if quiet:
         return fails, results
-    print(f"design-review {name}: axis {axis}, ink rises {'<-' if flip else '->'}, ramp {axis} "
-          f"{x_report(ramp[0], flip):.0f}-{x_report(ramp[1], flip):.0f}, {len(marks)} marks ({int((marks[:, 3] > 0).sum())} dots, "
-          f"{int((marks[:, 3] < 0).sum())} holes; {closing} more in the closing zone, coverage >= {TOUCH_OK_COVERAGE}), "
-          f"grain blur sigma {sigma:.1f} px")
+    print(f"design-review {name}: screen {screen}, axis {axis}, ink rises {'<-' if flip else '->'}, ramp {axis} "
+          f"{x_report(ramp[0], flip):.0f}-{x_report(ramp[1], flip):.0f}; marks below coverage {touch}: {len(marks)} "
+          f"({int((marks[:, 3] > 0).sum())} dots, {int((marks[:, 3] < 0).sum())} holes); closing zone: {len(choles)} holes "
+          f"measured, {closing_dots} dots judged by coverage only; grain blur sigma {sigma:.1f} px")
     print(f"{'METRIC':<40}{'VALUE':>8}{'LIMIT':>8}  RESULT")
     for m, v, lim, ok, note in results:
-        cmp = ">=" if ("min gap" in m or "polarity mix" in m) else "<="
+        cmp = ">=" if higher_is_better(m) else "<="
         print(f"{m:<40}{v:>8.3f}{cmp:>4}{lim:<5.3g} {'PASS' if ok else 'FAIL'}  {note}")
     print(f"RESULT: {'FAIL' if fails else 'PASS'} ({fails} of {len(results)} metrics failed)")
     print(f"sheet: {out}" + (f"\nhome:  {out.with_name(Path(path).stem + '-home.png')}" if home else ""))
@@ -693,11 +958,11 @@ def frame_paths(spec):
     return sorted(glob.glob(spec))
 
 
-def review_frames(paths, axis, region, home):
+def review_frames(paths, axis, region, home, screen="lattice"):
     """Every metric on every frame; prints one line per frame, then the worst frame per metric. Returns fails."""
     runs = []
     for p in paths:
-        fails, results = review(p, axis, region, None, home, quiet=True, frame=True)
+        fails, results = review(p, axis, region, None, home, quiet=True, frame=True, screen=screen)
         runs.append((Path(p).name, fails, results))
         bad = ", ".join(m.strip() for m, _, _, ok, _ in results if not ok)
         print(f"frame {Path(p).name}: {'FAIL' if fails else 'PASS'} ({fails} of {len(results)})" + (f": {bad}" if bad else ""))
@@ -705,7 +970,7 @@ def review_frames(paths, axis, region, home):
     print(f"{'METRIC':<40}{'VALUE':>8}{'LIMIT':>8}  RESULT  FRAME / WHERE")
     nfail = 0
     for k, (m, _, lim, _, _) in enumerate(runs[0][2]):
-        higher = "min gap" in m or "polarity mix" in m
+        higher = higher_is_better(m)
         rows = [(name, res[k]) for name, _, res in runs]
         bad = [r for r in rows if not r[1][3]]
         pool = bad or rows                             # the worst failing frame, else the worst value
@@ -971,6 +1236,71 @@ def synthetic_ramp(out, seed=7):
     print(f"synthetic ramp: {out}")
 
 
+def synthetic_stochastic(out, seed=7):
+    """The stochastic (blue-noise) reference that must PASS under --screen stochastic, same card as synthetic_ramp.
+    1. One progressively ranked blue-noise set (brandkit.progressive_blue_noise: Bridson, min distance D, ranked by
+       farthest point, so every prefix is evenly spread). Point i (rank u_i) is shown where u_i < c(x) / C_D: the
+       density follows the coverage at a fixed radius R0 (D = 2.5 * R0) up to the set's full density at C_D.
+    2. Beyond C_D every point is shown and the radius grows (r = R0 * sqrt(c / C_D) * scale(x)); the disks merge.
+    3. A morphological closing of radius WALL / 2 where c >= the touching exemption fills every paper gap or hole
+       thinner than WALL = 2.2 px (no hairlines, no slivers); then the solid.
+    4. scale(x) is calibrated (a few passes at 2x) so the rendered column coverage follows c(x) = 0.04 + 0.96 *
+       smoothstep. Everything is clipped to the card."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import brandkit
+    S = 4
+    BG, INK = np.array([249, 250, 245]), np.array([28, 28, 28])
+    W, H, R, CX, CY = 620, 400, 64, 490, 512
+    XL, YT = CX - W / 2, CY - H / 2
+    XS = XL + 0.72 * W
+    R0, WALL = 3.9, 2.2
+    D = 2.5 * R0
+    sstep = lambda t: (lambda u: u * u * (3 - 2 * u))(np.clip(t, 0, 1))
+    c = lambda x: np.where(x >= XS, 1.0, 0.04 + 0.96 * sstep((x - XL) / (XS - XL)))
+    box = (XL - D, XS + D, YT - D, YT + H + D)
+    pts = brandkit.progressive_blue_noise(10 ** 6, box, D, seed)
+    C_D = len(pts) / ((box[1] - box[0]) * (box[3] - box[2])) * math.pi * R0 ** 2
+    u = np.arange(len(pts)) / len(pts)
+    cp = c(pts[:, 0])
+    show = u < np.minimum(cp / C_D, 1)
+    qx, qy = np.abs(pts[:, 0] - CX) - (W / 2 - R), np.abs(pts[:, 1] - CY) - (H / 2 - R)
+    sd = np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - R
+    show &= (sd <= -R0 * np.sqrt(np.maximum(cp / C_D, 1)) * 1.3) | (cp >= TOUCH_OK_COVERAGE_STOCHASTIC + 0.06)  # whole dots
+
+    def card(s):
+        ys, xs = (np.mgrid[0:TILE * s, 0:TILE * s] + 0.5) / s
+        qx, qy = np.abs(xs - CX) - (W / 2 - R), np.abs(ys - CY) - (H / 2 - R)
+        return (np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - R <= 0), xs
+
+    def render(scale, s):
+        rad = np.where(cp <= C_D, R0, R0 * np.sqrt(cp / C_D) * np.interp(pts[:, 0], xc, scale))
+        rad = np.where(cp < TOUCH_OK_COVERAGE_STOCHASTIC + 0.06, np.minimum(rad, 0.95 * D / 2.4), rad)   # gap rule
+        im = Image.new("1", (TILE * s, TILE * s), 0)
+        dr = ImageDraw.Draw(im)
+        for (x, y), r in zip(pts[show] * s, rad[show] * s - 0.5):     # PIL's bbox is inclusive: half a px less
+            dr.ellipse((x - r, y - r, x + r, y + r), fill=1)
+        inside, xs = card(s)
+        ink = np.asarray(im, bool) | (inside & (xs >= XS))
+        rp = int(round(WALL / 2 * s))
+        st = np.hypot(*np.mgrid[-rp:rp + 1, -rp:rp + 1]) <= rp
+        late = c(xs) >= TOUCH_OK_COVERAGE_STOCHASTIC + 0.06                # after the gap-rule cap
+        ink = np.where(late, ndimage.binary_closing(ink, structure=st, border_value=0), ink)
+        return ink & inside
+
+    xc = np.linspace(XL, XS, 48)
+    scale = np.ones_like(xc)
+    rows = slice(int(YT + 0.2 * H), int(YT + 0.8 * H))
+    for _ in range(5):
+        ink = render(scale, 2).reshape(TILE, 2, TILE, 2).mean(axis=(1, 3))
+        meas = np.interp(xc, np.arange(TILE) + 0.5, ndimage.uniform_filter1d(ink[rows].mean(axis=0), 24))
+        want = c(xc)
+        scale = np.clip(scale * np.where(want > C_D, np.clip(np.sqrt(want / np.maximum(meas, 1e-3)), 0.85, 1.15), 1),
+                        0.7, 2.5)
+    cov = render(scale, S).reshape(TILE, S, TILE, S).mean(axis=(1, 3))[..., None]
+    Image.fromarray((BG * (1 - cov) + INK * cov).astype(np.uint8)).save(out)
+    print(f"synthetic stochastic ramp: {out} ({len(pts)} points, full density at coverage {C_D:.2f})")
+
+
 # ---------------------------------------------------------------- main
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -979,14 +1309,18 @@ if __name__ == "__main__":
     ap.add_argument("--region", help="x0,y0,x1,y1 in 1024 px (default: the ink bounding box)")
     ap.add_argument("--home", action="store_true", help="also render home-screen rows with Apple's icons")
     ap.add_argument("--out", help="sheet path (default: $TMPDIR/design-review/<name>-review.png)")
-    ap.add_argument("--make-synthetic", metavar="OUT.png", help="write the smooth reference ramp and review it")
+    ap.add_argument("--screen", choices=("lattice", "stochastic"), default="lattice",
+                    help="lattice (default): order must rise to a hex lattice; stochastic: blue noise, order must "
+                         "stay even (NN floor, no clumps or voids), touching allowed from coverage "
+                         f"{TOUCH_OK_COVERAGE_STOCHASTIC}")
+    ap.add_argument("--make-synthetic", metavar="OUT.png", help="write the smooth reference ramp (of --screen) and review it")
     ap.add_argument("--watch", action="store_true", help="re-run when a render changes; one PASS/FAIL line per run")
     ap.add_argument("--frames", action="append", metavar="DIR|GLOB",
                     help="an animation's frames (a directory or a quoted glob): every metric on every frame, worst "
                          "frame per metric; repeatable")
     a = ap.parse_args()
     if a.make_synthetic:
-        synthetic_ramp(a.make_synthetic)
+        (synthetic_ramp if a.screen == "lattice" else synthetic_stochastic)(a.make_synthetic)
         a.render = a.render or [a.make_synthetic]
     if not a.render and not a.frames:
         ap.error("render path (or --frames) required")
@@ -996,18 +1330,18 @@ if __name__ == "__main__":
         ap.error("--watch takes renders, not --frames")
     region = tuple(int(v) for v in a.region.split(",")) if a.region else None
     if a.watch:
-        watch(a.render, lambda p: review(p, a.axis, region, a.out, a.home, quiet=True))
+        watch(a.render, lambda p: review(p, a.axis, region, a.out, a.home, quiet=True, screen=a.screen))
         sys.exit(0)
     fails = 0
     for k, path in enumerate(a.render):
         if k:
             print()
-        fails += review(path, a.axis, region, a.out, a.home)[0]
+        fails += review(path, a.axis, region, a.out, a.home, screen=a.screen)[0]
     for k, spec in enumerate(a.frames or []):
         paths = frame_paths(spec)
         if not paths:
             ap.error(f"--frames {spec}: no .png/.svg frames")
         if k or a.render:
             print()
-        fails += review_frames(paths, a.axis, region, a.home)
+        fails += review_frames(paths, a.axis, region, a.home, a.screen)
     sys.exit(1 if fails else 0)

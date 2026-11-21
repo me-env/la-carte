@@ -47,12 +47,15 @@ public struct DeckStats: Codable, Equatable, Sendable {
   public var reviewedToday: Int
   /// When the next card that isn't due yet becomes due; `nil` if there is none.
   public var nextDue: Date?
+  /// Consecutive days with at least one review, ending today or yesterday, in the device's time zone (spec 007).
+  public var streak: Int
 
-  public init(total: Int, due: Int, new: Int, reviewedToday: Int, nextDue: Date?) {
+  public init(total: Int, due: Int, new: Int, reviewedToday: Int, nextDue: Date?, streak: Int = 0) {
     self.total = total
     self.due = due
     self.new = new
     self.reviewedToday = reviewedToday
     self.nextDue = nextDue
+    self.streak = streak
   }
 }

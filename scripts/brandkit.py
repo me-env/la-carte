@@ -18,9 +18,11 @@ Use from a round script (docs/design/brand/explorations/roundN/render.py), run w
     import brandkit as bk
     lat = bk.hex_lattice(x0, x1, y0, y1, pitch)                    # the ordered end state
     pos = bk.match(lat, bk.blue_noise(box, 0.75 * pitch, seed=8))  # its random start, one point per cell
+    pts = bk.progressive_blue_noise(n, box, d_min, seed=8)          # stochastic screens: every prefix evenly spread
     pos = pos * (1 - w) + lat * w                                  # w = bk.ease_out(...) along the axis
-    paths = bk.marks(lat, pos, coverage, pitch)                    # dots growing into the lattice's cells
-    bk.contact_sheet(bk.png(bk.svg("card.svg", 1024, bg, fg, paths=paths, clip=bk.rounded_rect(...))), "sheet.png")
+    k, rho, L = bk.mark_shape(coverage, pitch)                    # dots -> rounded hexagons (walls >= WALL) -> web retreat
+    bk.raster("card-1024.png", lat, pos, k, rho, L, pitch, inside, bg, fg)   # the full closing needs raster()
+    # bk.marks()/bk.svg() still draw the rounded-hexagon stage as SVG paths (capped at closing_c2(pitch))
 
 All lengths are px of a 1024 tile. Every function raises (not prints) on the bug classes seen in past rounds:
 unsorted np.interp x-points, and lattice cells silently dropped by the random-to-lattice matching.
@@ -51,6 +53,37 @@ def blue_noise(box, rmin, seed):
     side = max(x1 - x0, y1 - y0)                   # sample a square in unit space so rmin stays isotropic
     pts = qmc.PoissonDisk(2, radius=rmin / side, rng=rng(seed)).fill_space() * side + (x0, y0)
     return pts[(pts[:, 0] < x1) & (pts[:, 1] < y1)]
+
+
+def progressive_blue_noise(n, rect, d_min, seed):
+    """Up to n points in rect = (x0, x1, y0, y1), at least d_min apart, ranked so that every prefix is evenly spread
+    (progressive blue noise). A Bridson set at d_min / 1.06 (blue_noise), then pairs closer than d_min are pushed
+    apart until none is (a few dozen vectorised passes): ~0.68 points per d_min^2, where plain Bridson holds ~0.60
+    (measured; |psi6| stays ~0.42, blue noise, not a lattice). Then greedy farthest-point ranking: each next point is
+    the one farthest from those already ranked. n is a cap; len(result) is the real count. Rank = row order: show
+    point i where i / len(points) < density(x) / max density. ~0.6 s for 2,000 points."""
+    from scipy.spatial import cKDTree
+    x0, x1, y0, y1 = rect
+    pts = blue_noise(rect, d_min / 1.06, seed)
+    for _ in range(500):
+        pr = np.array(sorted(cKDTree(pts).query_pairs(d_min - 1e-6)))
+        if not len(pr):
+            break
+        v = pts[pr[:, 1]] - pts[pr[:, 0]]
+        L = np.hypot(*v.T)[:, None]
+        push = (d_min - L) / 2 * 1.05 * v / np.maximum(L, 1e-9)
+        dp = np.zeros_like(pts)
+        np.add.at(dp, pr[:, 0], -push); np.add.at(dp, pr[:, 1], push)
+        pts = np.column_stack([np.clip(pts[:, 0] + dp[:, 0], x0, x1 - 1e-6), np.clip(pts[:, 1] + dp[:, 1], y0, y1 - 1e-6)])
+    else:
+        raise ValueError(f"progressive_blue_noise: pairs still closer than d_min = {d_min} after 500 passes")
+    n = min(n, len(pts))
+    order, md, j = np.empty(n, int), np.full(len(pts), np.inf), int(rng(seed).integers(len(pts)))
+    for k in range(n):
+        order[k] = j
+        md = np.minimum(md, ((pts - pts[j]) ** 2).sum(axis=1))
+        j = int(np.argmax(md))
+    return pts[order]
 
 
 def hex_lattice(x0, x1, y0, y1, pitch):
@@ -117,15 +150,88 @@ def mark_area(k, rho):
     return 2 * SQ3 * k * k + 4 * SQ3 * k * rho + math.pi * rho * rho
 
 
-def mark(cov, pitch):
-    """(k, rho) of the mark covering `cov` (0..1) of its cell; a plain dot (k = 0, rho = dot_radius) below C1."""
+WALL = 2.2                                       # px: paper walls never get thinner than this (design-review hairlines)
+
+
+def _closing(pitch):
+    """Tables for one pitch: rounded-hexagon extent/rounding up to C2 (walls = WALL), then the paper web's
+    retreat length L into the cell corners (coverage C2 -> 1). Same method as design-review's synthetic_ramp."""
+    e1, e2 = float(dot_radius(C1, pitch)), (pitch - WALL) / 2
+    es = np.linspace(e1, e2, 600)                             # extent k + rho
+    rhos = e1 * (e2 - es) / (e2 - e1)
+    covs = mark_area(es - rhos, rhos) / cell_area(pitch)       # rises C1 -> C2
+    Rc = pitch / SQ3                                           # cell circumradius
+    g = (np.mgrid[0:300, 0:300].reshape(2, -1).T + 0.5) / 300 * [Rc, pitch / 2]   # one quarter cell
+    g = g[_hexnorm(g) <= pitch / 2]
+    band = pitch / 2 - _hexnorm(g) < WALL / 2
+    Ls = np.linspace(0, math.hypot(Rc / 2, WALL / 2) + 0.01, 300)
+    covL = np.array([1 - (band & (_corner_d(g, pitch) < L)).mean() for L in Ls])   # falls 1 -> C2 as L grows
+    keep = np.concatenate([[True], np.diff(covL) < 0])        # strictly decreasing for interp
+    return es, rhos, covs, float(covs[-1]), Ls[keep], covL[keep]
+
+
+def _hexnorm(q):
+    """Flat-top hexagon 'radius' of points q (abs coords): the apothem of the hexagon through q."""
+    return np.maximum(q[..., 1], 0.866025404 * q[..., 0] + 0.5 * q[..., 1])
+
+
+def _corner_d(q, pitch):
+    Rc = pitch / SQ3
+    corners = np.array([[Rc, 0], [Rc / 2, pitch / 2]])
+    return np.min(np.linalg.norm(q[..., None, :] - corners, axis=-1), axis=-1)
+
+
+def mark_shape(cov, pitch):
+    """(k, rho, L) per cell for coverage `cov`: below C1 a dot (k = 0); up to C2 a rounded hexagon (k, rho) whose
+    walls stop at WALL; above C2 the cell is ink except a WALL-wide paper web within L of its corners (L -> 0 at
+    cov 1). L = -1 means "no web" (cov < C2)."""
+    es, rhos, covs, C2, Ls, covL = _closing(pitch)
     cov = np.clip(np.asarray(cov, dtype=float), 0, 1)
-    e1 = float(dot_radius(C1, pitch))
-    e = np.linspace(e1, pitch / 2, 600)                       # extent k + rho
-    rho = e1 * (pitch / 2 - e) / (pitch / 2 - e1)
-    covs = mark_area(e - rho, rho) / cell_area(pitch)          # rises C1 -> 1
-    ee, rr = interp(cov, covs, e), interp(cov, covs, rho)
-    return np.where(cov < C1, 0.0, ee - rr), np.where(cov < C1, dot_radius(cov, pitch), rr)
+    e = np.where(cov < C1, dot_radius(cov, pitch), interp(np.minimum(cov, C2), covs, es))
+    rho = np.where(cov < C1, dot_radius(cov, pitch), interp(np.minimum(cov, C2), covs, rhos))
+    L = np.where(cov >= C2, interp(-cov, -covL, Ls), -1.0)        # covL falls with L
+    return np.where(cov < C1, 0.0, e - rho), rho, L
+
+
+def mark(cov, pitch):
+    """(k, rho) of the rounded-hexagon mark for coverage `cov`, capped at C2 (walls of WALL px). Above C2 the
+    closing is the paper web of mark_shape() / raster(), which SVG paths can't express."""
+    k, rho, _ = mark_shape(cov, pitch)
+    return k, rho
+
+
+def closing_c2(pitch):
+    """Coverage at which marks stop growing (walls = WALL) and the web retreat starts."""
+    return _closing(pitch)[3]
+
+
+def raster(path, lattice, pos, k, rho, L, pitch, inside, bg, fg, size=1024, ss=4):
+    """Rasterise marks to a PNG (supersampled ss×). Mark i is a rounded hexagon (k[i], rho[i]) at pos[i] (pixels
+    go to the nearest mark position, so a displaced dot is never cut), or, where L[i] >= 0, its lattice Voronoi
+    cell in solid ink minus the paper web (WALL wide, within L of the corners). inside(x, y) -> bool mask: the silhouette (e.g. a card); ink is limited to it. Returns the path."""
+    from scipy.spatial import cKDTree
+    ys, xs = (np.mgrid[0:size * ss, 0:size * ss] + 0.5) / ss
+    mask = inside(xs, ys)
+    p = np.column_stack([xs[mask], ys[mask]])
+    cl = cKDTree(lattice).query(p)[1]                          # web stage: the lattice's own Voronoi cell
+    late = L[cl] >= 0
+    # Dot stage: the nearest mark *position* (a dot far from its site must not be cut by its site's cell).
+    early = np.nonzero(L < 0)[0]
+    cm = early[cKDTree(pos[early]).query(p)[1]] if len(early) else cl
+    q = np.abs(p - pos[cm])                                    # iq's flat-top hexagon SDF, apothem k
+    kk = k[cm]
+    d = np.minimum(-0.866025404 * q[:, 0] + 0.5 * q[:, 1], 0)
+    hx, hy = q[:, 0] + 2 * d * 0.866025404, q[:, 1] - 2 * d * 0.5
+    hx, hy = hx - np.clip(hx, -0.577350269 * kk, 0.577350269 * kk), hy - kk
+    in_mark = (np.hypot(hx, hy) * np.sign(hy) - rho[cm] <= 0) & (k[cm] + rho[cm] > 0)
+    ql = np.abs(p - lattice[cl])
+    web = (pitch / 2 - _hexnorm(ql) < WALL / 2) & (_corner_d(ql, pitch) < L[cl])
+    ink = np.zeros(xs.shape, dtype=bool)
+    ink[mask] = np.where(late, ~web, in_mark)
+    cov = ink.reshape(size, ss, size, ss).mean(axis=(1, 3))[..., None]
+    hexrgb = lambda h: np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)], dtype=float)
+    Image.fromarray((hexrgb(bg) * (1 - cov) + hexrgb(fg) * cov).astype(np.uint8)).save(path)
+    return Path(path)
 
 
 def mark_path(cx, cy, k, rho):
@@ -199,32 +305,39 @@ def contact_sheet(pngs, out, cell=240, cols=4, bg="#2A2C33", labels=True):
 
 # ---------------------------------------------------------------- reference ramp + selftest
 def marks(lattice, pos, cov, pitch):
-    """SVG paths of the marks: cell i's mark (coverage cov[i]) drawn at pos[i]."""
+    """SVG paths of the marks: cell i's mark (coverage cov[i], capped at closing_c2) drawn at pos[i]."""
     k, rho = mark(cov, pitch)
     return [mark_path(x, y, kk, rr) for (x, y), kk, rr in zip(pos, k, rho) if kk + rr > 0]
 
 
-def synthetic_card(out_svg, seed=7, pitch=12.0, bg="#F9FAF5", fg="#1C1C1C", on_site=0.7):
+def card_sd(x, y, cx, cy, w, h, r):
+    """Signed distance to a rounded rectangle (negative inside)."""
+    qx, qy = np.abs(x - cx) - (w / 2 - r), np.abs(y - cy) - (h / 2 - r)
+    return np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - r
+
+
+def synthetic_card(out_png, seed=7, pitch=12.0, bg="#F9FAF5", fg="#1C1C1C", on_site=0.55):
     """Reference card (design-review.py --make-synthetic method): blue noise matched to a hex lattice, dots
-    easing onto their sites by coverage `on_site`, marks growing (mark()) into the solid. Returns the SVG path."""
+    easing onto their sites by coverage `on_site`, marks growing into rounded hexagons until the walls are WALL,
+    then the paper web retreating into the corners (mark_shape + raster). Returns the PNG path."""
     W, H, R, CX, CY = 620, 400, 64, 490, 512
     XL, XS, top = CX - W / 2, CX - W / 2 + 0.72 * W, CY - H / 2
-    cov = lambda x: 0.04 + 0.96 * smoothstep((x - XL) / (XS - XL))
+    cov = lambda x: np.where(x >= XS, 1.0, 0.04 + 0.96 * smoothstep((x - XL) / (XS - XL)))
     gx = np.linspace(XL, XS, 4000)
     xh = gx[np.argmax(cov(gx) >= on_site)]
-    lat = hex_lattice(XL, XS, top, top + H, pitch)
+    lat = hex_lattice(XL, CX + W / 2, top, top + H, pitch)
     zone = lat[:, 0] < xh + pitch                            # cells that move
     noise = blue_noise((XL - 2 * pitch, xh + 2 * pitch, top - 2 * pitch, top + H + 2 * pitch), 0.75 * pitch, seed)
     pos = lat.copy()
     w = ease_out((lat[zone, 0] - XL) / (xh - XL))[:, None]
     pos[zone] = match(lat[zone], noise) * (1 - w) + lat[zone] * w
     c = cov(lat[:, 0])
-    k, rho = mark(c, pitch)
-    qx, qy = np.abs(pos[:, 0] - CX) - (W / 2 - R), np.abs(pos[:, 1] - CY) - (H / 2 - R)
-    sd = np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - R
-    keep = (sd <= -(k + rho)) | (c >= 0.9)                   # marks stay whole inside the card; near solid: clipped
-    paths = [rounded_rect(XS, top, CX + W / 2 - XS, H, 0)] + marks(lat[keep], pos[keep], c[keep], pitch)
-    return svg(out_svg, 1024, bg, fg, paths=paths, clip=rounded_rect(XL, top, W, H, R))
+    k, rho, L = mark_shape(c, pitch)
+    sd = card_sd(pos[:, 0], pos[:, 1], CX, CY, W, H, R)
+    drop = (L < 0) & (sd > -(k + rho)) & (c < 0.65)          # dots stay whole inside the card
+    k, rho = np.where(drop, 0, k), np.where(drop, 0, rho)
+    inside = lambda x, y: card_sd(x, y, CX, CY, W, H, R) <= 0
+    return raster(out_png, lat, pos, k, rho, L, pitch, inside, bg, fg)
 
 
 def _selftest():
@@ -254,15 +367,15 @@ def _selftest():
     # (c) same seed -> identical output (points and SVG bytes); different seed differs
     assert np.array_equal(blue_noise((0, 300, 0, 100), 9, 3), blue_noise((0, 300, 0, 100), 9, 3))
     assert not np.array_equal(blue_noise((0, 300, 0, 100), 9, 3), blue_noise((0, 300, 0, 100), 9, 4))
-    a, b = synthetic_card(tmp / "a.svg", seed=5), synthetic_card(tmp / "b.svg", seed=5)
+    a, b = synthetic_card(tmp / "a.png", seed=5), synthetic_card(tmp / "b.png", seed=5)
     assert a.read_bytes() == b.read_bytes()
     # (d) mark coverage: analytic round trip, then rendered, monotonic 0 -> 1, step <= 0.08 per 8 px column
-    c = np.linspace(0, 1, 101)
+    C2 = closing_c2(12)
+    c = np.linspace(0, C2, 101)
     assert np.allclose(mark_area(*mark(c, 12)) / cell_area(12), c)
     lat = hex_lattice(64, 1000, 300, 724, 12)        # ramp 112 -> 912, solid to 1000
-    svg(tmp / "ht.svg", 1024, "#FFFFFF", "#000000", paths=marks(lat, lat, smoothstep((lat[:, 0] - 112) / 800), 12.0),
-        clip=rounded_rect(64, 300, 936, 424, 0))
-    (ht,) = png(tmp / "ht.svg", (1024,))
+    ht = raster(tmp / "ht.png", lat, lat, *mark_shape(smoothstep((lat[:, 0] - 112) / 800), 12.0), 12.0,
+                lambda x, y: (x >= 64) & (x <= 1000) & (y >= 300) & (y <= 724), "#FFFFFF", "#000000")
     ink = 1 - np.asarray(Image.open(ht).convert("L"), dtype=float) / 255
     prof = gaussian_filter(ink, 12)[400:624, 112:912].mean(axis=0)
     cols = prof[: len(prof) // 8 * 8].reshape(-1, 8).mean(axis=1)
@@ -270,12 +383,24 @@ def _selftest():
     assert cols[0] < 0.05 and cols[-1] > 0.95, f"ramp ends {cols[0]:.3f} -> {cols[-1]:.3f}"
     assert steps.min() > -0.005, f"coverage falls by {-steps.min():.3f}"
     assert steps.max() <= 0.08, f"coverage step {steps.max():.3f} > 0.08"
+    # (f) progressive blue noise: fast, min distance held, every prefix evenly spread, same seed -> same points
+    from scipy.spatial import cKDTree
+    t1 = time.time()
+    pb = progressive_blue_noise(2132, (170, 810, 267, 757), 10.0, seed=31)      # round 9's request (~2,100 fit)
+    dt = time.time() - t1
+    assert dt < 1.0, f"progressive_blue_noise took {dt:.2f} s for 2132 points"
+    assert cKDTree(pb).query(pb, k=2)[0][:, 1].min() >= 10.0 - 1e-5, "points closer than d_min"
+    for f in (0.05, 0.25, 1.0):
+        q = pb[: int(f * len(pb))]
+        nn = cKDTree(q).query(q, k=2)[0][:, 1]
+        assert 1 - nn.std() / nn.mean() >= 0.75, f"prefix {f:.0%} not even: 1 - CV(NN) {1 - nn.std() / nn.mean():.2f}"
+    assert np.array_equal(pb, progressive_blue_noise(2132, (170, 810, 267, 757), 10.0, seed=31))
     # (e) the synthetic card PASSES design-review.py
-    (card,) = png(synthetic_card(tmp / "card.svg"), (1024,))
+    card = synthetic_card(tmp / "card.png")
     res = subprocess.run(["uv", "run", "--script", str(Path(__file__).with_name("design-review.py")), str(card),
                           "--out", str(tmp / "card-review.png")], capture_output=True, text=True)
     assert res.returncode == 0, f"design-review FAILS the synthetic card:\n{res.stdout}{res.stderr}"
-    print(f"brandkit selftest: PASS (a-e) in {time.time() - t0:.1f} s; max column step {steps.max():.3f}; files in {tmp}")
+    print(f"brandkit selftest: PASS (a-f) in {time.time() - t0:.1f} s; max column step {steps.max():.3f}; files in {tmp}")
 
 
 if __name__ == "__main__":

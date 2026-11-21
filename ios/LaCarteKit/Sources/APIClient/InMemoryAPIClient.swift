@@ -45,12 +45,14 @@ extension APIClient {
       },
       stats: {
         let cards = deck.value
+        let reviewedToday = cards.filter { $0.lastReview.map(Calendar.current.isDateInToday) ?? false }.count
         return DeckStats(
           total: cards.count,
           due: cards.filter { $0.due <= now }.count,
           new: cards.filter { $0.lastReview == nil }.count,
-          reviewedToday: cards.filter { $0.lastReview.map(Calendar.current.isDateInToday) ?? false }.count,
-          nextDue: cards.map(\.due).filter { $0 > now }.min()
+          reviewedToday: reviewedToday,
+          nextDue: cards.map(\.due).filter { $0 > now }.min(),
+          streak: reviewedToday > 0 ? 1 : 0
         )
       },
       isConfigured: { true }
