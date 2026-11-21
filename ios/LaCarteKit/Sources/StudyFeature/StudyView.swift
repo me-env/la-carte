@@ -204,8 +204,9 @@ public struct StudyView: View {
         }
       )
       .onGeometryChange(for: CGSize.self, of: \.size) { cardSize = $0 }
-      .overlay { swipeRing }
       .accessibilityIdentifier("study.card")
+      // After the card's identifier, so the ring keeps its own.
+      .overlay { swipeRing }
       #if DEBUG
         .onChange(of: store.canRate, initial: true) { _, canRate in
           guard canRate, let fraction = Self.swipePreview else { return }
