@@ -21,8 +21,8 @@ docker-compose.yml (repo root)
 2. **Create the service.** In a project → *Create Service* → **Compose** (type *Docker Compose*, not *Stack*).
 3. **Provider** (General tab): GitHub (or Git with the SSH URL for a private repo), branch `main`,
    **Compose Path** `./docker-compose.yml`. The compose file sits at the repo root and builds `./api`, so
-   nothing else is needed for the monorepo. Optional: *Watch Paths* `api/**` and `docker-compose.yml`, so
-   iOS-only commits don't redeploy the API.
+   nothing else is needed for the monorepo. Turn **Auto Deploy off**: CI deploys only after the API tests
+   pass on that commit (`ci-cd.md`).
 4. **Environment** tab: add
    ```
    LA_CARTE_API_TOKEN=<the token from step 1>

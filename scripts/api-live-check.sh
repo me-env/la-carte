@@ -6,8 +6,13 @@ url="${1:-${LA_CARTE_LIVE_URL:-}}"
 [[ -n "$url" ]] || { echo "usage: $0 <url>  (or set LA_CARTE_LIVE_URL)" >&2; exit 2; }
 cd "$(dirname "$0")/../api"
 local_build=$(uv run --quiet python -c 'from la_carte_api.build import source_hash; print(source_hash())')
-live_build=$(curl -fsS --max-time 10 "${url%/}/health" \
-  | uv run --quiet python -c 'import json, sys; print(json.load(sys.stdin).get("build", "unknown"))')
+where=${CI:+the live API}  # in CI the URL is a secret: never print it
+where=${where:-$url}
+if ! health=$(curl -fs --max-time 10 "${url%/}/health"); then
+  echo "could not reach $where/health → behind"
+  exit 1
+fi
+live_build=$(uv run --quiet python -c 'import json, sys; print(json.load(sys.stdin).get("build", "unknown"))' <<<"$health")
 if [[ "$live_build" == "$local_build" ]]; then
   echo "live build $live_build / local build $local_build → up to date"
 else

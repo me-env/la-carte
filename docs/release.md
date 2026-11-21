@@ -70,7 +70,9 @@ CI never falls back to the Xcode account: if `CI` is set and the secret is missi
 With a key, xcodebuild uses the key's role and ignores the local certificate.
 
 `CI` (`.github/workflows/ci.yml`) runs on every PR and push to main: API tests, the API Docker image build (`docs/deploy.md`), iOS unit tests, UI tests
-(mock deck), and live E2E. Screenshots are uploaded as the `screenshots` artifact.
+(mock deck), and live E2E. Before the UI tests, `ci/boot-simulator.sh` boots the simulator and switches its
+appearance once with `simctl ui` (otherwise `XCUIDevice.shared.appearance` had no effect on the macos-26 runner and
+every dark screenshot was light). Screenshots are uploaded as the `screenshots` artifact.
 
 ## One-time setup
 
