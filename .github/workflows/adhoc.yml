@@ -15,10 +15,10 @@ jobs:
     runs-on: macos-26
     environment: prod
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '27'  # iOS 27 deployment target needs the Xcode 27 SDK
+          xcode-version: latest-stable  # deployment target is iOS 26; newest non-beta Xcode on the image
       - name: Version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.0.${{ github.run_number }}"; fi
@@ -34,7 +34,7 @@ jobs:
         run: ci/export-ipa.sh
       - name: Verify
         run: ci/verify-ipa.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: la-carte-ipa
           path: build/export/LaCarte.ipa

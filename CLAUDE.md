@@ -6,7 +6,7 @@ so any agent can say "add these words to my deck". Monorepo:
 | Path | What | Stack |
 |---|---|---|
 | `api/` | Source of truth: cards, scheduling, REST for the app, MCP for agents | Python 3.13, FastAPI, SQLModel/SQLite, `fsrs`, `mcp` 2.x, uv |
-| `ios/` | The app: thin Xcode shell + `LaCarteKit` Swift package (all code lives there) | Swift 6, SwiftUI, TCA 1.26, iOS 27 |
+| `ios/` | The app: thin Xcode shell + `LaCarteKit` Swift package (all code lives there) | Swift 6, SwiftUI, TCA 1.26, iOS 26+ |
 | `docs/` | Architecture, conventions, design system, specs | — |
 | `qa/` | QA reports + exported UI-test screenshots | — |
 | `scripts/` | The only way to build/test (agents: use these, don't improvise xcodebuild) | bash |

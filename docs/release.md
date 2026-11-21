@@ -59,7 +59,7 @@ that touch your Apple account, so no agent runs them for you.
 4. Later, once the GitHub repo exists: one-time setup, step 2 (the `prod` secret), then tag as below.
 
 Checked without the account (2026-11-21, Xcode 27.0): an unsigned Release archive for `generic/platform=iOS`
-builds (arm64, `fr.lacarte.app`, version overrides applied). You can reproduce it with
+builds (arm64, `fr.lacarte.app`, `MinimumOSVersion` 26.0, version overrides applied). You can reproduce it with
 `xcodebuild archive -project ios/LaCarte.xcodeproj -scheme LaCarte -configuration Release -destination generic/platform=iOS -archivePath build/LaCarte.xcarchive -skipMacroValidation CODE_SIGNING_ALLOWED=NO`.
 Signing, export and install have **not** been run yet. They're the steps above.
 
@@ -76,9 +76,11 @@ Signing, export and install have **not** been run yet. They're the steps above.
 Versioning: `MARKETING_VERSION` comes from the tag (`v1.2.0` → `1.2.0`); the build number is the
 workflow run number.
 
-Both workflows pin `setup-xcode` to major `27`, because the iOS 27 deployment target needs the Xcode 27 SDK. If the
-`macos-26` runner image doesn't have Xcode 27 yet, the job fails at that step instead of building with
-an older SDK.
+The deployment target is **iOS 26.0**, so the app builds with Xcode 26.x (what the `macos-26` runner has,
+up to 26.6) as well as Xcode 27 (the Mac). Both workflows use `setup-xcode` with `latest-stable`, the newest
+non-beta Xcode on the image, and pick Xcode 27 automatically once the image ships it. Keep the project
+format at `objectVersion = 77` (Xcode 16 format) so Xcode 26 can open it. If Xcode 27 on the Mac bumps it
+to 90 when saving the project, set it back.
 
 ## The API the phone talks to
 The simulator reaches `127.0.0.1:8000` on the Mac, but a phone can't. Deploy the API with HTTPS

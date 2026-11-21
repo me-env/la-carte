@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
   name: "LaCarteKit",
-  platforms: [.iOS("27.0")],
+  platforms: [.iOS(.v26)],
   products: [
     .library(name: "AppFeature", targets: ["AppFeature"])
   ],

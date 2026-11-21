@@ -14,15 +14,15 @@ jobs:
     name: API (ruff + pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
       - run: scripts/api-test.sh
 
   api-image:
     name: API (docker build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build the production image (same as Dokploy)
         run: docker build -t la-carte-api:ci api/
       - name: Starts and answers /health
@@ -38,11 +38,11 @@ jobs:
       SIMULATOR: ${{ vars.CI_SIMULATOR || 'iPhone 17' }}
       OS: ${{ vars.CI_IOS_VERSION || 'latest' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '27'  # iOS 27 deployment target needs the Xcode 27 SDK
-      - uses: astral-sh/setup-uv@v6
+          xcode-version: latest-stable  # deployment target is iOS 26; newest non-beta Xcode on the image
+      - uses: astral-sh/setup-uv@v7
       - name: Unit tests
         run: scripts/ios-test.sh
       - name: UI tests (mock deck, light + dark)
@@ -51,7 +51,7 @@ jobs:
         run: scripts/e2e.sh ci-e2e
       - name: Upload screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: screenshots
           path: qa/screenshots/
