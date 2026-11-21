@@ -1,7 +1,7 @@
 # Dev velocity: running agents in parallel
 
 Owner: `dev-velocity`. Several agents share one Mac, one working tree, one booted simulator and one
-DerivedData per project. These rules keep them from blocking or breaking each other.
+DerivedData per project, and pools of test simulators. These rules keep them from blocking or breaking each other.
 
 ## How to wait: you don't, the scripts do
 
@@ -22,22 +22,23 @@ then run. Never poll `pgrep xcodebuild`, never `sleep` in a loop, never call `xc
 |---|---|---|
 | `build-LaCarte-<checkout>` | `ios/LaCarte.xcodeproj` DerivedData ("database is locked" if shared) | `ios-build.sh`; `ios-ui-test.sh` **build phase only** |
 | `build-LaCarteKit-<checkout>` | `ios/LaCarteKit` DerivedData (a different folder from the app's) | `ios-test.sh` |
-| `sim-<SIMULATOR>-<OS>` | the UI-test simulator (`iPhone 17 Pro`) | `ios-ui-test.sh` **test phase only** |
+| `sim-<SIMULATOR>-<OS>` | UI pool slot 1 (`iPhone 17 Pro`) | `ios-ui-test.sh` **test phase only** (via `_sim-pool.sh`; older scripts take it directly) |
+| `sim-la-carte-ui-<n>-<OS>` | UI pool slots 2..5 (`la-carte-ui-2` … `-5`) | `ios-ui-test.sh` test phase via `SIM_POOL=ui _sim-pool.sh` |
 | `sim-<UNIT_SIMULATOR>-<OS>` | unit-test pool slot 1 (`iPhone 17`) | `ios-test.sh` (via `_sim-pool.sh`; older scripts take it directly) |
 | `sim-la-carte-unit-<n>-<OS>` | unit-test pool slots 2..3 (`la-carte-unit-2`, `-3`) | `ios-test.sh` via `_sim-pool.sh` |
 
 Order is always build lock, then simulator lock, so no deadlock. `<checkout>` is a hash of the repo path:
 each git worktree (`.claude/worktrees/*`) has its own DerivedData and build locks, while simulator locks are
-global (`/tmp/la-carte-locks`), so UI runs from several worktrees queue for the same device; unit runs take
-the first free device of the unit pool (below). `OS=27.0`
+global (`/tmp/la-carte-locks`): unit and UI runs from any worktree take the first free device of their pool
+(below). `OS=27.0`
 resolves to the same lock as `latest` when 27.0 is the newest runtime.
 
 ## What can run at the same time
 
 | While this runs ↓ | `ios-build.sh` | `ios-test.sh` | `ios-ui-test.sh` / `e2e.sh` | `api-test.sh` / `api-dev.sh` |
 |---|---|---|---|---|
-| `ios-ui-test.sh` / `e2e.sh`, building (~1–3 min) | waits | **yes** | waits | yes |
-| `ios-ui-test.sh` / `e2e.sh`, testing (~20–30 min) | **yes** | **yes** | waits | yes |
+| `ios-ui-test.sh` / `e2e.sh`, building (~1–3 min) | waits | **yes** | same checkout waits; other worktrees yes | yes |
+| `ios-ui-test.sh` / `e2e.sh`, testing (~20–30 min) | **yes** | **yes** | **yes, up to 5 at once** | yes |
 | `ios-test.sh` | yes | yes, up to 3 at once (same checkout: waits) | yes | yes |
 | `ios-build.sh` | waits | yes | build waits | yes |
 
@@ -56,7 +57,17 @@ resolves to the same lock as `latest` when 27.0 is the newest runtime.
   one checkout still queue on that checkout's DerivedData lock. `UNIT_POOL_SIZE=1` turns the pool off (CI does).
 - `ios-test.sh` passes `-collect-test-diagnostics never`: after a failing or crashing test, Xcode otherwise runs
   `simctl diagnose` (up to 10 min) while still holding the simulator.
-- UI suites stay on one device: no UI pool until two UI suites at once are measured to be fine (see Plan 1).
+- UI tests run on their own **pool** (`SIM_POOL=ui scripts/_sim-pool.sh`): slot 1 is `SIMULATOR` (`iPhone 17 Pro`,
+  same lock as before); slots 2..`UI_POOL_SIZE` (default 5) are `la-carte-ui-<n>`, **same model and runtime**, so
+  screenshots and pixel checks are identical whichever slot a run gets. Same first-free / retry / `LOCK_TIMEOUT`
+  rules as the unit pool. `e2e.sh` gets it through `ios-ui-test.sh`; callers change nothing. `UI_POOL_SIZE=1`
+  turns it off (CI does).
+- **Simulator budget: about 8 booted at once** (5 UI slots + 3 unit slots). In-run workers
+  (`-parallel-testing-enabled`, `UI_WORKERS`) each boot one more clone, so **`UI_WORKERS` defaults to 1**; set
+  `UI_WORKERS=N` only when about N UI slots are idle (e.g. a lone full-suite run), keeping running UI runs ×
+  workers + unit runs ≤ 8. All three numbers are env-tunable: `UI_POOL_SIZE`, `UNIT_POOL_SIZE`, `UI_WORKERS`.
+- **Bound a run** with `scripts/_timeout.sh <seconds> <command…>` (macOS has no `timeout`): kills the command's
+  whole process group (xcodebuild included) and exits 124; its locks drop with it.
 
 ## Big outputs: the scratch disk
 
@@ -93,6 +104,17 @@ After: with slot 1 still busy and 4 runs queued on it (older scripts), a new `io
 101 passed in 91.9 s, 102 s end to end, 0 s wait. Three concurrent dummy holders: the third saw "all 3 busy" and
 timed out with exit 75 as configured. Disk: `la-carte-unit-2` 2.0 GB after one run, `-3` 17 MB until used.
 
+### UI pool: sizing (2026-11-21)
+
+Before: every `ios-ui-test.sh` / `e2e.sh` queued on `sim-iPhone-17-Pro-latest`; at 18:47 one run (`010-mock`,
+since 17:52) held it and 6 more QA runs were waiting behind it. After: with slot 1 still held, `pool-check`
+took slot 2 at once, created `la-carte-ui-2`, and passed (1 test, 83.6 s). Measured during it: 2 booted
+simulators, 56–61% memory free, but load 130 on 14 cores from 2 `xcodebuild`s + 11 `swift-frontend`s: **builds,
+not simulators, are what saturates CPU**, and memory has room. Hence 5 UI slots + 3 unit slots = 8 booted
+simulators at most, `UI_WORKERS=1` by default. Disk: about 1.5–2 GB per slot once used, so 4 UI + 2 unit clones
+≈ 12 GB (budget 20 GB); free disk went 38 → 35 GB during the check. Lower `UI_POOL_SIZE` if load or memory
+pressure turns out to slow UI runs down (timeouts), rather than adding workers.
+
 ## Working tree
 
 Agents spawned with worktree isolation work in `.claude/worktrees/<agent>` (own build locks, shared
@@ -105,12 +127,7 @@ simulator locks); everyone else shares the main tree. Either way, don't edit fil
 Measured 2026-11-21 (before the user freed disk): iOS 27 runtime 7.5 GB, `iPhone 17 Pro` 5.7 GB, la-carte
 DerivedData 1.7 GB app + 1.0 GB kit, `qa/.results` 1.1 GB. 48 GB RAM, 14 cores. Unit-test simulator (`iPhone 17`): 17 MB → 1.6 GB after its first run; `ios-test.sh` took 91 s (114 tests) while a UI suite ran on `iPhone 17 Pro`.
 
-1. **Per-agent simulator clones** for UI work (`xcrun simctl clone "iPhone 17 Pro" "iPhone 17 Pro <agent>"`,
-   `SIMULATOR=` per agent). About 2–5 GB each as they get used (they must live on the internal disk). It
-   lets two UI suites run at once; CPU allows about 2, but on 2026-11-21 load hit 46 on 14 cores with 12 GB of
-   memory compressed while 5 worktrees built, so measure two suites on a quiet machine first (`_sim-pool.sh` can
-   grow a UI pool then). Worth it only if QA and another agent often need UI
-   runs at the same time.
+1. ~~Per-agent simulator clones~~: done as the UI pool (above).
 2. **Git worktrees** per engineer (`git worktree add "$LA_CARTE_SCRATCH/worktrees/<agent>" -b
    <agent>/<feature>`). Each brings its own DerivedData (about 2.7 GB, on the scratch disk) and its own
    build locks automatically; the simulator locks stay shared. The manager merges.
