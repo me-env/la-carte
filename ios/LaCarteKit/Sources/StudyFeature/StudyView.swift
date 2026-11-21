@@ -19,17 +19,21 @@ public struct StudyView: View {
   }
 
   public var body: some View {
-    VStack(spacing: Theme.Spacing.m) {
-      topBar
+    // Only the content changes per phase. The top bar is a safe-area inset, so it sits at the top of the safe
+    // area whatever the content's size, even empty (last card rated, caught-up not loaded yet).
+    ZStack {
+      Rectangle().fill(Theme.background).ignoresSafeArea()
       content
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .refreshable { await store.send(.pulledToRefresh).finish() }
+        .padding(.horizontal, Theme.Spacing.m)
+        .padding(.bottom, Theme.Spacing.m)
     }
-    .padding(.horizontal, Theme.Spacing.m)
-    .padding(.bottom, Theme.Spacing.m)
-    // While the content is empty (last card rated, caught-up not loaded yet) the stack would shrink to the top bar.
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Theme.background)
+    .safeAreaInset(edge: .top, spacing: Theme.Spacing.m) {
+      topBar
+        .padding(.horizontal, Theme.Spacing.m)
+        .background(Theme.background)
+    }
     .onAppear { store.send(.onAppear) }
     .onChange(of: scenePhase) { _, phase in
       if phase == .background { focusedField = nil }
