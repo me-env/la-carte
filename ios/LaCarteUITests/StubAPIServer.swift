@@ -155,7 +155,7 @@ enum StubJSON {
 // MARK: - Stateful stub deck (spec 002: list / search / add / edit / delete)
 
 /// An in-memory deck behind `StubAPIServer`, speaking the REST shape of `api/` for `/cards`, `/cards/due`,
-/// `/stats`, `POST /cards`, `PATCH /cards/{id}` and `DELETE /cards/{id}`. Writes can be delayed or failed.
+/// `/stats`, `POST /cards`, `POST /cards/{id}/review`, `PATCH /cards/{id}` and `DELETE /cards/{id}`. Writes can be delayed or failed.
 final class StubDeck: @unchecked Sendable {
   struct Card {
     var id: String
@@ -232,6 +232,13 @@ final class StubDeck: @unchecked Sendable {
                       back: body["back"] as? String ?? "", due: now, createdAt: now)
       _cards.append(card)
       return .init(status: 201, body: Self.json(card), delay: _writeDelay)
+    case ("POST", let r) where r.hasPrefix("/cards/") && r.hasSuffix("/review"):
+      if _writeStatus != 0 { return .init(status: _writeStatus, body: #"{"detail":"boom"}"#, delay: _writeDelay) }
+      let id = String(r.dropFirst("/cards/".count).dropLast("/review".count)).lowercased()
+      guard let i = _cards.firstIndex(where: { $0.id.lowercased() == id }) else { return .init(status: 404, body: "{}") }
+      _cards[i].state = "review"
+      _cards[i].due = now.addingTimeInterval(86_400)
+      return .init(body: Self.json(_cards[i]), delay: _writeDelay)
     case ("PATCH", let r) where r.hasPrefix("/cards/"):
       if _writeStatus != 0 { return .init(status: _writeStatus, body: #"{"detail":"boom"}"#, delay: _writeDelay) }
       let id = String(r.dropFirst("/cards/".count)).lowercased()
