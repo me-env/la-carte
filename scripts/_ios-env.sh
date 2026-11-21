@@ -10,6 +10,12 @@ UNIT_DESTINATION="platform=iOS Simulator,name=$UNIT_SIMULATOR,OS=$OS"
 # Unit tests take the first free device of a small pool (scripts/_sim-pool.sh): slot 1 is $UNIT_SIMULATOR, slots 2..N
 # are "la-carte-unit-<n>" clones created on first use. 1 = no pool (CI boots only one simulator).
 if [ -n "${CI:-}" ]; then UNIT_POOL_SIZE="${UNIT_POOL_SIZE:-1}"; else UNIT_POOL_SIZE="${UNIT_POOL_SIZE:-3}"; fi
+# UI tests (ios-ui-test.sh, e2e.sh) take the first free device of their own pool: slot 1 is $SIMULATOR, slots 2..N
+# are "la-carte-ui-<n>", same model and runtime, so screenshots stay pixel-identical. 1 = no pool (CI).
+if [ -n "${CI:-}" ]; then UI_POOL_SIZE="${UI_POOL_SIZE:-1}"; else UI_POOL_SIZE="${UI_POOL_SIZE:-5}"; fi
+# Parallel-testing workers inside one UI run. Each worker is one more simulator (Xcode clones it), so the default is 1;
+# raise it only when UI slots are idle. Budget: about 8 booted simulators in all (docs/dev-velocity.md).
+UI_WORKERS="${UI_WORKERS:-1}"
 
 # Locks (scripts/_lock.sh, rules in docs/dev-velocity.md). Always take the DerivedData lock before the
 # simulator lock, so two scripts can never deadlock. DerivedData is per checkout (Xcode hashes the path).

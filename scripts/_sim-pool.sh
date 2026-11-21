@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Run a command on the first free unit-test simulator of a small pool, holding that device's lock, so unit
-# tests from several checkouts/worktrees run side by side instead of queuing for one device.
+# Run a command on the first free simulator of a small pool, holding that device's lock, so test runs from
+# several checkouts/worktrees go side by side instead of queuing for one device.
 #
 #   scripts/_sim-pool.sh <command> [args...]     (the command reads $POOL_DESTINATION, an xcodebuild -destination)
+#   SIM_POOL=ui scripts/_sim-pool.sh ...          (UI pool; default SIM_POOL=unit)
 #
-# Slot 1 is $UNIT_SIMULATOR with lock $UNIT_SIM_LOCK: the same device and lock as older scripts, so worktrees
-# that still run them share it correctly. Slots 2..$UNIT_POOL_SIZE are simulators named "la-carte-unit-<n>",
-# created on first use ($UNIT_SIMULATOR's device type, $OS runtime), each with its own lock.
+# unit: slot 1 is $UNIT_SIMULATOR (lock $UNIT_SIM_LOCK), slots 2..$UNIT_POOL_SIZE are "la-carte-unit-<n>".
+# ui:   slot 1 is $SIMULATOR (lock $SIM_LOCK), slots 2..$UI_POOL_SIZE are "la-carte-ui-<n>".
+# Slot 1 is the same device and lock as older scripts, so worktrees that still run them share it correctly.
+# Other slots are created on first use (slot 1's device type, $OS runtime: identical screenshots), each with
+# its own lock.
 # Tries each slot without waiting; if all are busy, retries every 2 s (fair enough for a handful of agents) until
 # one frees up or LOCK_TIMEOUT passes (exit 75). Locks are the same kernel locks as scripts/_lock.sh (lockf,
 # dropped on exit or crash) in LOCK_DIR, with the same holder notes.
@@ -14,15 +17,20 @@ set -euo pipefail
 source "$(dirname "$0")/_ios-env.sh"
 DIR="${LOCK_DIR:-/tmp/la-carte-locks}"
 mkdir -p "$DIR"
-slot_lock() { if [ "$1" -eq 1 ]; then echo "$UNIT_SIM_LOCK"; else echo "sim-la-carte-unit-$1-$LOCK_OS"; fi; }
+if [ "${SIM_POOL:-unit}" = ui ]; then
+  KIND=ui; MODEL="$SIMULATOR"; FIRST_LOCK="$SIM_LOCK"; FIRST_DEST="$DESTINATION"; SIZE="$UI_POOL_SIZE"
+else
+  KIND=unit; MODEL="$UNIT_SIMULATOR"; FIRST_LOCK="$UNIT_SIM_LOCK"; FIRST_DEST="$UNIT_DESTINATION"; SIZE="$UNIT_POOL_SIZE"
+fi
+slot_lock() { if [ "$1" -eq 1 ]; then echo "$FIRST_LOCK"; else echo "sim-la-carte-$KIND-$1-$LOCK_OS"; fi; }
 
 # Internal: we now hold slot $2's lock. Find or create its device, then run the command.
 if [ "${1:-}" = --on-slot ]; then
   SLOT="$2"; shift 2
   if [ "$SLOT" -eq 1 ]; then
-    export POOL_DESTINATION="$UNIT_DESTINATION"
+    export POOL_DESTINATION="$FIRST_DEST"
   else
-    NAME="la-carte-unit-$SLOT"
+    NAME="la-carte-$KIND-$SLOT"
     if [ "$OS" = latest ]; then
       RUNTIME="$(xcrun simctl list runtimes | sed -n 's/^iOS \([0-9.]*\) .* - \(com\.apple\.[^ ]*\).*/\1 \2/p' \
         | sort -t. -k1,1n -k2,2n | tail -1 | cut -d' ' -f2)"
@@ -35,8 +43,8 @@ import json, sys
 devices = json.load(sys.stdin)["devices"].get(sys.argv[1], [])
 print(next((d["udid"] for d in devices if d["name"] == sys.argv[2] and d["isAvailable"]), ""))' "$RUNTIME" "$NAME")"
     if [ -z "$UDID" ]; then
-      echo "📱 creating simulator $NAME ($UNIT_SIMULATOR, $RUNTIME), about 1.5 GB once used" >&2
-      UDID="$(xcrun simctl create "$NAME" "$UNIT_SIMULATOR" "$RUNTIME")"
+      echo "📱 creating simulator $NAME ($MODEL, $RUNTIME), about 1.5 GB once used" >&2
+      UDID="$(xcrun simctl create "$NAME" "$MODEL" "$RUNTIME")"
     fi
     export POOL_DESTINATION="platform=iOS Simulator,id=$UDID"
   fi
@@ -44,7 +52,6 @@ print(next((d["udid"] for d in devices if d["name"] == sys.argv[2] and d["isAvai
 fi
 
 [ $# -ge 1 ] || { echo "usage: $0 <command> [args...]" >&2; exit 64; }
-SIZE="${UNIT_POOL_SIZE:-3}"
 for k in $(seq 1 "$SIZE"); do  # an outer caller already holds a slot: use it
   case " ${LACARTE_HELD_LOCKS:-} " in *" $(slot_lock "$k") "*) exec "$0" --on-slot "$k" "$@" ;; esac
 done
@@ -70,9 +77,9 @@ while :; do
   done
   if [ -z "$WAITING" ]; then
     WAITING=$SECONDS
-    echo "🔒 all $SIZE unit-test simulators busy, waiting (up to ${TIMEOUT}s), held by:$(holders)" >&2
+    echo "🔒 all $SIZE $KIND-test simulators busy, waiting (up to ${TIMEOUT}s), held by:$(holders)" >&2
   elif [ $((SECONDS - WAITING)) -ge "$TIMEOUT" ]; then
-    echo "🔒 gave up after ${TIMEOUT}s waiting for a unit-test simulator, held by:$(holders)" >&2
+    echo "🔒 gave up after ${TIMEOUT}s waiting for a $KIND-test simulator, held by:$(holders)" >&2
     exit 75
   fi
   sleep 2
