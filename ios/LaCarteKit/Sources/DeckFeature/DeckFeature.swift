@@ -1,22 +1,22 @@
 import APIClient
-import CardEditorFeature
 import ComposableArchitecture
 import Foundation
+import NoteEditorFeature
 import SettingsFeature
 import SwiftUI
 
-/// Every card in the deck: search, swipe to delete, tap to edit, add (spec 002); hosts Settings (spec 003).
+/// Every note in the deck: search, swipe to delete, tap to edit, add (specs 002, 014c); hosts Settings (spec 003).
 @Reducer
 public struct DeckFeature {
   @Reducer
   public enum Destination {
-    case editor(CardEditorFeature)
+    case editor(NoteEditorFeature)
     case settings(SettingsFeature)
   }
 
   @ObservableState
   public struct State: Equatable {
-    var cards: IdentifiedArrayOf<Card> = []
+    var notes: IdentifiedArrayOf<Note> = []
     var query = ""
     var phase: Phase = .loading
     /// Haptic trigger: bumps on every row deleted (spec 009a).
@@ -60,7 +60,7 @@ public struct DeckFeature {
       case .offline: .offline
       case .notSetUp: .notSetUp
       case .unauthorized: .unauthorized
-      case .loaded where cards.isEmpty: query.isEmpty ? .noCards : .noMatches
+      case .loaded where notes.isEmpty: query.isEmpty ? .noCards : .noMatches
       case .loaded: nil
       }
     }
@@ -76,12 +76,12 @@ public struct DeckFeature {
     case onAppear
     case addButtonTapped
     case settingsButtonTapped
-    case rowTapped(Card.ID)
-    case rowSwipedToDelete(Card.ID)
+    case rowTapped(Note.ID)
+    case rowSwipedToDelete(Note.ID)
     case pulledToRefresh
     case scenePhaseChanged(ScenePhase)
-    case cardsResponse(Result<[Card], any Error>)
-    case deleteResponse(Result<Card.ID, any Error>)
+    case notesResponse(Result<[Note], any Error>)
+    case deleteResponse(Result<Note.ID, any Error>)
     case destination(PresentationAction<Destination.Action>)
     case delegate(Delegate)
 
@@ -103,16 +103,16 @@ public struct DeckFeature {
     Reduce { state, action in
       switch action {
       case .binding(\.query):
-        return loadCards(&state, after: .seconds(0.3))
+        return loadNotes(&state, after: .seconds(0.3))
 
       case .onAppear, .pulledToRefresh, .scenePhaseChanged(.active):
-        return loadCards(&state)
+        return loadNotes(&state)
 
       case .scenePhaseChanged:
         return .none
 
       case .addButtonTapped:
-        state.destination = .editor(CardEditorFeature.State())
+        state.destination = .editor(NoteEditorFeature.State())
         return .none
 
       case .settingsButtonTapped:
@@ -120,12 +120,12 @@ public struct DeckFeature {
         return .none
 
       case let .rowTapped(id):
-        guard let card = state.cards[id: id] else { return .none }
-        state.destination = .editor(CardEditorFeature.State(card: card))
+        guard let note = state.notes[id: id] else { return .none }
+        state.destination = .editor(NoteEditorFeature.State(note: note))
         return .none
 
       case let .rowSwipedToDelete(id):
-        state.cards.remove(id: id)
+        state.notes.remove(id: id)
         state.deletions += 1
         // A load still in flight may predate the delete and would bring the row back.
         return .merge(
@@ -134,7 +134,7 @@ public struct DeckFeature {
             await send(
               .deleteResponse(
                 Result {
-                  try await apiClient.deleteCard(id)
+                  try await apiClient.deleteNote(id)
                   return id
                 }
               )
@@ -142,40 +142,40 @@ public struct DeckFeature {
           }
         )
 
-      case let .cardsResponse(.success(cards)):
-        state.cards = IdentifiedArray(uniqueElements: cards)
+      case let .notesResponse(.success(notes)):
+        state.notes = IdentifiedArray(uniqueElements: notes)
         state.phase = .loaded
         return .none
 
-      case let .cardsResponse(.failure(error)):
-        state.cards = []
+      case let .notesResponse(.failure(error)):
+        state.notes = []
         state.phase = (error as? APIError)?.isUnauthorized == true ? .unauthorized : .offline
         return .none
 
       case .deleteResponse(.success):
         // The swipe cancelled any load in flight, including a debounced search: catch up with the field.
         return .merge(
-          loadCards(&state),
+          loadNotes(&state),
           .send(.delegate(.deckChanged))
         )
 
       case .deleteResponse(.failure):
-        return loadCards(&state)
+        return loadNotes(&state)
 
-      case let .destination(.presented(.editor(.delegate(.saved(card))))):
-        state.cards.updateOrInsert(card, at: 0)
+      case let .destination(.presented(.editor(.delegate(.saved(note))))):
+        state.notes.updateOrInsert(note, at: 0)
         return .send(.delegate(.deckChanged))
 
       case .destination(.presented(.settings(.delegate(.serverChanged)))):
         return .merge(
-          loadCards(&state),
+          loadNotes(&state),
           .send(.delegate(.deckChanged))
         )
 
       // Closing Settings counts as saving it. Runs before `ifLet` clears the destination.
       case .destination(.dismiss) where state.destination?.is(\.settings) == true:
         return .merge(
-          loadCards(&state),
+          loadNotes(&state),
           .send(.delegate(.deckChanged))
         )
 
@@ -186,11 +186,11 @@ public struct DeckFeature {
     .ifLet(\.$destination, action: \.destination)
   }
 
-  /// Loads the cards matching the search field; without a server URL and a token, makes no request (spec 008).
+  /// Loads the notes matching the search field; without a server URL and a token, makes no request (spec 008).
   /// Every load shares one cancel id, so a slow response never overwrites a newer one.
-  private func loadCards(_ state: inout State, after delay: Duration = .zero) -> Effect<Action> {
+  private func loadNotes(_ state: inout State, after delay: Duration = .zero) -> Effect<Action> {
     guard apiClient.isConfigured() else {
-      state.cards = []
+      state.notes = []
       state.phase = .notSetUp
       return .cancel(id: CancelID.load)
     }
@@ -199,10 +199,39 @@ public struct DeckFeature {
       if delay > .zero {
         try await clock.sleep(for: delay)
       }
-      await send(.cardsResponse(Result { try await apiClient.cards(query.isEmpty ? nil : query) }))
+      await send(.notesResponse(Result { try await apiClient.notes(query.isEmpty ? nil : query) }))
     }
     .cancellable(id: CancelID.load, cancelInFlight: true)
   }
 }
 
 extension DeckFeature.Destination.State: Equatable {}
+
+/// What a deck row shows for a note (spec 014c #2).
+extension Note {
+  /// The key field: `front`, or a person's `name`.
+  var title: String {
+    fields[type == .person ? "name" : "front"] ?? ""
+  }
+
+  var subtitle: String {
+    switch type {
+    case .basic: fields["back"] ?? ""
+    case .person: fields["description"] ?? ""
+    }
+  }
+
+  var photoURL: URL? {
+    fields["photo"].flatMap(URL.init(string:))
+  }
+
+  /// The earliest `due` among its cards.
+  var due: Date {
+    cards.map(\.due).min() ?? createdAt
+  }
+
+  /// The card's state when there's one card, else how many directions it's studied in.
+  var stateText: String {
+    cards.count == 1 ? cards[0].state.rawValue : "\(cards.count) directions"
+  }
+}

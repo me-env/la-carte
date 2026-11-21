@@ -3,7 +3,7 @@ import XCTest
 /// Spec 006: pull-to-refresh on Study and Deck + reload when the scene becomes active.
 /// "Stub" = `StubAPIServer` + `StubDeck`; the test adds/removes cards on it to simulate an agent (MCP).
 final class RefreshUITests: XCTestCase {
-  static let ratings = ["again", "hard", "good", "easy"]
+  static let ratings = ["again", "good"]  // spec 011
   static let base = Date(timeIntervalSince1970: 1_767_225_600)  // 2026-01-01: due now
   static let idA = "AAAAAAAA-0000-0000-0000-000000000001"
   static let idB = "BBBBBBBB-0000-0000-0000-000000000002"
@@ -146,14 +146,17 @@ final class RefreshUITests: XCTestCase {
                                           appearance: .light)
     // In flight: the canine row still drawn (visual review), only one row before the response.
     assertInkVisible(inFlight, ink: Palette.light.ink, "existing row during the refresh")
-    assertNoBlue(inFlight, "deck refresh spinner")
+    // The system keyboard (still up from the search) has a blue Search key: only check above it.
+    let keyboardTop = app.keyboards.firstMatch.exists ? app.keyboards.firstMatch.frame.minY : app.windows.firstMatch.frame.maxY
+    assertNoBlue(inFlight.flatMap { $0.cropping(to: CGRect(x: 0, y: 0, width: $0.width, height: Int(keyboardTop * 3))) },
+                 "deck refresh spinner")
     XCTAssertTrue(deckTitle(app).exists, "the pull closed the deck sheet")
     XCTAssertTrue(row(app, Self.idB).waitFor(timeout: 20), "feline row missing after the pull with a query")
     XCTAssertTrue(row(app, Self.idA).exists, "canine row gone after the pull")
     XCTAssertFalse(row(app, Self.idC).exists, "raven (not matching 'ine') shown: the refresh ignored the query")
     XCTAssertEqual(deckSearch(app).value as? String, "ine", "search field lost its text")
-    let gets = server.requests.dropFirst(before).filter { $0.method == "GET" && StubDeck.route($0.path) == "/cards" }
-    XCTAssertFalse(gets.isEmpty, "no GET /cards after the pull")
+    let gets = server.requests.dropFirst(before).filter { $0.method == "GET" && StubDeck.route($0.path) == "/notes" }
+    XCTAssertFalse(gets.isEmpty, "no GET /notes after the pull (spec 014c: the deck lists notes)")
     for g in gets {
       XCTAssertEqual(StubDeck.queryItems(g.path)["query"], "ine", "refresh GET \(g.path) without the query")
     }
@@ -207,7 +210,8 @@ final class RefreshUITests: XCTestCase {
 
     let created = try XCTUnwrap(liveRequest(url + "/cards", method: "POST", body: #"{"front":"canine","back":"dog"}"#))
     let canine = try XCTUnwrap(try JSONSerialization.jsonObject(with: created) as? [String: Any])
-    let canineID = try XCTUnwrap(canine["id"] as? String, "POST /cards: \(canine)")
+    // Spec 014c: deck rows are notes, keyed by the card's `note_id`.
+    let canineID = try XCTUnwrap(canine["note_id"] as? String ?? canine["id"] as? String, "POST /cards: \(canine)")
     XCTAssertFalse(row(app, canineID).exists, "canine shown before any refresh")
 
     pullToRefresh(app, from: anyRow)

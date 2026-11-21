@@ -26,6 +26,41 @@ final class LaunchUITests: XCTestCase {
     assertCornerButtonsStable(launch(api: .live(unreachableAPIURL)))
   }
 
+  /// Rating the last card swaps the content for "All caught up": the top bar must stay put, also in between,
+  /// while the due cards and stats load (slow reads here, so that gap is long enough to sample).
+  @MainActor
+  func testLastCardToCaughtUp_cornerButtonsDontMove() throws {
+    let deck = StubDeck([.init(id: "aaaaaaaa-0000-0000-0000-000000000001", front: "gratitude", back: "thank you")])
+    let server = StubAPIServer(handler: deck.handle)
+    try server.start()
+    defer { server.stop() }
+    let app = launch(api: .live(server.url))
+    let deckButton = el(app, "study.deck")
+    let add = el(app, "study.add")
+    waitForLabel(el(app, "study.remaining"), "1 to review")
+    el(app, "study.reveal").tap()
+    XCTAssertTrue(el(app, "study.rate.good").waitFor(timeout: 5), "study.rate.good missing")
+    let studying = (deck: deckButton.frame, add: add.frame)
+
+    deck.readDelay = 2
+    el(app, "study.rate.good").tap()
+    var samples = [(deck: deckButton.frame, add: add.frame)]
+    let caughtUp = el(app, "study.message")
+    while !caughtUp.exists, samples.count < 40 {
+      samples.append((deck: deckButton.frame, add: add.frame))
+    }
+    waitForLabel(caughtUp, "All caught up")
+    _ = XCTWaiter().wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
+    samples.append((deck: deckButton.frame, add: add.frame))
+
+    for sample in samples {
+      for (name, a, b) in [("study.deck", studying.deck, sample.deck), ("study.add", studying.add, sample.add)] {
+        XCTAssertEqual(a.minX, b.minX, accuracy: 1, "\(name) moved: \(a) → \(b)")
+        XCTAssertEqual(a.minY, b.minY, accuracy: 1, "\(name) moved: \(a) → \(b)")
+      }
+    }
+  }
+
   /// Reads the buttons' frames as soon as they exist, then after 1 s: they must match within 1 pt.
   @MainActor
   private func assertCornerButtonsStable(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {

@@ -137,7 +137,8 @@ value). Light only: `study-revealed-xl` (AX XL, #19).
 from a DEBUG-only launch argument `-studySwipePreview <f>` (UserDefaults argument domain, like `-theme`; `f` in
 card-width fractions, the same unit as the drags). When it is set and `canRate` becomes true, `StudyView` acts as if
 a finger came down at the card's center and is held at `f`: it draws the real dots and sends
-`swipeChanged(f)` once. It never releases. Use the five `f` values above.
+`swipeChanged(f)` once. It never releases. Use the five `f` values above. A negative value must be passed as
+`"<real>-0.13</real>"` or `" -0.13"` (leading space): a bare `-0.13` is read as another flag and the preview is off.
 
 ## TCA shape (iOS)
 No new module, no new dependency. `StudyFeature` + `StudyView`, plus a dots view in `DesignSystem` (design-lead).
@@ -204,6 +205,12 @@ Kept: `study.rate.again` (now "Forgot"), `study.rate.good` (now "Got it"), `stud
 (now also carry the four rating actions when `canRate`). Removed: `study.rate.hard`, `study.rate.easy`.
 
 ## Design notes (design-lead)
+**Implemented defaults, pending design-lead** (ios-engineer, all in `DotRing` in
+`ios/LaCarteKit/Sources/DesignSystem/ConfidenceDots.swift`, the one place to tune): 16 dots of 6 pt in `Theme.ink`,
+drawn on the gesture's ring (R = 0.25 x card width); noise = linear `(1 - v)`; at full noise each dot moves
+± 45% of R radially, ± half a gap along the circle, and its size varies ± 33% (never under 4 pt); fixed SplitMix64
+seed. No hairline, no secondaryInk, no gather-in animation yet (opacity in/out with `Theme.Motion.standard`). The view
+is `ConfidenceDots(order:radius:)` (gallery: "Confidence dots"); the logo can adopt `DotRing` when its route lands.
 _To fill before implementation; design-critic reviews. Decide and write here, then copy the outcome into
 `docs/design-system.md` (tokens, Components, Motion):_
 - **Dot count** (proposal: 12–16, readable at 92 pt radius, not busy) and **dot size** (min 4 pt, so a

@@ -2,6 +2,8 @@ import XCTest
 
 enum APIMode {
   case mock
+  /// `LA_CARTE_API=mock-notes`: the in-memory deck seeded with notes (spec 014b: basics + a made-up person).
+  case mockNotes
   case live(String)
   /// No API env at all (neither `LA_CARTE_API` nor `LA_CARTE_API_URL`/`_TOKEN`): the app uses the URL and token
   /// stored by Settings (spec 003 #6, #9).
@@ -42,6 +44,8 @@ extension XCTestCase {
     switch api {
     case .mock:
       app.launchEnvironment["LA_CARTE_API"] = "mock"
+    case .mockNotes:
+      app.launchEnvironment["LA_CARTE_API"] = "mock-notes"
     case let .live(url):
       app.launchEnvironment["LA_CARTE_API_URL"] = url
       // Spec 008 #14: the app needs URL + token to be "set up"; unguarded stubs ignore the header.
@@ -425,7 +429,7 @@ extension XCTestCase {
   /// Navigation bar of the card editor, whichever its title ("New card" / "Edit card").
   @MainActor
   func editorBar(_ app: XCUIApplication) -> XCUIElement {
-    app.navigationBars.matching(NSPredicate(format: "identifier IN %@", ["New card", "Edit card"])).firstMatch
+    app.navigationBars.matching(NSPredicate(format: "identifier IN %@", ["New card", "Edit card", "New person", "Edit person"])).firstMatch
   }
 
   /// The title text inside the sheet's navigation bar (for frame checks).

@@ -21,10 +21,10 @@ let package = Package(
     .target(
       name: "AppFeature",
       dependencies: [
-        "CardEditorFeature",
         "DeckFeature",
         "DeckWidget",
         "DesignSystem",
+        "NoteEditorFeature",
         "SettingsFeature",
         "StudyFeature",
         .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
@@ -32,30 +32,30 @@ let package = Package(
     ),
     .testTarget(
       name: "AppFeatureTests",
-      dependencies: ["AppFeature", "APIClient", "CardEditorFeature", "DeckFeature", "SettingsFeature", "StudyFeature"]
+      dependencies: ["AppFeature", "APIClient", "DeckFeature", "NoteEditorFeature", "SettingsFeature", "StudyFeature"]
     ),
     .target(
-      name: "CardEditorFeature",
+      name: "NoteEditorFeature",
       dependencies: [
         "APIClient",
         "DesignSystem",
         .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
       ]
     ),
-    .testTarget(name: "CardEditorFeatureTests", dependencies: ["CardEditorFeature", "APIClient"]),
+    .testTarget(name: "NoteEditorFeatureTests", dependencies: ["NoteEditorFeature", "APIClient"]),
     .target(
       name: "DeckFeature",
       dependencies: [
         "APIClient",
-        "CardEditorFeature",
         "DesignSystem",
+        "NoteEditorFeature",
         "SettingsFeature",
         .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
       ]
     ),
     .testTarget(
       name: "DeckFeatureTests",
-      dependencies: ["DeckFeature", "APIClient", "CardEditorFeature", "SettingsFeature"]
+      dependencies: ["DeckFeature", "APIClient", "NoteEditorFeature", "SettingsFeature"]
     ),
     .target(
       name: "SettingsFeature",

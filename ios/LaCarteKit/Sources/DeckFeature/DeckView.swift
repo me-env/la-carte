@@ -1,13 +1,14 @@
 import APIClient
-import CardEditorFeature
 import ComposableArchitecture
 import DesignSystem
+import NoteEditorFeature
 import SettingsFeature
 import SwiftUI
 
 public struct DeckView: View {
   @Bindable var store: StoreOf<DeckFeature>
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   public init(store: StoreOf<DeckFeature>) {
     self.store = store
@@ -42,7 +43,7 @@ public struct DeckView: View {
     .onAppear { store.send(.onAppear) }
     .onChange(of: scenePhase) { _, phase in store.send(.scenePhaseChanged(phase)) }
     .sheet(item: $store.scope(\.$destination, action: \.destination).editor) { editorStore in
-      CardEditorView(store: editorStore)
+      NoteEditorView(store: editorStore)
     }
     .sheet(item: $store.scope(\.$destination, action: \.destination).settings) { settingsStore in
       SettingsView(store: settingsStore)
@@ -67,8 +68,8 @@ public struct DeckView: View {
       .scrollDismissesKeyboard(.immediately)
     } else {
       List {
-        ForEach(store.cards) { card in
-          row(card)
+        ForEach(store.notes) { note in
+          row(note)
             .listRowInsets(
               EdgeInsets(
                 top: Theme.Spacing.s / 2, leading: Theme.Spacing.m,
@@ -78,14 +79,14 @@ public struct DeckView: View {
             .listRowSeparator(.hidden)
             .listRowBackground(Rectangle().fill(Theme.background))
             .swipeActions(edge: .trailing) {
-              Button("Delete", role: .destructive) { delete(card) }
-                .accessibilityIdentifier("deck.row.\(card.id).delete")
+              Button("Delete", role: .destructive) { delete(note) }
+                .accessibilityIdentifier("deck.row.\(note.id).delete")
             }
             .contextMenu {
-              Button("Edit", systemImage: "pencil") { store.send(.rowTapped(card.id)) }
-                .accessibilityIdentifier("deck.row.\(card.id).edit")
-              Button("Delete", systemImage: "trash", role: .destructive) { delete(card) }
-                .accessibilityIdentifier("deck.row.\(card.id).contextDelete")
+              Button("Edit", systemImage: "pencil") { store.send(.rowTapped(note.id)) }
+                .accessibilityIdentifier("deck.row.\(note.id).edit")
+              Button("Delete", systemImage: "trash", role: .destructive) { delete(note) }
+                .accessibilityIdentifier("deck.row.\(note.id).contextDelete")
             }
         }
       }
@@ -114,33 +115,39 @@ public struct DeckView: View {
     }
   }
 
-  private func delete(_ card: Card) {
+  private func delete(_ note: Note) {
     withAnimation(.easeInOut(duration: 0.25)) {
-      _ = store.send(.rowSwipedToDelete(card.id))
+      _ = store.send(.rowSwipedToDelete(note.id))
     }
   }
 
-  private func row(_ card: Card) -> some View {
+  private func row(_ note: Note) -> some View {
     Button {
-      store.send(.rowTapped(card.id))
+      store.send(.rowTapped(note.id))
     } label: {
-      VStack(alignment: .leading, spacing: Theme.Spacing.s / 2) {
-        HStack(spacing: Theme.Spacing.s) {
-          Text(Self.dueText(card.due))
-            .accessibilityIdentifier("deck.row.\(card.id).due")
-          Spacer(minLength: 0)
-          Text(card.state.rawValue)
-            .accessibilityIdentifier("deck.row.\(card.id).state")
+      HStack(alignment: dynamicTypeSize.isAccessibilitySize ? .top : .center, spacing: Theme.Spacing.m) {
+        if note.type == .person {
+          CardPhoto(url: note.photoURL, style: .thumbnail)
+            .accessibilityIdentifier("deck.row.\(note.id).photo")
         }
-        .font(.meta)
-        .foregroundStyle(Theme.secondaryInk)
-        Text(card.front)
-          .foregroundStyle(Theme.ink)
-        Text(card.back)
+        VStack(alignment: .leading, spacing: Theme.Spacing.s / 2) {
+          HStack(spacing: Theme.Spacing.s) {
+            Text(Self.dueText(note.due))
+              .accessibilityIdentifier("deck.row.\(note.id).due")
+            Spacer(minLength: 0)
+            Text(note.stateText)
+              .accessibilityIdentifier("deck.row.\(note.id).state")
+          }
+          .font(.meta)
           .foregroundStyle(Theme.secondaryInk)
+          Text(note.title)
+            .foregroundStyle(Theme.ink)
+          Text(note.subtitle)
+            .foregroundStyle(Theme.secondaryInk)
+        }
+        .font(.body)
+        .lineLimit(1)
       }
-      .font(.body)
-      .lineLimit(1)
       .padding(Theme.Spacing.m)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.row))
@@ -148,7 +155,7 @@ public struct DeckView: View {
     .buttonStyle(.plain)
     // `.contain` keeps the due/state texts queryable by UI tests inside the tappable row.
     .accessibilityElement(children: .contain)
-    .accessibilityIdentifier("deck.row.\(card.id)")
+    .accessibilityIdentifier("deck.row.\(note.id)")
   }
 
   static func dueText(_ due: Date, now: Date = .now, locale: Locale = .current) -> String {
@@ -161,7 +168,9 @@ public struct DeckView: View {
 }
 
 #Preview("Deck") {
-  DeckView(store: Store(initialState: DeckFeature.State()) { DeckFeature() })
+  DeckView(store: Store(initialState: DeckFeature.State()) { DeckFeature() } withDependencies: {
+    $0.apiClient = .inMemory(notes: .fixtures)
+  })
 }
 
 #Preview("Not set up") {

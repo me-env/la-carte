@@ -157,8 +157,8 @@ AppFeature → <Name>Feature → APIClient
 Feature tree (specs 001–004):
 ```
 AppFeature ── study: StudyFeature                      (home, always on screen)
-           └─ destination: .deck(DeckFeature)          ── destination: .editor(CardEditorFeature)
-                           .addCard(CardEditorFeature)                 .settings(SettingsFeature)
+           └─ destination: .deck(DeckFeature)          ── destination: .editor(NoteEditorFeature)
+                           .addNote(NoteEditorFeature)                 .settings(SettingsFeature)
 ```
 Changes flow up as delegates: `CardEditor.saved` → Deck/App; `Settings.serverChanged` → Deck;
 `Deck.deckChanged` → App, which sends `study(.deckChanged)` so study re-fetches.

@@ -63,10 +63,11 @@ final class DeckUITests: XCTestCase {
     XCTAssertEqual(row(app, newest).frame.height, row(app, older).frame.height, accuracy: 1,
                    "long text row is taller than a short one: front/back not limited to 1 line")
     snapshot("deck-api-rows", appearance: .light)
-    let lists = server.requests.filter { StubDeck.route($0.path) == "/cards" && $0.method == "GET" }
-    XCTAssertFalse(lists.isEmpty, "no GET /cards")
+    // Spec 014c #1: the deck lists notes.
+    let lists = server.requests.filter { StubDeck.route($0.path) == "/notes" && $0.method == "GET" }
+    XCTAssertFalse(lists.isEmpty, "no GET /notes")
     for r in lists {
-      XCTAssertEqual(StubDeck.queryItems(r.path)["limit"], "500", "GET /cards without limit=500: \(r.path)")
+      XCTAssertEqual(StubDeck.queryItems(r.path)["limit"], "500", "GET /notes without limit=500: \(r.path)")
     }
     server.stop()
   }
@@ -573,7 +574,7 @@ final class DeckUITests: XCTestCase {
     var rows: [(String, CGFloat)] = []
     func walk(_ node: XCUIElementSnapshot) {
       let id = node.identifier
-      if id.hasPrefix("deck.row."), !id.hasSuffix(".due"), !id.hasSuffix(".state"), !id.lowercased().hasSuffix(".delete"), !id.hasSuffix(".edit"), !id.lowercased().hasSuffix(".contextdelete"), !node.frame.isEmpty,
+      if id.hasPrefix("deck.row."), !id.hasSuffix(".due"), !id.hasSuffix(".state"), !id.lowercased().hasSuffix(".delete"), !id.hasSuffix(".edit"), !id.lowercased().hasSuffix(".contextdelete"), !id.hasSuffix(".photo"), !node.frame.isEmpty,
          !rows.contains(where: { $0.0 == id }) {
         rows.append((id, node.frame.minY))
       }

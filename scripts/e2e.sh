@@ -38,10 +38,16 @@ done
 # Spec 004 forest live check only reads (study + deck), so it can run last.
 # Spec 002 #13 adds "feline"/"cat" from study and deletes it again (net zero), so it can run before 001's flow.
 # Spec 006 #12 POSTs "canine"/"dog", pulls deck + study, then DELETEs it (net zero): also before 001's flow.
+# Spec 014c #17 adds a person from the deck and deletes it; 014d #11 posts a person to the EMPTY API, studies it and
+# deletes it (both net zero; Notes runs after Deck, before Study).
+# Spec 010 #16 edits greeting's back to "hello!" then PATCHes it back (net zero); StudyEdit runs before Study.
 UI_WORKERS=1 "$ROOT/scripts/ios-ui-test.sh" "$RUN" \
   "-only-testing:LaCarteUITests/DeckUITests/testDeck_addFromStudyThenDelete_liveAPI" \
+  "-only-testing:LaCarteUITests/NotesUITests/testNoteEditor_personCreateDelete_liveAPI" \
+  "-only-testing:LaCarteUITests/NotesUITests/testNotesStudy_unreachablePhoto_liveAPI" \
   "-only-testing:LaCarteUITests/RefreshUITests/testStudy_pullToRefresh_liveAPI" \
   "-only-testing:LaCarteUITests/SettingsUITests/testSettings_setupOnDevice_liveAPI" \
+  "-only-testing:LaCarteUITests/StudyEditUITests/testStudyEdit_appendToBack_liveAPI" \
   "-only-testing:LaCarteUITests/StudyUITests/testStudy_revealRateToCaughtUp_liveAPI" \
   "-only-testing:LaCarteUITests/StudyUITests/testStudy_emptyDeck_liveAPI" \
   "-only-testing:LaCarteUITests/ThemeUITests/testTheme_forestDeck_liveAPI"

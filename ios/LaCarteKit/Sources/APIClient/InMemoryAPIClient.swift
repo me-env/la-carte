@@ -34,9 +34,6 @@ extension APIClient {
     }
 
     return APIClient(
-      cards: { query in
-        cards(deck.value.filter { $0.matches(query) })
-      },
       dueCards: { limit in
         let notes = deck.value
         var servedNotes = Set<Note.ID>()
@@ -47,11 +44,6 @@ extension APIClient {
           .filter { servedNotes.insert($0.noteId).inserted }
         return Array(servable.prefix(limit))
       },
-      addCard: { front, back in
-        let note = Card(id: UUID(), front: front, back: back, due: now, createdAt: now, updatedAt: now).basicNote
-        deck.withValue { $0.insert(note, at: 0) }
-        return Card(note: note, card: note.cards[0])
-      },
       updateCard: { id, front, back in
         try editCard(id) { note, index in
           let card = note.cards[index]
@@ -61,14 +53,6 @@ extension APIClient {
           note.fields[card.prompt[0]] = front
           note.fields[card.answer[0]] = back
           return Card(note: note, card: card)
-        }
-      },
-      deleteCard: { id in
-        deck.withValue { notes in
-          for index in notes.indices {
-            notes[index].cards.removeAll { $0.id == id }
-          }
-          notes.removeAll { $0.cards.isEmpty }
         }
       },
       review: { id, rating in
@@ -103,7 +87,7 @@ extension APIClient {
         let note = Note(
           id: UUID(),
           type: draft.type,
-          fields: draft.fields,
+          fields: draft.fields.filter { !$0.value.isEmpty },
           cards: directions.map { Note.Card(id: UUID(), prompt: $0.prompt, answer: $0.answer, due: now) },
           createdAt: now,
           updatedAt: now
@@ -219,12 +203,12 @@ extension [Note] {
       fields: [
         "photo": neutralPhoto,
         "name": "Ada Example",
-        "role": "runs the bakery",
-        "context": "met at the climbing gym",
+        "description": "runs the bakery",
       ],
       cards: [
-        Note.Card(id: id(12), prompt: ["photo"], answer: ["name"], due: date),
-        Note.Card(id: id(13), prompt: ["role"], answer: ["name"], due: date),
+        Note.Card(id: id(12), prompt: ["photo"], answer: ["name", "description"], due: date),
+        Note.Card(id: id(13), prompt: ["name"], answer: ["photo", "description"], due: date),
+        Note.Card(id: id(15), prompt: ["description"], answer: ["photo", "name"], due: date),
       ],
       createdAt: date,
       updatedAt: date
