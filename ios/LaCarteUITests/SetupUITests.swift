@@ -2,8 +2,8 @@ import XCTest
 
 /// Spec 008: "Connect your deck" (no URL or no token) and "Token rejected" (401/403), on Study and Deck.
 /// Every test launches with `APIMode.stored` (no API env) and first clears whatever a previous test stored.
-/// Lives on `SettingsUITests` to share its Settings helpers (`setText`, `startStub`, `guarded`, …).
-extension SettingsUITests {
+/// Settings helpers (`setText`, `startStub`, `guarded`, …) come from `SettingsTestCase`.
+final class SetupUITests: SettingsTestCase {
   static let notSetUp = (message: "Connect your deck", detail: "Add your server URL and token in Settings.")
   static let rejected = (message: "Token rejected", detail: "Check your token in Settings.")
 

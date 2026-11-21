@@ -23,7 +23,8 @@ final class StubAPIServer: @unchecked Sendable {
 
   typealias Handler = @Sendable (Request) -> Response
 
-  let port: UInt16
+  /// Picked by the OS when the listener starts (port 0), so parallel test workers never collide.
+  private(set) var port: UInt16 = 0
   var url: String { "http://127.0.0.1:\(port)" }
 
   private let queue = DispatchQueue(label: "qa.stub-api")
@@ -39,7 +40,6 @@ final class StubAPIServer: @unchecked Sendable {
   }
 
   init(handler: @escaping Handler = { _ in Response(status: 404, body: #"{"detail":"Not Found"}"#) }) {
-    port = UInt16.random(in: 20_000...50_000)
     _handler = handler
   }
 
@@ -48,7 +48,7 @@ final class StubAPIServer: @unchecked Sendable {
   func start() throws {
     let params = NWParameters.tcp
     params.allowLocalEndpointReuse = true
-    let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+    let listener = try NWListener(using: params, on: .any)
     let ready = DispatchSemaphore(value: 0)
     listener.stateUpdateHandler = { state in
       switch state {
@@ -63,6 +63,7 @@ final class StubAPIServer: @unchecked Sendable {
     }
     listener.start(queue: queue)
     _ = ready.wait(timeout: .now() + 5)
+    port = listener.port?.rawValue ?? 0
     self.listener = listener
   }
 

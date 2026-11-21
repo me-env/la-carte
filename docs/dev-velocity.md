@@ -56,7 +56,12 @@ resolves to the same lock as `latest` when 27.0 is the newest runtime.
   one checkout still queue on that checkout's DerivedData lock. `UNIT_POOL_SIZE=1` turns the pool off (CI does).
 - `ios-test.sh` passes `-collect-test-diagnostics never`: after a failing or crashing test, Xcode otherwise runs
   `simctl diagnose` (up to 10 min) while still holding the simulator.
-- UI suites stay on one device: no UI pool until two UI suites at once are measured to be fine (see Plan 1).
+- UI suites stay on one device lock: one `ios-ui-test.sh` / `e2e.sh` at a time holds `sim-<SIMULATOR>-<OS>`, no UI
+  pool until two suites at once are measured to be fine (see Plan 1). Inside a run, test classes run on
+  `UI_WORKERS` (default 3) parallel clones of that simulator (`-parallel-testing-enabled`): Xcode creates them
+  under `~/Library/Developer/XCTestDevices` for the run and deletes them after (a few GB, transient). Each test
+  class must stand alone (its own stub servers on OS-picked ports, no order between classes).
+  `UI_WORKERS=1` gives the old serial run.
 
 ## Big outputs: the scratch disk
 
