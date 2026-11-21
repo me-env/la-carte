@@ -41,9 +41,11 @@ account or installing on the iPhone. No CodeGraph in this repo: don't offer to i
 | `api-engineer` | `api/**` (REST, MCP, scheduling) + pytest | Touches `ios/` |
 | `code-reviewer` | Read-only review for simplicity/clarity/conventions | Edits code |
 | `qa-validator` | **Independent** E2E: `ios/LaCarteUITests/**`, `qa/**`, screenshots, verdict | Edits app or API code |
-| `release-engineer` | CI, signing, Ad Hoc builds, installing on the iPhone (`ci/`, `.github/`) | Changes features; touches the Apple account/repo without the user's OK |
+| `release-engineer` | Signing, Ad Hoc builds (`adhoc.yml`, signing `ci/` scripts), installing on the iPhone; CI pipelines belong to `cicd-lead` | Changes features; touches the Apple account/repo without the user's OK |
 | `design-lead` | Design system + brand: native feel (Apple components first), `docs/design-system.md`, `DesignSystem` module, dynamic SwiftUI logo, app icon, brand kit (`docs/design/brand*`) for marketing | Edits feature code (writes design notes into specs instead) |
 | `design-critic` | Independent judge of design-lead's visuals (logo, icon, screens) against the reference app (Vyst) and Apple apps; feedback to design-lead until it's good enough to show the user | Designs or edits files |
+| `dev-velocity` | Parallel agents don't block each other: build/simulator lock, per-agent clones, worktrees, disk; `docs/dev-velocity.md` | Skips tests or weakens safety to go faster |
+| `cicd-lead` | CI/CD: GitHub Actions pipelines, test gating, API deploy (Dokploy) only after tests pass, fast feedback; `docs/ci-cd.md` | Signing/Ad Hoc/device installs (release-engineer) |
 | `tooling-lead` | Audits the team's tools/processes one by one (`scripts/`, `ci/`, test helpers, render/video pipelines), researches better options, proposes to the owner, delegates agreed changes; keeps `docs/tooling.md` | Implements tooling itself; changes product code |
 | `tooling-implementer` | Implements one agreed tooling change from tooling-lead's brief; reports to the owner and tooling-lead | Changes product features |
 | `instructions-keeper` | Sanity of all agent instructions (`CLAUDE.md`s, `.claude/agents/`, skills, docs agents read): correct, useful, not duplicated, no slop | Touches product code; weakens safety rules |
