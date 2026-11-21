@@ -32,3 +32,5 @@ ios/Config/Signing.local.xcconfig
 # Claude Code local state
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+# Per-machine script settings (scratch dir on an external disk)
+scripts/.local.env
