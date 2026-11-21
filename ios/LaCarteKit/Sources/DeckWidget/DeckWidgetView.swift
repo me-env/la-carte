@@ -35,6 +35,8 @@ struct DeckWidgetView: View {
         Spacer(minLength: 0)
       }
     }
+    .minimumScaleFactor(0.6)
+    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(accessibilityText)
