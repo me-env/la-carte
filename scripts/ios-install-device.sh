@@ -30,6 +30,9 @@ print(phones[0]["hardwareProperties"]["udid"] if phones else "")' "$JSON")"
   [ -n "$DEVICE" ] || { echo "No paired iPhone found (xcrun devicectl list devices)"; exit 1; }
 fi
 
+# Bundle ID from the .ipa itself, so it follows Signing.xcconfig (and a fork's prefix).
+BUNDLE_ID="$(unzip -p "$IPA" Payload/LaCarte.app/Info.plist | plutil -extract CFBundleIdentifier raw -)"
+
 echo "==> Installing $IPA on $DEVICE"
 xcrun devicectl device install app --device "$DEVICE" "$IPA"
-xcrun devicectl device process launch --device "$DEVICE" fr.lacarte.app || true
+xcrun devicectl device process launch --device "$DEVICE" "$BUNDLE_ID" || true

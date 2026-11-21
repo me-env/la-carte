@@ -144,6 +144,11 @@ helpers incl. "Next at"/"Next on" and 1-day/0-day streak), `APIClientTests` (dec
 in-memory streak). Existing TestStore suites must stay green unchanged.
 
 ## Signing & release (release-engineer)
+- **Forks / signing scheme** (added after this spec): team and bundle IDs come from `ios/Config/Signing.xcconfig`
+  (see `docs/release.md`, "Your own team"). Read `fr.lacarte` below as `$(LA_CARTE_BUNDLE_ID_PREFIX)`: the widget
+  target uses that xcconfig as base configuration, `PRODUCT_BUNDLE_IDENTIFIER = $(LA_CARTE_BUNDLE_ID_PREFIX).app.widget`,
+  no `DEVELOPMENT_TEAM` in the target; entitlements list `group.$(LA_CARTE_BUNDLE_ID_PREFIX).app`; and `AppGroup.id`
+  is read at runtime from an Info.plist key with that value (both app and widget), not hard-coded.
 - The Ad Hoc build now signs **two** bundle IDs: `fr.lacarte.app` and `fr.lacarte.app.widget`, both with the App
   Group `group.fr.lacarte.app`. Automatic signing with `-allowProvisioningUpdates` + the ASC API key registers the
   new App ID, the App Group, and both Ad Hoc profiles; no change to `ExportOptions-AdHoc.plist` expected

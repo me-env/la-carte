@@ -1,8 +1,20 @@
-# Shared CI settings (sourced). Same App Store Connect API key as l'alfred.
-TEAM_ID="5X9ZWT7KT3"
+# Shared CI settings (sourced).
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# A setting from ios/Config/Signing.xcconfig, overridden by Signing.local.xcconfig when present
+# (same precedence as Xcode: the local file is included last).
+signing_setting() {
+  local f
+  for f in "$ROOT/ios/Config/Signing.xcconfig" "$ROOT/ios/Config/Signing.local.xcconfig"; do
+    if [ -f "$f" ]; then sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/\1/p" "$f"; fi
+  done | tail -n 1
+}
+# Team: always from the xcconfig, so the project, the archive and ExportOptions agree.
+TEAM_ID="$(signing_setting DEVELOPMENT_TEAM)"
+# App Store Connect API key IDs (identifiers, not secrets). Defaults are this project's key;
+# a fork sets ASC_KEY_ID / ASC_ISSUER_ID in the environment (CI: GitHub variables, see docs/release.md).
 ASC_KEY_ID="${ASC_KEY_ID:-75U623RH52}"
 ASC_ISSUER_ID="${ASC_ISSUER_ID:-1d327459-1aa2-4c1c-9ef3-561cea662e40}"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD="$ROOT/build"
 ARCHIVE="$BUILD/LaCarte.xcarchive"
 EXPORT="$BUILD/export"

@@ -1,0 +1,6 @@
+// Copy to Signing.local.xcconfig (gitignored) to build with your own Apple team.
+// Team ID: developer.apple.com → Membership details. The prefix must be a reverse-DNS name you own;
+// the app's bundle ID becomes <prefix>.app.
+
+DEVELOPMENT_TEAM = YOURTEAMID
+LA_CARTE_BUNDLE_ID_PREFIX = com.example.lacarte

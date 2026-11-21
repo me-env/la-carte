@@ -23,6 +23,7 @@
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* LaCarte.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LaCarte.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000121 /* LaCarteUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LaCarteUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000130 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Signing.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -58,6 +59,7 @@
 			children = (
 				000000000000000000000010 /* LaCarte */,
 				000000000000000000000011 /* LaCarteUITests */,
+				000000000000000000000130 /* Signing.xcconfig */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -255,11 +257,11 @@
 		};
 		000000000000000111000000 /* Debug configuration for PBXNativeTarget "LaCarte" */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 000000000000000000000130 /* Signing.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 5X9ZWT7KT3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
@@ -273,7 +275,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = fr.lacarte.app;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LA_CARTE_BUNDLE_ID_PREFIX).app";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -285,11 +287,11 @@
 		};
 		000000000000000112000000 /* Release configuration for PBXNativeTarget "LaCarte" */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 000000000000000000000130 /* Signing.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 5X9ZWT7KT3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
@@ -303,7 +305,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = fr.lacarte.app;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LA_CARTE_BUNDLE_ID_PREFIX).app";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -315,13 +317,13 @@
 		};
 		000000000000000211000000 /* Debug configuration for PBXNativeTarget "LaCarteUITests" */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 000000000000000000000130 /* Signing.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 5X9ZWT7KT3;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = fr.lacarte.app.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LA_CARTE_BUNDLE_ID_PREFIX).app.uitests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -332,13 +334,13 @@
 		};
 		000000000000000212000000 /* Release configuration for PBXNativeTarget "LaCarteUITests" */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 000000000000000000000130 /* Signing.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 5X9ZWT7KT3;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = fr.lacarte.app.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LA_CARTE_BUNDLE_ID_PREFIX).app.uitests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;

@@ -1,6 +1,6 @@
 name: iOS Ad Hoc
 
-# Builds a signed Ad Hoc .ipa for the devices registered on team 5X9ZWT7KT3.
+# Builds a signed Ad Hoc .ipa for the devices registered on the team in ios/Config/Signing.xcconfig.
 # Install it with: scripts/ios-install-device.sh
 on:
   push:
@@ -14,6 +14,10 @@ jobs:
   ipa:
     runs-on: macos-26
     environment: prod
+    env:
+      # Optional repo/environment variables for a fork's API key; empty → defaults in ci/_env.sh.
+      ASC_KEY_ID: ${{ vars.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID }}
     steps:
       - uses: actions/checkout@v5
       - uses: maxim-lobanov/setup-xcode@v1

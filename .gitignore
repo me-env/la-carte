@@ -9,7 +9,9 @@ ios/LaCarteKit/.swiftpm/
 api/.venv/
 __pycache__/
 *.db
-.env
+*.sqlite*
+.env*
+!.env.example
 # QA artifacts (screenshots are reviewed, then kept only via reports)
 qa/.results/
 qa/screenshots/*
@@ -21,3 +23,10 @@ docs/design/reference/
 build/
 *.p8
 *.p12
+*.ipa
+*.mobileprovision
+# Per-developer signing (team + bundle ID prefix), see ios/Config/Signing.local.xcconfig.example
+ios/Config/Signing.local.xcconfig
+# Claude Code local state
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

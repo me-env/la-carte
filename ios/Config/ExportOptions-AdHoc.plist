@@ -2,11 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- "release-testing" is Xcode's current name for Ad Hoc. -->
+	<!-- "release-testing" is Xcode's current name for Ad Hoc.
+	     teamID is added by ci/export-ipa.sh from ios/Config/Signing.xcconfig. -->
 	<key>method</key>
 	<string>release-testing</string>
-	<key>teamID</key>
-	<string>5X9ZWT7KT3</string>
 	<key>signingStyle</key>
 	<string>automatic</string>
 	<key>thinning</key>

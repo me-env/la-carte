@@ -19,7 +19,6 @@ xcodebuild archive \
   -archivePath "$ARCHIVE" \
   -skipMacroValidation \
   $flags \
-  DEVELOPMENT_TEAM="$TEAM_ID" \
   CODE_SIGN_STYLE=Automatic \
   MARKETING_VERSION="$VERSION" \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \

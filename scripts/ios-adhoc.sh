@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Ad Hoc build, same steps as CI.
 #   scripts/ios-adhoc.sh                                   signs with the account signed in to Xcode
-#   AC_API_KEY_PATH=/path/AuthKey_75U623RH52.p8 scripts/ios-adhoc.sh   signs with the API key (like CI)
+#   AC_API_KEY_PATH=/path/AuthKey_<KEY_ID>.p8 scripts/ios-adhoc.sh   signs with the API key (like CI)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # A key decoded from AC_API_KEY_BASE64 lands in build/; never leave it behind.
