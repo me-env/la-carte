@@ -66,6 +66,10 @@ closed. Work through `list_reports`, then close each with `update_report`:
   or `kept`.
 - rephrase: ask the user how they want it; change nothing before they answer; then `fixed`.
 - other: read `comment`; ask the user if unclear.
+- broken_photo: the app filed it because a photo failed to load (`comment` may hold the URL).
+  Check the URL. Look for a working public URL only if the user gave a source; otherwise ask the
+  user for a new photo URL, or remove the photo direction. Then `update_note` and close it with
+  `fixed`.
 When you ask the user, first set `waiting_user` with your question as `note`.
 """
 

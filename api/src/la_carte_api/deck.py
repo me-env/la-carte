@@ -37,6 +37,7 @@ from la_carte_api.models import (
     ReportCreate,
     ReportOutcome,
     ReportRead,
+    ReportReason,
     ReportStatus,
     ReviewLog,
     utcnow,
@@ -610,17 +611,28 @@ def _report_read(session: Session, report: Report) -> ReportRead:
 
 def report_card(
     session: Session, card_id: UUID, body: ReportCreate, now: datetime | None = None
-) -> ReportRead:
-    """Opens a report on the card, which holds it out of study until the report is closed."""
+) -> tuple[ReportRead, bool]:
+    """Opens a report on the card, which holds it out of study until the report is closed.
+    Returns `(report, created)`: a `broken_photo` report is not duplicated while one is active."""
     now = now or utcnow()
     card = _card(session, card_id)
+    if body.reason == ReportReason.broken_photo:
+        active = session.exec(
+            select(Report).where(
+                Report.card_id == card.id,
+                Report.reason == body.reason,
+                col(Report.status).in_(ACTIVE_REPORT),
+            )
+        ).first()
+        if active:
+            return _report_read(session, active), False
     report = Report(
         card_id=card.id, note_id=card.note_id, reason=body.reason, comment=body.comment,
         created_at=now, updated_at=now,
     )  # fmt: skip
     session.add(report)
     session.commit()
-    return _report_read(session, report)
+    return _report_read(session, report), True
 
 
 ReportFilter = Literal["active", "all"] | ReportStatus

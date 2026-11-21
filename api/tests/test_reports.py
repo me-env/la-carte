@@ -34,7 +34,7 @@ def _two_way_note(session) -> tuple:
 
 
 def _report(session, card_id, reason="wrong"):
-    return deck.report_card(session, card_id, ReportCreate(reason=reason))
+    return deck.report_card(session, card_id, ReportCreate(reason=reason))[0]
 
 
 def _card(session, front="chat", back="cat"):
@@ -93,6 +93,33 @@ def test_reported_card_leaves_study_but_stays_in_the_deck(client):
     assert (stats["total"], stats["due"], stats["next_due"]) == (1, 0, None)
     assert [c["id"] for c in client.get("/cards").json()] == [card["id"]]
     assert len(client.get("/notes").json()) == 1
+
+
+def test_broken_photo_report_is_idempotent_while_active(client):
+    card = client.post("/cards", json={"front": "chat", "back": "cat"}).json()
+    url = f"/cards/{card['id']}/report"
+
+    first = client.post(url, json={"reason": "broken_photo"})
+    again = client.post(url, json={"reason": "broken_photo", "comment": "https://x.test/a.jpg"})
+
+    assert (first.status_code, first.json()["status"]) == (201, "open")
+    assert (again.status_code, again.json()["id"]) == (200, first.json()["id"])
+    assert client.get("/cards/due").json() == []
+    other = client.post(url, json={"reason": "wrong"})
+    assert other.status_code == 201
+    assert client.post(url, json={"reason": "wrong"}).json()["id"] != other.json()["id"]
+
+
+def test_broken_photo_reopens_after_its_report_is_fixed(session):
+    card = _card(session)
+    first = _report(session, card.id, "broken_photo")
+    deck.update_report(session, first.id, ReportOutcome.waiting_user, "New URL?")
+    assert _report(session, card.id, "broken_photo").id == first.id
+    deck.update_report(session, first.id, ReportOutcome.fixed, "Photo replaced")
+
+    second, created = deck.report_card(session, card.id, ReportCreate(reason="broken_photo"))
+
+    assert created and second.id != first.id
 
 
 def test_held_card_does_not_hide_a_due_sibling(session):
@@ -231,6 +258,7 @@ async def test_agent_works_through_reports(engine):
 def test_instructions_describe_reports():
     assert "Reports. While studying, the user flags cards" in INSTRUCTIONS
     assert "rephrase: ask the user how they want it; change nothing" in INSTRUCTIONS
+    assert "broken_photo: the app filed it because a photo failed to load" in INSTRUCTIONS
 
 
 # --- Migration ---------------------------------------------------------------------------------

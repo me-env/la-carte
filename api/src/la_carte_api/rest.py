@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlmodel import Session
 
 from la_carte_api import deck
@@ -105,9 +105,13 @@ def review_card(session: SessionDep, card_id: UUID, body: ReviewCreate):
 @router.post(
     "/cards/{card_id}/report", response_model=ReportRead, status_code=status.HTTP_201_CREATED
 )
-def report_card(session: SessionDep, card_id: UUID, body: ReportCreate):
-    """Holds the card out of study until an agent closes the report (spec 015)."""
-    return _call(deck.report_card, session, card_id, body)
+def report_card(session: SessionDep, card_id: UUID, body: ReportCreate, response: Response):
+    """Holds the card out of study until an agent closes the report (spec 015).
+    An already active `broken_photo` report is returned with 200 instead of a new one."""
+    report, created = _call(deck.report_card, session, card_id, body)
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return report
 
 
 @router.get("/stats", response_model=DeckStats)

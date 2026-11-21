@@ -42,6 +42,7 @@ class ReportReason(StrEnum):
     doubt = "doubt"
     rephrase = "rephrase"
     other = "other"
+    broken_photo = "broken_photo"  # filed by the app when a photo fails to load
 
 
 class ReportStatus(StrEnum):
