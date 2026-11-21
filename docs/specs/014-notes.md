@@ -5,8 +5,8 @@ Status: split — implement from [014a](014a-notes-api.md) (API + MCP), [014b](0
 This file holds the shared model and the phase plan. Backlog #27–#30.
 
 ## Goal
-The user also uses la-carte to remember people "from different angles" (photo → name, photo → name + what they
-do, what they do → name) and facts both ways (term → definition, definition → term). Each angle has its own
+The user also uses la-carte to remember people "from different angles" (photo → name + description, name → photo + description,
+description → name + photo) and facts both ways (term → definition, definition → term). Each angle has its own
 recall strength, but the angles are linked: fixing a name fixes every angle, and agents editing through MCP see
 the link instead of loose, unrelated cards.
 
@@ -17,7 +17,13 @@ the link instead of loose, unrelated cards.
   | Type | Fields (in display order) | Required | Duplicate key | Default directions |
   |---|---|---|---|---|
   | `basic` | `front`, `back` | both | `front` | `front → back` only |
-  | `person` | `photo` (http(s) URL), `name`, `role` (what they do), `context` (how you know them) | `name` | `name` | none: the creator must list them |
+  | `person` | `photo` (http(s) URL), `name`, `description` (free text: "Mistral CEO", "met at the climbing gym"; no `role`/`context`) | `name` | `name` | none: the creator must list them |
+
+  *Amended 2026-11-21 (user).* A person has exactly **three allowed directions**, and each answer is **all the other
+  non-empty fields**: `photo → {name, description}`, `name → {photo, description}`, `description → {name, photo}`.
+  No other person prompt/answer combination exists; a direction whose prompt field is empty is invalid. The creator
+  picks one, two or all three (still no default). `role` and `context` are removed (description covers both; no data
+  to migrate). The answer side shows every other non-empty field, the photo as an image.
 
 - **Card** = one **direction** over a note's fields: `prompt` fields → `answer` fields (both non-empty, disjoint
   field lists, kept in the type's display order). Each card has its own FSRS state and its own review history.

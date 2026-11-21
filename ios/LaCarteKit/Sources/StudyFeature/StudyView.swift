@@ -125,9 +125,13 @@ public struct StudyView: View {
   }
 
   /// A scroll view the size of the content area, so a centered message can be pulled to refresh.
+  /// Width comes from the proposal, not `containerRelativeFrame(.horizontal)`: that one resolved to the full
+  /// window width, which the vertical scroll view adopted, pushing the top bar past its margins.
   private func pullable(@ViewBuilder _ message: () -> some View) -> some View {
     ScrollView {
-      message().containerRelativeFrame([.horizontal, .vertical])
+      message()
+        .frame(maxWidth: .infinity)
+        .containerRelativeFrame(.vertical)
     }
   }
 

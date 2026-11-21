@@ -14,12 +14,12 @@ no longer used), their tests. Not Study (`StudyFeature/**` only renames its `add
 
 ## Goal
 The user manages notes, not loose cards: the deck shows one row per note with its directions, and the editor
-lets them pick a type, fill its fields (a person's photo URL, name, role, context) and choose which directions
+lets them pick a type, fill its fields (a person's photo URL, name, description) and choose which directions
 to study.
 
 ## User stories
-- As the user, I add a person with a photo URL, a name and what they do, and pick "photo → name" and
-  "role → name"; both become cards.
+- As the user, I add a person with a photo URL, a name and a description, and pick "photo → name + description" and
+  "description → name + photo"; both become cards.
 - As the user, I open a vocabulary card and turn on "back → front" because I need to produce the word too.
 - As the user, I fix a typo in a person's name once and every angle shows the fix.
 
@@ -29,14 +29,14 @@ Mock = `LA_CARTE_API=mock-notes` (014b).
 | # | Criterion (observable) | Validated by |
 |---|---|---|
 | 1 | The deck lists **notes** (`apiClient.notes(query)`), one row per note: `deck.row.<noteId>`. 4 rows in the mock | unit + UI |
-| 2 | Row text: line 1 = the note's key field (`basic.front`, `person.name`), line 2 = `basic.back`, or `person.role` (else `context`). Meta: left = the earliest `due` among its cards (format unchanged, `deck.row.<id>.due`); right = the single card's state as today when the note has one card, else "N directions" (`deck.row.<id>.state`) | unit (row model) + UI |
+| 2 | Row text: line 1 = the note's key field (`basic.front`, `person.name`), line 2 = `basic.back`, or `person.description`. Meta: left = the earliest `due` among its cards (format unchanged, `deck.row.<id>.due`); right = the single card's state as today when the note has one card, else "N directions" (`deck.row.<id>.state`) | unit (row model) + UI |
 | 3 | A `person` row shows the photo as a small thumbnail when present (size/placement per design notes; `deck.row.<id>.photo`, accessibility label "Photo"); a failed load shows the placeholder symbol, never a broken layout | UI |
 | 4 | Search filters notes server-side over all text fields (unchanged debounce); "bakery" finds the person | unit + UI |
 | 5 | Swipe-to-delete and the context-menu Delete delete the **note** (`deleteNote`); the row disappears; `deckChanged` is sent | unit + UI |
 | 6 | Tapping a row (or context-menu Edit) opens the editor for that note | unit + UI |
 | 7 | Editor, new note: segmented type picker Basic / Person (`editor.type`), Basic selected. Changing the type swaps the fields and resets the directions to that type's defaults. Editing an existing note shows no picker (type is fixed) | unit + UI |
-| 8 | Fields per type, in order, one text field each with id `editor.<field>` (`editor.front`, `editor.back` unchanged; `editor.photo`, `editor.name`, `editor.role`, `editor.context`). `editor.photo` uses the URL keyboard, no autocorrection/capitalization, and shows a live preview (`editor.photoPreview`) once the text is an http(s) URL | UI |
-| 9 | Directions section: one toggle per catalog direction (`editor.direction.<prompt>-<answer>`, field names joined by `+`): basic `front-back`, `back-front`; person `photo-name`, `photo-name+role`, `role-name`. Labels use field labels ("Photo → Name + Role"). An existing note's directions outside the catalog are listed too, on | unit + UI |
+| 8 | Fields per type, in order, one text field each with id `editor.<field>` (`editor.front`, `editor.back` unchanged; `editor.photo`, `editor.name`, `editor.description`; amended 2026-11-21 (user): no role/context). `editor.photo` uses the URL keyboard, no autocorrection/capitalization, and shows a live preview (`editor.photoPreview`) once the text is an http(s) URL | UI |
+| 9 | Directions section: one toggle per catalog direction (`editor.direction.<prompt>-<answer>`, field names joined by `+`): basic `front-back`, `back-front`; person exactly three, `photo-name+description`, `name-photo+description`, `description-name+photo` (amended 2026-11-21 (user); answer = all other non-empty fields). Labels use field labels ("Photo → Name + Description"). An existing note's directions outside the catalog are listed too, on | unit + UI |
 | 10 | Defaults, **never automatic reverse**: new basic → only `front-back` on; new person → none on | unit + UI |
 | 11 | A toggle whose fields are empty is disabled (can't be turned on); one already on stays on | unit + UI |
 | 12 | Save (`editor.save`) is enabled only when: required fields present (basic both, person name), ≥ 1 direction on, every direction that is on has its fields filled, and `photo` is empty or an http(s) URL. With no direction on, `editor.directionsHint` reads "Choose at least one direction" | unit + UI |
@@ -78,8 +78,8 @@ Native `Form` from 009b; no accent beyond the focused field's cursor (rule 2, `.
 1. *Type* (new note only): `Picker` `.segmented` "Basic" / "Person", no header, `.listRowBackground(Color.clear)`.
    Tint ink, like Settings' theme picker. Switching is instant (no animation besides the system's row change).
 2. *Basic*: one section, `Front`, `Back` (placeholders as today).
-   *Person*: section 1 = photo; section 2 = `Name`, `Role` (placeholder "What they do"), `Context` (placeholder
-   "How you know them", `axis: .vertical`, `lineLimit(1...3)`).
+   *Person*: section 1 = photo; section 2 = `Name`, `Description` (placeholder "Role, or how you know them",
+   `axis: .vertical`, `lineLimit(1...3)`). *Amended 2026-11-21 (user).*
 3. *Photo section* (person): row 1 = `editor.photoPreview`, a `CardPhoto(.preview)` circle centered in the row
    (`.listRowBackground(Color.clear)`, like Contacts' new-contact avatar); row 2 = `editor.photo` field,
    placeholder "Photo URL". The preview is **always laid out** (88 pt), so typing never jumps the form:
@@ -91,8 +91,8 @@ Native `Form` from 009b; no accent beyond the focused field's cursor (rule 2, `.
    checkmark row is the native multi-select idiom, monochrome). Row = `Button` with the label left in `ink` and a
    trailing `checkmark` (SF Symbol, ink, regular) when on; `.accessibilityAddTraits(.isSelected)` when on;
    ids unchanged (`editor.direction.<prompt>-<answer>`). Label: field labels joined by " → " for the side and
-   " + " inside a side: "Front → Back", "Back → Front", "Photo → Name", "Photo → Name + Role", "Role → Name".
-   VoiceOver label reads "Photo to Name and Role". Unavailable rows (#11) use `.disabled` (system dimming), no
+   " + " inside a side: "Front → Back", "Back → Front", "Photo → Name + Description", "Name → Photo + Description", "Description → Name + Photo".
+   VoiceOver label reads "Photo to Name and Description". Unavailable rows (#11) use `.disabled` (system dimming), no
    extra text. Footer: with none on, `editor.directionsHint` "Choose at least one direction"; otherwise
    "Each direction is its own card." (both `.meta`, `secondaryInk`).
 5. Titles: navigation title (009b removed the `editor.title` text): QA reads them via `app.navigationBars`;
@@ -117,7 +117,7 @@ the frame; success = `.scaledToFill()` clipped. `.thumbnail` (`Theme.Photo.thumb
 None (uses 014a via 014b).
 
 ## Accessibility identifiers
-`editor.type`, `editor.<field>` (`front`, `back`, `photo`, `name`, `role`, `context`), `editor.photoPreview`,
+`editor.type`, `editor.<field>` (`front`, `back`, `photo`, `name`, `description`), `editor.photoPreview`,
 `editor.direction.<prompt>-<answer>`, `editor.directionsHint`; `deck.row.<noteId>`, `deck.row.<id>.due`,
 `deck.row.<id>.state`, `deck.row.<id>.photo`. Unchanged: `editor.save`, `editor.close`, `editor.discard`,
 `editor.keepEditing`, `editor.error`, `editor.title`, `deck.*` from 009a.

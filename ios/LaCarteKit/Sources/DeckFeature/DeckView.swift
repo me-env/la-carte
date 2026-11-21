@@ -60,7 +60,9 @@ public struct DeckView: View {
             unavailable(message)
           }
         }
-        .containerRelativeFrame([.horizontal, .vertical])
+        .padding(.horizontal, Theme.Spacing.m)
+        .frame(maxWidth: .infinity)
+        .containerRelativeFrame(.vertical)
       }
       .scrollDismissesKeyboard(.immediately)
     } else {
