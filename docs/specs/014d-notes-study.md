@@ -45,10 +45,30 @@ Screenshots (light + dark): `study-person-photo` (prompt), `study-person-photo-r
 - `dueCards`, `review`, `stats` calls unchanged; burying needs nothing on the device.
 
 ## Design notes (design-lead, before engineering)
-_Placeholder._ To decide: the photo on the card face (size relative to the screen, shape/radius, does it replace
-the centered word or sit above it, placeholder symbol, behavior with 011's drag ring), the answer-hint wording and
-style, multi-field answer layout (name + role), the context line, and the AX cap. "One thing on screen" still
-holds: the photo *is* the one thing. Tokens only; no accent on any of it.
+"One thing on screen": on a photo prompt the photo **replaces** the centered word. Uses `CardPhoto(.card)` (014c
+notes: shared view, hairline placeholder, `person.fill` failure symbol, fixed frame, 1 pt hairline stroke).
+No accent anywhere on the card; the only pink stays `study.remaining` (rule 4).
+
+- **Photo:** centered where `.cardFace` text sits, width `min(Theme.Photo.card, 60% of the card width)` = 240 pt
+  on an iPhone 17 Pro, 4:5 portrait (300 pt tall), `Theme.Radius.photo` (20, continuous). It sits inside the
+  `study.front` container, so it moves with 011's drag; the ink-dot ring draws on top, unchanged. Success fades in
+  with `Theme.Motion.standard` (Reduce Motion: appears). Loading and failure keep the same frame, so nothing moves.
+- **Other prompt fields** (`photo → name + role` has none; `role → name` has the role): first text field
+  `.cardFace` ink, further ones `.body` `secondaryInk`, `Theme.Spacing.s` apart.
+- **Answer hint** (`study.answerHint`, person only): `.meta`, `secondaryInk`, sentence wording from the answer
+  labels, a question: "Name?", "Name and role?" (`ListFormatter`, first word capitalized; overrides #5's
+  "Name · Role" example). It shares **one slot** with the answer: a `ZStack` in the `study.back` position sized by
+  the larger child; on reveal the hint fades out as the answer fades in (`Theme.Motion.standard`; Reduce Motion:
+  instant swap). The slot is always laid out, so the prompt never moves (today's rule). Hidden from VoiceOver
+  after reveal.
+- **Answer fields** (name + role): one line block per field, today's back style (`.body`, `secondaryInk`),
+  `Theme.Spacing.xs` apart, in display order; no labels ("Name:") on the card.
+- **Context** (`study.context`): under the answer, `Theme.Spacing.s` gap, `.meta`, `secondaryInk`, wraps
+  (no line limit; the card scrolls as today). Revealed with the answer (same opacity), never before.
+- **AX sizes:** when `dynamicTypeSize.isAccessibilitySize`, the photo drops to `Theme.Photo.cardCompact` (160 pt
+  wide, 200 tall), so photo + hint + rating row fit one screen at AX5 (text stays capped at `.accessibility2`).
+- **Dark/forest:** same view, no extra treatment; the hairline stroke keeps dark-edged photos off the paper.
+- Inline edit off (#9): double-tap on a photo or multi-field card does nothing, no haptic.
 
 ## API / MCP changes
 None.

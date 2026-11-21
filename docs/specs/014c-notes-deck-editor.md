@@ -71,10 +71,47 @@ Screenshots (light + dark; forest for `deck-notes`): `deck-notes` (4 rows, perso
 - Delegates: `NoteEditor.saved` → Deck/App (as `CardEditor.saved` today); `Deck.deckChanged` unchanged.
 
 ## Design notes (design-lead, before engineering)
-_Placeholder._ To decide: the person editor layout (photo preview: size, shape, placement relative to the URL
-field, empty/failed states), the Directions section (toggle rows vs. chips; arrow glyph; label wording), deck row
-thumbnail for people (size, radius 12 or circle), and how "N directions" reads in the meta line. Native first
-(`Form` sections from 009b, `Toggle`, `AsyncImage` phases); tokens only; no accent.
+Native `Form` from 009b; no accent beyond the focused field's cursor (rule 2, `.tint(Theme.accent)` on each field,
+`editor.photo` included). Nothing else is pink: checkmarks, picker, photos stay ink/grey.
+
+**Editor layout** (sections top to bottom, `.scrollContentBackground(.hidden)`, rows `Theme.surface`):
+1. *Type* (new note only): `Picker` `.segmented` "Basic" / "Person", no header, `.listRowBackground(Color.clear)`.
+   Tint ink, like Settings' theme picker. Switching is instant (no animation besides the system's row change).
+2. *Basic*: one section, `Front`, `Back` (placeholders as today).
+   *Person*: section 1 = photo; section 2 = `Name`, `Role` (placeholder "What they do"), `Context` (placeholder
+   "How you know them", `axis: .vertical`, `lineLimit(1...3)`).
+3. *Photo section* (person): row 1 = `editor.photoPreview`, a `CardPhoto(.preview)` circle centered in the row
+   (`.listRowBackground(Color.clear)`, like Contacts' new-contact avatar); row 2 = `editor.photo` field,
+   placeholder "Photo URL". The preview is **always laid out** (88 pt), so typing never jumps the form:
+   empty/invalid URL and loading → placeholder (no spinner); success → image, fades in `Theme.Motion.standard`
+   (Reduce Motion: none); failure → placeholder symbol + section footer "Couldn't load this photo" (`.meta`,
+   `secondaryInk`). A failed photo never blocks Save (out of scope: validating the URL loads).
+4. *Directions*: `Section("Directions")`, one **checkmark row** per catalog direction, not a `Toggle` switch
+   (why: a switch's on-track is either system green or an ink track whose white knob vanishes in dark/forest; the
+   checkmark row is the native multi-select idiom, monochrome). Row = `Button` with the label left in `ink` and a
+   trailing `checkmark` (SF Symbol, ink, regular) when on; `.accessibilityAddTraits(.isSelected)` when on;
+   ids unchanged (`editor.direction.<prompt>-<answer>`). Label: field labels joined by " → " for the side and
+   " + " inside a side: "Front → Back", "Back → Front", "Photo → Name", "Photo → Name + Role", "Role → Name".
+   VoiceOver label reads "Photo to Name and Role". Unavailable rows (#11) use `.disabled` (system dimming), no
+   extra text. Footer: with none on, `editor.directionsHint` "Choose at least one direction"; otherwise
+   "Each direction is its own card." (both `.meta`, `secondaryInk`).
+5. Titles: navigation title (009b removed the `editor.title` text): QA reads them via `app.navigationBars`;
+   architect: align #15's id with 009b.
+
+**Deck row** (009a list, radius 12, `surface`): a `person` row always has a leading `CardPhoto(.thumbnail)`
+(44 pt circle, `Theme.Spacing.m` to the text, vertically centered; top-aligned at accessibility sizes, never
+scaled), placeholder symbol when there's no photo or it fails, so people read as people at a glance. Basic rows have
+no thumbnail (unchanged). Meta right: one card → state as today; several → "2 directions" (`.meta`,
+`secondaryInk`, no symbol).
+
+**`CardPhoto`** (new, `DesignSystem/CardPhoto.swift`, shared with 014d; whichever lands first builds it, design-lead
+reviews + adds the gallery entry): `CardPhoto(url: URL?, style: .thumbnail | .preview | .card)`. `AsyncImage`
+phases in a fixed frame: placeholder = `Theme.hairline` fill; failure/nil = `person.fill` in `secondaryInk` at ⅓ of
+the frame; success = `.scaledToFill()` clipped. `.thumbnail` (`Theme.Photo.thumbnail` 44) / `.preview` (`Theme.Photo.preview` 88) = circle; `.card` (width
+`Theme.Photo.card` 240, `cardCompact` 160 at AX sizes; 014d) = 4:5 portrait,
+`RoundedRectangle(cornerRadius: Theme.Radius.photo, style: .continuous)`. Every style has a 1 pt inner
+`Theme.hairline` stroke (white photos don't bleed into the paper). Accessibility: one element, label "Photo"
+(failure: "Photo, not loaded"), `.isImage`, id set by the caller. Never logs the URL.
 
 ## API / MCP changes
 None (uses 014a via 014b).
