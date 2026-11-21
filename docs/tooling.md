@@ -300,7 +300,13 @@ XCUITest keeps navigation, E2E and one appearance-switch smoke test.
 
 ### P8. Contact sheet + one colour helper, then colour checks out of the UI suite (qa-validator request)
 
-- **Owner:** qa-validator (UI tests, qa/), ios-engineer informed (test-only files in `LaCarteKit/Tests`). **Status:** approved; implementers spawned.
+- **Owner:** qa-validator (UI tests, qa/), ios-engineer informed (test-only files in `LaCarteKit/Tests`). **Status:** implemented 2026-11-21,
+  uncommitted. (a) `scripts/contact-sheet.py`: 170 PNGs → 107 rows, 9 pages, 5.2 s (bug: `--out` into a missing folder crashes).
+  (b) 6 sampler copies → one set of helpers in `Support.swift`. (c) `AppFeatureTests/ScreenColorTests` (6 tests × 4 looks, 3.4 s);
+  22 dark passes dropped from UI tests; estimated −645 s (~11 min, under the 15 min target), full-run measurement `p8-after` pending.
+  Gaps: dark deck row-gap check and dark deck spinner (light + forest only). Docs still saying "light + dark" for every mock
+  test: docs/testing.md, .claude/agents/qa-validator.md, docs/workflow.md, docs/ci-cd.md, docs/specs/_template.md (owner: instructions-keeper/qa-validator).
+  Follow-up (ios-engineer): Settings / editor content out of the ScrollView so unit renders cover fields.
 - **Evidence (008-r4):** UI suite 2,952 s; ThemeUITests 622 s; 27 light/dark loops; 5 hand-rolled samplers
   (`Pixels` in DeckUITests, `close`/`waitForColors`/`assertTextColor`/`assertStatusBar`/`assertKeyboard` in Theme,
   `assertNoBlue`/`assertInkVisible` in Refresh); 78 sampler call sites. QA opens every PNG by eye.
