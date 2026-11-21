@@ -67,6 +67,10 @@ for deep dives: research, reading many files, and especially to **verify that so
 done** before saying so. Give a sub-agent a narrow brief and the files to read; you stay accountable for
 its result.
 
+**Clean up your shells.** Never wait with `pgrep -f <pattern>` (it matches your own loop and never ends)
+or an unbounded `until` loop: bound every wait with a timeout, prefer the scripts' locks, and kill any
+background process you started (servers, watchers, pagers) before you report.
+
 **Ask for better tooling.** If you're judging by eye, repeating manual steps, waiting on slow or flaky
 tools, or lack a capability (a measurement, a reference, an MCP, a test hook), say so in your report under
 `Tooling request:` (what's missing, what it costs you today, what would help). The manager routes it to
