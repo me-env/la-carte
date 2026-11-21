@@ -46,11 +46,15 @@ set +e
   -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER"
 STATUS=${PIPESTATUS[0]}
 # 2. Test the copy on the first free UI simulator ($POOL_DESTINATION), under its lock only.
+# One worker runs serially: classes in alphabetical order, which e2e.sh's live tests rely on (parallel testing
+# reorders classes even with a single worker).
+if [ "$UI_WORKERS" -gt 1 ]; then PARALLEL=(-parallel-testing-enabled YES -parallel-testing-worker-count "$UI_WORKERS")
+else PARALLEL=(-parallel-testing-enabled NO); fi
 if [ "$STATUS" -eq 0 ]; then
   TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" \
   TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \
   SIM_POOL=ui "$ROOT/scripts/_sim-pool.sh" /bin/sh -c 'exec xcodebuild test-without-building -destination "$POOL_DESTINATION" "$@"' \
-    sh -testProductsPath "$PRODUCTS" -parallel-testing-enabled YES -parallel-testing-worker-count "$UI_WORKERS" \
+    sh -testProductsPath "$PRODUCTS" "${PARALLEL[@]}" \
     -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} 2>&1 \
     | grep --line-buffered -E "$FILTER"
   STATUS=${PIPESTATUS[0]}
