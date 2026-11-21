@@ -17,11 +17,76 @@ struct InMemoryAPIClientTests {
     #expect(try await client.stats().nextDue == now.addingTimeInterval(600))
   }
 
+  @Test func streakIsOneOnceACardWasReviewedToday() async throws {
+    let client = APIClient.inMemory(cards: .fixtures, now: .now)
+    #expect(try await client.stats().streak == 0)
+
+    _ = try await client.review([Card].fixtures[0].id, .good)
+    #expect(try await client.stats().streak == 1)
+  }
+
   @Test func dueCardsKeepFixtureOrderAfterAReview() async throws {
     let client = APIClient.inMemory(cards: .fixtures, now: now)
     let cards = [Card].fixtures
 
     _ = try await client.review(cards[1].id, .good)
     #expect(try await client.dueCards(100).map(\.front) == [cards[0].front, cards[2].front])
+  }
+
+  @Test func mockDeckServesTheSameCardsAsBeforeNotes() async throws {
+    let client = APIClient.inMemory(cards: .fixtures, now: now)
+    #expect(try await client.cards(nil) == .fixtures)
+    #expect(try await client.dueCards(100) == .fixtures)
+  }
+
+  @Test func dueCardsServeOneCardPerNoteAndBurySiblingsAfterAReview() async throws {
+    let client = APIClient.inMemory(notes: .fixtures, now: now)
+    let laCarte = [Note].fixtures[2]
+    #expect(laCarte.cards.count == 2)
+
+    let due = try await client.dueCards(100)
+    #expect(due.count == 4)
+    #expect(Set(due.map(\.noteId)).count == 4)
+    #expect(try await client.stats().due == 4)
+
+    _ = try await client.review(laCarte.cards[0].id, .again)
+    let afterReview = try await client.dueCards(100)
+    #expect(!afterReview.contains { $0.noteId == laCarte.id })
+    #expect(try await client.stats().due == 3)
+  }
+
+  @Test func mockNotesDeckHasFourNotesAndSixCards() async throws {
+    let client = APIClient.inMemory(notes: .fixtures, now: now)
+    let notes = try await client.notes(nil)
+    let ids = (11...14).map { UUID(uuidString: "00000000-0000-0000-0000-0000000000\($0)")! }
+
+    #expect(notes.count == 4)
+    #expect(try await client.cards(nil).count == 6)
+    #expect(notes[0].id == ids[0])
+    #expect(notes[0].cards.map(\.id) == [ids[1], ids[2]])
+    #expect(notes[2].cards.map(\.id) == [[Card].fixtures[1].id, ids[3]])
+    #expect(notes[2].cards[1].direction == Direction(prompt: ["back"], answer: ["front"]))
+    #expect(notes[0].fields["photo"]?.hasPrefix("data:image/png;base64,") == true)
+    #expect(try await client.dueCards(100).first?.id == ids[1])
+  }
+
+  @Test func updateNoteKeepsTheScheduleOfKeptDirections() async throws {
+    let client = APIClient.inMemory(notes: .fixtures, now: now)
+    let person = [Note].fixtures[0]
+    _ = try await client.review(person.cards[0].id, .good)
+
+    let updated = try await client.updateNote(
+      person.id,
+      NoteDraft(type: .person, fields: ["role": ""], directions: [person.cards[0].direction])
+    )
+    #expect(updated.fields["role"] == nil)
+    #expect(updated.cards.map(\.id) == [person.cards[0].id])
+    #expect(updated.cards[0].lastReview == now)
+  }
+
+  @Test func deletingANotesLastCardDeletesTheNote() async throws {
+    let client = APIClient.inMemory(cards: .fixtures, now: now)
+    try await client.deleteCard([Card].fixtures[0].id)
+    #expect(try await client.notes(nil).map(\.id) == [[Card].fixtures[1].id, [Card].fixtures[2].id])
   }
 }

@@ -29,5 +29,5 @@ When contention is unavoidable, make it explicit, short and fair.
 
 ## Process
 Measure first (how long did agents wait today? read reports, timings, `ps`). Propose changes with numbers
-to the manager; owners of affected scripts (`release-engineer`, `qa-validator`) agree; then implement
+to the manager; owners of affected scripts (root `CLAUDE.md`) agree; then implement
 (or hand to a `tooling-implementer`). Never weaken safety rules or skip tests to go faster.

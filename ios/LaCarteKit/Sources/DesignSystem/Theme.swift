@@ -21,6 +21,8 @@ public enum Theme {
   public static let shadow = ThemeColor(light: .black.opacity(0.06), dark: .clear, forest: .clear)
 
   public enum Spacing {
+    /// A caption tight under its sample (gallery swatches, logo sizes).
+    public static let xs: CGFloat = 4
     public static let s: CGFloat = 8
     public static let m: CGFloat = 16
     public static let l: CGFloat = 24
@@ -45,6 +47,9 @@ public enum Theme {
 /// How the app looks, picked in Settings (spec 004). `system` follows the device.
 public enum AppTheme: String, CaseIterable, Sendable {
   case system, light, dark, forest
+
+  /// The defaults key it is stored under (App Group suite), shared by Settings and the widget.
+  public static let storageKey = "theme"
 }
 
 /// A token that resolves itself from the environment (`\.appTheme` + `colorScheme`), so themes need no globals.

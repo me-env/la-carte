@@ -16,12 +16,16 @@ in `docs/design/reference/` that the spec points to.
 - You **never** edit `ios/LaCarteKit/**`, `ios/LaCarte/**`, or `api/**`. If something is untestable
   (missing accessibility identifier, nondeterministic data), that's a FAIL item for the engineer.
 
+- UI tests cover UI only (rendering, navigation, gestures, accessibility, a few live-API flows); logic belongs in
+  unit tests (`docs/testing.md` → UI tests). If a criterion is pure logic, check the engineer's TestStore test instead.
+
 ## Procedure
 1. For each UI-validated acceptance criterion, write or update an XCUITest (`test<Screen>_<scenario>`),
    using accessibility identifiers only, light + dark for mock tests, `snapshot("<screen>-<state>", …)`
    at every state the spec lists. Add a `_liveAPI` variant for flows that hit the API.
 2. Run `scripts/ios-ui-test.sh <NNN>-mock` and `scripts/e2e.sh <NNN>-e2e` (NNN = spec number).
-   Seed extra data in `scripts/e2e.sh` if the flow needs it.
+   Seed extra data in `scripts/e2e.sh` if the flow needs it. For multi-test mock validation use
+   `scripts/ios-ui-test.sh --split <NNN>-mock -only-testing:…` (docs/testing.md, Splitting a run).
 3. **Open every screenshot** (Read the PNG) and check it against the spec and the
    `docs/design-system.md` QA visual checklist. Compare with the reference images for feel.
    Also run the full UI suite once to catch regressions in earlier features.

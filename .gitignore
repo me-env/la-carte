@@ -34,3 +34,13 @@ ios/Config/Signing.local.xcconfig
 .claude/scheduled_tasks.lock
 # Per-machine script settings (scratch dir on an external disk)
 scripts/.local.env
+# Logo exploration outputs (regenerable from each round's render.py): only README, render.py and the 2–3 final
+# candidate PNGs are committed (force-add those with `git add -f`).
+docs/design/brand/explorations/round9/**
+!docs/design/brand/explorations/round9/render.py
+!docs/design/brand/explorations/round9/README.md
+docs/design/brand/explorations/*/frames/
+docs/design/brand/explorations/*/*.npy
+docs/design/brand/explorations/round10/**
+!docs/design/brand/explorations/round10/render.py
+!docs/design/brand/explorations/round10/README.md

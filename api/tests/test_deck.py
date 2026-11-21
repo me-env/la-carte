@@ -3,9 +3,10 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
+from sqlmodel import col, select
 
 from la_carte_api import deck
-from la_carte_api.models import CardCreate, CardState, Rating, utcnow
+from la_carte_api.models import CardCreate, CardState, Rating, ReviewLog, utcnow
 
 
 def test_new_cards_are_due_immediately(session):
@@ -196,3 +197,35 @@ def test_time_zone_rejects_unknown_names():
     for name in ("Mars/Olympus", "", "../etc/passwd", "a" * 5000):
         with pytest.raises(deck.UnknownTimeZone, match=f"^Unknown time zone: {re.escape(name)}$"):
             deck.time_zone(name)
+
+
+def test_deleting_a_card_keeps_its_review_history(session):
+    _review_at(session, NOON - timedelta(days=1), NOON - timedelta(hours=1))
+    [card] = deck.list_cards(session)
+    before = deck.stats(session, now=NOON)
+    assert (before.reviewed_today, before.streak) == (1, 2)
+
+    deck.delete_card(session, card.id)
+
+    after = deck.stats(session, now=NOON)
+    assert (after.total, after.reviewed_today, after.streak) == (0, 1, 2)
+    logs = session.exec(select(ReviewLog).order_by(col(ReviewLog.reviewed_at))).all()
+    assert [(log.card_id, log.rating) for log in logs] == [(card.id, Rating.good)] * 2
+
+
+def test_confidence_is_stored_and_does_not_change_scheduling(session):
+    now = utcnow()
+    plain, measured = deck.add_cards(
+        session, [CardCreate(front="a", back="a"), CardCreate(front="b", back="b")], now=now
+    ).added
+    for rating in (Rating.good, Rating.again):
+        later = now + timedelta(days=1)
+        a = deck.review_card(session, plain.id, rating, now=later)
+        b = deck.review_card(session, measured.id, rating, now=later, confidence=0.3)
+        assert (a.due, a.last_review, a.state) == (
+            b.due, b.last_review, b.state,
+        )  # fmt: skip
+        now = later
+
+    logs = session.exec(select(ReviewLog).order_by(col(ReviewLog.id))).all()
+    assert [log.confidence for log in logs] == [None, 0.3, None, 0.3]

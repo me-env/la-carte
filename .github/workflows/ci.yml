@@ -16,7 +16,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Nightly runs get their own group, so they never replace a pending push run (and its deploy).
+  group: ci-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
   # PRs: a new push cancels the old run. main: runs queue, so a deploy is never cut off mid-way.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 

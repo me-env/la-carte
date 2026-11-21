@@ -57,7 +57,7 @@ public struct StudyFeature {
 **Effects**
 - Only `.run { … }`, `.none`, `.send`, `.cancel(id:)`. Capture dependencies explicitly: `.run { [apiClient] send in … }`.
 - Animation: the view wraps the send, `withAnimation(.easeInOut(duration: 0.25)) { _ = store.send(.x) }`
-  (`send(_:animation:)` is deprecated under the 2.0 deprecations trait; see `StudyView.reveal()`).
+  (`send(_:animation:)` is deprecated under the 2.0 deprecations trait; see `StudyView.sendAnimated(_:)`).
 - Debounce: `clock.sleep` + `.cancellable(id:cancelInFlight:)`.
 - No `Effect.concatenate`/`.map`/Combine publishers. Never call `reducer.reduce(into:action:)`.
 - Never send an action synchronously from within action processing (reentrancy warning).

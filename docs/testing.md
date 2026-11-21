@@ -5,16 +5,35 @@
 | API unit/integration | `api/tests/` | pytest (in-memory SQLite, `TestClient`, MCP in-process `Client`) | api-engineer | `scripts/api-test.sh` |
 | Feature logic | `ios/LaCarteKit/Tests/` | Swift Testing + TCA `TestStore` | ios-engineer | `scripts/ios-test.sh` |
 | API contract (iOS side) | `Tests/APIClientTests/DecodingTests.swift` | real JSON payloads from the API | ios-engineer + api-engineer | `scripts/ios-test.sh` |
-| UI end-to-end (mock) | `ios/LaCarteUITests/` | XCUITest, `LA_CARTE_API=mock` | **qa-validator** | `scripts/ios-ui-test.sh <run>` |
+| UI end-to-end (mock) | `ios/LaCarteUITests/` | XCUITest, `LA_CARTE_API=mock` (3 basic cards) or `mock-notes` (notes with several directions + a person, spec 014b) | **qa-validator** | `scripts/ios-ui-test.sh <run>` |
 | Full-stack E2E | same, `*_liveAPI` tests | XCUITest against a fresh seeded API | **qa-validator** | `scripts/e2e.sh <run>` |
 
 **Logo renders.** `scripts/ios-test.sh --render -only-testing:DesignSystemTests/RenderTests` (about 15 s) writes
 `logo-<light|dark|forest>-p<000|025|050|075|100>.png` (1024 × 1024 px, `ImageRenderer`, on the theme
 background) to `$LA_CARTE_SCRATCH/renders` or `build/renders`, or to `LA_CARTE_RENDER_DIR` if you set it. The
-suite is skipped in normal runs and on CI. It doesn't render the gallery, because `ImageRenderer` draws a
-ScrollView as empty. Use the UI-test screenshots for the gallery.
+suite is skipped in normal runs and on CI. It also writes `gallery-<light|dark|forest>.png` (390 pt wide at 3×):
+the gallery's content without its ScrollView (`DesignSystemGalleryContent`), since `ImageRenderer` draws a
+ScrollView as empty.
+
+## Script output and exit codes
+
+- **Live:** `ios-test.sh`, `ios-ui-test.sh` and `e2e.sh` print each test as it finishes, even redirected to a
+  file or agent log (`NSUnbufferedIO=YES` + `grep --line-buffered`), plus 🔒 lock lines and `error:` lines.
+  `tail -f` the file to follow a long run.
+- **Summary:** the last line is `TESTS: 69 passed, 0 failed, 6 skipped (49.3 min)` (from the xcresult), followed by
+  one `✘ Class/test(): message` line per failed test. `TESTS: none run (exit N…)` means the build failed or a lock timed out.
+- **Exit code** = xcodebuild's: 0 green, 65 build or test failure, 75 lock timeout. Screenshot export, renaming,
+  the summary and the contact sheet only print a ⚠️ warning when they fail. `e2e.sh` exits with `ios-ui-test.sh`'s code.
+- **Contact sheet:** when `uv` is on PATH, `ios-ui-test.sh` runs `scripts/contact-sheet.py` on the run's
+  screenshots after the export (writes `contact-sheet*.png` into `qa/screenshots/<run>/`).
 
 ## UI tests
+
+**UI tests test UI, not logic.** A UI test exists only for what a TestStore/unit test can't see: the screen
+renders right (layout, colours, light/dark, accessibility sizes), navigation and gestures work on real UIKit,
+and the app wires to the API end to end (a few `_liveAPI` tests). Reducer logic (state changes, API calls made,
+errors, debounce, in-flight guards, persistence) is a unit test. Before adding a UI test, ask "could a TestStore
+test catch this?" — if yes, write that instead. One UI test per flow, one appearance pass unless the look differs.
 
 - Test names: `test<Screen>_<scenario>` (e.g. `testStudy_revealAndRateGood`). Live-API variants end in `_liveAPI`
   and `XCTSkip` when `LA_CARTE_API_URL` is unset.
@@ -22,8 +41,22 @@ ScrollView as empty. Use the UI-test screenshots for the gallery.
 - Mock tests run in **light and dark** (`XCUIDevice.shared.appearance`).
 - Call `snapshot("<screen>-<state>", appearance:)` at every state worth reviewing. Names are stable:
   QA compares runs by filename.
+- Debug galleries (debug builds only, no network): `LA_CARTE_SCREEN=design-system` (tokens and components),
+  `LA_CARTE_SCREEN=widget` (spec 007: every Home Screen widget state in 170 pt tiles, `widgetGallery.title`,
+  `widgetGallery.tile.<due|caughtUp|caughtUpLater|empty|unavailable|long>`). Widgets themselves aren't reachable
+  from XCUITest. Both follow `-theme forest`.
 - Mock data comes from `[Card].fixtures` (`APIClient/InMemoryAPIClient.swift`). Changing fixtures changes
   screenshots — coordinate with qa-validator.
+
+## Splitting a run
+
+`scripts/ios-ui-test.sh --split [N] <run> [-only-testing:LaCarteUITests/<Class>[/<test>] …]` builds once, deals
+the selected test methods into N shards (balanced by the last measured durations in
+`<results dir>/ui-test-durations.tsv`, else by count) and runs them at once, one UI pool simulator each. Output is
+the same as a plain run: screenshots in `qa/screenshots/<run>/`, one merged `<run>.xcresult`, one `TESTS: …` line
+(wall time), exit code non-zero if any shard fails. Shard lines are prefixed `[k]`.
+- **When:** 8+ tests or about 4 min of runtime; below that run plainly (each shard costs ~1 min of fixed overhead).
+- **N** defaults to, and is capped by, the free UI simulators; with one free (busy pool) it is a plain run.
 
 ## Running the app against a local API
 
@@ -50,3 +83,8 @@ Defaults to `iPhone 17 Pro` (same as the user's phone) on the latest installed i
 create that simulator by default; create it once with:
 `xcrun simctl create "iPhone 17 Pro" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimRuntime.iOS-27-0`.
 Override with `SIMULATOR=… OS=…` (CI uses `iPhone 17`).
+
+**Dark on a local iOS 26.5 simulator** (docs/tooling.md P9): the device appearance can't be switched unattended
+(`simctl ui` triggers a macOS privacy prompt). Check dark rendering there with the forced Dark / Forest theme
+(`-theme dark`). "System theme follows device dark" on iOS 26 is checked on CI shards only
+(`ci/boot-simulator.sh`), or locally only with the user at the Mac.

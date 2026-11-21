@@ -110,6 +110,6 @@ public struct SettingsFeature {
 extension SharedKey where Self == AppStorageKey<AppTheme>.Default {
   /// The theme picked in Settings. Also read from the `-theme <value>` launch argument (UserDefaults argument domain).
   public static var theme: Self {
-    Self[.appStorage("theme"), default: .system]
+    Self[.appStorage(AppTheme.storageKey), default: .system]
   }
 }

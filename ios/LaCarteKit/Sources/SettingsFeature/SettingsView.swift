@@ -16,29 +16,31 @@ public struct SettingsView: View {
   }
 
   public var body: some View {
-    VStack(alignment: .leading, spacing: Theme.Spacing.l) {
-      header
-      ScrollView {
-        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
-          server
-          appearance
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    NavigationStack {
+      Form {
+        server
+        appearance
       }
-      .scrollBounceBehavior(.basedOnSize)
+      .scrollContentBackground(.hidden)
+      .background(Theme.background)
+      .foregroundStyle(Theme.ink)
+      .navigationTitle("Settings")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button(role: .close) {
+            store.send(.closeButtonTapped)
+          }
+          .accessibilityIdentifier("settings.close")
+        }
+      }
     }
-    .padding([.horizontal, .top], Theme.Spacing.l)
-    .background(Theme.background)
     .tint(Theme.ink)
     .onAppear { store.send(.onAppear) }
   }
 
   private var server: some View {
-    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-      Text("Server")
-        .font(.meta)
-        .foregroundStyle(Theme.secondaryInk)
-        .accessibilityAddTraits(.isHeader)
+    Section("Server") {
       TextField(
         "API URL", text: $store.apiURL.sending(\.urlChanged),
         prompt: Text("Server URL").foregroundStyle(Theme.secondaryInk)
@@ -48,23 +50,20 @@ public struct SettingsView: View {
       .textInputAutocapitalization(.never)
       .autocorrectionDisabled()
       .focused($focusedField, equals: .url)
+      .tint(Theme.accent)
       .accessibilityIdentifier("settings.url")
-      .modifier(SurfaceRow { focusedField = .url })
       tokenField
       Button("Test connection") {
         store.send(.testButtonTapped)
       }
-      .font(.body)
-      .foregroundStyle(Theme.ink)
-      .frame(minHeight: 44)
       .accessibilityIdentifier("settings.test")
       if let status = store.status {
         Text(status)
-          .font(.meta)
           .foregroundStyle(Theme.secondaryInk)
           .accessibilityIdentifier("settings.status")
       }
     }
+    .listRowBackground(Rectangle().fill(Theme.surface))
   }
 
   /// Masked unless the user reveals it. Not a `SecureField`: iOS offers to save any typed secure text as a password
@@ -77,6 +76,7 @@ public struct SettingsView: View {
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .focused($focusedField, equals: .token)
+            .tint(Theme.accent)
             .onAppear { focusedField = .token }
         } else {
           // One dot per character, as a secure field shows.
@@ -85,6 +85,8 @@ public struct SettingsView: View {
             .foregroundStyle(store.token.isEmpty ? Theme.secondaryInk : Theme.ink)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+            .onTapGesture { isTokenRevealed = true }
             .accessibilityLabel("Token")
             .accessibilityValue(dots)
             .accessibilityAddTraits(.isButton)
@@ -100,81 +102,29 @@ public struct SettingsView: View {
           .frame(width: 44, height: 44)
           .contentShape(.rect)
       }
-      .buttonStyle(.plain)
+      // Borderless, so a tap elsewhere in the row doesn't trigger it.
+      .buttonStyle(.borderless)
       // The 44pt button spans the row's full height instead of growing it.
       .padding(.vertical, -Theme.Spacing.s)
       .accessibilityLabel(isTokenRevealed ? "Hide token" : "Show token")
       .accessibilityIdentifier("settings.token.reveal")
     }
-    .modifier(SurfaceRow { isTokenRevealed = true })
     .onChange(of: focusedField) { old, new in
       if old == .token, new != .token { isTokenRevealed = false }
     }
   }
 
   private var appearance: some View {
-    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-      Text("Appearance")
-        .font(.meta)
-        .foregroundStyle(Theme.secondaryInk)
-        .accessibilityAddTraits(.isHeader)
-      ViewThatFits(in: .horizontal) {
-        HStack(spacing: Theme.Spacing.s) { themeButtons }
-        VStack(spacing: Theme.Spacing.s) { themeButtons }
+    Section("Appearance") {
+      Picker("Theme", selection: Binding(get: { store.theme }, set: { store.send(.themeTapped($0)) })) {
+        ForEach(AppTheme.allCases, id: \.self) { theme in
+          Text(theme.rawValue.capitalized).tag(theme)
+        }
       }
+      .pickerStyle(.segmented)
+      .accessibilityIdentifier("settings.theme")
     }
-  }
-
-  private var themeButtons: some View {
-    ForEach(AppTheme.allCases, id: \.self) { theme in
-      let isSelected = store.theme == theme
-      Button {
-        store.send(.themeTapped(theme))
-      } label: {
-        Text(theme.rawValue.capitalized)
-          .font(.body)
-          .lineLimit(1)
-          .foregroundStyle(isSelected ? Theme.background : Theme.ink)
-          .padding(.horizontal, Theme.Spacing.s)
-          .frame(maxWidth: .infinity, minHeight: 44)
-          .background(isSelected ? Theme.ink : Theme.surface, in: .rect(cornerRadius: Theme.Radius.row))
-      }
-      .buttonStyle(.plain)
-      .accessibilityAddTraits(isSelected ? .isSelected : [])
-      .accessibilityIdentifier("settings.theme.\(theme.rawValue)")
-    }
-  }
-
-  private var header: some View {
-    HStack(spacing: Theme.Spacing.s) {
-      Text("Settings")
-        .font(.screenTitle)
-        .foregroundStyle(Theme.ink)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityIdentifier("settings.title")
-      CircleIconButton("xmark", accessibilityLabel: "Close") {
-        store.send(.closeButtonTapped)
-      }
-      .accessibilityIdentifier("settings.close")
-    }
-  }
-}
-
-/// A field on a `surface` row, radius 12, like the deck's search field. The whole row focuses the field.
-private struct SurfaceRow: ViewModifier {
-  let focus: () -> Void
-
-  func body(content: Content) -> some View {
-    content
-      .font(.body)
-      .foregroundStyle(Theme.ink)
-      .padding(.horizontal, Theme.Spacing.m)
-      .padding(.vertical, Theme.Spacing.s)
-      .frame(minHeight: 44)
-      .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.row))
-      .contentShape(.rect(cornerRadius: Theme.Radius.row))
-      .onTapGesture(perform: focus)
+    .listRowBackground(Rectangle().fill(Theme.surface))
   }
 }
 

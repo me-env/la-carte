@@ -148,7 +148,7 @@ enum StubJSON {
 
   static func stats(total: Int, nextDue: Date?) -> String {
     let next = nextDue.map { "\"\(iso($0))\"" } ?? "null"
-    return #"{"total":\#(total),"due":0,"new":0,"reviewed_today":\#(total),"next_due":\#(next)}"#
+    return #"{"total":\#(total),"due":0,"new":0,"reviewed_today":\#(total),"next_due":\#(next),"streak":0}"#
   }
 }
 

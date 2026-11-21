@@ -43,9 +43,13 @@ struct LaCarteLogoTests {
     let front = geometry.frontCard
     for line in [geometry.wordLine, geometry.answerLine] {
       #expect(front.boundingRect.contains(line.boundingRect))
-      // Boolean ops can leave zero-area subpaths, so compare areas rather than `isEmpty`.
-      let overlap = geometry.backCard.intersection(line).boundingRect
-      #expect(overlap.isNull || overlap.width * overlap.height < 0.01)
+      // Sample points rather than `intersection`: on iOS 26 it returns the whole line although no point overlaps.
+      let bounds = line.boundingRect
+      let steps = (0...100).map { CGFloat($0) / 100 }
+      let points = steps.flatMap { u in
+        steps.map { v in CGPoint(x: bounds.minX + bounds.width * u, y: bounds.minY + bounds.height * v) }
+      }
+      #expect(!points.contains { line.contains($0) && geometry.backCard.contains($0) })
     }
   }
 
