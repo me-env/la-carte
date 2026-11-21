@@ -1,4 +1,5 @@
 import APIClient
+import AskAIClient
 import ComposableArchitecture
 import Foundation
 import SwiftUI
@@ -18,6 +19,13 @@ public struct StudyFeature {
     var editFailed = false
     /// The continuous ease value 0...1 while a rating drag is held; nil = no ring (spec 011).
     var swipeEase: Double?
+    var isReportMenuShown = false
+    var isReportCommentShown = false
+    var reportComment = ""
+    /// Shown in the counter slot: a report's or a copy's outcome (specs 015, 016).
+    var notice: Notice?
+    /// Cards whose broken photo was reported this session: sent once, and never served again (spec 015 #13-15).
+    var reportedBrokenPhotos: Set<Card.ID> = []
 
     /// What releasing the drag now would send.
     var swipeRating: Rating? { swipeEase.flatMap(StudyFeature.rating(forEase:)) }
@@ -26,6 +34,9 @@ public struct StudyFeature {
     var canRate: Bool {
       phase == .studying && isRevealed && editing == nil && !isReviewing
     }
+
+    /// The double-tap menu (report, ask) is offered exactly when the card can be rated.
+    var canReport: Bool { canRate }
 
     /// Inline edit (010) needs one text field on each side; photo and multi-field cards use the deck editor (014d).
     var canEditInline: Bool {
@@ -48,12 +59,17 @@ public struct StudyFeature {
       case front, back
     }
 
+    enum Notice: Equatable {
+      case reported, failed, copied
+    }
+
     enum Phase: Equatable {
       case loading, studying, caughtUp(nextDue: Date?), offline, notSetUp, unauthorized
     }
   }
 
-  public enum Action {
+  public enum Action: BindableAction {
+    case binding(BindingAction<State>)
     /// Not a binding: ending the edit on a typed newline needs the draft before and after.
     case draftChanged(String)
     case onAppear
@@ -75,6 +91,14 @@ public struct StudyFeature {
     case statsResponse(Result<DeckStats, any Error>)
     case reviewResponse(Result<Card, any Error>)
     case editSaveResponse(Result<Card, any Error>, previous: Card)
+    case cardDoubleTapped
+    case askTapped
+    case reportReasonTapped(ReportReason)
+    case reportCommentSubmitted
+    case reportResponse(Result<Void, any Error>, cardID: Card.ID)
+    case noticeExpired
+    /// A photo on the card couldn't be loaded (error or 10 s timeout); `side` is where it shows.
+    case photoLoadFailed(cardID: Card.ID, url: String, side: State.Field)
     case delegate(Delegate)
 
     @CasePathable
@@ -84,8 +108,10 @@ public struct StudyFeature {
   }
 
   @Dependency(\.apiClient) var apiClient
+  @Dependency(\.askAI) var askAI
+  @Dependency(\.continuousClock) var clock
 
-  private enum CancelID { case load }
+  private enum CancelID { case load, notice }
 
   public init() {}
 
@@ -109,8 +135,12 @@ public struct StudyFeature {
   }
 
   public var body: some ReducerOf<Self> {
+    BindingReducer()
     Reduce { state, action in
       switch action {
+      case .binding:
+        return .none
+
       case let .draftChanged(draft):
         // A vertical field types return instead of submitting (iOS 27): a typed newline ends the edit.
         guard let kept = Self.droppingTypedNewlines(old: state.draft, new: draft) else {
@@ -151,6 +181,7 @@ public struct StudyFeature {
         state.editing = field
         state.draft = card.text(field)
         state.editFailed = false
+        state.notice = nil
         return .cancel(id: CancelID.load)
 
       case .editEnded:
@@ -191,7 +222,9 @@ public struct StudyFeature {
       case .openSettingsTapped:
         return .send(.delegate(.settingsRequested))
 
-      case let .cardsResponse(.success(cards)):
+      case var .cardsResponse(.success(cards)):
+        // The report may not have landed yet (or failed): a skipped card must not come back.
+        cards.removeAll { $0.id != state.cards.first?.id && state.reportedBrokenPhotos.contains($0.id) }
         if cards.first?.id != state.cards.first?.id {
           state.isRevealed = false
           state.swipeEase = nil
@@ -223,6 +256,60 @@ public struct StudyFeature {
         state.phase = (error as? APIError)?.isUnauthorized == true ? .unauthorized : .offline
         return .none
 
+      case .cardDoubleTapped:
+        guard state.canReport else { return .none }
+        state.isReportMenuShown = true
+        return .none
+
+      case .askTapped:
+        guard state.canReport, let card = state.cards.first else { return .none }
+        state.notice = .copied
+        let text = AskText.make(for: card)
+        return .merge(.run { [askAI] _ in askAI.copy(text) }, expireNotice())
+
+      case .reportReasonTapped(.other):
+        state.reportComment = ""
+        state.isReportCommentShown = true
+        return .none
+
+      case let .reportReasonTapped(reason):
+        return report(reason, comment: nil, state: &state)
+
+      case .reportCommentSubmitted:
+        let comment = state.reportComment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !comment.isEmpty else { return .none }
+        state.isReportCommentShown = false
+        return report(.other, comment: comment, state: &state)
+
+      case let .reportResponse(.success, cardID):
+        state.isReviewing = false
+        state.isRevealed = false
+        state.cards.remove(id: cardID)
+        state.notice = .reported
+        return .merge(expireNotice(), state.cards.isEmpty ? fetchDueCards(&state) : .none)
+
+      case .reportResponse(.failure, _):
+        state.isReviewing = false
+        state.notice = .failed
+        return .none
+
+      case .noticeExpired:
+        if state.notice != .failed { state.notice = nil }
+        return .none
+
+      case let .photoLoadFailed(cardID, url, side):
+        var send = Effect<Action>.none
+        if state.reportedBrokenPhotos.insert(cardID).inserted {
+          let comment = String(url.prefix(500))
+          send = .run { [apiClient] _ in try? await apiClient.reportCard(cardID, .brokenPhoto, comment) }
+        }
+        // A broken answer photo leaves the card studyable; a broken prompt can't be asked, so it's skipped.
+        guard side == .front, state.cards.first?.id == cardID else { return send }
+        state.cards.removeFirst()
+        state.isRevealed = false
+        state.swipeEase = nil
+        return .merge(send, state.cards.isEmpty ? fetchDueCards(&state) : .none)
+
       case .delegate:
         return .none
       }
@@ -233,6 +320,7 @@ public struct StudyFeature {
     guard !state.isReviewing, let card = state.cards.first else { return .none }
     state.isReviewing = true
     state.editFailed = false
+    state.notice = nil
     // A load in flight may predate the review and would bring the rated card back.
     return .merge(
       .cancel(id: CancelID.load),
@@ -240,6 +328,28 @@ public struct StudyFeature {
         await send(.reviewResponse(Result { try await apiClient.review(card.id, rating) }))
       }
     )
+  }
+
+  /// Sends the report as a rating would: it blocks the buttons, the drag and refresh until it's answered.
+  private func report(_ reason: ReportReason, comment: String?, state: inout State) -> Effect<Action> {
+    guard state.canReport, let card = state.cards.first else { return .none }
+    state.isReviewing = true
+    state.editFailed = false
+    state.notice = nil
+    return .merge(
+      .cancel(id: CancelID.load),
+      .run { [apiClient] send in
+        await send(.reportResponse(Result { try await apiClient.reportCard(card.id, reason, comment) }, cardID: card.id))
+      }
+    )
+  }
+
+  private func expireNotice() -> Effect<Action> {
+    .run { [clock] send in
+      try await clock.sleep(for: .seconds(2))
+      await send(.noticeExpired)
+    }
+    .cancellable(id: CancelID.notice, cancelInFlight: true)
   }
 
   /// Saves the edited side optimistically: the trimmed text shows at once and the server's card replaces it.

@@ -42,6 +42,15 @@ public struct StudyView: View {
     }
     .sensoryFeedback(.selection, trigger: store.editing) { _, new in new != nil }
     .sensoryFeedback(.error, trigger: store.editFailed) { _, new in new }
+    .sensoryFeedback(.success, trigger: store.notice) { _, new in new == .reported }
+    .alert("What's wrong?", isPresented: $store.isReportCommentShown) {
+      TextField("", text: $store.reportComment)
+        .accessibilityIdentifier("study.report.comment")
+      Button("Report") { store.send(.reportCommentSubmitted) }
+        .disabled(store.reportComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .accessibilityIdentifier("study.report.send")
+      Button("Cancel", role: .cancel) {}
+    }
     .sensoryFeedback(trigger: store.swipeRating) { _, new in
       switch new {
       case .hard, .good: .selection
@@ -64,6 +73,10 @@ public struct StudyView: View {
             counterText("Couldn't save the edit")
               .accessibilityIdentifier("study.editError")
               .transition(.opacity)
+          } else if let notice = store.notice {
+            counterText(Self.text(notice))
+              .accessibilityIdentifier("study.reportNotice")
+              .transition(.opacity)
           } else if !store.cards.isEmpty {
             counterText("\(store.cards.count) to review")
               .accessibilityIdentifier("study.remaining")
@@ -72,11 +85,20 @@ public struct StudyView: View {
       }
       .frame(maxWidth: .infinity)
       .animation(Theme.Motion.standard, value: store.editFailed)
+      .animation(Theme.Motion.standard, value: store.notice)
 
       CircleIconButton("plus", accessibilityLabel: "Add card") {
         store.send(.addButtonTapped)
       }
       .accessibilityIdentifier("study.add")
+    }
+  }
+
+  static func text(_ notice: StudyFeature.State.Notice) -> String {
+    switch notice {
+    case .reported: "Reported"
+    case .failed: "Couldn't send the report"
+    case .copied: "Copied"
     }
   }
 
@@ -203,6 +225,9 @@ public struct StudyView: View {
         }
       }
       .contentShape(.rect)
+      // Before the single tap, so it waits for a second tap; only on when revealed, so revealing isn't delayed.
+      // The text's own double tap (010, edit) is on a child view, so it wins there.
+      .gesture(TapGesture(count: 2).onEnded { store.send(.cardDoubleTapped) }, isEnabled: store.canReport)
       .gesture(
         TapGesture().onEnded { sendAnimated(.cardTapped) },
         isEnabled: store.editing == nil
@@ -217,7 +242,15 @@ public struct StudyView: View {
         }
       )
       .onGeometryChange(for: CGSize.self, of: \.size) { cardSize = $0 }
+      .accessibilityActions {
+        if store.canReport {
+          Button("Report") { store.send(.cardDoubleTapped) }
+        }
+      }
       .accessibilityIdentifier("study.card")
+      .confirmationDialog("", isPresented: $store.isReportMenuShown, titleVisibility: .hidden) {
+        reportMenu
+      }
       // After the card's identifier, so the ring keeps its own.
       .overlay { swipeRing }
       #if DEBUG
@@ -256,6 +289,26 @@ public struct StudyView: View {
       isEnabled: store.editing != nil
     )
   }
+
+  /// System buttons, no destructive role: every report is reversible (spec 015).
+  @ViewBuilder private var reportMenu: some View {
+    Button("Ask about this card") { store.send(.askTapped) }
+      .accessibilityIdentifier("study.report.ask")
+    ForEach(Self.reportReasons, id: \.reason) { reason, title in
+      Button(title) { store.send(.reportReasonTapped(reason)) }
+        .accessibilityIdentifier("study.report.\(reason.rawValue)")
+    }
+    Button("Cancel", role: .cancel) {}
+  }
+
+  /// The menu's reasons in order; `brokenPhoto` is filed by the app alone, never offered.
+  static let reportReasons: [(reason: ReportReason, title: String)] = [
+    (.wrong, "This is wrong"),
+    (.drop, "I don't want this card"),
+    (.doubt, "I doubt this is correct"),
+    (.rephrase, "I want it phrased differently"),
+    (.other, "Other…"),
+  ]
 
   /// One side of the card: its text, or in its place a field that looks the same while that side is edited.
   @ViewBuilder
@@ -310,7 +363,7 @@ public struct StudyView: View {
       VStack(spacing: Theme.Spacing.s) {
         ForEach(card.shown(card.prompt), id: \.self) { name in
           field(
-            name, of: card, font: name == firstText ? .cardFace : .body,
+            name, of: card, side: .front, font: name == firstText ? .cardFace : .body,
             color: name == firstText ? Theme.ink : Theme.secondaryInk
           )
         }
@@ -344,7 +397,7 @@ public struct StudyView: View {
     } else {
       VStack(spacing: Theme.Spacing.xs) {
         ForEach(card.shown(card.answer), id: \.self) { name in
-          field(name, of: card, font: .body, color: Theme.secondaryInk)
+          field(name, of: card, side: .back, font: .body, color: Theme.secondaryInk)
         }
       }
       .accessibilityElement(children: .contain)
@@ -355,10 +408,15 @@ public struct StudyView: View {
 
   /// A photo field shows the image at its public URL, never the URL text.
   @ViewBuilder
-  private func field(_ name: String, of card: Card, font: Font, color: ThemeColor) -> some View {
+  private func field(
+    _ name: String, of card: Card, side: StudyFeature.State.Field, font: Font, color: ThemeColor
+  ) -> some View {
     if name == Card.photoField {
-      CardPhoto(url: card.fields[name].flatMap(URL.init(string:)), style: .card)
-        .accessibilityIdentifier("study.photo")
+      let url = card.fields[name] ?? ""
+      CardPhoto(url: URL(string: url), style: .card) {
+        store.send(.photoLoadFailed(cardID: card.id, url: url, side: side))
+      }
+      .accessibilityIdentifier("study.photo")
     } else {
       Text(card.fields[name] ?? "")
         .font(font)

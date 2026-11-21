@@ -169,6 +169,12 @@ public enum Rating: String, Codable, CaseIterable, Sendable {
   case again, hard, good, easy
 }
 
+/// Why a card was reported (spec 015). `brokenPhoto` is filed by the app only, never offered in the menu.
+public enum ReportReason: String, Codable, CaseIterable, Sendable {
+  case wrong, drop, doubt, rephrase, other
+  case brokenPhoto = "broken_photo"
+}
+
 public struct DeckStats: Codable, Equatable, Sendable {
   public var total: Int
   public var due: Int
