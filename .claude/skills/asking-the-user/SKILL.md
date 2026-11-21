@@ -27,7 +27,7 @@ truly impossible), and make their part **the smallest reasonable action**.
 
 ## Where
 Write the request to a file in the scratchpad and open it in nvim in an idle tmux pane below the
-manager's pane (`tmux send-keys -t la-carte:0.1 'nvim <file>' Enter`; check with `tmux list-panes`).
+manager's pane: find it with `tmux list-panes -a`, then `tmux send-keys -t <session:win.pane> 'nvim <file>' Enter`.
 Subagents send the request to the manager, who opens it.
 
 ## Example

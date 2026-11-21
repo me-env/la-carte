@@ -28,6 +28,11 @@ Rules:
 - Times are UTC everywhere; `now` is injectable in `deck` functions for tests.
 - No login. Optional single bearer token (`LA_CARTE_API_TOKEN`) protects REST + MCP when deployed.
 - MCP tool docstrings are the agent-facing docs: write them for an LLM reader (what, when, effects).
+- Schema changes on existing tables go in `db._migrate`: idempotent, checked with `PRAGMA`, run at startup after
+  `create_all`. Plain SQL, no migration framework. A table rebuild runs in one transaction
+  (`PRAGMA foreign_keys=OFF` around it) after a `VACUUM INTO <db>.pre-<spec>-<timestamp>.bak` copy of the file.
+- Review history (`ReviewLog`) is never deleted: `card_id` has no foreign key, so deleting a card keeps its reviews
+  and `streak` / `reviewed_today` don't change (spec 012).
 
 ### REST contract
 

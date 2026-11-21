@@ -9,6 +9,7 @@
 # LOCK_TIMEOUT (seconds to wait, default 3600; exits 75 when it gives up), LOCK_DIR (default /tmp/la-carte-locks).
 # Already holding <name> (an outer _lock.sh on the same name)? The command just runs.
 set -euo pipefail
+[ $# -ge 2 ] || { echo "usage: $0 <lock-name> <command> [args...]" >&2; exit 64; }
 NAME="$1"; shift
 DIR="${LOCK_DIR:-/tmp/la-carte-locks}"
 FILE="$DIR/$NAME.lock"
@@ -29,6 +30,7 @@ lockf -s -k -t "$TIMEOUT" "$FILE" /bin/sh -c 'printf "%s\n" "$1" >"$2.holder"; s
   sh "$HOLDER" "$FILE" "$@"
 STATUS=$?
 set -e
+# 75 is lockf's timeout code; a wrapped command exiting 75 itself is reported the same way (none of ours does).
 if [ "$STATUS" -eq 75 ]; then
   echo "🔒 gave up after ${TIMEOUT}s waiting for '$NAME', held by: $(cat "$FILE.holder" 2>/dev/null || echo '?')" >&2
 fi

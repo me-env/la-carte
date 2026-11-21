@@ -132,19 +132,15 @@ private struct UnitShape: Shape {
 /// The logo drawing itself in once, e.g. on a launch or empty screen. With Reduce Motion it only fades in.
 public struct LaCarteLaunchMark: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var progress = 0.0
-  @State private var opacity = 0.0
+  @State private var shown = false
 
   public init() {}
 
   public var body: some View {
-    LaCarteLogo(progress: reduceMotion ? 1 : progress)
-      .opacity(reduceMotion ? opacity : 1)
+    LaCarteLogo(progress: reduceMotion || shown ? 1 : 0)
+      .opacity(reduceMotion && !shown ? 0 : 1)
       .onAppear {
-        withAnimation(reduceMotion ? Theme.Motion.standard : Theme.Motion.logoDrawIn) {
-          progress = 1
-          opacity = 1
-        }
+        withAnimation(reduceMotion ? Theme.Motion.standard : Theme.Motion.logoDrawIn) { shown = true }
       }
   }
 }

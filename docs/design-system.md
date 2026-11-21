@@ -56,7 +56,7 @@ Layouts must reflow at accessibility sizes (`dynamicTypeSize.isAccessibilitySize
 Study caps the card text, the `study.remaining` counter and the rating row at `.accessibility2` so they fit one
 screen; longer card text scrolls (its scroll indicators flash on reveal).
 
-Spacing `Theme.Spacing.s/m/l/xl` = 8/16/24/40. Row radius 12. Screen side margin 16–24.
+Spacing `Theme.Spacing.xs/s/m/l/xl` = 4/8/16/24/40 (`xs` only for a caption tight under its sample). Radius `Theme.Radius.row` 12, `Theme.Radius.photo` 20 (card-face photo, continuous). Photo sizes `Theme.Photo.thumbnail/preview/card/cardCompact` = 44/88/240/160 pt (card is a width, 4:5 portrait; compact at accessibility sizes; spec 014). Screen side margin 16–24.
 
 ## Components
 - `CircleIconButton(systemImage, accessibilityLabel:)` — 44pt, surface fill, soft shadow (light) /
@@ -68,6 +68,8 @@ Spacing `Theme.Spacing.s/m/l/xl` = 8/16/24/40. Row radius 12. Screen side margin
   one line each.
 - Swipe-to-delete: `Button("Delete", role: .destructive)`, the system destructive red. It is the one sanctioned
   non-token color; keep `.tint(Theme.ink)` off the `List` so it doesn't turn the action ink.
+- `CardPhoto(url:style:)` (spec 014) — a person's photo from a URL (`AsyncImage`) in a fixed frame: `.thumbnail`/`.preview` circles (deck row, editor), `.card` 4:5 rounded rect (Study). Loading = `hairline` fill, failure/none = `person.fill` in `secondaryInk`, 1 pt `hairline` stroke, label "Photo". Never logs the URL.
+- Multi-select rows (note directions, spec 014c): checkmark rows (ink `checkmark`, `.isSelected` trait), not `Toggle` switches, so no green or low-contrast track.
 - Settings rows (spec 003): text field on a `surface` row, radius 12, 44pt min height, like the deck search field.
 
 ## Motion (`Theme.Motion`)

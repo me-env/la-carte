@@ -11,8 +11,9 @@
 **Logo renders.** `scripts/ios-test.sh --render -only-testing:DesignSystemTests/RenderTests` (about 15 s) writes
 `logo-<light|dark|forest>-p<000|025|050|075|100>.png` (1024 × 1024 px, `ImageRenderer`, on the theme
 background) to `$LA_CARTE_SCRATCH/renders` or `build/renders`, or to `LA_CARTE_RENDER_DIR` if you set it. The
-suite is skipped in normal runs and on CI. It doesn't render the gallery, because `ImageRenderer` draws a
-ScrollView as empty. Use the UI-test screenshots for the gallery.
+suite is skipped in normal runs and on CI. It also writes `gallery-<light|dark|forest>.png` (390 pt wide at 3×):
+the gallery's content without its ScrollView (`DesignSystemGalleryContent`), since `ImageRenderer` draws a
+ScrollView as empty.
 
 ## UI tests
 

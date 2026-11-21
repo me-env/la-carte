@@ -29,7 +29,7 @@ fi
 # 3. Deploy (queued; the call returns at once). The title lets us find this deployment below.
 title="CI ${GITHUB_SHA:0:7}"
 dokploy -X POST "${DOKPLOY_URL%/}/api/compose.deploy" -H 'Content-Type: application/json' \
-  -d "{\"composeId\":\"$DOKPLOY_COMPOSE_ID\",\"title\":\"$title\"}"
+  -d "$(jq -n --arg c "$DOKPLOY_COMPOSE_ID" --arg t "$title" '{composeId: $c, title: $t}')"
 echo
 echo "Deploy queued: $title"
 
@@ -37,9 +37,11 @@ echo "Deploy queued: $title"
 status=pending
 for _ in $(seq 1 90); do
   sleep 10
-  status=$(dokploy "${DOKPLOY_URL%/}/api/deployment.allByCompose?composeId=$DOKPLOY_COMPOSE_ID" \
-    | jq -r --arg t "$title" '[.[] | select(.title == $t)] | sort_by(.createdAt) | last | .status // "pending"' \
-    2>/dev/null || echo unknown)
+  # A failed request is retried; a response we can't read fails at once (the API changed).
+  deployments=$(dokploy "${DOKPLOY_URL%/}/api/deployment.allByCompose?composeId=$DOKPLOY_COMPOSE_ID") \
+    || { echo "dokploy: request failed, retrying"; continue; }
+  status=$(jq -er --arg t "$title" '[.[] | select(.title == $t)] | sort_by(.createdAt) | last | .status // "pending"' \
+    <<<"$deployments") || { echo "::error::Unexpected deployment.allByCompose response from Dokploy"; exit 1; }
   echo "dokploy: $status"
   case "$status" in
     done) break ;;

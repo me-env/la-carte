@@ -21,6 +21,8 @@ public enum Theme {
   public static let shadow = ThemeColor(light: .black.opacity(0.06), dark: .clear, forest: .clear)
 
   public enum Spacing {
+    /// A caption tight under its sample (gallery swatches, logo sizes).
+    public static let xs: CGFloat = 4
     public static let s: CGFloat = 8
     public static let m: CGFloat = 16
     public static let l: CGFloat = 24
