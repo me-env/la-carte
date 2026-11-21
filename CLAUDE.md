@@ -67,6 +67,13 @@ for deep dives: research, reading many files, and especially to **verify that so
 done** before saying so. Give a sub-agent a narrow brief and the files to read; you stay accountable for
 its result.
 
+**Watch your context.** Every turn re-reads your whole context, so a bloated agent burns usage fast.
+- Don't dump big outputs: pipe through `tail`/`grep`/`head`, read files by range, never `cat` logs or JSONL.
+- Delegate heavy reading/research to sub-agents and keep only their conclusion.
+- Long task? Compact when your context gets large (~150k tokens): summarise state into your notes/report,
+  then continue from the summary. If you can't compact, finish the current step, report a short hand-off
+  (what's done, what's next, file paths) and stop; the manager restarts a fresh agent from it.
+
 **Clean up your shells.** Never wait with `pgrep -f <pattern>` (it matches your own loop and never ends)
 or an unbounded `until` loop: bound every wait with a timeout, prefer the scripts' locks, and kill any
 background process you started (servers, watchers, pagers) before you report.
