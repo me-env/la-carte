@@ -1,6 +1,6 @@
 # 012 — Keep review history when a card is deleted
 
-Status: ready
+Status: done
 Owners: api-engineer. No iOS work.
 Depends on: 007's API part (streak, merged). Backlog #16.
 Design reference: none (no UI).
