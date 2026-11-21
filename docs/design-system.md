@@ -31,7 +31,7 @@ and picked in Settings → Appearance. QA can force a theme with the `-theme for
 
 Always use tokens, never literal colors.
 
-**Accent: pink, in very small amounts** (from l'alfred's Flourish Pink). `Theme.accent` = `#B8325A` light /
+**Accent: pink, in very small amounts**. `Theme.accent` = `#B8325A` light /
 `#ED6E8C` dark and forest (text on `background`: 5.50 / 5.98 / 6.18:1, AA). `Theme.accentOnInk` = the reverse pair
 (`#ED6E8C` light / `#B8325A` dark and forest), only for the logo's word on the ink card (5.85 / 5.14 / 5.09:1).
 It may appear **only** in these places:

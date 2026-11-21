@@ -42,7 +42,7 @@ Never use a bitmap.
 | accent | `#B8325A` | `#ED6E8C` | `#ED6E8C` | Pink, very small amounts (below) |
 | accentOnInk | `#ED6E8C` | `#B8325A` | `#B8325A` | The logo's word only |
 
-The pink is l'alfred's Flourish Pink (`#ED6E8C`; hover `#E5537A` is web-only, unused here) and its darker text
+The accent pink is `#ED6E8C`; its darker text
 shade `#B8325A`. **Very small amounts:** in the app it's limited to the logo's word, the text cursor/selection, the
 widget's streak number and Study's count (`docs/design-system.md`). In marketing: the logo's word, and at most one
 highlighted word per caption or headline (`#B8325A` on light, `#ED6E8C` on dark). Never as a background, a fill,
