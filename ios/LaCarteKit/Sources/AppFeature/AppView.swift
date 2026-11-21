@@ -27,7 +27,9 @@ struct AppView: View {
 public struct RootView: View {
   @State private var store = Store(initialState: AppFeature.State()) { AppFeature() }
 
-  public init() {}
+  public init() {
+    Theme.tintSearchFields()
+  }
 
   public var body: some View {
     Group {

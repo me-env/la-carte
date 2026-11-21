@@ -16,7 +16,7 @@ public struct DeckView: View {
   public var body: some View {
     NavigationStack {
       content
-        // Rows, menus and swipe-delete keep the system tint; the pink below is for the search field only.
+        // Rows, menus and swipe-delete keep the system tint; the search cursor's pink is `Theme.tintSearchFields()`.
         .tint(Color?.none)
         .background(Theme.background)
         .refreshable { await store.send(.pulledToRefresh).finish() }
@@ -36,7 +36,6 @@ public struct DeckView: View {
         .searchable(text: $store.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
-        .tint(Theme.accent)
     }
     .sensoryFeedback(.impact(weight: .light), trigger: store.deletions)
     .sensoryFeedback(.error, trigger: store.phase) { _, new in new == .offline || new == .unauthorized }
