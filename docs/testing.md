@@ -8,6 +8,12 @@
 | UI end-to-end (mock) | `ios/LaCarteUITests/` | XCUITest, `LA_CARTE_API=mock` | **qa-validator** | `scripts/ios-ui-test.sh <run>` |
 | Full-stack E2E | same, `*_liveAPI` tests | XCUITest against a fresh seeded API | **qa-validator** | `scripts/e2e.sh <run>` |
 
+**Logo renders.** `scripts/ios-test.sh --render -only-testing:DesignSystemTests/RenderTests` (about 15 s) writes
+`logo-<light|dark|forest>-p<000|025|050|075|100>.png` (1024 × 1024 px, `ImageRenderer`, on the theme
+background) to `$LA_CARTE_SCRATCH/renders` or `build/renders`, or to `LA_CARTE_RENDER_DIR` if you set it. The
+suite is skipped in normal runs and on CI. It doesn't render the gallery, because `ImageRenderer` draws a
+ScrollView as empty. Use the UI-test screenshots for the gallery.
+
 ## UI tests
 
 - Test names: `test<Screen>_<scenario>` (e.g. `testStudy_revealAndRateGood`). Live-API variants end in `_liveAPI`
@@ -18,6 +24,13 @@
   QA compares runs by filename.
 - Mock data comes from `[Card].fixtures` (`APIClient/InMemoryAPIClient.swift`). Changing fixtures changes
   screenshots — coordinate with qa-validator.
+
+## Running the app against a local API
+
+The app has no built-in server (spec 008). To run it from Xcode on the simulator against `scripts/api-dev.sh`,
+set `LA_CARTE_API_URL=http://127.0.0.1:8000` and any `LA_CARTE_API_TOKEN` in the scheme, or type both once in
+Settings. A server started without `LA_CARTE_API_TOKEN` ignores the header. UI tests' `APIMode.live` always
+sends a token for the same reason.
 
 ## Screenshots
 

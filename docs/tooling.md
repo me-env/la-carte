@@ -16,13 +16,15 @@ payoff. Measurements are from 2026-11-21 (CI run 44907442393, local `qa/.results
 | 7 | `scripts/ios-ui-test.sh` (47) | XCUITest + xcresult export + inline Python rename of attachments | qa-validator | every feature, often several times | full suite 2.6 min (8 tests) → **41.6 min (74 tests)** in one day, ~34 s/test, serial; 1.0 GB of xcresults kept in `qa/.results` |
 | 8 | `scripts/e2e.sh` (42) | two fresh APIs + seed + 6 live UI tests | qa-validator | every feature (3.4 min) | fixed ports 8765/8766: two agents can't run it at once |
 | 9 | UI-test helpers: `Support.swift` (187), `StubAPIServer.swift` (251), pixel samplers in Theme/Deck/Settings/Refresh tests (~365 lines) | launch, waits, screenshots, colour asserts by sampling PNG pixels | qa-validator | all UI tests | colour checks cost a full UI test (~35 s) each; light+dark looped inside tests; dark appearance ignored on CI's iOS 26 sim (6 CI-only failures); drags can't pause mid-gesture (DEBUG launch args used instead) |
-| 10 | Agent coordination | agents wait on each other by polling `pgrep -x xcodebuild` (undocumented; `pgrep -f` matched the waiting loops) | manager / all | every iOS run | one 40-min UI run blocks every other agent; shared DerivedData is unsafe for concurrent builds ("database is locked") |
+| 10 | Agent coordination | `scripts/_lock.sh` (lockf named locks, commit aa5473b); was `pgrep -x xcodebuild` polling | manager / all | every iOS run | solved for waiting: design-lead's `wait-xcodebuild.sh` request is covered by `_lock.sh` (scripts block on the lock themselves), no new script |
 | 11 | `.github/workflows/ci.yml` (59) | API, docker image, iOS unit + UI + E2E | release-engineer | every push | iOS job **~50 min** (UI step 46 min, sum of test times 2566 s); 10 tests fail only on iOS 26; E2E skipped when UI fails |
 | 12 | `ci/boot-simulator.sh` (31) | pre-boot sim + `simctl ui appearance` to fix dark on CI | release-engineer | CI | untested (not in the last pushed run); Apple forum 812656 confirms appearance is ignored under `xcodebuild` on iOS 26, no confirmed fix |
 | 13 | `.github/workflows/adhoc.yml` + `ci/archive.sh`, `export-ipa.sh`, `verify-ipa.sh`, `_env.sh` (~175) | signed Ad Hoc .ipa (tags/manual) | release-engineer | releases | works; fine as is |
 | 14 | `scripts/ios-adhoc.sh` (11) + `ios-install-device.sh` (38) | local Ad Hoc build; download latest CI ipa + devicectl install | release-engineer | "put it on my phone" | devicectl triggers privacy prompts: needs the user at the Mac |
 | 15 | `scripts/fetch-design-refs.sh` (14) | Vyst screenshots + icon via iTunes lookup (gitignored) | design-lead / design-critic | design rounds | none |
 | 16 | Brand render scripts: `docs/design/brand/render.sh` (82), `explorations/render.sh` (53), 9× `explorations/round*/render.py` (1,515 lines) | hand-written seeded Python/SVG per round → rsvg-convert PNGs + a sheet | design-lead | every logo round (6 rounds, 5 passes in round 6) | each round re-implements PRNG, SVG writer, PNG export, sheet layout and its own checks; checks report per-15-px-band coverage only, which hides the joint seam (see P1) |
+| 16b | Brand-render library (P5) | shared PRNG, Poisson-disc, lattice matching, SVG/PNG, sheets for new rounds | design-lead | every logo round from round 8 | done: 285 lines, selftest PASS in 3.2 s; round script ~25 lines (was 140–165) |
+| 16c | Swift logo/gallery PNG renders (P6) | `ImageRenderer` in DesignSystemTests → PNGs | design-lead | every logo/design-system change | logo done (15 PNGs, 14.9 s); gallery renders blank (ScrollView), needs a `content` view exposed in `Sources` by design-lead |
 | 17 | Critic review sheets (scratchpad `critic/sheet*.py`, zooms) | ad hoc contact sheets, home-screen mocks with hand-drawn fake Apple icons | design-critic | every design review | replaced by `scripts/design-review.py` (P1, done): measured PASS/FAIL, sheet, home mock with real Apple icons |
 | 18 | Marketing video pipeline (`docs/marketing/video-tools.md`) | simctl recordVideo → ffmpeg → VHS → gifski | marketing | planned | not built; ffmpeg, gifski, vhs not installed |
 | 19 | `marketing/seed-demo.sh` (37) | seeds the demo deck | marketing | demo takes | none |
@@ -167,9 +169,49 @@ XCUITest keeps navigation, E2E and one appearance-switch smoke test.
 - **Gain:** about 40 colour tests leave the UI suite, roughly 20 min.
 - **Risk:** reference drift across iOS 26/27, and ImageRenderer can't render UIKit-backed views.
 
+### P5. `scripts/brandkit.py`: one brand-render library for new logo rounds (design-lead request)
+
+- **Owner:** design-lead. **Status:** **done 2026-11-21** (uncommitted). `scripts/brandkit.py` (~290 lines);
+  `--selftest` ~3 s, its synthetic card PASSES design-review on 12 of 12 seeds; a minimal round script is 25 lines.
+  Deviations: marks are design-review's dot → rounded-hexagon morph, not the AM inversion (a flip fails `seam:
+  polarity mix`); `match` minimises squared distance (Euclidean cost let lerped dots touch on 10 of 12 seeds).
+- **Evidence:** 12 render scripts, 1,788 lines. Across the 9 `render.py`: `mulberry32` defined 8×, `svg`,
+  `png`, `rounded`, `smooth` 7× each, `write` 6×, `frame`/`check`/`build` 4×. Round 7 and
+  `design-review.py --make-synthetic` each have their own blue-noise + `linear_sum_assignment` + `np.interp`
+  copy. Bugs reported by design-lead recur per copy: unsorted `np.interp` x-points (silently wrong), lattice
+  cells left unmatched and dropped.
+- **Proposal:** `scripts/brandkit.py` (~250 lines, PEP 723, same pins as `design-review.py`), imported by new
+  round scripts (`uv run` puts `scripts/` on the path when the round script inserts it). Uses maintained
+  parts instead of hand-rolled ones: `numpy.random.default_rng` (not mulberry32), `scipy.stats.qmc.PoissonDisk`
+  (Bridson, in SciPy ≥1.10), `linear_sum_assignment`, `rsvg-convert`. Functions: blue noise, hex lattice,
+  one-to-one matching (asserts every cell matched), `interp` that asserts increasing x, coverage→radius /
+  AM-halftone inversion, SVG writer, PNG export, contact sheet. `uv run scripts/brandkit.py --selftest`
+  covers the two bug classes. Old rounds stay as history. After the in-flight `design-review.py` change
+  lands, its `--make-synthetic` imports brandkit (follow-up, ~-40 lines there) so render and review share math.
+- **Gain:** a new round script drops from ~150 to ~50 lines; the two bug classes fail loudly. **Risk/rollback:** delete the file.
+
+### P6. Render the Swift logo and gallery to PNG from unit tests (design-lead request)
+
+- **Owner:** design-lead (ios-engineer informed: test-only, no `Sources/` change). **Status:** logo done 2026-11-21:
+  `scripts/ios-test.sh --render -only-testing:DesignSystemTests/RenderTests`, 15 logo PNGs at 1024 px in 14.9 s;
+  full unit run unchanged (suite skipped without the env var). Gallery open: `ImageRenderer` draws its
+  ScrollView empty; design-lead exposes the gallery content without the ScrollView, then a ~10-line test.
+- **Evidence:** today the only way to see the Swift geometry is a UI test (~35 s each, simctl/screenshots)
+  or the user's phone; the SVG and the Swift `LogoGeometry` can drift unseen.
+- **Proposal:** plain SwiftUI `ImageRenderer` (Apple, no dependency) in `DesignSystemTests/RenderTests.swift`,
+  enabled only when `LA_CARTE_RENDER_DIR` is set: logo at 1024 px for light/dark/forest × progress
+  0, 0.25, 0.5, 0.75, 1, plus the gallery content per theme. `scripts/ios-test.sh` sets
+  `TEST_RUNNER_LA_CARTE_RENDER_DIR` (xcodebuild strips the prefix) to `$LA_CARTE_SCRATCH/renders` or
+  `build/renders` (gitignored) and passes extra args through (`-only-testing:DesignSystemTests/RenderTests`).
+  Not swift-snapshot-testing: we want PNGs to look at and feed to `design-review.py`, not reference diffs (that
+  stays P4). **Risk:** `ImageRenderer` can't draw UIKit-backed views (none in the logo; gallery checked).
+  **Rollback:** delete the test file and the 2 script lines.
+
 ## Decisions log
 
 | Date | Proposal | Owner answer | Result |
 |---|---|---|---|
 | 2026-11-21 | P1 design-review tool | pre-approved by the user (priority) | implementer spawn blocked by the permission classifier; brief ready, awaiting manager |
 | 2026-11-21 | P1 design-review tool | manager approved for design-critic and design-lead | implemented: `scripts/design-review.py`, critic rule updated; pass5 FAILS, synthetic PASSES |
+| 2026-11-21 | P3 step 1 / design-lead's `wait-xcodebuild.sh` | already solved by `scripts/_lock.sh` (aa5473b) | no new script |
+| 2026-11-21 | P5 brandkit, P6 Swift renders | manager pre-approved, design-lead requested | tooling-implementers spawned |
