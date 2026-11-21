@@ -33,10 +33,15 @@ Messages are written for an LLM reader and name the offending field or direction
 4. `photo`, if present, must be an `http`/`https` URL with a host → error otherwise.
 5. Each direction: `prompt` and `answer` non-empty, known fields, disjoint; stored in the type's field order
    (so `["name","photo"]` ≡ `["photo","name"]`); no two cards of a note with the same direction.
+   *Amended 2026-11-21 (user):* for `person`, `prompt` must be exactly one of `photo`, `name`, `description` and `answer`
+   exactly **all the other non-empty fields** (else error listing the three allowed directions). When a PATCH
+   changes which fields are non-empty, person cards keep their id/FSRS state and their `answer` is re-derived.
+   `role` or `context` sent for a person → 422 "`role` no longer exists: put it in `description` (e.g. "Mistral CEO")"
+   (also covers rule 2's message for these two names).
 6. Every field used by a direction must be present in the note (e.g. no `photo → name` without a photo). Clearing a
    field that a direction uses → error "remove the direction first".
-7. A note always has ≥ 1 direction. `person` with no `directions` given → error "choose directions: e.g.
-   photo → name, role → name". `basic` with none given → `front → back`.
+7. A note always has ≥ 1 direction. `person` with no `directions` given → error "choose directions: photo →
+   name + description, name → photo + description, description → name + photo". `basic` with none given → `front → back`.
 
 ## Sibling burying (`deck.py`)
 `SIBLING_BURY = timedelta(hours=6)` (named constant, user decision). One function decides what is servable now and
@@ -76,21 +81,21 @@ after.
 ```json
 // NoteCreate
 {"type": "person",
- "fields": {"photo": "https://example.org/p/42.jpg", "name": "Ada Example", "role": "runs the bakery"},
- "directions": [{"prompt": ["photo"], "answer": ["name"]}, {"prompt": ["role"], "answer": ["name"]}]}
+ "fields": {"photo": "https://example.org/p/42.jpg", "name": "Ada Example", "description": "runs the bakery"},
+ "directions": [{"prompt": ["photo"], "answer": ["name", "description"]}, {"prompt": ["description"], "answer": ["name", "photo"]}]}
 // NoteUpdate (both optional)
-{"fields": {"role": "runs the bakery and the café"}, "directions": [{"prompt": ["photo"], "answer": ["name", "role"]}]}
+{"fields": {"description": "runs the bakery and the café"}, "directions": [{"prompt": ["photo"], "answer": ["name", "description"]}]}
 // Note
-{"id": "…", "type": "person", "fields": {"photo": "…", "name": "Ada Example", "role": "runs the bakery"},
- "cards": [{"id": "…", "prompt": ["photo"], "answer": ["name"], "state": "new", "due": "…", "last_review": null}],
+{"id": "…", "type": "person", "fields": {"photo": "…", "name": "Ada Example", "description": "runs the bakery"},
+ "cards": [{"id": "…", "prompt": ["photo"], "answer": ["name", "description"], "state": "new", "due": "…", "last_review": null}],
  "created_at": "…", "updated_at": "…"}
 ```
 
 ### `/cards` (compatibility; paths unchanged)
 `Card` gains fields; old ones keep their meaning:
 ```json
-{"id": "…", "note_id": "…", "type": "person", "prompt": ["photo"], "answer": ["name", "role"],
- "fields": {"photo": "…", "name": "Ada Example", "role": "runs the bakery"},
+{"id": "…", "note_id": "…", "type": "person", "prompt": ["photo"], "answer": ["name", "description"],
+ "fields": {"photo": "…", "name": "Ada Example", "description": "runs the bakery"},
  "front": "https://example.org/p/42.jpg", "back": "Ada Example\nruns the bakery",
  "state": "new", "due": "…", "last_review": null, "created_at": "…", "updated_at": "…"}
 ```
@@ -131,8 +136,9 @@ those fields (prompt fields -> answer fields) and has its own schedule. Cards of
 siblings: editing a field changes every sibling; deleting the note deletes them all.
 Note types:
 - basic: front, back (both required). Default direction: front -> back.
-- person: photo (public http(s) URL), name (required), role (what they do), context (how the user
-  knows them). No default: list the directions.
+- person: photo (public http(s) URL), name (required), description (free text: what they do, how the user
+  knows them; e.g. "Mistral CEO"). No role/context. Allowed directions, answer = all other non-empty
+  fields: photo -> name+description, name -> photo+description, description -> name+photo. No default.
 
 Edit the note, not loose cards: to fix a typo use `update_note`; to quiz another angle use
 `add_direction`, never a second note with the same content. Check `find_notes` before adding;
@@ -140,7 +146,7 @@ Edit the note, not loose cards: to fix a typo use `update_note`; to quiz another
 
 Choose directions deliberately, never "all of them". Add back -> front only when recalling it that
 way is useful to the user (e.g. vocabulary they must produce, not just recognize). For a person, pick
-the angles the user wants to recall (e.g. photo -> name, role -> name). Each extra direction is extra
+the angles the user wants to recall (e.g. photo -> name+description, description -> name+photo). Each extra direction is extra
 daily work.
 
 Cards stay minimalist: front = a word or short question, back = the shortest answer, one fact per note.
@@ -157,9 +163,10 @@ Ready-made prompts: `quiz_me`, `make_cards`.
 ## Acceptance criteria
 | # | Criterion (observable) | Validated by |
 |---|---|---|
-| 1 | `POST /notes` with the person example returns 201 and a `Note` with 2 cards (`["photo"]→["name"]`, `["role"]→["name"]`), both `new`, due now | pytest (REST) |
+| 1 | `POST /notes` with the person example returns 201 and a `Note` with 2 cards (`["photo"]→["name","description"]`, `["description"]→["name","photo"]`), both `new`, due now | pytest (REST) |
 | 2 | `POST /notes {"type":"basic","fields":{"front":"chat","back":"cat"}}` (no `directions`) creates exactly one card `front → back`; no reverse card exists | pytest |
 | 3 | `person` without `directions` → 422 naming the missing directions; nothing is written | pytest |
+| 3a | *Amended 2026-11-21 (user).* Person: `name → photo` while a description exists (answer not all other non-empty fields), a prompt of two fields, or a direction whose prompt field is empty → 422 listing the three allowed directions; `role`/`context` in `fields` → 422 saying to use `description`; a PATCH adding a description re-derives card answers, keeping card ids | pytest (REST + MCP) |
 | 4 | Validation 1–7 each produce a 422 with a message naming the field/direction (one test per rule), and the same via MCP as a `ToolError` | pytest (REST + MCP) |
 | 5 | `PATCH /notes/{id}` with `fields.name` changes `fields` on every sibling's `Card` (`GET /cards/{id}` of both) and keeps their FSRS state | pytest |
 | 6 | `PATCH /notes/{id}` with `directions` = {kept A, new C}, dropping B: A keeps its id and `due`; C is new and due now; B returns 404; B's `ReviewLog` rows still exist | pytest |

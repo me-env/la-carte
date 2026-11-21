@@ -17,7 +17,7 @@ The app can read and write notes and knows each card's direction and fields, so 
 
 ## Models (`Models.swift`)
 - `NoteType: String, Codable, CaseIterable` = `basic`, `person`, with `fields: [String]` in display order
-  (`["front","back"]`, `["photo","name","role","context"]`). Mirrors the API's fixed set; no other logic.
+  (`["front","back"]`, `["photo","name","description"]` (amended 2026-11-21 (user), see 014)). Mirrors the API's fixed set; no other logic.
 - `Direction: Codable, Hashable { prompt: [String]; answer: [String] }`.
 - `Note: Codable, Equatable, Identifiable { id, type, fields: [String: String], cards: [Note.Card], createdAt,
   updatedAt }`, `Note.Card { id, prompt, answer, state, due, lastReview }` (+ `var direction: Direction`).
@@ -47,9 +47,9 @@ New endpoints (old ones unchanged; 014c removes the ones it stops using):
 - `LA_CARTE_API=mock` is **unchanged**: the 3 fixture cards become 3 `basic` notes (`note.id == card.id`, as the
   migration does), so every existing screenshot and UI test stays valid.
 - New `LA_CARTE_API=mock-notes` = those 3 notes, plus `"la carte"` gets a second direction `back → front`, plus one
-  person note: name "Ada Example", role "runs the bakery", context "met at the climbing gym", photo = a **neutral
+  person note: name "Ada Example", description "runs the bakery, met at the climbing gym", photo = a **neutral
   generated image** (abstract shape, no face, no real person) as a `data:image/png;base64,…` URL constant, cards
-  `photo → name` and `role → name`. Stable ids `…0011`–`…0014`, all due at the fixture date, person cards first.
+  `photo → name+description` and `description → name+photo`. Stable ids `…0011`–`…0014`, all due at the fixture date, person cards first.
   (A `data:` URL is mock-only; the API accepts only http(s). It keeps UI tests offline and deterministic.)
 
 ## Acceptance criteria
