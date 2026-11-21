@@ -1,8 +1,10 @@
 """The deck: every operation on cards. REST routes and MCP tools are thin wrappers around this."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import fsrs
 from sqlmodel import Session, col, func, or_, select
@@ -18,11 +20,26 @@ from la_carte_api.models import (
 )
 
 _scheduler = fsrs.Scheduler()
+_DAY = timedelta(days=1)
 
 
 class CardNotFound(LookupError):
     def __init__(self, card_id: UUID) -> None:
         super().__init__(f"No card with id {card_id}")
+
+
+class UnknownTimeZone(ValueError):
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Unknown time zone: {name}")
+
+
+def time_zone(name: str) -> ZoneInfo:
+    """The IANA time zone `name` (e.g. "Europe/Paris"), or `UnknownTimeZone`."""
+    try:
+        return ZoneInfo(name)
+    # ValueError: malformed key ("../x"); OSError: e.g. a name too long for the file system.
+    except (ZoneInfoNotFoundError, ValueError, OSError) as error:
+        raise UnknownTimeZone(name) from error
 
 
 def list_cards(session: Session, query: str | None = None, limit: int = 100) -> list[Card]:
@@ -119,9 +136,11 @@ def review_card(
     return card
 
 
-def stats(session: Session, now: datetime | None = None) -> DeckStats:
+def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> DeckStats:
+    """Deck counts at `now`. `reviewed_today` and `streak` use calendar days in `tz`."""
     now = now or utcnow()
-    start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today = now.astimezone(tz).date()
+    start_of_day, end_of_day = _local_midnight(today, tz), _local_midnight(today + _DAY, tz)
 
     def count(*where) -> int:
         return session.exec(select(func.count()).select_from(Card).where(*where)).one()
@@ -129,13 +148,38 @@ def stats(session: Session, now: datetime | None = None) -> DeckStats:
     reviewed_today = session.exec(
         select(func.count(func.distinct(ReviewLog.card_id))).where(
             col(ReviewLog.reviewed_at) >= start_of_day,
-            col(ReviewLog.reviewed_at) < start_of_day + timedelta(days=1),
+            col(ReviewLog.reviewed_at) < end_of_day,
         )
     ).one()
+    review_times = session.exec(
+        select(ReviewLog.reviewed_at)
+        .where(col(ReviewLog.reviewed_at) < end_of_day)
+        .order_by(col(ReviewLog.reviewed_at).desc())
+    )
     return DeckStats(
         total=count(),
         due=count(col(Card.due) <= now),
         new=count(col(Card.last_review).is_(None)),
         reviewed_today=reviewed_today,
         next_due=session.exec(select(func.min(Card.due)).where(col(Card.due) > now)).one(),
+        streak=_streak(
+            (t.astimezone(tz).date() for t in review_times),
+            last_day=today if reviewed_today else today - _DAY,  # alive until the end of today
+        ),
     )
+
+
+def _local_midnight(day: date, tz: tzinfo) -> datetime:
+    """Start of `day` in `tz`, as UTC (a local day is 23 or 25 hours long across DST)."""
+    return datetime.combine(day, time(), tzinfo=tz).astimezone(UTC)
+
+
+def _streak(review_days: Iterable[date], last_day: date) -> int:
+    """Consecutive review days ending on `last_day`. `review_days`: local dates, newest first."""
+    streak, expected = 0, last_day
+    for day in review_days:
+        if day == expected:
+            streak, expected = streak + 1, expected - _DAY
+        elif day < expected:
+            break  # a gap; a later day is another review on a day already counted
+    return streak

@@ -20,6 +20,7 @@ def test_card_lifecycle(client):
     stats = client.get("/stats").json()
     assert stats == {
         "total": 1, "due": 0, "new": 0, "reviewed_today": 1, "next_due": reviewed["due"],
+        "streak": 1,
     }  # fmt: skip
 
     assert client.delete(f"/cards/{created['id']}").status_code == 204
@@ -47,3 +48,20 @@ def test_bearer_token_is_required_when_configured():
         assert client.get("/cards").status_code == 401
         assert client.post("/mcp", json={}).status_code == 401
         assert client.get("/cards", headers={"Authorization": "Bearer secret"}).status_code == 200
+
+
+def test_stats_rejects_an_unknown_time_zone(client):
+    response = client.get("/stats", params={"tz": "Mars/Olympus"})
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Unknown time zone: Mars/Olympus"}
+    assert client.get("/stats", params={"tz": "../etc/passwd"}).status_code == 422
+
+
+def test_stats_without_tz_is_utc(client):
+    created = client.post("/cards", json={"front": "chat", "back": "cat"}).json()
+    client.post(f"/cards/{created['id']}/review", json={"rating": "good"})
+
+    default = client.get("/stats").json()
+    assert default == client.get("/stats", params={"tz": "UTC"}).json()
+    assert (default["reviewed_today"], default["streak"]) == (1, 1)
+    assert client.get("/stats", params={"tz": "Europe/Paris"}).status_code == 200

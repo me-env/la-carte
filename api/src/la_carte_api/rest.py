@@ -55,8 +55,13 @@ def review_card(session: SessionDep, card_id: UUID, body: ReviewCreate):
 
 
 @router.get("/stats", response_model=DeckStats)
-def stats(session: SessionDep):
-    return deck.stats(session)
+def stats(session: SessionDep, tz: str = "UTC"):
+    """`tz`: IANA time zone defining "today" for `reviewed_today` and `streak`."""
+    try:
+        zone = deck.time_zone(tz)
+    except deck.UnknownTimeZone as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    return deck.stats(session, tz=zone)
 
 
 def _or_404(operation, *args):

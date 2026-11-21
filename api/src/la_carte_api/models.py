@@ -132,6 +132,7 @@ class DeckStats(BaseModel):
     new: int
     reviewed_today: int
     next_due: datetime | None  # earliest `due` strictly after now; null if no such card
+    streak: int  # consecutive local days with a review, ending today or yesterday (spec 007)
 
 
 class AddCardsResult(BaseModel):

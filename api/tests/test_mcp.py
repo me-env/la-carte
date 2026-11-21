@@ -130,3 +130,35 @@ async def test_prompt_counts_must_be_at_least_one(engine, name, arguments):
         # The SDK reports prompt-argument validation as an internal error (-32603).
         with pytest.raises(MCPError):
             await client.get_prompt(name, arguments)
+
+
+async def test_mcp_review_counts_in_rest_stats(client):
+    async with Client(build_mcp(client.app.state.engine)) as mcp:
+        added = await mcp.call_tool("add_cards", {"cards": [{"front": "chat", "back": "cat"}]})
+        [card] = added.structured_content["added"]
+        await mcp.call_tool("review_card", {"card_id": card["id"], "rating": "good"})
+
+    stats = client.get("/stats").json()
+    assert (stats["reviewed_today"], stats["streak"]) == (1, 1)
+
+
+async def test_deck_stats_takes_a_time_zone(client):
+    async with Client(build_mcp(client.app.state.engine)) as mcp:
+        added = await mcp.call_tool("add_cards", {"cards": [{"front": "chat", "back": "cat"}]})
+        [card] = added.structured_content["added"]
+        await mcp.call_tool("review_card", {"card_id": card["id"], "rating": "good"})
+
+        stats = await mcp.call_tool("deck_stats", {"tz": "UTC"})
+        assert stats.structured_content == client.get("/stats").json()
+        assert stats.structured_content["streak"] == 1
+
+        paris = await mcp.call_tool("deck_stats", {"tz": "Europe/Paris"})
+        assert not paris.is_error
+
+        bad = await mcp.call_tool("deck_stats", {"tz": "Mars/Olympus"})
+        assert bad.is_error
+        assert "Unknown time zone: Mars/Olympus" in bad.content[0].text
+
+        [tool] = [t for t in (await mcp.list_tools()).tools if t.name == "deck_stats"]
+        assert "IANA time zone" in tool.description
+        assert "`streak`" in tool.description

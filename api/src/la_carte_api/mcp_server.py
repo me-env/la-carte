@@ -115,10 +115,18 @@ def build_mcp(engine: Engine) -> MCPServer:
         return CardRead.of(run(deck.review_card, card_id, rating))
 
     @mcp.tool()
-    def deck_stats() -> DeckStats:
+    def deck_stats(tz: str = "UTC") -> DeckStats:
         """How many cards in total, due now, never reviewed, and reviewed today, and when the next
-        card not yet due becomes due (`next_due`, UTC, null if none)."""
-        return run(deck.stats)
+        card not yet due becomes due (`next_due`, UTC, null if none). Read-only.
+
+        `streak`: consecutive days with at least one review, ending today or yesterday, in `tz`.
+        Pass the user's IANA time zone (e.g. `Europe/Paris`) when you know it; `reviewed_today`
+        and `streak` use it. Defaults to UTC; an unknown name is an error."""
+        try:
+            zone = deck.time_zone(tz)
+        except deck.UnknownTimeZone as error:
+            raise ToolError(str(error)) from error
+        return run(partial(deck.stats, tz=zone))
 
     @mcp.prompt(title="Quiz me")
     def quiz_me(
