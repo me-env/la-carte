@@ -12,17 +12,30 @@ public struct StudyFeature {
     var isRevealed = false
     var isReviewing = false
     var phase: Phase = .loading
+    var editing: Field?
+    var draft = ""
+    var isSavingEdit = false
+    var editFailed = false
 
     public init() {}
+
+    /// The side of the revealed card being edited in place (spec 010).
+    public enum Field: Hashable, Sendable {
+      case front, back
+    }
 
     enum Phase: Equatable {
       case loading, studying, caughtUp(nextDue: Date?), offline, notSetUp, unauthorized
     }
   }
 
-  public enum Action {
+  public enum Action: BindableAction {
+    case binding(BindingAction<State>)
     case onAppear
     case revealTapped
+    case cardTapped
+    case textDoubleTapped(State.Field)
+    case editEnded
     case ratingTapped(Rating)
     case retryButtonTapped
     case deckButtonTapped
@@ -34,6 +47,7 @@ public struct StudyFeature {
     case cardsResponse(Result<[Card], any Error>)
     case statsResponse(Result<DeckStats, any Error>)
     case reviewResponse(Result<Card, any Error>)
+    case editSaveResponse(Result<Card, any Error>, previous: Card)
     case delegate(Delegate)
 
     @CasePathable
@@ -49,14 +63,25 @@ public struct StudyFeature {
   public init() {}
 
   public var body: some ReducerOf<Self> {
+    BindingReducer()
     Reduce { state, action in
       switch action {
+      case .binding(\.draft):
+        // A vertical field may type return instead of submitting it: a trailing newline ends the edit.
+        guard state.draft.hasSuffix("\n") else { return .none }
+        state.draft.removeLast()
+        return endEdit(&state)
+
+      case .binding:
+        return .none
+
       case .onAppear, .deckChanged:
         return fetchDueCards(&state)
 
       case .pulledToRefresh, .scenePhaseChanged(.active):
-        // The review's response updates the queue; a list fetched meanwhile could bring the rated card back.
-        guard !state.isReviewing else { return .none }
+        // The review's or the edit's response updates the queue; a list fetched meanwhile could undo it.
+        // While editing, a new list could replace the card under the user's fingers.
+        guard !state.isReviewing, state.editing == nil, !state.isSavingEdit else { return .none }
         return fetchDueCards(&state)
 
       case .scenePhaseChanged:
@@ -70,9 +95,39 @@ public struct StudyFeature {
         state.isRevealed = true
         return .none
 
+      case .cardTapped:
+        if state.editing != nil { return endEdit(&state) }
+        state.isRevealed = true
+        return .none
+
+      case let .textDoubleTapped(field):
+        guard state.isRevealed, state.editing == nil, !state.isSavingEdit, state.phase == .studying,
+          let card = state.cards.first
+        else { return .none }
+        state.editing = field
+        state.draft = field == .front ? card.front : card.back
+        state.editFailed = false
+        return .cancel(id: CancelID.load)
+
+      case .editEnded:
+        return endEdit(&state)
+
+      case let .editSaveResponse(result, previous):
+        state.isSavingEdit = false
+        guard state.cards[id: previous.id] != nil else { return .none }
+        switch result {
+        case let .success(card):
+          state.cards[id: card.id] = card
+        case .failure:
+          state.cards[id: previous.id] = previous
+          state.editFailed = true
+        }
+        return .none
+
       case let .ratingTapped(rating):
         guard !state.isReviewing, let card = state.cards.first else { return .none }
         state.isReviewing = true
+        state.editFailed = false
         // A load in flight may predate the review and would bring the rated card back.
         return .merge(
           .cancel(id: CancelID.load),
@@ -82,10 +137,10 @@ public struct StudyFeature {
         )
 
       case .deckButtonTapped:
-        return .send(.delegate(.deckRequested))
+        return .merge(endEdit(&state), .send(.delegate(.deckRequested)))
 
       case .addButtonTapped:
-        return .send(.delegate(.addCardRequested))
+        return .merge(endEdit(&state), .send(.delegate(.addCardRequested)))
 
       case .openSettingsTapped:
         return .send(.delegate(.settingsRequested))
@@ -122,6 +177,27 @@ public struct StudyFeature {
       case .delegate:
         return .none
       }
+    }
+  }
+
+  /// Saves the edited side optimistically: the trimmed text shows at once and the server's card replaces it.
+  /// An unchanged or blank text just ends the edit. Idempotent, since focus loss can follow Done.
+  private func endEdit(_ state: inout State) -> Effect<Action> {
+    guard let field = state.editing, let previous = state.cards.first else { return .none }
+    state.editing = nil
+    let text = state.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    var card = previous
+    switch field {
+    case .front: card.front = text
+    case .back: card.back = text
+    }
+    guard !text.isEmpty, card != previous else { return .none }
+    state.cards[id: card.id] = card
+    state.isSavingEdit = true
+    return .run { [apiClient, card] send in
+      await send(
+        .editSaveResponse(Result { try await apiClient.updateCard(card.id, card.front, card.back) }, previous: previous)
+      )
     }
   }
 

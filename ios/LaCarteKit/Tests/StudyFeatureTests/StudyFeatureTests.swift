@@ -563,6 +563,359 @@ struct StudyFeatureTests {
     }
   }
 
+  // MARK: Inline edit (spec 010)
+
+  @Test func tappingAnUnrevealedCardRevealsWithoutEditing() async {
+    let store = TestStore(initialState: studying(cards)) { StudyFeature() }
+
+    await store.send(.textDoubleTapped(.front))
+    await store.send(.cardTapped) {
+      $0.isRevealed = true
+    }
+    await store.send(.cardTapped)
+  }
+
+  @Test func doubleTappingARevealedSideEditsItOneAtATime() async {
+    let store = TestStore(initialState: revealed(cards)) { StudyFeature() }
+
+    await store.send(.textDoubleTapped(.front)) {
+      $0.editing = .front
+      $0.draft = "serendipity"
+    }
+    await store.send(.textDoubleTapped(.back))
+    await store.send(.editEnded) {
+      $0.editing = nil
+    }
+    await store.send(.textDoubleTapped(.back)) {
+      $0.editing = .back
+      $0.draft = "finding something good without looking for it"
+    }
+  }
+
+  @Test func doneSavesTheEditOptimistically() async {
+    let updates = LockIsolated<[(Card.ID, String, String)]>([])
+    let (responses, respond) = AsyncStream.makeStream(of: Card.self)
+    var saved = cards[0]
+    saved.back = "a happy accident"
+    let store = TestStore(initialState: revealed(cards)) {
+      StudyFeature()
+    } withDependencies: {
+      $0.apiClient.updateCard = { id, front, back in
+        updates.withValue { $0.append((id, front, back)) }
+        for await card in responses { return card }
+        throw CancellationError()
+      }
+    }
+
+    await store.send(.textDoubleTapped(.back)) {
+      $0.editing = .back
+      $0.draft = "finding something good without looking for it"
+    }
+    await store.send(\.binding.draft, "a happy accident") {
+      $0.draft = "a happy accident"
+    }
+    await store.send(.editEnded) {
+      $0.editing = nil
+      $0.cards[0].back = "a happy accident"
+      $0.isSavingEdit = true
+    }
+    respond.yield(saved)
+    await store.receive(\.editSaveResponse) {
+      $0.isSavingEdit = false
+    }
+    #expect(updates.value.map(\.0) == [cards[0].id])
+    #expect(updates.value.map(\.1) == ["serendipity"])
+    #expect(updates.value.map(\.2) == ["a happy accident"])
+  }
+
+  @Test func returnTypedAtTheEndOfTheFieldEndsTheEdit() async {
+    var state = revealed(cards)
+    state.editing = .back
+    state.draft = "a happy accident"
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.updateCard = { _, _, back in
+        var card = cards[0]
+        card.back = back
+        return card
+      }
+    }
+
+    await store.send(\.binding.draft, "a happy accident\n") {
+      $0.draft = "a happy accident"
+      $0.editing = nil
+      $0.cards[0].back = "a happy accident"
+      $0.isSavingEdit = true
+    }
+    await store.receive(\.editSaveResponse) {
+      $0.isSavingEdit = false
+    }
+  }
+
+  @Test func addingOrOpeningTheDeckWhileEditingCommitsFirst() async {
+    let updates = LockIsolated(0)
+    var state = revealed(cards)
+    state.editing = .back
+    state.draft = "a happy accident"
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.updateCard = { _, _, back in
+        updates.withValue { $0 += 1 }
+        var card = cards[0]
+        card.back = back
+        return card
+      }
+    }
+
+    await store.send(.addButtonTapped) {
+      $0.editing = nil
+      $0.cards[0].back = "a happy accident"
+      $0.isSavingEdit = true
+    }
+    await store.receive(\.delegate.addCardRequested)
+    await store.receive(\.editSaveResponse) {
+      $0.isSavingEdit = false
+    }
+    await store.send(.deckButtonTapped)
+    await store.receive(\.delegate.deckRequested)
+    #expect(updates.value == 1)
+  }
+
+  @Test func tappingTheCardWhileEditingCommits() async {
+    var state = revealed(cards)
+    state.editing = .front
+    state.draft = "serendipitous"
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.updateCard = { _, front, _ in
+        var card = cards[0]
+        card.front = front
+        return card
+      }
+    }
+
+    await store.send(.cardTapped) {
+      $0.editing = nil
+      $0.cards[0].front = "serendipitous"
+      $0.isSavingEdit = true
+    }
+    await store.receive(\.editSaveResponse) {
+      $0.isSavingEdit = false
+    }
+    // Focus loss after the tap ends the same edit again: nothing happens.
+    await store.send(.editEnded)
+  }
+
+  @Test func anUnchangedOrBlankEditSendsNothing() async {
+    // `updateCard` is unimplemented: calling it fails the test.
+    let store = TestStore(initialState: revealed(cards)) { StudyFeature() }
+
+    await store.send(.textDoubleTapped(.front)) {
+      $0.editing = .front
+      $0.draft = "serendipity"
+    }
+    await store.send(\.binding.draft, " serendipity ") {
+      $0.draft = " serendipity "
+    }
+    await store.send(.editEnded) {
+      $0.editing = nil
+    }
+    await store.send(.textDoubleTapped(.back)) {
+      $0.editing = .back
+      $0.draft = "finding something good without looking for it"
+    }
+    await store.send(\.binding.draft, "  \n ") {
+      $0.draft = "  \n "
+    }
+    await store.send(.editEnded) {
+      $0.editing = nil
+    }
+  }
+
+  @Test func theSavedTextIsTrimmed() async {
+    let sent = LockIsolated<String?>(nil)
+    var state = revealed(cards)
+    state.editing = .back
+    state.draft = "  a happy accident \n"
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.updateCard = { _, _, back in
+        sent.setValue(back)
+        var card = cards[0]
+        card.back = back
+        return card
+      }
+    }
+
+    await store.send(.editEnded) {
+      $0.editing = nil
+      $0.cards[0].back = "a happy accident"
+      $0.isSavingEdit = true
+    }
+    await store.receive(\.editSaveResponse) {
+      $0.isSavingEdit = false
+    }
+    #expect(sent.value == "a happy accident")
+  }
+
+  @Test func aFailedSaveRestoresTheTextAndSaysSoUntilTheNextEditOrRating() async {
+    var state = revealed(cards)
+    state.editing = .back
+    state.draft = "a happy accident"
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.updateCard = { _, _, _ in throw APIError(statusCode: 500, message: "Internal Server Error") }
+      $0.apiClient.review = { _, _ in cards[0] }
+    }
+
+    await store.send(.editEnded) {
+      $0.editing = nil
+      $0.cards[0].back = "a happy accident"
+      $0.isSavingEdit = true
+    }
+    await store.receive(\.editSaveResponse) {
+      $0.isSavingEdit = false
+      $0.cards[0].back = self.cards[0].back
+      $0.editFailed = true
+    }
+    await store.send(.textDoubleTapped(.front)) {
+      $0.editing = .front
+      $0.draft = "serendipity"
+      $0.editFailed = false
+    }
+    await store.send(\.binding.draft, "serendipitous") {
+      $0.draft = "serendipitous"
+    }
+    await store.send(.editEnded) {
+      $0.editing = nil
+      $0.cards[0].front = "serendipitous"
+      $0.isSavingEdit = true
+    }
+    await store.receive(\.editSaveResponse) {
+      $0.isSavingEdit = false
+      $0.cards[0].front = "serendipity"
+      $0.editFailed = true
+    }
+    await store.send(.ratingTapped(.good)) {
+      $0.isReviewing = true
+      $0.editFailed = false
+    }
+    await store.receive(\.reviewResponse.success) {
+      $0.isReviewing = false
+      $0.isRevealed = false
+      $0.cards.removeFirst()
+    }
+  }
+
+  @Test func refreshIsSkippedWhileEditing() async {
+    var state = revealed(cards)
+    state.editing = .back
+    // `dueCards` is unimplemented: calling it fails the test.
+    let store = TestStore(initialState: state) { StudyFeature() }
+
+    await store.send(.pulledToRefresh)
+    await store.send(.scenePhaseChanged(.active))
+  }
+
+  @Test func startingAnEditCancelsALoadInFlight() async {
+    let clock = TestClock()
+    let store = TestStore(initialState: revealed(cards)) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.dueCards = { _ in
+        try await clock.sleep(for: .seconds(1))
+        return [cards[1]]
+      }
+    }
+
+    await store.send(.scenePhaseChanged(.active))
+    await store.send(.textDoubleTapped(.back)) {
+      $0.editing = .back
+      $0.draft = "finding something good without looking for it"
+    }
+    await clock.run()
+  }
+
+  @Test func whileASaveIsInFlightNoEditStartsAndRefreshIsSkipped() async {
+    let (responses, respond) = AsyncStream.makeStream(of: Card.self)
+    var state = revealed(cards)
+    state.editing = .back
+    state.draft = "a happy accident"
+    // `dueCards` is unimplemented: calling it fails the test.
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: {
+      $0.apiClient.updateCard = { _, _, _ in
+        for await card in responses { return card }
+        throw CancellationError()
+      }
+    }
+
+    await store.send(.editEnded) {
+      $0.editing = nil
+      $0.cards[0].back = "a happy accident"
+      $0.isSavingEdit = true
+    }
+    await store.send(.textDoubleTapped(.front))
+    await store.send(.pulledToRefresh)
+    await store.send(.scenePhaseChanged(.active))
+    var saved = cards[0]
+    saved.back = "a happy accident"
+    respond.yield(saved)
+    await store.receive(\.editSaveResponse) {
+      $0.isSavingEdit = false
+    }
+    #expect(store.state.isRevealed)
+  }
+
+  @Test func aSaveResponseForARatedCardChangesNothing() async {
+    let (saves, respondToSave) = AsyncStream.makeStream(of: Card.self)
+    var state = revealed(cards)
+    state.editing = .back
+    state.draft = "a happy accident"
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.updateCard = { _, _, _ in
+        for await card in saves { return card }
+        throw CancellationError()
+      }
+      $0.apiClient.review = { _, _ in cards[0] }
+    }
+
+    await store.send(.editEnded) {
+      $0.editing = nil
+      $0.cards[0].back = "a happy accident"
+      $0.isSavingEdit = true
+    }
+    await store.send(.ratingTapped(.good)) {
+      $0.isReviewing = true
+    }
+    await store.receive(\.reviewResponse.success) {
+      $0.isReviewing = false
+      $0.isRevealed = false
+      $0.cards.removeFirst()
+    }
+    var saved = cards[0]
+    saved.back = "a happy accident"
+    respondToSave.yield(saved)
+    await store.receive(\.editSaveResponse) {
+      $0.isSavingEdit = false
+    }
+  }
+
+  private func revealed(_ cards: [Card]) -> StudyFeature.State {
+    var state = studying(cards)
+    state.isRevealed = true
+    return state
+  }
+
   private func studying(_ cards: [Card]) -> StudyFeature.State {
     var state = StudyFeature.State()
     state.cards = IdentifiedArray(uniqueElements: cards)

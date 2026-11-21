@@ -4,8 +4,9 @@ import DesignSystem
 import SwiftUI
 
 public struct StudyView: View {
-  let store: StoreOf<StudyFeature>
+  @Bindable var store: StoreOf<StudyFeature>
   @Environment(\.scenePhase) private var scenePhase
+  @FocusState private var focusedField: StudyFeature.State.Field?
 
   public init(store: StoreOf<StudyFeature>) {
     self.store = store
@@ -23,6 +24,14 @@ public struct StudyView: View {
     .background(Theme.background)
     .onAppear { store.send(.onAppear) }
     .onChange(of: scenePhase) { _, phase in store.send(.scenePhaseChanged(phase)) }
+    .onChange(of: focusedField) { _, field in
+      if field == nil { store.send(.editEnded) }
+    }
+    .onChange(of: store.editFailed) { _, failed in
+      if failed { AccessibilityNotification.Announcement("Couldn't save the edit").post() }
+    }
+    .sensoryFeedback(.selection, trigger: store.editing) { _, new in new != nil }
+    .sensoryFeedback(.error, trigger: store.editFailed) { _, new in new }
   }
 
   private var topBar: some View {
@@ -33,22 +42,33 @@ public struct StudyView: View {
       .accessibilityIdentifier("study.deck")
 
       ZStack {
-        if store.phase == .studying, !store.cards.isEmpty {
-          Text("\(store.cards.count) to review")
-            .font(.meta)
-            .foregroundStyle(Theme.secondaryInk)
-            .multilineTextAlignment(.center)
-            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-            .accessibilityIdentifier("study.remaining")
+        if store.phase == .studying, store.editing == nil {
+          if store.editFailed {
+            counterText("Couldn't save the edit")
+              .accessibilityIdentifier("study.editError")
+              .transition(.opacity)
+          } else if !store.cards.isEmpty {
+            counterText("\(store.cards.count) to review")
+              .accessibilityIdentifier("study.remaining")
+          }
         }
       }
       .frame(maxWidth: .infinity)
+      .animation(Theme.Motion.standard, value: store.editFailed)
 
       CircleIconButton("plus", accessibilityLabel: "Add card") {
         store.send(.addButtonTapped)
       }
       .accessibilityIdentifier("study.add")
     }
+  }
+
+  private func counterText(_ text: String) -> some View {
+    Text(text)
+      .font(.meta)
+      .foregroundStyle(Theme.secondaryInk)
+      .multilineTextAlignment(.center)
+      .dynamicTypeSize(...DynamicTypeSize.accessibility2)
   }
 
   @ViewBuilder private var content: some View {
@@ -133,42 +153,80 @@ public struct StudyView: View {
   /// The rating row shares the card text's `.accessibility2` cap so it never outgrows the card.
   private func studying(_ card: Card) -> some View {
     VStack(spacing: Theme.Spacing.m) {
-      ScrollView {
-        VStack(spacing: Theme.Spacing.m) {
-          Text(card.front)
-            .font(.cardFace)
-            .foregroundStyle(Theme.ink)
-            .accessibilityIdentifier("study.front")
-          Text(card.back)
-            .font(.body)
-            .foregroundStyle(Theme.secondaryInk)
-            .opacity(store.isRevealed ? 1 : 0)
-            .accessibilityHidden(!store.isRevealed)
-            .accessibilityIdentifier("study.back")
+      ScrollViewReader { proxy in
+        ScrollView {
+          VStack(spacing: Theme.Spacing.m) {
+            side(.front, text: card.front, font: .cardFace, color: Theme.ink)
+            side(.back, text: card.back, font: .body, color: Theme.secondaryInk)
+              .opacity(store.isRevealed ? 1 : 0)
+              .accessibilityHidden(!store.isRevealed)
+          }
+          .multilineTextAlignment(.center)
+          .frame(maxWidth: .infinity)
+          .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         }
-        .multilineTextAlignment(.center)
-        .frame(maxWidth: .infinity)
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        .defaultScrollAnchor(.center, for: .alignment)
+        .scrollIndicatorsFlash(trigger: store.isRevealed)
+        .scrollDismissesKeyboard(.interactively)
+        .onChange(of: focusedField) { _, field in
+          guard let field else { return }
+          withAnimation(Theme.Motion.standard) { proxy.scrollTo(field, anchor: .center) }
+        }
       }
-      .defaultScrollAnchor(.center, for: .alignment)
-      .scrollIndicatorsFlash(trigger: store.isRevealed)
       .contentShape(.rect)
-      .onTapGesture { reveal() }
+      .onTapGesture {
+        withAnimation(.easeInOut(duration: 0.25)) { _ = store.send(.cardTapped) }
+      }
       .accessibilityIdentifier("study.card")
 
       ZStack {
         ratingRow(ratingLabel).hidden().accessibilityHidden(true)
-        if store.isRevealed {
-          ratingRow(ratingButton)
-            .disabled(store.isReviewing)
-            .transition(.opacity)
-        } else {
-          Button { reveal() } label: { textButtonLabel("Show answer") }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("study.reveal")
+        if store.editing == nil {
+          if store.isRevealed {
+            ratingRow(ratingButton)
+              .disabled(store.isReviewing)
+              .transition(.opacity)
+          } else {
+            Button { reveal() } label: { textButtonLabel("Show answer") }
+              .buttonStyle(.plain)
+              .accessibilityIdentifier("study.reveal")
+          }
         }
       }
       .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+    }
+  }
+
+  /// One side of the card: its text, or in its place a field that looks the same while that side is edited.
+  @ViewBuilder
+  private func side(_ field: StudyFeature.State.Field, text: String, font: Font, color: ThemeColor) -> some View {
+    let name = field == .front ? "front" : "back"
+    let canEdit = store.isRevealed && store.editing == nil
+    if store.editing == field {
+      TextField("", text: $store.draft, axis: .vertical)
+        .font(font)
+        .foregroundStyle(color)
+        .textFieldStyle(.plain)
+        .submitLabel(.done)
+        .tint(Theme.accent)
+        .focused($focusedField, equals: field)
+        .onSubmit { store.send(.editEnded) }
+        .onAppear { focusedField = field }
+        .id(field)
+        .accessibilityLabel(field == .front ? "Front" : "Back")
+        .accessibilityIdentifier("study.\(name)Field")
+    } else {
+      Text(text)
+        .font(font)
+        .foregroundStyle(color)
+        .id(field)
+        .gesture(TapGesture(count: 2).onEnded { store.send(.textDoubleTapped(field)) }, isEnabled: canEdit)
+        .accessibilityActions {
+          if canEdit {
+            Button("Edit") { store.send(.textDoubleTapped(field)) }
+          }
+        }
+        .accessibilityIdentifier("study.\(name)")
     }
   }
 
@@ -230,4 +288,14 @@ public struct StudyView: View {
   StudyView(store: Store(initialState: StudyFeature.State()) { StudyFeature() } withDependencies: {
     $0.apiClient.isConfigured = { false }
   })
+}
+
+#Preview("Editing the back") {
+  var state = StudyFeature.State()
+  state.cards = IdentifiedArray(uniqueElements: [Card].fixtures)
+  state.phase = .studying
+  state.isRevealed = true
+  state.editing = .back
+  state.draft = [Card].fixtures[0].back
+  return StudyView(store: Store(initialState: state) { StudyFeature() })
 }
