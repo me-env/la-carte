@@ -1,6 +1,6 @@
 # 009 — Native polish: system chrome, states, haptics, icon
 
-Status: draft
+Status: split — implement from [009a](009a-native-deck.md) (Deck), [009b](009b-native-sheets.md) (Editor, Settings, launch, glass buttons), [009c](009c-native-study.md) (Study, after 011). This file stays as the design-lead source; #1 (app icon) is done.
 Owners: ios-engineer (features), design-lead (DesignSystem, AppIcon, LaunchBackground)
 Depends on: 006 (refresh) and 008 (setup) merged first, because both edit the same views. Independent of 007,
 except the `CircleIconButton` change (#9), which the widget doesn't use.
