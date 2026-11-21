@@ -1,6 +1,6 @@
 # QA: 007 Home Screen widget (due count + streak)
 
-Verdict: FAIL (one bug: the widget breaks at accessibility text sizes; everything else passes)
+Verdict: PASS (AX-size bug fixed at d32f582; re-check below. Items left for the user still pending.)
 Date: 2026-11-21 · Simulator: iPhone 17 Pro / iOS 27 (en_US, 12-hour clock) · Code: branch at 143b9cd (review fixes)
 Runs: `qa/screenshots/007-widget/` (widget gallery), `qa/screenshots/007-mock/` (regression subset), `qa/screenshots/007-e2e/`
 Commands (main's test tooling, `--split`, per the manager's "feature classes + smoke only" rule):
@@ -63,3 +63,16 @@ Commands (main's test tooling, `--split`, per the manager's "feature classes + s
 - #24 device check: install the Ad Hoc build over the current one (URL + token already set), add the widget,
   confirm live due count + streak without re-entering settings, tap opens Study; check a tinted/clear Home Screen
   (accented rendering mode). Not automatable here.
+
+## Re-check (commit d32f582, run `007-recheck`)
+
+Fix: Dynamic Type capped at xxLarge plus `minimumScaleFactor` 0.6 on `DeckWidgetView`.
+`WidgetUITests`: 4 passed, 0 failed. Screenshots: `qa/screenshots/007-recheck/`.
+
+- Bug 1 (AX overflow): FIXED. `widget-gallery-xl-{light,dark}.png` and `widget-gallery-xxxl-{light,dark}.png`:
+  all key text ("All caught up", "Next at 6:40 PM", "No cards yet", "Can't reach your deck", "12-day streak",
+  "999 to review") is shown in full with no "…", and everything stays inside its tile. Text remains legible.
+- Not a bug: the large grey labels under tiles are gallery captions and wrap at AX sizes, so grid rows misalign.
+
+Still pending for the user: the checks left for the user in the earlier sections of this report (on-device
+Home Screen checks).
