@@ -6,7 +6,11 @@ import SwiftUI
 public struct StudyView: View {
   @Bindable var store: StoreOf<StudyFeature>
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @FocusState private var focusedField: StudyFeature.State.Field?
+  /// Where the rating drag came down, in the card's coordinates: the ring's center. Visual only.
+  @State private var touchDown: CGPoint?
+  @State private var cardSize = CGSize.zero
 
   public init(store: StoreOf<StudyFeature>) {
     self.store = store
@@ -32,6 +36,13 @@ public struct StudyView: View {
     }
     .sensoryFeedback(.selection, trigger: store.editing) { _, new in new != nil }
     .sensoryFeedback(.error, trigger: store.editFailed) { _, new in new }
+    .sensoryFeedback(trigger: store.swipeRating) { _, new in
+      switch new {
+      case .hard, .good: .selection
+      case .again, .easy: .impact(weight: .medium)
+      case nil: nil
+      }
+    }
   }
 
   private var topBar: some View {
@@ -177,7 +188,24 @@ public struct StudyView: View {
       .onTapGesture {
         withAnimation(.easeInOut(duration: 0.25)) { _ = store.send(.cardTapped) }
       }
+      .gesture(
+        HorizontalPan(isEnabled: store.canRate) { start, translation in
+          touchDown = start
+          store.send(.swipeChanged(fraction: swipeFraction(translation)))
+        } onEnd: { translation in
+          store.send(.swipeEnded(fraction: swipeFraction(translation)))
+        }
+      )
+      .onGeometryChange(for: CGSize.self, of: \.size) { cardSize = $0 }
+      .overlay { swipeRing }
       .accessibilityIdentifier("study.card")
+      #if DEBUG
+        .onChange(of: store.canRate, initial: true) { _, canRate in
+          guard canRate, let fraction = Self.swipePreview else { return }
+          touchDown = nil
+          store.send(.swipeChanged(fraction: fraction))
+        }
+      #endif
 
       ZStack {
         ratingRow(ratingLabel).hidden().accessibilityHidden(true)
@@ -225,20 +253,21 @@ public struct StudyView: View {
           if canEdit {
             Button("Edit") { store.send(.textDoubleTapped(field)) }
           }
+          if store.canRate {
+            ForEach(Rating.allCases, id: \.self) { rating in
+              Button(Self.title(rating)) { store.send(.ratingTapped(rating)) }
+            }
+          }
         }
         .accessibilityIdentifier("study.\(name)")
     }
   }
 
+  /// Forgot and Got it; Hard and Easy are reached by dragging (spec 011).
   private func ratingRow<Item: View>(_ item: @escaping (Rating) -> Item) -> some View {
     ViewThatFits(in: .horizontal) {
-      HStack(spacing: Theme.Spacing.l) {
-        ForEach(Rating.allCases, id: \.self, content: item)
-      }
-      Grid(horizontalSpacing: Theme.Spacing.l, verticalSpacing: Theme.Spacing.s) {
-        GridRow { item(.again); item(.hard) }
-        GridRow { item(.good); item(.easy) }
-      }
+      HStack(spacing: Theme.Spacing.xl) { item(.again); item(.good) }
+      VStack(spacing: Theme.Spacing.s) { item(.again); item(.good) }
     }
   }
 
@@ -249,8 +278,60 @@ public struct StudyView: View {
   }
 
   private func ratingLabel(_ rating: Rating) -> some View {
-    textButtonLabel(rating.rawValue.capitalized)
+    textButtonLabel(Self.title(rating))
   }
+
+  static func title(_ rating: Rating) -> String {
+    switch rating {
+    case .again: "Forgot"
+    case .hard: "Hard"
+    case .good: "Got it"
+    case .easy: "Easy"
+    }
+  }
+
+  /// The dots around the touch-down point while a drag is held. With Reduce Motion they jump between the five
+  /// bin drawings instead of morphing. Appears and fades out by opacity only; the card never moves.
+  private var swipeRing: some View {
+    ZStack {
+      if let ease = store.swipeEase {
+        ConfidenceDots(
+          order: reduceMotion ? Self.binOrder(store.swipeRating) : ease,
+          radius: StudyFeature.ringRadius * cardSize.width
+        )
+        .position(touchDown ?? CGPoint(x: cardSize.width / 2, y: cardSize.height / 2))
+        .accessibilityElement()
+        .accessibilityLabel("Rating")
+        .accessibilityValue(store.swipeRating.map(Self.title) ?? "None")
+        .accessibilityIdentifier("study.swipeRing")
+        .transition(.opacity)
+      }
+    }
+    .allowsHitTesting(false)
+    .animation(Theme.Motion.standard, value: store.swipeEase == nil)
+  }
+
+  private static func binOrder(_ rating: Rating?) -> Double {
+    switch rating {
+    case .again: 0
+    case .hard: 0.25
+    case nil: 0.5
+    case .good: 0.75
+    case .easy: 1
+    }
+  }
+
+  private func swipeFraction(_ translation: CGFloat) -> Double {
+    cardSize.width > 0 ? translation / cardSize.width : 0
+  }
+
+  #if DEBUG
+    /// `-studySwipePreview <f>` holds a drag at `f` card widths so QA can screenshot the dots (spec 011).
+    /// A negative value must be written `"<real>-0.13</real>"` (or `" -0.13"`): a bare `-0.13` reads as a flag.
+    static let swipePreview: Double? =
+      UserDefaults.standard.object(forKey: "studySwipePreview") != nil
+      ? UserDefaults.standard.double(forKey: "studySwipePreview") : nil
+  #endif
 
   /// A plain button only hit-tests what it draws: the 44pt band must be in the label's shape, not outside the button.
   private func textButtonLabel(_ title: String) -> some View {
@@ -288,6 +369,15 @@ public struct StudyView: View {
   StudyView(store: Store(initialState: StudyFeature.State()) { StudyFeature() } withDependencies: {
     $0.apiClient.isConfigured = { false }
   })
+}
+
+#Preview("Rating drag held") {
+  var state = StudyFeature.State()
+  state.cards = IdentifiedArray(uniqueElements: [Card].fixtures)
+  state.phase = .studying
+  state.isRevealed = true
+  state.swipeEase = 0.76
+  return StudyView(store: Store(initialState: state) { StudyFeature() })
 }
 
 #Preview("Editing the back") {

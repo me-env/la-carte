@@ -910,6 +910,222 @@ struct StudyFeatureTests {
     }
   }
 
+  // MARK: Ratings (spec 011)
+
+  @Test func forgotAndGotItSendAgainAndGood() async {
+    for rating in [Rating.again, .good] {
+      let reviewed = LockIsolated<[Rating]>([])
+      let store = TestStore(initialState: revealed(cards)) {
+        StudyFeature()
+      } withDependencies: { [cards] in
+        $0.apiClient.review = { _, rating in
+          reviewed.withValue { $0.append(rating) }
+          return cards[0]
+        }
+      }
+
+      await store.send(.ratingTapped(rating)) {
+        $0.isReviewing = true
+      }
+      await store.receive(\.reviewResponse.success) {
+        $0.isReviewing = false
+        $0.isRevealed = false
+        $0.cards.removeFirst()
+      }
+      #expect(reviewed.value == [rating])
+    }
+  }
+
+  @Test func easeIsTheSwipeOverTheRingClamped() {
+    let expected: [(Double, Double)] = [(-0.6, 0), (-0.25, 0), (-0.1, 0.3), (0, 0.5), (0.1, 0.7), (0.25, 1), (0.6, 1)]
+    for (fraction, ease) in expected {
+      #expect(abs(StudyFeature.ease(forSwipe: fraction) - ease) < 1e-9, "f = \(fraction)")
+    }
+  }
+
+  @Test func easeIsQuantizedIntoFourGradesAndADeadZone() {
+    let expected: [(Double, Rating?)] = [
+      (0, .again), (0.125, .again), (0.126, .hard), (0.35, .hard), (0.351, nil), (0.5, nil), (0.649, nil),
+      (0.65, .good), (0.874, .good), (0.875, .easy), (1, .easy),
+    ]
+    for (ease, rating) in expected {
+      #expect(StudyFeature.rating(forEase: ease) == rating, "v = \(ease)")
+    }
+  }
+
+  @Test func draggingFollowsTheFingerWithTheGradeItWouldSend() async {
+    let store = TestStore(initialState: revealed(cards)) { StudyFeature() }
+
+    await store.send(.swipeChanged(fraction: 0.13)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: 0.13)
+    }
+    #expect(store.state.swipeRating == .good)
+    await store.send(.swipeChanged(fraction: 0.22)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: 0.22)
+    }
+    #expect(store.state.swipeRating == .easy)
+    await store.send(.swipeChanged(fraction: -0.13)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: -0.13)
+    }
+    #expect(store.state.swipeRating == .hard)
+    await store.send(.swipeChanged(fraction: -0.22)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: -0.22)
+    }
+    #expect(store.state.swipeRating == .again)
+    await store.send(.swipeChanged(fraction: 0.04)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: 0.04)
+    }
+    #expect(store.state.swipeRating == nil)
+  }
+
+  @Test(arguments: [(0.13, Rating.good), (0.22, .easy), (-0.13, .hard), (-0.22, .again)])
+  func releasingReviewsWithTheQuantizedGrade(fraction: Double, rating: Rating) async {
+    let reviewed = LockIsolated<[(Card.ID, Rating)]>([])
+    let store = TestStore(initialState: revealed(cards)) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.review = { id, rating in
+        reviewed.withValue { $0.append((id, rating)) }
+        return cards[0]
+      }
+    }
+
+    await store.send(.swipeChanged(fraction: fraction)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: fraction)
+    }
+    await store.send(.swipeEnded(fraction: fraction)) {
+      $0.swipeEase = nil
+      $0.isReviewing = true
+    }
+    await store.receive(\.reviewResponse.success) {
+      $0.isReviewing = false
+      $0.isRevealed = false
+      $0.cards.removeFirst()
+    }
+    #expect(reviewed.value.map(\.0) == [cards[0].id])
+    #expect(reviewed.value.map(\.1) == [rating])
+  }
+
+  @Test func releasingInTheDeadZoneOrBackAtTheStartSendsNothing() async {
+    let store = TestStore(initialState: revealed(cards)) { StudyFeature() }
+
+    await store.send(.swipeChanged(fraction: 0.04)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: 0.04)
+    }
+    await store.send(.swipeEnded(fraction: 0.04)) {
+      $0.swipeEase = nil
+    }
+    await store.send(.swipeChanged(fraction: 0.22)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: 0.22)
+    }
+    await store.send(.swipeChanged(fraction: 0)) {
+      $0.swipeEase = 0.5
+    }
+    await store.send(.swipeEnded(fraction: 0)) {
+      $0.swipeEase = nil
+    }
+  }
+
+  @Test func draggingAnUnrevealedCardDoesNothing() async {
+    let store = TestStore(initialState: studying(cards)) { StudyFeature() }
+
+    await store.send(.swipeChanged(fraction: 0.22))
+    await store.send(.swipeEnded(fraction: 0.22))
+  }
+
+  @Test func draggingWhileEditingDoesNothing() async {
+    var state = revealed(cards)
+    state.editing = .back
+    state.draft = cards[0].back
+    let store = TestStore(initialState: state) { StudyFeature() }
+
+    await store.send(.swipeChanged(fraction: 0.22))
+    await store.send(.swipeEnded(fraction: 0.22))
+  }
+
+  @Test func draggingWhileAReviewIsInFlightDoesNothing() async {
+    var state = revealed(cards)
+    state.isReviewing = true
+    let store = TestStore(initialState: state) { StudyFeature() }
+
+    await store.send(.swipeChanged(fraction: -0.22))
+    await store.send(.swipeEnded(fraction: -0.22))
+  }
+
+  @Test func aFailedDragReviewRetriesToTheSameRevealedCardWithoutARing() async {
+    let store = TestStore(initialState: revealed(cards)) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.review = { _, _ in throw Offline() }
+      $0.apiClient.dueCards = { _ in cards }
+    }
+
+    await store.send(.swipeChanged(fraction: 0.13)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: 0.13)
+    }
+    await store.send(.swipeEnded(fraction: 0.13)) {
+      $0.swipeEase = nil
+      $0.isReviewing = true
+    }
+    await store.receive(\.reviewResponse.failure) {
+      $0.isReviewing = false
+      $0.phase = .offline
+    }
+    await store.send(.retryButtonTapped) {
+      $0.phase = .loading
+    }
+    await store.receive(\.cardsResponse.success) {
+      $0.phase = .studying
+    }
+    #expect(store.state.isRevealed && store.state.swipeEase == nil)
+  }
+
+  @Test func aRefreshWithANewFirstCardClearsTheRing() async {
+    var state = revealed(cards)
+    state.swipeEase = 0.76
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.dueCards = { _ in [cards[1], cards[2]] }
+    }
+
+    await store.send(.scenePhaseChanged(.active))
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = [self.cards[1], self.cards[2]]
+      $0.isRevealed = false
+      $0.swipeEase = nil
+    }
+  }
+
+  @Test func aRefreshWithTheSameFirstCardKeepsTheRing() async {
+    var state = revealed(cards)
+    state.swipeEase = 0.76
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: { [cards] in
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.dueCards = { _ in [cards[0], cards[2]] }
+    }
+
+    await store.send(.scenePhaseChanged(.active))
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = [self.cards[0], self.cards[2]]
+    }
+  }
+
+  @Test func aReleaseAfterTheDragLostItsCardClearsTheRingWithoutAReview() async {
+    var state = revealed(cards)
+    state.swipeEase = 1
+    state.phase = .offline
+    let store = TestStore(initialState: state) { StudyFeature() }
+
+    await store.send(.swipeEnded(fraction: 0.22)) {
+      $0.swipeEase = nil
+    }
+  }
+
   private func revealed(_ cards: [Card]) -> StudyFeature.State {
     var state = studying(cards)
     state.isRevealed = true

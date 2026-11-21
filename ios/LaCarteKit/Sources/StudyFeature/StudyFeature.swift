@@ -16,6 +16,16 @@ public struct StudyFeature {
     var draft = ""
     var isSavingEdit = false
     var editFailed = false
+    /// The continuous ease value 0...1 while a rating drag is held; nil = no ring (spec 011).
+    var swipeEase: Double?
+
+    /// What releasing the drag now would send.
+    var swipeRating: Rating? { swipeEase.flatMap(StudyFeature.rating(forEase:)) }
+
+    /// The buttons can be tapped, a drag can rate, and VoiceOver offers the ratings.
+    var canRate: Bool {
+      phase == .studying && isRevealed && editing == nil && !isReviewing
+    }
 
     public init() {}
 
@@ -37,6 +47,8 @@ public struct StudyFeature {
     case textDoubleTapped(State.Field)
     case editEnded
     case ratingTapped(Rating)
+    case swipeChanged(fraction: Double)
+    case swipeEnded(fraction: Double)
     case retryButtonTapped
     case deckButtonTapped
     case addButtonTapped
@@ -61,6 +73,25 @@ public struct StudyFeature {
   private enum CancelID { case load }
 
   public init() {}
+
+  /// The drag's scale: the ring's radius as a fraction of the card's width.
+  static let ringRadius = 0.25
+
+  /// The ease value for a horizontal drag of `fraction` card widths: 0.5 at touch-down, 0 or 1 on the ring.
+  static func ease(forSwipe fraction: Double) -> Double {
+    min(max(0.5 + fraction / (2 * ringRadius), 0), 1)
+  }
+
+  /// FSRS takes four grades; the middle band is a dead zone so going back to the start cancels.
+  static func rating(forEase ease: Double) -> Rating? {
+    switch ease {
+    case ...0.125: .again
+    case ...0.35: .hard
+    case ..<0.65: nil
+    case ..<0.875: .good
+    default: .easy
+    }
+  }
 
   public var body: some ReducerOf<Self> {
     BindingReducer()
@@ -125,16 +156,18 @@ public struct StudyFeature {
         return .none
 
       case let .ratingTapped(rating):
-        guard !state.isReviewing, let card = state.cards.first else { return .none }
-        state.isReviewing = true
-        state.editFailed = false
-        // A load in flight may predate the review and would bring the rated card back.
-        return .merge(
-          .cancel(id: CancelID.load),
-          .run { [apiClient] send in
-            await send(.reviewResponse(Result { try await apiClient.review(card.id, rating) }))
-          }
-        )
+        return review(rating, state: &state)
+
+      case let .swipeChanged(fraction):
+        guard state.canRate else { return .none }
+        state.swipeEase = Self.ease(forSwipe: fraction)
+        return .none
+
+      case let .swipeEnded(fraction):
+        // A drag can outlive `canRate` (a refresh fails mid-drag): the release always clears the ring.
+        state.swipeEase = nil
+        guard state.canRate, let rating = Self.rating(forEase: Self.ease(forSwipe: fraction)) else { return .none }
+        return review(rating, state: &state)
 
       case .deckButtonTapped:
         return .merge(endEdit(&state), .send(.delegate(.deckRequested)))
@@ -148,6 +181,7 @@ public struct StudyFeature {
       case let .cardsResponse(.success(cards)):
         if cards.first?.id != state.cards.first?.id {
           state.isRevealed = false
+          state.swipeEase = nil
         }
         state.cards = IdentifiedArray(uniqueElements: cards)
         guard cards.isEmpty else {
@@ -178,6 +212,19 @@ public struct StudyFeature {
         return .none
       }
     }
+  }
+
+  private func review(_ rating: Rating, state: inout State) -> Effect<Action> {
+    guard !state.isReviewing, let card = state.cards.first else { return .none }
+    state.isReviewing = true
+    state.editFailed = false
+    // A load in flight may predate the review and would bring the rated card back.
+    return .merge(
+      .cancel(id: CancelID.load),
+      .run { [apiClient] send in
+        await send(.reviewResponse(Result { try await apiClient.review(card.id, rating) }))
+      }
+    )
   }
 
   /// Saves the edited side optimistically: the trimmed text shows at once and the server's card replaces it.
