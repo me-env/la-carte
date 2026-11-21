@@ -3,11 +3,12 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
+from itertools import islice
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import fsrs
-from sqlmodel import Session, col, func, or_, select
+from sqlmodel import Session, col, func, select
 
 from la_carte_api.models import (
     Card,
@@ -43,13 +44,19 @@ def time_zone(name: str) -> ZoneInfo:
 
 
 def list_cards(session: Session, query: str | None = None, limit: int = 100) -> list[Card]:
-    statement = select(Card).order_by(col(Card.created_at).desc()).limit(limit)
-    if query:
-        pattern = f"%{query}%"
-        statement = statement.where(
-            or_(col(Card.front).ilike(pattern), col(Card.back).ilike(pattern))
-        )
-    return list(session.exec(statement))
+    """Newest first. `query` is a trimmed, casefolded substring of front or back.
+
+    Filtered in Python, not SQL: SQLite's LIKE only folds ASCII case ("été" must find "Été")."""
+    statement = select(Card).order_by(col(Card.created_at).desc())
+    needle = (query or "").strip().casefold()
+    if not needle:
+        return list(session.exec(statement.limit(limit)))
+    matches = (
+        card
+        for card in session.exec(statement)
+        if needle in card.front.casefold() or needle in card.back.casefold()
+    )
+    return list(islice(matches, limit))
 
 
 def get_card(session: Session, card_id: UUID) -> Card:

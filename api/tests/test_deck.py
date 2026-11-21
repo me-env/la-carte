@@ -55,6 +55,23 @@ def test_search_matches_front_and_back(session):
     assert [c.front for c in deck.list_cards(session, query="DOG")] == ["chien"]
 
 
+def test_search_is_casefolded_trimmed_and_literal(session):
+    now = utcnow()
+    fronts = ["Été", "50% off", "a_b", "axb", "Straße"]
+    for i, front in enumerate(fronts):  # distinct created_at so newest-first is deterministic
+        deck.add_cards(session, [CardCreate(front=front, back="x")], now=now + timedelta(seconds=i))
+
+    def search(query, limit=100):
+        return [c.front for c in deck.list_cards(session, query=query, limit=limit)]
+
+    assert search("été") == search("ÉTÉ") == search("  été ") == ["Été"]
+    assert search("STRASSE") == ["Straße"]  # casefold, not just lower
+    assert search("%") == ["50% off"]
+    assert search("a_b") == ["a_b"]
+    assert search("   ") == search(None) == list(reversed(fronts))
+    assert search("b", limit=1) == ["axb"]  # limit applies after filtering, newest first
+
+
 def test_next_due_is_the_earliest_due_strictly_after_now(session):
     now = utcnow()
     new_cards = [CardCreate(front=f, back=f) for f in ("a", "b", "c")]
