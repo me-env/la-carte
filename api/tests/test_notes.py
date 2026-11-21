@@ -30,10 +30,10 @@ def anyio_backend():
 PHOTO = "https://example.org/p/42.jpg"  # neutral placeholder, never a real person's photo
 PERSON = {
     "type": "person",
-    "fields": {"photo": PHOTO, "name": "Ada Example", "role": "runs the bakery"},
+    "fields": {"photo": PHOTO, "name": "Ada Example", "description": "runs the bakery"},
     "directions": [
-        {"prompt": ["photo"], "answer": ["name"]},
-        {"prompt": ["role"], "answer": ["name"]},
+        {"prompt": ["photo"], "answer": ["name", "description"]},
+        {"prompt": ["description"]},
     ],
 }  # fmt: skip
 CHAT = {"type": "basic", "fields": {"front": "chat", "back": "cat"}}
@@ -51,7 +51,10 @@ def test_post_person_note_creates_one_card_per_direction(client):
     assert response.status_code == 201
     note = response.json()
     assert (note["type"], note["fields"]) == ("person", PERSON["fields"])
-    assert _ways(note) == [(["photo"], ["name"]), (["role"], ["name"])]
+    assert _ways(note) == [
+        (["photo"], ["name", "description"]),
+        (["description"], ["photo", "name"]),
+    ]
     assert {c["state"] for c in note["cards"]} == {"new"}
     due = {c["id"] for c in client.get("/cards/due").json()}
     assert len(due & {c["id"] for c in note["cards"]}) == 1  # one sibling at a time
@@ -68,7 +71,7 @@ def test_person_without_directions_is_rejected_and_nothing_is_written(client):
     response = client.post("/notes", json={**PERSON, "directions": None})
     assert response.status_code == 422
     assert "Choose directions" in response.json()["detail"]
-    assert "photo -> name" in response.json()["detail"]
+    assert "photo -> name + description" in response.json()["detail"]
     assert client.get("/notes").json() == []
 
 
@@ -81,28 +84,39 @@ def _fields(**changes) -> dict:
 
 
 def _directions(*ways: tuple[list[str], list[str]]) -> dict:
-    return _with(directions=[{"prompt": p, "answer": a} for p, a in ways])
+    return _with(directions=[{"prompt": p, "answer": a} for p, a in ways])  # a None: omitted
 
 
 INVALID = {
     "rule 2, unknown field": (
-        _with(fields=_fields(age="40")), ["'age'", "photo, name, role, context"],
+        _with(fields=_fields(age="40")), ["'age'", "photo, name, description"],
+    ),
+    "removed field role": (_with(fields=_fields(role="CEO")), ["'role'", "use description"]),
+    "removed field context": (
+        _directions((["context"], None)), ["'context'", "use description"],
     ),
     "rule 3, required field": (_with(fields=_fields(name="  ")), ["'name'"]),
     "rule 4, photo not http": (
         _with(fields=_fields(photo="ftp://example.org/a.jpg")), ["'photo'", "http(s)"],
     ),
     "rule 4, photo no host": (_with(fields=_fields(photo="https:///a.jpg")), ["'photo'"]),
-    "rule 5, empty side": (_directions(([], ["name"])), ["(nothing) -> name"]),
+    "rule 5, empty prompt": (_directions(([], ["name"])), ["(nothing) -> name", "one field"]),
+    "rule 5, two prompts": (_directions((["photo", "name"], None)), ["one field"]),
     "rule 5, unknown field": (_directions((["age"], ["name"])), ["'age'"]),
-    "rule 5, not disjoint": (_directions((["name", "role"], ["name"])), ["'name'", "both"]),
+    "rule 5, partial answer": (
+        _directions((["photo"], ["name"])), ["every other field", "photo -> name + description"],
+    ),
     "rule 5, duplicate": (
-        _directions((["name", "photo"], ["role"]), (["photo", "name"], ["role"])),
-        ["photo + name -> role", "twice"],
+        _directions((["name"], None), (["name"], ["photo", "description"])),
+        ["name -> photo + description", "twice"],
     ),
     "rule 6, field missing": (
-        {**_directions((["photo"], ["name"])), "fields": {"name": "Ada"}},
-        ["photo -> name", "'photo'"],
+        {**_directions((["photo"], None)), "fields": {"name": "Ada"}},
+        ["photo -> name + description", "'photo'"],
+    ),
+    "rule 6, nothing to recall": (
+        {**_directions((["name"], None)), "fields": {"name": "Ada"}},
+        ["nothing to recall"],
     ),
     "rule 7, no directions": (_with(directions=[]), ["at least one direction"]),
     "basic, missing back": ({"type": "basic", "fields": {"front": "chat"}}, ["'back'"]),
@@ -129,19 +143,24 @@ async def test_validation_rules_are_tool_errors(engine, body, expected):
             assert text in result.content[0].text
 
 
-def test_values_are_trimmed_empty_means_absent_and_directions_are_in_field_order(client):
-    fields = {"name": " Ada ", "role": "", "context": "the market", "photo": PHOTO}
+def test_values_are_trimmed_empty_means_absent_and_empty_answer_fields_are_left_out(client):
+    fields = {"name": " Ada ", "description": "", "photo": PHOTO}
 
-    def post(prompt, answer):
+    def post(prompt, answer=None):
         directions = [{"prompt": prompt, "answer": answer}]
         return client.post(
             "/notes", json={"type": "person", "fields": fields, "directions": directions}
         )
 
-    assert post(["photo"], ["role"]).status_code == 422  # "" = absent: no role to recall (rule 6)
-    note = post(["name", "photo"], ["context"]).json()
-    assert note["fields"] == {"photo": PHOTO, "name": "Ada", "context": "the market"}
-    assert _ways(note) == [(["photo", "name"], ["context"])]  # the type's field order
+    assert post(["description"]).status_code == 422  # "" = absent: no prompt (rule 6)
+    note = post(["name"], ["photo"]).json()  # the set fields only: accepted
+    assert note["fields"] == {"photo": PHOTO, "name": "Ada"}
+    assert _ways(note) == [(["name"], ["photo"])]  # no description: left out
+    [card] = client.get("/cards").json()
+    assert (card["answer"], card["back"]) == (["photo"], PHOTO)
+
+    patched = client.patch(f"/notes/{note['id']}", json={"fields": {"description": "CEO"}})
+    assert _ways(patched.json()) == [(["name"], ["photo", "description"])]  # shows up when set
 
 
 def test_patch_fields_changes_every_sibling_and_keeps_their_schedule(client):
@@ -157,13 +176,13 @@ def test_patch_fields_changes_every_sibling_and_keeps_their_schedule(client):
     for i in (a, b):
         card = client.get(f"/cards/{i}").json()
         assert card["fields"]["name"] == "Ada Lovelace"
-        assert card["back"] == "Ada Lovelace"
+        assert "Ada Lovelace" in card["back"].split("\n")
         assert (card["due"], card["state"]) == (before[i]["due"], before[i]["state"])
 
 
 def test_patch_clearing_a_field_a_direction_uses_says_remove_the_direction_first(client):
     note = client.post("/notes", json=PERSON).json()
-    response = client.patch(f"/notes/{note['id']}", json={"fields": {"role": ""}})
+    response = client.patch(f"/notes/{note['id']}", json={"fields": {"description": ""}})
     assert response.status_code == 422
     assert "remove the direction first" in response.json()["detail"]
     assert client.get(f"/notes/{note['id']}").json() == note
@@ -177,15 +196,15 @@ def test_patch_directions_keeps_adds_and_deletes_cards(client):
 
     patched = client.patch(
         f"/notes/{note['id']}",
-        json={"directions": [{"prompt": ["photo"], "answer": ["name"]},
-                             {"prompt": ["name"], "answer": ["photo", "role"]}]},
+        json={"directions": [{"prompt": ["photo"], "answer": ["name", "description"]},
+                             {"prompt": ["name"]}]},
     ).json()  # fmt: skip
 
     kept, added = patched["cards"]
     assert (kept["id"], kept["due"]) == (a["id"], a["due"])
     assert (added["prompt"], added["answer"], added["state"]) == (
         ["name"],
-        ["photo", "role"],
+        ["photo", "description"],
         "new",
     )
     assert added["id"] not in (a["id"], b["id"])
@@ -289,11 +308,15 @@ def test_stats_due_matches_the_queue_and_next_due_is_the_end_of_burying(session)
 def test_card_json_carries_note_data_and_joined_front_back(client):
     note = client.post(
         "/notes",
-        json={**PERSON, "directions": [{"prompt": ["photo"], "answer": ["name", "role"]}]},
+        json={**PERSON, "directions": [{"prompt": ["photo"]}]},
     ).json()
     [card] = client.get("/cards").json()
     assert card["note_id"] == note["id"]
-    assert (card["type"], card["prompt"], card["answer"]) == ("person", ["photo"], ["name", "role"])
+    assert (card["type"], card["prompt"], card["answer"]) == (
+        "person",
+        ["photo"],
+        ["name", "description"],
+    )
     assert card["fields"] == PERSON["fields"]
     assert (card["front"], card["back"]) == (PHOTO, "Ada Example\nruns the bakery")
 
@@ -333,7 +356,9 @@ def test_delete_cards_removes_a_direction_and_the_note_with_its_last_card(client
     a, b = (c["id"] for c in note["cards"])
 
     assert client.delete(f"/cards/{a}").status_code == 204
-    assert _ways(client.get(f"/notes/{note['id']}").json()) == [(["role"], ["name"])]
+    assert _ways(client.get(f"/notes/{note['id']}").json()) == [
+        (["description"], ["photo", "name"])
+    ]
 
     assert client.delete(f"/cards/{b}").status_code == 204
     assert client.get(f"/notes/{note['id']}").status_code == 404
@@ -354,8 +379,8 @@ async def test_add_notes_skips_duplicate_keys_unless_allowed(engine):
                 {"type": "basic", "fields": {"front": "  CHAT ", "back": "a cat"}},
                 {"type": "basic", "fields": {"front": "chien", "back": "dog"}},
                 {"type": "basic", "fields": {"front": "Chien", "back": "dog again"}},  # same call
-                {"type": "person", "fields": {"name": " ada EXAMPLE", "role": "x"},
-                 "directions": [{"prompt": ["role"], "answer": ["name"]}]},
+                {"type": "person", "fields": {"name": " ada EXAMPLE", "description": "x"},
+                 "directions": [{"prompt": ["description"]}]},
                 {"type": "basic", "fields": {"front": "Ada Example", "back": "a person"}},
             ]},
         )  # fmt: skip
@@ -394,16 +419,19 @@ async def test_note_tools(engine):
         assert [n["id"] for n in found.structured_content["result"]] == [note["id"]]
 
         updated = await client.call_tool(
-            "update_note", {"note_id": note["id"], "fields": {"context": "the market"}}
+            "update_note", {"note_id": note["id"], "fields": {"description": "the market"}}
         )
-        assert updated.structured_content["fields"]["context"] == "the market"
+        assert updated.structured_content["fields"]["description"] == "the market"
 
-        direction = {"note_id": note["id"], "prompt": ["context"], "answer": ["name"]}
+        direction = {"note_id": note["id"], "prompt": ["name"]}
         added = await client.call_tool("add_direction", direction)
-        assert _ways(added.structured_content)[-1] == (["context"], ["name"])
+        assert _ways(added.structured_content)[-1] == (["name"], ["photo", "description"])
+        again = await client.call_tool("add_direction", {**direction, "answer": ["description"]})
+        assert again.is_error  # a partial answer is refused
+        assert "every other field" in again.content[0].text
         again = await client.call_tool("add_direction", direction)
         assert again.is_error
-        assert "already has the direction context -> name" in again.content[0].text
+        assert "already has the direction name -> photo + description" in again.content[0].text
 
         cards = added.structured_content["cards"]
         for card in cards[:-1]:
@@ -434,6 +462,6 @@ async def test_due_cards_tool_serves_the_buried_queue(engine):
 
 def test_note_types_table_matches_the_spec():
     assert deck.NOTE_TYPES[NoteType.basic].fields == ("front", "back")
-    assert deck.NOTE_TYPES[NoteType.person].fields == ("photo", "name", "role", "context")
+    assert deck.NOTE_TYPES[NoteType.person].fields == ("photo", "name", "description")
     assert deck.SIBLING_BURY == timedelta(hours=6)
-    assert Direction(prompt=["a"], answer=["b"]).prompt == ["a"]
+    assert Direction(prompt=["a"]).answer is None

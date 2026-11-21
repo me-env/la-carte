@@ -150,7 +150,7 @@ class CardRead(BaseModel):
             note_id=note.id,
             type=note.type,
             prompt=card.prompt,
-            answer=card.answer,
+            answer=shown(card.answer, note),
             fields=note.fields,
             front=side(card.prompt),
             back=side(card.answer),
@@ -162,21 +162,32 @@ class CardRead(BaseModel):
         )
 
 
+def shown(answer: list[str], note: Note) -> list[str]:
+    """A card's answer as shown: its fields that are set (a person's answer is stored whole)."""
+    return [name for name in answer if name in note.fields]
+
+
 class Direction(BaseModel):
-    prompt: list[str] = PydanticField(description='Fields shown as the question, e.g. ["photo"].')
-    answer: list[str] = PydanticField(description='Fields to recall, e.g. ["name"].')
+    prompt: list[str] = PydanticField(
+        description='The one field shown as the question, e.g. ["photo"].'
+    )
+    answer: list[str] | None = PydanticField(
+        default=None,
+        description="Fields to recall: always every other field of the note (empty ones are "
+        'left out when shown), e.g. ["name", "description"]. May be omitted.',
+    )
 
 
 class NoteCreate(BaseModel):
     type: NoteType = PydanticField(description="basic or person.")
     fields: dict[str, str] = PydanticField(
         description="basic: front, back (both required). person: photo (public http(s) URL), "
-        "name (required), role (what they do), context (how the user knows them)."
+        'name (required), description (free text, e.g. "Mistral CEO").'
     )
     directions: list[Direction] | None = PydanticField(
         default=None,
-        description="The cards to create. Omit for basic (front -> back only); required for "
-        "person.",
+        description="The cards to create, one per prompt field. Omit for basic (front -> back "
+        "only); required for person: any of photo, name, description as prompt.",
     )
 
 
@@ -218,7 +229,7 @@ class NoteRead(BaseModel):
                 NoteCard(
                     id=c.id,
                     prompt=c.prompt,
-                    answer=c.answer,
+                    answer=shown(c.answer, note),
                     state=c.state,
                     due=c.due,
                     last_review=c.last_review,
