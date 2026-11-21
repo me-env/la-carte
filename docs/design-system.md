@@ -56,7 +56,7 @@ Layouts must reflow at accessibility sizes (`dynamicTypeSize.isAccessibilitySize
 Study caps the card text, the `study.remaining` counter and the rating row at `.accessibility2` so they fit one
 screen; longer card text scrolls (its scroll indicators flash on reveal).
 
-Spacing `Theme.Spacing.s/m/l/xl` = 8/16/24/40. Row radius 12. Screen side margin 16–24.
+Spacing `Theme.Spacing.xs/s/m/l/xl` = 4/8/16/24/40 (`xs` only for a caption tight under its sample). Row radius 12. Screen side margin 16–24.
 
 ## Components
 - `CircleIconButton(systemImage, accessibilityLabel:)` — 44pt, surface fill, soft shadow (light) /

@@ -81,7 +81,7 @@ struct DesignSystemGalleryContent: View {
       }
       HStack(spacing: Theme.Spacing.m) {
         ForEach([0.25, 0.5, 0.75, 1], id: \.self) { progress in
-          VStack(spacing: 4) {
+          VStack(spacing: Theme.Spacing.xs) {
             LaCarteLogo(progress: progress).frame(width: 56, height: 56)
             Text(progress.formatted(.percent)).font(.meta).foregroundStyle(Theme.secondaryInk)
           }
@@ -89,11 +89,11 @@ struct DesignSystemGalleryContent: View {
       }
       .accessibilityIdentifier("gallery.logo.phases")
       HStack(spacing: Theme.Spacing.l) {
-        VStack(spacing: 4) {
+        VStack(spacing: Theme.Spacing.xs) {
           LaCarteLaunchMark().frame(width: 56, height: 56)
           Text("launch").font(.meta).foregroundStyle(Theme.secondaryInk)
         }
-        VStack(spacing: 4) {
+        VStack(spacing: Theme.Spacing.xs) {
           LaCarteLoadingMark().frame(width: 56, height: 56)
           Text("loading").font(.meta).foregroundStyle(Theme.secondaryInk)
         }
@@ -109,7 +109,7 @@ struct DesignSystemGalleryContent: View {
   }
 
   private func logoTile(_ name: String, theme: AppTheme, scheme: ColorScheme) -> some View {
-    VStack(spacing: 4) {
+    VStack(spacing: Theme.Spacing.xs) {
       HStack(alignment: .bottom, spacing: Theme.Spacing.s) {
         LaCarteLogo().frame(width: 29, height: 29)
         LaCarteLogo().frame(width: 44, height: 44)
@@ -152,7 +152,7 @@ struct DesignSystemGalleryContent: View {
   }
 
   private func swatch(_ name: String, _ color: ThemeColor) -> some View {
-    VStack(spacing: 4) {
+    VStack(spacing: Theme.Spacing.xs) {
       RoundedRectangle(cornerRadius: Theme.Radius.row)
         .fill(color)
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.row).strokeBorder(Theme.hairline))
