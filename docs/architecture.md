@@ -33,7 +33,7 @@ Rules:
 
 | Method | Path | Body / query | Returns |
 |---|---|---|---|
-| GET | `/health` | — | `{status}` (no auth) |
+| GET | `/health` | — | `{status, build}` (no auth); `build` = 12-hex sha256 of the API's `.py` source (`build.py`) |
 | GET | `/cards` | `?query=&limit=` | `[Card]` newest first |
 | POST | `/cards` | `{front, back}` | `Card` (201) |
 | GET | `/cards/due` | `?limit=` | `[Card]` most overdue first |
@@ -101,12 +101,13 @@ Changes flow up as delegates: `CardEditor.saved` → Deck/App; `Settings.serverC
 | Variable | Effect |
 |---|---|
 | `LA_CARTE_API=mock` | In-memory deck seeded with `[Card].fixtures` (UI tests, demos) |
-| `LA_CARTE_API_URL` | API base URL (default `http://127.0.0.1:8000`) |
+| `LA_CARTE_API_URL` | API base URL (no default: without it or a stored URL the app shows "Connect your deck") |
 | `LA_CARTE_API_TOKEN` | Bearer token |
 
 On device (spec 003) the URL is stored in `UserDefaults` key `apiURL` (`@Shared(.appStorage)`) and the token in
 the Keychain (`TokenStore`). The live `APIClient` resolves both **per request**:
-launch env > stored value > default (`http://127.0.0.1:8000`, no token).
+launch env > stored value > none. Without both a URL and a token the app shows "Connect your deck" and makes
+no request (`APIClient.isConfigured`, spec 008); a 401/403 shows "Token rejected".
 
 Theme (spec 004): `@Shared(.appStorage("theme"))`, `system|light|dark|forest`; launch argument `-theme forest`
 overrides it for screenshots.

@@ -37,9 +37,14 @@ docker-compose.yml (repo root)
 6. **Deploy**, then check:
    ```bash
    URL=https://carte.example.com TOKEN=…           # your values
-   curl -s $URL/health                              # {"status":"ok"}  (no token needed)
+   curl -s $URL/health                              # {"status":"ok","build":"…"}  (no token needed)
    curl -s -o /dev/null -w '%{http_code}\n' $URL/cards                                   # 401
    curl -s -H "Authorization: Bearer $TOKEN" $URL/cards                                  # [...]
+   ```
+7. **Did the deploy land?** `/health` reports `build`, a hash of the API's Python source. Compare it with
+   your working tree (no token needed; exit 0 = up to date, 1 = behind):
+   ```bash
+   scripts/api-live-check.sh $URL        # or: export LA_CARTE_LIVE_URL=$URL; scripts/api-live-check.sh
    ```
 
 **Keep the volume.** The deck lives only in the named volume `la-carte-data`. Redeploys and image
@@ -81,8 +86,8 @@ Then ask "add these words to my deck". `claude mcp list` should show `la-carte` 
 ## Point the iPhone app at it
 
 The Settings screen (spec 003, backlog #5) is where you do this. Once it ships: Deck → gear icon → URL
-`https://carte.example.com`, token, then *Test connection* ("Connected · N cards"). Until then, the app
-only talks to its built-in default (`http://127.0.0.1:8000`), which works in the simulator but not on the phone.
+`https://carte.example.com`, token, then *Test connection* ("Connected · N cards"). The app has no built-in
+server (spec 008): until both are set it shows "Connect your deck" with an "Open Settings" button.
 
 ## Run the production image locally
 

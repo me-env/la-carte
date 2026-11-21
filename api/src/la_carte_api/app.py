@@ -6,6 +6,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from la_carte_api.build import source_hash
 from la_carte_api.config import Settings
 from la_carte_api.db import make_engine
 from la_carte_api.mcp_server import build_mcp
@@ -31,10 +32,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="la-carte", lifespan=lifespan)
     app.state.engine = engine
+    build = source_hash()
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok"}
+        return {"status": "ok", "build": build}
 
     app.include_router(router)
     app.mount("/", mcp_app)  # serves /mcp; mounted last so REST routes match first
