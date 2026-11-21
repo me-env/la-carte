@@ -5,4 +5,3 @@
 - The Xcode project uses synchronized folders: files added under `LaCarte/` or `LaCarteUITests/`
   are picked up automatically. Don't hand-edit `project.pbxproj` unless adding a target.
 - Build/test only through `../scripts/ios-*.sh` (they pin the simulator and export screenshots).
-- `LaCarteUITests/` belongs to qa-validator.

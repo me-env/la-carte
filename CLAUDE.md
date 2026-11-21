@@ -30,7 +30,9 @@ Simulator defaults: `iPhone 17 Pro`, latest iOS (27). Override with `SIMULATOR=�
 ## How work gets done (agent team)
 
 The main session is the **manager**: it talks to the user, keeps the backlog
-(`docs/specs/backlog.md`), and delegates. It does not write feature code itself.
+(`docs/specs/backlog.md`), and delegates. It does not write feature code itself. It commits finished
+work without asking; it still asks the user before pushing tags, setting secrets, touching the Apple
+account or installing on the iPhone. No CodeGraph in this repo: don't offer to initialize it.
 
 | Agent | Owns | Never |
 |---|---|---|
@@ -40,6 +42,31 @@ The main session is the **manager**: it talks to the user, keeps the backlog
 | `code-reviewer` | Read-only review for simplicity/clarity/conventions | Edits code |
 | `qa-validator` | **Independent** E2E: `ios/LaCarteUITests/**`, `qa/**`, screenshots, verdict | Edits app or API code |
 | `release-engineer` | CI, signing, Ad Hoc builds, installing on the iPhone (`ci/`, `.github/`) | Changes features; touches the Apple account/repo without the user's OK |
+| `design-lead` | Design system + brand: native feel (Apple components first), `docs/design-system.md`, `DesignSystem` module, dynamic SwiftUI logo, app icon, brand kit (`docs/design/brand*`) for marketing | Edits feature code (writes design notes into specs instead) |
+| `instructions-keeper` | Sanity of all agent instructions (`CLAUDE.md`s, `.claude/agents/`, skills, docs agents read): correct, useful, not duplicated, no slop | Touches product code; weakens safety rules |
+| `secrets-guard` | Read-only check that no credentials or private data reach the public repo (tree + history) | Edits files; prints secret values |
+| `marketing` | Demo deck content, demo videos (app + widget, agent-adds-cards via MCP), README visuals (`docs/marketing/`, `marketing/`) | Touches app/API code; shows real URLs, tokens or personal data |
+
+The repo is public: run `secrets-guard` before every push, and whenever CI, signing, deploy or config files change.
+
+**Every agent can spawn sub-agents** (`Agent` tool), in parallel when the work is independent. Use them
+for deep dives: research, reading many files, and especially to **verify that something really can't be
+done** before saying so. Give a sub-agent a narrow brief and the files to read; you stay accountable for
+its result.
+
+**Asking the user for something** (only after that deep dive). One request at a time, each with:
+1. **What** you want to do.
+2. **Why you can't do it yourself**: what you tried or checked, and the concrete blocker (needs their
+   Apple account / physical device / a secret / a UI only they can reach / their decision). "I didn't
+   try" is not a reason.
+3. **What they should do**: exact steps or the command to paste, and how you'll know it worked.
+
+**English only**: app UI, sample and demo content, docs, commits, test fixtures.
+
+**No macOS privacy prompts unless the user is at the Mac and said go:** no `xcrun devicectl`
+(so no `scripts/ios-install-device.sh`), no ad-hoc `xcrun simctl io`/`ui`/`privacy`, no reading
+`~/Library` or the Keychain. A blocked prompt stalls the whole run: use the repo scripts, and list
+skipped checks as "left for the user".
 
 Pipeline per feature — full detail in `docs/workflow.md`:
 **spec (architect) → implement (ios/api engineer) → review (code-reviewer) → validate (qa-validator) → done.**
