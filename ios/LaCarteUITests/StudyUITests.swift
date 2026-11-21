@@ -3,7 +3,7 @@ import XCTest
 /// Spec 001: Study session (home). Replaces spec 000's `testHome_*`.
 /// Mock deck = `LA_CARTE_API=mock`: serendipity, la carte, ephemeral (all due, fixture order).
 final class StudyUITests: XCTestCase {
-  static let ratings = ["again", "hard", "good", "easy"]
+  static let ratings = ["again", "good"]  // spec 011: hard/easy are drag-only
   static let fixtures: [(front: String, back: String)] = [
     ("serendipity", "finding something good without looking for it"),
     ("la carte", "the menu — and the map"),
@@ -48,7 +48,7 @@ final class StudyUITests: XCTestCase {
       el(app, "study.reveal").tap()
       assertRevealed(app, front: Self.fixtures[1].front, back: Self.fixtures[1].back)
       assertFrontDidNotMove(app, from: secondBefore)
-      el(app, "study.rate.hard").tap()
+      el(app, "study.rate.again").tap()
       assertFront(app, Self.fixtures[2].front, remaining: "1 to review")
       app.terminate()
     }
@@ -60,7 +60,7 @@ final class StudyUITests: XCTestCase {
     for appearance in [XCUIDevice.Appearance.light, .dark] {
       XCUIDevice.shared.appearance = appearance
       let app = launch(api: .mock)
-      let plan = ["easy", "again", "good"]
+      let plan = ["good", "again", "good"]
       for (index, card) in Self.fixtures.enumerated() {
         assertFront(app, card.front, remaining: "\(3 - index) to review")
         el(app, index.isMultiple(of: 2) ? "study.card" : "study.reveal").tap()
@@ -123,8 +123,8 @@ final class StudyUITests: XCTestCase {
     assertFront(app, "greeting", remaining: "1 to review")
     el(app, "study.reveal").tap()
     assertRevealed(app, front: "greeting", back: "hello")
-    el(app, "study.rate.easy").tap()
-    // In flight (3s): all four rating buttons disabled.
+    el(app, "study.rate.good").tap()
+    // In flight (3s): both rating buttons disabled.
     for rating in Self.ratings {
       let button = el(app, "study.rate.\(rating)")
       XCTAssertTrue(button.exists, "study.rate.\(rating) vanished while the review is in flight")
@@ -138,7 +138,7 @@ final class StudyUITests: XCTestCase {
     let posts = server.requests.filter { $0.method == "POST" }
     XCTAssertEqual(posts.count, 1, "expected exactly one review POST, got \(posts.map(\.path))")
     XCTAssertEqual(posts.first?.path, "/cards/\(id)/review")
-    XCTAssertTrue(posts.first?.body.contains("\"easy\"") ?? false, "review body \(posts.first?.body ?? "nil") lacks \"easy\"")
+    XCTAssertTrue(posts.first?.body.contains("\"good\"") ?? false, "review body \(posts.first?.body ?? "nil") lacks \"good\"")
     server.stop()
   }
 
@@ -398,7 +398,10 @@ final class StudyUITests: XCTestCase {
     snapshot("study-live-front", appearance: .light)
     el(app, "study.card").tap()
     assertRevealed(app, front: "greeting", back: "hello")
-    el(app, "study.rate.good").tap()
+    // Spec 011 #20: the first card is rated by a drag (f = +0.13 → good).
+    let card = el(app, "study.card")
+    card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+      .press(forDuration: 0.05, thenDragTo: card.coordinate(withNormalizedOffset: CGVector(dx: 0.63, dy: 0.5)))
     assertFront(app, "gratitude", remaining: "1 to review")
     el(app, "study.reveal").tap()
     assertRevealed(app, front: "gratitude", back: "thank you")
@@ -451,7 +454,7 @@ final class StudyUITests: XCTestCase {
   private func assertFrontDidNotMove(_ app: XCUIApplication, from before: CGRect,
                                      file: StaticString = #filePath, line: UInt = #line) {
     // Let the 0.25s fade settle, then compare.
-    _ = el(app, "study.rate.easy").waitForExistence(timeout: 3)
+    _ = el(app, "study.rate.good").waitForExistence(timeout: 3)
     Thread.sleep(forTimeInterval: 0.5)
     let after = el(app, "study.front").frame
     XCTAssertEqual(after.minY, before.minY, accuracy: 0.5, "study.front moved on reveal: \(before) → \(after)",
@@ -477,12 +480,15 @@ final class StudyUITests: XCTestCase {
                                          object: el(app, "study.reveal"))
     XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 3), .completed, "study.reveal still shown after reveal",
                    file: file, line: line)
-    let labels = ["again": "Again", "hard": "Hard", "good": "Good", "easy": "Easy"]
+    let labels = ["again": "Forgot", "good": "Got it"]
     for rating in Self.ratings {
       let button = el(app, "study.rate.\(rating)")
       XCTAssertTrue(button.waitForExistence(timeout: 3), "study.rate.\(rating) missing", file: file, line: line)
       XCTAssertTrue(button.isEnabled, "study.rate.\(rating) disabled", file: file, line: line)
       XCTAssertEqual(button.label, labels[rating], file: file, line: line)
+    }
+    for gone in ["hard", "easy"] {
+      XCTAssertFalse(el(app, "study.rate.\(gone)").exists, "study.rate.\(gone) exists (spec 011)", file: file, line: line)
     }
   }
 

@@ -3,7 +3,7 @@ import XCTest
 /// Spec 006: pull-to-refresh on Study and Deck + reload when the scene becomes active.
 /// "Stub" = `StubAPIServer` + `StubDeck`; the test adds/removes cards on it to simulate an agent (MCP).
 final class RefreshUITests: XCTestCase {
-  static let ratings = ["again", "hard", "good", "easy"]
+  static let ratings = ["again", "good"]  // spec 011
   static let appearances: [XCUIDevice.Appearance] = [.light, .dark]
   static let base = Date(timeIntervalSince1970: 1_767_225_600)  // 2026-01-01: due now
   static let idA = "AAAAAAAA-0000-0000-0000-000000000001"
