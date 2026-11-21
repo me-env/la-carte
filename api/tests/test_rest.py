@@ -65,3 +65,16 @@ def test_stats_without_tz_is_utc(client):
     assert default == client.get("/stats", params={"tz": "UTC"}).json()
     assert (default["reviewed_today"], default["streak"]) == (1, 1)
     assert client.get("/stats", params={"tz": "Europe/Paris"}).status_code == 200
+
+
+def test_deleting_a_card_keeps_stats(client):
+    card = client.post("/cards", json={"front": "chat", "back": "cat"}).json()
+    client.post(f"/cards/{card['id']}/review", json={"rating": "good"})
+    before = client.get("/stats").json()
+
+    assert client.delete(f"/cards/{card['id']}").status_code == 204
+
+    assert client.get("/cards").json() == []
+    assert client.get("/cards/due").json() == []
+    after = client.get("/stats").json()
+    assert (after["reviewed_today"], after["streak"]) == (1, before["streak"]) == (1, 1)

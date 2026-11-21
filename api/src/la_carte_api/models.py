@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 import fsrs
 from pydantic import BaseModel
 from pydantic import Field as PydanticField
-from sqlmodel import Column, Field, ForeignKey, SQLModel, Uuid
+from sqlmodel import Column, Field, SQLModel, Uuid
 
 from la_carte_api.db import UTCDateTime
 
@@ -77,10 +77,11 @@ class Card(SQLModel, table=True):
 
 
 class ReviewLog(SQLModel, table=True):
+    """One review. Never deleted: `card_id` has no foreign key so the history (streak,
+    reviewed_today) survives deleting the card (spec 012)."""
+
     id: int | None = Field(default=None, primary_key=True)
-    card_id: UUID = Field(
-        sa_column=Column(Uuid, ForeignKey("card.id", ondelete="CASCADE"), index=True)
-    )
+    card_id: UUID = Field(sa_column=Column(Uuid, nullable=False, index=True))
     rating: Rating
     reviewed_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime, index=True)
 

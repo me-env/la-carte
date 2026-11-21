@@ -113,7 +113,7 @@ def build_mcp(engine: Engine) -> MCPServer:
 
     @mcp.tool()
     def delete_card(card_id: UUID) -> str:
-        """Delete a card permanently."""
+        """Delete a card permanently. Its review history is kept for stats."""
         run(deck.delete_card, card_id)
         return f"Deleted card {card_id}"
 
