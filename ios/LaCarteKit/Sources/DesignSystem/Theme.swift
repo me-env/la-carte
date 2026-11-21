@@ -31,6 +31,17 @@ public enum Theme {
 
   public enum Radius {
     public static let row: CGFloat = 12
+    /// A person's photo on the card face (spec 014d), continuous corners.
+    public static let photo: CGFloat = 20
+  }
+
+  /// A person's photo (spec 014): circles in the deck row and the editor, a 4:5 portrait on the card face.
+  public enum Photo {
+    public static let thumbnail: CGFloat = 44
+    public static let preview: CGFloat = 88
+    /// Width of the card-face photo; `cardCompact` at accessibility text sizes.
+    public static let card: CGFloat = 240
+    public static let cardCompact: CGFloat = 160
   }
 
   /// Calm, ease-in-out, nothing bounces. Every use has a Reduce Motion variant (a fade or nothing).

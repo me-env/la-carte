@@ -1,8 +1,8 @@
-import CardEditorFeature
 import ComposableArchitecture
 import DeckFeature
 import DeckWidget
 import DesignSystem
+import NoteEditorFeature
 import SettingsFeature
 import StudyFeature
 import SwiftUI
@@ -16,8 +16,8 @@ struct AppView: View {
       .sheet(item: $store.scope(\.$destination, action: \.destination).deck) { deckStore in
         DeckView(store: deckStore)
       }
-      .sheet(item: $store.scope(\.$destination, action: \.destination).addCard) { editorStore in
-        CardEditorView(store: editorStore)
+      .sheet(item: $store.scope(\.$destination, action: \.destination).addNote) { editorStore in
+        NoteEditorView(store: editorStore)
       }
       .sheet(item: $store.scope(\.$destination, action: \.destination).settings) { settingsStore in
         SettingsView(store: settingsStore)
