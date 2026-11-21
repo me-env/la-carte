@@ -11,32 +11,59 @@ struct NoteEditorFeatureTests {
   let laCarte = [Note].fixtures[2]
   struct Offline: Error {}
 
-  let frontBack = Direction(prompt: ["front"], answer: ["back"])
-  let backFront = Direction(prompt: ["back"], answer: ["front"])
-  let photoName = Direction(prompt: ["photo"], answer: ["name"])
-  let photoNameRole = Direction(prompt: ["photo"], answer: ["name", "role"])
-  let roleName = Direction(prompt: ["role"], answer: ["name"])
+  func d(_ prompt: String, _ answer: String...) -> Direction {
+    Direction(prompt: [prompt], answer: answer)
+  }
+
+  var emptyPerson: NoteEditorFeature.State {
+    var state = NoteEditorFeature.State()
+    state.type = .person
+    state.fields = ["photo": "", "name": "", "description": ""]
+    state.directions = []
+    return state
+  }
 
   @Test func aNewNoteIsBasicWithOnlyFrontToBackOn() {
     let state = NoteEditorFeature.State()
     #expect(state.type == .basic)
     #expect(state.fields == ["front": "", "back": ""])
-    #expect(state.directions == [frontBack])
-    #expect(state.catalog == [frontBack, backFront])
+    #expect(state.directions == [d("front")])
+    #expect(state.catalog == [d("front"), d("back")])
     #expect(!state.hasChanges)
   }
 
   @Test func editingPrefillsEveryFieldOfTheTypeAndItsDirections() {
     let state = NoteEditorFeature.State(note: laCarte)
     #expect(state.fields == ["front": "la carte", "back": "the menu — and the map"])
-    #expect(state.directions == [frontBack, backFront])
+    #expect(state.directions == [d("front", "back"), d("back", "front")])
 
-    var noRole = person
-    noRole.fields["role"] = nil
-    let personState = NoteEditorFeature.State(note: noRole)
-    #expect(personState.fields["role"] == "")
-    #expect(personState.directions == [photoName, roleName])
-    #expect(personState.catalog == [photoName, photoNameRole, roleName])
+    let personState = NoteEditorFeature.State(note: person)
+    #expect(personState.directions == [d("photo", "name", "description"), d("description", "photo", "name")])
+    #expect(
+      personState.catalog
+        == [d("photo", "name", "description"), d("name", "photo", "description"), d("description", "photo", "name")]
+    )
+    #expect(!personState.hasChanges)
+  }
+
+  @Test func eachDirectionAsksForEveryOtherNonEmptyField() async {
+    let store = TestStore(initialState: emptyPerson) { NoteEditorFeature() }
+
+    await store.send(.fieldChanged("name", "Ada"))  {
+      $0.fields["name"] = "Ada"
+    }
+    await store.send(.directionToggled(d("name"))) // nothing else to recall yet
+    await store.send(.fieldChanged("description", "Mistral CEO")) {
+      $0.fields["description"] = "Mistral CEO"
+    }
+    await store.send(.directionToggled(d("name", "description"))) {
+      $0.directions = [self.d("name", "description")]
+    }
+    await store.send(.fieldChanged("photo", "https://example.com/a.png")) {
+      $0.fields["photo"] = "https://example.com/a.png"
+      $0.directions = [self.d("name", "photo", "description")]
+    }
+    #expect(store.state.canSave)
   }
 
   @Test func switchingToPersonSwapsTheFieldsAndTurnsEveryDirectionOff() async {
@@ -47,7 +74,7 @@ struct NoteEditorFeatureTests {
     }
     await store.send(.typeChanged(.person)) {
       $0.type = .person
-      $0.fields = ["photo": "", "name": "", "role": "", "context": ""]
+      $0.fields = ["photo": "", "name": "", "description": ""]
       $0.directions = []
     }
     #expect(!store.state.hasChanges)
@@ -55,7 +82,7 @@ struct NoteEditorFeatureTests {
     await store.send(.typeChanged(.basic)) {
       $0.type = .basic
       $0.fields = ["front": "", "back": ""]
-      $0.directions = [self.frontBack]
+      $0.directions = [self.d("front")]
     }
   }
 
@@ -66,69 +93,64 @@ struct NoteEditorFeatureTests {
 
   @Test func directionsTheNoteHasOutsideTheCatalogAreListedAndOn() {
     var note = person
-    let contextName = Direction(prompt: ["context"], answer: ["name"])
-    note.cards.append(Note.Card(id: UUID(), prompt: ["context"], answer: ["name"], due: note.createdAt))
+    let extra = Direction(prompt: ["photo", "description"], answer: ["name"])
+    note.cards.append(Note.Card(id: UUID(), prompt: extra.prompt, answer: extra.answer, due: note.createdAt))
     let state = NoteEditorFeature.State(note: note)
-    #expect(state.catalog == [photoName, photoNameRole, roleName, contextName])
-    #expect(state.directions == [photoName, roleName, contextName])
+    #expect(state.catalog.last == extra)
+    #expect(state.directions == [d("photo", "name", "description"), d("description", "photo", "name"), extra])
   }
 
-  @Test func aDirectionWithEmptyFieldsCantBeTurnedOnButOneAlreadyOnStaysOn() async {
+  @Test func aDirectionWithAnEmptyPromptCantBeTurnedOnButOneAlreadyOnStaysOn() async {
     let store = TestStore(initialState: NoteEditorFeature.State()) { NoteEditorFeature() }
 
-    #expect(store.state.isUnavailable(backFront))
-    #expect(!store.state.isUnavailable(frontBack))
-    await store.send(.directionToggled(backFront))
+    #expect(store.state.isUnavailable(d("back")))
+    await store.send(.directionToggled(d("back")))
 
     await store.send(.fieldChanged("front", "chat")) {
       $0.fields["front"] = "chat"
+      $0.directions = [self.d("front")]
     }
     await store.send(.fieldChanged("back", "cat")) {
       $0.fields["back"] = "cat"
+      $0.directions = [self.d("front", "back")]
     }
-    await store.send(.directionToggled(backFront)) {
-      $0.directions = [self.frontBack, self.backFront]
+    await store.send(.directionToggled(d("back", "front"))) {
+      $0.directions = [self.d("front", "back"), self.d("back", "front")]
     }
     await store.send(.fieldChanged("back", "")) {
       $0.fields["back"] = ""
+      $0.directions = [self.d("front"), self.d("back", "front")]
     }
-    #expect(!store.state.isUnavailable(backFront))
-    #expect(store.state.directions == [frontBack, backFront])
+    #expect(!store.state.isUnavailable(d("back", "front")))
     #expect(!store.state.canSave)
-    await store.send(.directionToggled(backFront)) {
-      $0.directions = [self.frontBack]
+    await store.send(.directionToggled(d("back", "front"))) {
+      $0.directions = [self.d("front")]
     }
-    #expect(store.state.isUnavailable(backFront))
+    #expect(store.state.isUnavailable(d("back", "front")))
   }
 
   @Test func directionsStayInCatalogOrder() async {
-    var state = NoteEditorFeature.State()
-    state.type = .person
-    state.fields = ["photo": "https://example.com/a.png", "name": "Ada", "role": "baker", "context": ""]
-    state.directions = []
+    var state = emptyPerson
+    state.fields = ["photo": "https://example.com/a.png", "name": "Ada", "description": "baker"]
     let store = TestStore(initialState: state) { NoteEditorFeature() }
 
-    await store.send(.directionToggled(roleName)) {
-      $0.directions = [self.roleName]
+    await store.send(.directionToggled(d("description", "photo", "name"))) {
+      $0.directions = [self.d("description", "photo", "name")]
     }
-    await store.send(.directionToggled(photoName)) {
-      $0.directions = [self.photoName, self.roleName]
+    await store.send(.directionToggled(d("photo", "name", "description"))) {
+      $0.directions = [self.d("photo", "name", "description"), self.d("description", "photo", "name")]
     }
   }
 
-  @Test func saveNeedsRequiredFieldsADirectionFilledDirectionsAndAnHTTPPhoto() {
-    var state = NoteEditorFeature.State()
-    state.type = .person
-    state.fields = ["photo": "", "name": "", "role": "", "context": ""]
-    state.directions = []
+  @Test func saveNeedsTheNameADirectionAndAnHTTPPhoto() {
+    var state = emptyPerson
     #expect(!state.canSave)
 
     state.fields["name"] = "Ada"
+    state.fields["description"] = "runs the bakery"
     #expect(!state.canSave)  // no direction
 
-    state.directions = [roleName]
-    #expect(!state.canSave)  // role empty
-    state.fields["role"] = "runs the bakery"
+    state.directions = [d("description", "name")]
     #expect(state.canSave)
 
     state.fields["photo"] = "ftp://example.com/a.png"
@@ -165,17 +187,17 @@ struct NoteEditorFeatureTests {
 
     await store.send(.typeChanged(.person)) {
       $0.type = .person
-      $0.fields = ["photo": "", "name": "", "role": "", "context": ""]
+      $0.fields = ["photo": "", "name": "", "description": ""]
       $0.directions = []
     }
     await store.send(.fieldChanged("name", " Ada ")) {
       $0.fields["name"] = " Ada "
     }
-    await store.send(.fieldChanged("role", "baker")) {
-      $0.fields["role"] = "baker"
+    await store.send(.fieldChanged("description", "baker")) {
+      $0.fields["description"] = "baker"
     }
-    await store.send(.directionToggled(roleName)) {
-      $0.directions = [self.roleName]
+    await store.send(.directionToggled(d("description", "name"))) {
+      $0.directions = [self.d("description", "name")]
     }
     await store.send(.saveButtonTapped) {
       $0.isSaving = true
@@ -186,8 +208,8 @@ struct NoteEditorFeatureTests {
       added.value
         == NoteDraft(
           type: .person,
-          fields: ["photo": "", "name": "Ada", "role": "baker", "context": ""],
-          directions: [roleName]
+          fields: ["photo": "", "name": "Ada", "description": "baker"],
+          directions: [d("description", "name")]
         )
     )
     #expect(dismissed.value)
@@ -205,8 +227,8 @@ struct NoteEditorFeatureTests {
       $0.dismiss = DismissEffect {}
     }
 
-    await store.send(.directionToggled(frontBack)) {
-      $0.directions = [self.backFront]
+    await store.send(.directionToggled(d("front", "back"))) {
+      $0.directions = [self.d("back", "front")]
     }
     await store.send(.saveButtonTapped) {
       $0.isSaving = true
@@ -216,13 +238,17 @@ struct NoteEditorFeatureTests {
     #expect(patched.value?.0 == laCarte.id)
     #expect(
       patched.value?.1
-        == NoteDraft(type: .basic, fields: ["front": "la carte", "back": "the menu — and the map"], directions: [backFront])
+        == NoteDraft(
+          type: .basic, fields: ["front": "la carte", "back": "the menu — and the map"],
+          directions: [d("back", "front")]
+        )
     )
   }
 
   @Test func saveFailureKeepsTheSheetAndShowsTheError() async {
     var state = NoteEditorFeature.State()
     state.fields = ["front": "chat", "back": "cat"]
+    state.directions = [d("front", "back")]
     let store = TestStore(initialState: state) {
       NoteEditorFeature()
     } withDependencies: {
@@ -248,11 +274,11 @@ struct NoteEditorFeatureTests {
     #expect(state.hasChanges)
 
     state = NoteEditorFeature.State(note: laCarte)
-    state.directions = [frontBack]
+    state.directions = [d("front", "back")]
     #expect(state.hasChanges)
 
     state = NoteEditorFeature.State()
-    state.directions = [frontBack, backFront]
+    state.directions = [d("front"), d("back")]
     #expect(state.hasChanges)
   }
 
@@ -271,8 +297,8 @@ struct NoteEditorFeatureTests {
   @Test func closeWithChangesAsksBeforeDiscarding() async {
     let store = TestStore(initialState: NoteEditorFeature.State(note: person)) { NoteEditorFeature() }
 
-    await store.send(.directionToggled(roleName)) {
-      $0.directions = [self.photoName]
+    await store.send(.directionToggled(d("description", "photo", "name"))) {
+      $0.directions = [self.d("photo", "name", "description")]
     }
     await store.send(.closeButtonTapped) {
       $0.isDiscardDialogPresented = true
@@ -280,7 +306,7 @@ struct NoteEditorFeatureTests {
     await store.send(\.binding.isDiscardDialogPresented, false) {
       $0.isDiscardDialogPresented = false
     }
-    #expect(store.state.directions == [photoName])
+    #expect(store.state.directions == [d("photo", "name", "description")])
   }
 
   @Test func discardDismisses() async {
@@ -298,9 +324,14 @@ struct NoteEditorFeatureTests {
     #expect(dismissed.value)
   }
 
-  @Test func directionLabelsUseFieldLabels() {
-    #expect(NoteEditorView.label(photoNameRole, side: " → ", join: " + ") == "Photo → Name + Role")
-    #expect(NoteEditorView.label(photoNameRole, side: " to ", join: " and ") == "Photo to Name and Role")
-    #expect(NoteEditorView.label(backFront, side: " → ", join: " + ") == "Back → Front")
+  @Test func directionRowsHaveStableIdsAndReadableLabels() {
+    #expect(NoteEditorView.identifier(d("photo"), type: .person) == "photo-name+description")
+    #expect(NoteEditorView.identifier(d("name", "photo"), type: .person) == "name-photo+description")
+    #expect(NoteEditorView.identifier(d("back", "front"), type: .basic) == "back-front")
+    #expect(NoteEditorView.label(d("photo", "name"), type: .person, side: " → ", join: " + ") == "Photo")
+    #expect(NoteEditorView.label(d("back", "front"), type: .basic, side: " → ", join: " + ") == "Back → Front")
+    let extra = Direction(prompt: ["photo", "description"], answer: ["name"])
+    #expect(NoteEditorView.identifier(extra, type: .person) == "photo+description-name")
+    #expect(NoteEditorView.label(extra, type: .person, side: " to ", join: " and ") == "Photo and Description to Name")
   }
 }

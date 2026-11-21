@@ -77,9 +77,9 @@ struct InMemoryAPIClientTests {
 
     let updated = try await client.updateNote(
       person.id,
-      NoteDraft(type: .person, fields: ["role": ""], directions: [person.cards[0].direction])
+      NoteDraft(type: .person, fields: ["description": ""], directions: [person.cards[0].direction])
     )
-    #expect(updated.fields["role"] == nil)
+    #expect(updated.fields["description"] == nil)
     #expect(updated.cards.map(\.id) == [person.cards[0].id])
     #expect(updated.cards[0].lastReview == now)
   }

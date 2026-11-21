@@ -63,7 +63,10 @@ struct AppFeatureTests {
       $0.destination?.modify(\.addNote) { $0.fields["front"] = "chat" }
     }
     await store.send(\.destination.addNote.fieldChanged, ("back", "cat")) {
-      $0.destination?.modify(\.addNote) { $0.fields["back"] = "cat" }
+      $0.destination?.modify(\.addNote) {
+        $0.fields["back"] = "cat"
+        $0.directions = [Direction(prompt: ["front"], answer: ["back"])]
+      }
     }
     await store.send(\.destination.addNote.saveButtonTapped) {
       $0.destination?.modify(\.addNote) { $0.isSaving = true }

@@ -24,32 +24,33 @@ public struct NoteEditorFeature {
       self.type = type
       self.fields = type.emptyFields.merging(note?.fields ?? [:]) { $1 }
       self.directions = []
-      self.directions = sortedInCatalogOrder(note?.cards.map(\.direction) ?? type.defaultDirections)
+      setDirections(note?.cards.map(\.direction) ?? type.defaultDirections)
     }
 
-    /// The type's directions, then any other direction the note already has (e.g. added by an agent).
+    /// One direction per field of the type, then any other direction the note already has (e.g. from an agent).
     var catalog: [Direction] {
-      let extras = (note?.cards.map(\.direction) ?? []).filter { !type.directionCatalog.contains($0) }
-      return type.directionCatalog + extras
+      type.fields.map { Self.normalized(Direction(prompt: [$0], answer: []), type: type, fields: fields) }
+        + (note?.cards.map(\.direction) ?? []).filter { !type.isCatalogPrompt($0.prompt) }
     }
 
-    /// An off direction whose fields aren't all filled can't be turned on.
+    /// An off direction that would show or ask for an empty field can't be turned on.
     func isUnavailable(_ direction: Direction) -> Bool {
-      !directions.contains(direction) && !isFilled(direction.prompt + direction.answer)
+      !directions.contains(direction) && !isComplete(direction)
     }
 
     var canSave: Bool {
       !isSaving
         && isFilled(type.requiredFields)
         && !directions.isEmpty
-        && directions.allSatisfy { isFilled($0.prompt + $0.answer) }
+        && directions.allSatisfy(isComplete)
         && isPhotoValid
     }
 
     /// For a new note, the current type's empty fields and default directions count as unchanged.
     var hasChanges: Bool {
       let originalFields = type.emptyFields.merging(note?.fields ?? [:]) { $1 }
-      let originalDirections = note?.cards.map(\.direction) ?? type.defaultDirections
+      let originalDirections = (note?.cards.map(\.direction) ?? type.defaultDirections)
+        .map { Self.normalized($0, type: type, fields: originalFields) }
       return fields.mapValues(\.trimmed) != originalFields || Set(directions) != Set(originalDirections)
     }
 
@@ -75,8 +76,21 @@ public struct NoteEditorFeature {
       names.allSatisfy { !(fields[$0]?.trimmed ?? "").isEmpty }
     }
 
-    fileprivate func sortedInCatalogOrder(_ directions: [Direction]) -> [Direction] {
-      catalog.filter { directions.contains($0) }
+    private func isComplete(_ direction: Direction) -> Bool {
+      !direction.prompt.isEmpty && !direction.answer.isEmpty && isFilled(direction.prompt + direction.answer)
+    }
+
+    /// Keeps the directions that are on in catalog order, each catalog one asking for the current other fields.
+    fileprivate mutating func setDirections(_ directions: [Direction]) {
+      let on = directions.map { Self.normalized($0, type: type, fields: fields) }
+      self.directions = catalog.filter { on.contains($0) }
+    }
+
+    /// A catalog direction shows its one field and asks for every other non-empty one (person model, spec 014).
+    private static func normalized(_ direction: Direction, type: NoteType, fields: [String: String]) -> Direction {
+      guard type.isCatalogPrompt(direction.prompt) else { return direction }
+      let answer = type.fields.filter { $0 != direction.prompt[0] && !(fields[$0]?.trimmed ?? "").isEmpty }
+      return Direction(prompt: direction.prompt, answer: answer)
     }
   }
 
@@ -110,18 +124,19 @@ public struct NoteEditorFeature {
         guard state.note == nil, type != state.type else { return .none }
         state.type = type
         state.fields = type.emptyFields
-        state.directions = type.defaultDirections
+        state.setDirections(type.defaultDirections)
         return .none
 
       case let .fieldChanged(name, value):
         state.fields[name] = value
+        state.setDirections(state.directions)
         return .none
 
       case let .directionToggled(direction):
         if let index = state.directions.firstIndex(of: direction) {
           state.directions.remove(at: index)
         } else if !state.isUnavailable(direction) {
-          state.directions = state.sortedInCatalogOrder(state.directions + [direction])
+          state.setDirections(state.directions + [direction])
         }
         return .none
 
@@ -171,20 +186,7 @@ public struct NoteEditorFeature {
 }
 
 extension NoteType {
-  /// The directions the editor offers, a UI choice: the API takes any. Never a reverse unless the user picks it.
-  var directionCatalog: [Direction] {
-    switch self {
-    case .basic:
-      [Direction(prompt: ["front"], answer: ["back"]), Direction(prompt: ["back"], answer: ["front"])]
-    case .person:
-      [
-        Direction(prompt: ["photo"], answer: ["name"]),
-        Direction(prompt: ["photo"], answer: ["name", "role"]),
-        Direction(prompt: ["role"], answer: ["name"]),
-      ]
-    }
-  }
-
+  /// Never a reverse unless the user picks it: basic starts with `front → back`, person with nothing.
   var defaultDirections: [Direction] {
     switch self {
     case .basic: [Direction(prompt: ["front"], answer: ["back"])]
@@ -197,6 +199,11 @@ extension NoteType {
     case .basic: ["front", "back"]
     case .person: ["name"]
     }
+  }
+
+  /// The editor offers one direction per field: that field as the prompt, the rest as the answer.
+  func isCatalogPrompt(_ prompt: [String]) -> Bool {
+    prompt.count == 1 && fields.contains(prompt[0])
   }
 
   fileprivate var emptyFields: [String: String] {

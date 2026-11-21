@@ -217,7 +217,7 @@ extension Note {
   var subtitle: String {
     switch type {
     case .basic: fields["back"] ?? ""
-    case .person: [fields["role"], fields["context"]].compactMap { $0 }.first { !$0.isEmpty } ?? ""
+    case .person: fields["description"] ?? ""
     }
   }
 

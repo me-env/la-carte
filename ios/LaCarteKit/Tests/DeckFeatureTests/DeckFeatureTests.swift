@@ -453,7 +453,10 @@ struct DeckFeatureTests {
       $0.destination?.modify(\.editor) { $0.fields["front"] = "chat" }
     }
     await store.send(\.destination.editor.fieldChanged, ("back", "cat")) {
-      $0.destination?.modify(\.editor) { $0.fields["back"] = "cat" }
+      $0.destination?.modify(\.editor) {
+        $0.fields["back"] = "cat"
+        $0.directions = [Direction(prompt: ["front"], answer: ["back"])]
+      }
     }
     await store.send(\.destination.editor.saveButtonTapped) {
       $0.destination?.modify(\.editor) { $0.isSaving = true }
@@ -519,10 +522,6 @@ struct DeckFeatureTests {
     #expect(person.subtitle == "runs the bakery")
     #expect(person.stateText == "2 directions")
     #expect(person.photoURL != nil)
-
-    var noRole = person
-    noRole.fields["role"] = nil
-    #expect(noRole.subtitle == "met at the climbing gym")
 
     let basic = notes[1]
     #expect(basic.title == "serendipity")

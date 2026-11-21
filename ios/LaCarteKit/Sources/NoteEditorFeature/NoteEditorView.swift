@@ -38,8 +38,7 @@ public struct NoteEditorView: View {
           photoSection
           Section {
             field("name", prompt: "Name")
-            field("role", prompt: "What they do")
-            field("context", prompt: "How you know them")
+            field("description", prompt: "Who they are, e.g. what they do")
               .lineLimit(1...3)
           }
         }
@@ -125,6 +124,8 @@ public struct NoteEditorView: View {
         if store.directions.isEmpty {
           Text("Choose at least one direction")
             .accessibilityIdentifier("editor.directionsHint")
+        } else if store.type == .person {
+          Text("Each direction is its own card: it shows that field and asks for the rest.")
         } else {
           Text("Each direction is its own card.")
         }
@@ -145,7 +146,7 @@ public struct NoteEditorView: View {
       store.send(.directionToggled(direction))
     } label: {
       HStack {
-        Text(Self.label(direction, side: " → ", join: " + "))
+        Text(Self.label(direction, type: store.type, side: " → ", join: " + "))
           .foregroundStyle(isUnavailable ? Theme.secondaryInk : Theme.ink)
         Spacer(minLength: Theme.Spacing.s)
         if isOn {
@@ -157,18 +158,27 @@ public struct NoteEditorView: View {
     }
     .disabled(isUnavailable)
     .listRowBackground(Rectangle().fill(Theme.surface))
-    .accessibilityLabel(Self.label(direction, side: " to ", join: " and "))
+    .accessibilityLabel(Self.label(direction, type: store.type, side: " to ", join: " and "))
     .accessibilityAddTraits(isOn ? .isSelected : [])
-    .accessibilityIdentifier(
-      "editor.direction.\(direction.prompt.joined(separator: "+"))-\(direction.answer.joined(separator: "+"))"
-    )
+    .accessibilityIdentifier("editor.direction.\(Self.identifier(direction, type: store.type))")
   }
 
-  /// "Photo → Name + Role" on screen, "Photo to Name and Role" for VoiceOver.
-  static func label(_ direction: Direction, side: String, join: String) -> String {
-    [direction.prompt, direction.answer]
+  /// A person's directions read as their prompt ("Photo"); others as "Front → Back" ("Front to Back" for VoiceOver).
+  static func label(_ direction: Direction, type: NoteType, side: String, join: String) -> String {
+    if type == .person, type.isCatalogPrompt(direction.prompt) {
+      return direction.prompt[0].capitalized
+    }
+    return [direction.prompt, direction.answer]
       .map { $0.map(\.capitalized).joined(separator: join) }
       .joined(separator: side)
+  }
+
+  /// `<prompt>-<answer>`, fields joined by `+`. A catalog direction names every other field of the type, so its id
+  /// doesn't change while fields are typed: `front-back`, `photo-name+description`.
+  static func identifier(_ direction: Direction, type: NoteType) -> String {
+    let answer =
+      type.isCatalogPrompt(direction.prompt) ? type.fields.filter { $0 != direction.prompt[0] } : direction.answer
+    return "\(direction.prompt.joined(separator: "+"))-\(answer.joined(separator: "+"))"
   }
 
   private func field(_ name: String, prompt: String) -> some View {
