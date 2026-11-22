@@ -17,6 +17,8 @@ public struct StudyView: View {
   @State private var cardSize = CGSize.zero
   /// A long card scrolls, so a vertical first movement is left to the scroll view (spec 019).
   @State private var isCardScrollable = false
+  /// The card's visible height: a person card centres itself in it, see `studying`.
+  @State private var cardHeight: CGFloat = 0
   /// Flashes the scroll indicators on each reveal, never as a card leaves.
   @State private var revealCount = 0
   @State private var reportMenuHeight: CGFloat = 360
@@ -251,6 +253,9 @@ public struct StudyView: View {
                 }
               }
             }
+            // A person card centres itself, not through the scroll view's alignment (kept for basic cards): that one
+            // shifted the whole content at once on reveal, so whatever faded out was drawn away from what moved (014d).
+            .frame(minHeight: card.type == .person ? cardHeight : nil)
             .dynamicTypeSize(...DynamicTypeSize.accessibility2)
             // Fades under the dial while a drag is held; animated only as the drag starts and ends.
             .opacity(store.cardTextOpacity)
@@ -264,14 +269,16 @@ public struct StudyView: View {
           }
         }
         .onChange(of: card.id) { _, id in proxy.scrollTo(id, anchor: .top) }
-        // Every path that reveals a person card's text prompt moves it in one transaction, scroll anchoring included.
+        // Every path that reveals a person card's text prompt moves it in one transaction (Reduce Motion: none, the
+        // cross-fade animates its own opacity).
         .transaction(value: store.isRevealed) { transaction in
           guard store.isRevealed, card.isPersonWithTextPrompt else { return }
-          transaction.animation = reduceMotion ? Theme.Motion.standard : Theme.Motion.reveal
+          transaction.animation = reduceMotion ? nil : Theme.Motion.reveal
         }
         .onScrollGeometryChange(for: Bool.self, of: { $0.contentSize.height > $0.containerSize.height }) {
           isCardScrollable = $1
         }
+        .onScrollGeometryChange(for: CGFloat.self, of: \.containerSize.height) { cardHeight = $1 }
         .defaultScrollAnchor(.center, for: .alignment)
         // On reveal only: flashing on `isRevealed` also fired as the next card came in, where the hidden answer laid
         // out below a short question often overflows, so a card that visibly fits showed a scroll bar.
@@ -606,11 +613,14 @@ public struct StudyView: View {
         }
       }
     } else if reduceMotion {
-      // No move, no morph: the question fades out and the composition fades in, in its final place.
-      if store.isRevealed {
-        personQuestion(card, rows: rows, revealed: true).transition(.opacity)
-      } else {
-        personQuestion(card, rows: rows, revealed: false).transition(.opacity)
+      // No move, no morph: both are laid out in place and only their opacity changes.
+      CrossFadeStack(showsSecond: store.isRevealed) {
+        personQuestion(card, rows: rows, revealed: false)
+          .animation(Theme.Motion.standard) { $0.opacity(store.isRevealed ? 0 : 1) }
+          .accessibilityHidden(store.isRevealed)
+        personQuestion(card, rows: rows, revealed: true)
+          .animation(Theme.Motion.standard) { $0.opacity(store.isRevealed ? 1 : 0) }
+          .accessibilityHidden(!store.isRevealed)
       }
     } else {
       personQuestion(card, rows: rows, revealed: store.isRevealed)
@@ -621,32 +631,65 @@ public struct StudyView: View {
   /// keyed by field name, so the prompt keeps its identity and moves.
   private func personQuestion(_ card: Card, rows: [String], revealed: Bool) -> some View {
     let shown = revealed ? rows : rows.filter(card.prompt.contains)
+    let promptIsName = card.prompt.contains(Card.nameField)
     return VStack(spacing: 0) {
       ForEach(shown, id: \.self) { name in
         let isPrompt = card.prompt.contains(name)
         Group {
           if name == Card.photoField {
             photo(of: card, side: .back)
+              .accessibilityActions { ratingActions }
+          } else if isPrompt {
+            personPrompt(name, of: card, revealed: revealed)
           } else {
             personText(name, of: card, revealed: revealed)
-              .accessibilityIdentifier(isPrompt ? "study.front" : "study.back")
+              .accessibilityActions { ratingActions }
+              .accessibilityIdentifier("study.back")
           }
         }
-        .accessibilityActions { ratingActions }
         .padding(.top, Self.gap(before: name, in: shown))
-        // Spec 014d's timings, not tokens: new rows fade in as room opens, so nothing overlaps the moving text.
-        .transition(isPrompt ? .identity : .opacity.animation(.easeOut(duration: 0.25).delay(0.1)))
-      }
-      if !revealed, let hint = store.answerHint {
-        answerHint(hint)
-          .padding(.top, Theme.Spacing.m)
-          .transition(.opacity.animation(.easeIn(duration: 0.15)))  // spec 014d
+        // Not tokens: new rows fade in once the prompt has moved past them, so nothing overlaps it. A description
+        // travels further, under the name's row.
+        .transition(isPrompt ? .identity : .opacity.animation(.easeOut(duration: 0.2).delay(promptIsName ? 0.2 : 0.3)))
       }
     }
   }
 
-  /// One text row, the same view as question and answer: a prompt changes font, colour and frame on reveal. The name
-  /// morphs (one line); a description cross-fades its style while it re-wraps into the caption block.
+  /// A text prompt's row, its hint under it before reveal. The hint stays in the row and folds to no height as it
+  /// fades: removed, it faded where it was while the prompt moved across it.
+  private func personPrompt(_ name: String, of card: Card, revealed: Bool) -> some View {
+    VStack(spacing: 0) {
+      Group {
+        if name == Card.nameField {
+          personText(name, of: card, revealed: revealed)
+        } else {
+          // A description re-wraps and changes colour: its two styles cross-fade on one moving frame. A `Text` with
+          // `.contentTransition(.opacity)` drew the old style at its old place, a copy left behind.
+          CrossFadeStack(showsSecond: revealed) {
+            // Done before the rows above fade in (0.3 s delay): the larger prompt style reaches into the name's row.
+            personText(name, of: card, revealed: false)
+              .animation(.easeOut(duration: 0.15)) { $0.opacity(revealed ? 0 : 1) }
+              .accessibilityHidden(revealed)
+            personText(name, of: card, revealed: true)
+              .animation(.easeOut(duration: 0.2)) { $0.opacity(revealed ? 1 : 0) }
+              .accessibilityHidden(!revealed)
+          }
+        }
+      }
+      .accessibilityActions { ratingActions }
+      .accessibilityIdentifier("study.front")
+      if let hint = store.answerHint {
+        answerHint(hint)
+          .padding(.top, Theme.Spacing.m)
+          // Gone before the prompt reaches it (0.15 s ease-in still showed under the moving name).
+          .animation(.easeOut(duration: 0.1)) { $0.opacity(revealed ? 0 : 1) }
+          .frame(height: revealed ? 0 : nil, alignment: .top)
+          .accessibilityHidden(revealed)
+      }
+    }
+  }
+
+  /// One text row: a prompt's style before reveal, the composition's after it. The name morphs its font (one line).
   private func personText(_ name: String, of card: Card, revealed: Bool) -> some View {
     let isQuestion = !revealed && card.prompt.contains(name)
     let isName = name == Card.nameField
@@ -655,7 +698,7 @@ public struct StudyView: View {
     return Text(card.fields[name] ?? "")
       .font(isQuestion ? card.promptFont.font : isName ? .cardFaceSmall : .body)
       .foregroundStyle(isQuestion || isName ? Theme.ink : Theme.secondaryInk)
-      .contentTransition(isName ? .interpolate : .opacity)
+      .contentTransition(isName ? .interpolate : .identity)
       .multilineTextAlignment(alignment)
       .frame(maxWidth: fills ? .infinity : nil, alignment: Alignment(horizontal: alignment.horizontal, vertical: .center))
       .frame(maxWidth: isQuestion || isName ? nil : captionWidth)
@@ -952,6 +995,23 @@ extension View {
   StudyView(store: Store(initialState: StudyFeature.State()) { StudyFeature() } withDependencies: {
     $0.apiClient.isConfigured = { false }
   })
+}
+
+/// Lays its two subviews over each other, centred, sized by the one shown: a cross-fade between two layouts where
+/// neither is re-laid out or left behind (spec 014d).
+private struct CrossFadeStack: Layout {
+  var showsSecond: Bool
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    subviews[showsSecond ? 1 : 0].sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+  }
+
+  /// Each at the width offered to the stack, not the shown one's: a fading prompt style keeps its wrapping.
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    for subview in subviews {
+      subview.place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center, proposal: ProposedViewSize(width: proposal.width, height: nil))
+    }
+  }
 }
 
 #Preview("Person photo") {
