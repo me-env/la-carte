@@ -22,6 +22,7 @@ scripts/ios-build.sh         # build app for simulator
 scripts/ios-test.sh          # LaCarteKit unit tests (TestStore)
 scripts/ios-ui-test.sh <run> # XCUITest (mock API) → qa/screenshots/<run>/
 scripts/ios-ui-test.sh --split [N] <run> [-only-testing:…]  # same, sharded over free pool simulators (docs/testing.md)
+scripts/ios-ui-test.sh --record <run>  # also keep recordings of passing tests; every UI run writes test output to qa/screenshots/<run>/logs/ (docs/testing.md)
 scripts/e2e.sh <run>         # fresh API + seeded deck → live UI tests → qa/screenshots/<run>/
 uv run scripts/design-review.py <render> --home  # measured logo/visual review (design-critic gates on it)
 scripts/ios-adhoc.sh         # signed Ad Hoc .ipa (same steps as CI)
@@ -81,7 +82,7 @@ its result.
 the scratchpad and overwrite each other's `build.log`/`mock.log` otherwise.
 
 **Clean up your shells.** Never wait with `pgrep -f <pattern>` (it matches your own loop and never ends)
-or an unbounded `until` loop: wait for a run with ONE background command that exits when it ends (the harness wakes you; every wake re-reads your whole context, so no short re-armed polls), bound it with a timeout, prefer the scripts' locks, and kill any
+or an unbounded `until` loop: wait for a run with ONE background command that exits when it ends (the harness wakes you; every wake re-reads your whole context, so no short re-armed polls), bound it with the tool's own timeout, `LOCK_TIMEOUT` or the scripts' locks (macOS has no `timeout` binary), and kill any
 background process you started (servers, watchers, pagers) before you report.
 
 **Ask for better tooling.** If you're judging by eye, repeating manual steps, waiting on slow or flaky
