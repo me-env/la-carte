@@ -50,19 +50,21 @@ The held drag must say, at a glance, **which grade a release gives and when a th
      alone; some Forgot dots in the accent; lines connecting the dots for Got it"). Each cue rides the disorder ramp
      of its grade, so it is continuous with the drag (no pop) and complete exactly at the grade's bin edge; Hard
      and the dead zone carry none. All three are state, not motion, so Reduce Motion keeps them.
-     - **Forgot**: `blush = (c − 0.45) / 0.55` (negative side). A seeded quarter of the dots (24, never the tiniest
-       scattered ones, scatter size ≥ 0.8×) fade from ink to `Theme.accent`, staggered over `blush` (each over half
-       of it), so the pink share grows in. Hard stays monochrome.
-     - **Got it**: `ringLinks = (0.3 − c) / 0.1` (positive side). Each dot links to its neighbour on its ring
-       (96 links, three closed loops), 1 pt lines in the dots' colour at 40 % × `ringLinks`, growing out of both
-       dots' edges to meet in the middle. Under the dots.
-     - **Easy**: `crossLinks = (0.2 − c) / 0.2`. On top of the loops, each dot links to its nearest lattice dot on
-       the next ring in and out (every dot gets at least one): the loops become one network, plus the perfect
-       order. Got it = three separate wobbly loops; Easy = one even mesh, so they differ in topology, not only in
-       precision.
-     - On release the cues stay as held (the settle doesn't grow Easy's network into a Got it reward).
-     - Cost: links are two stroked `Path`s and the dots one filled `Path` per frame (fewer draw calls than before);
-       pink dots are at most 24 extra fills.
+     - **Forgot**: `blush = (c − 0.45) / 0.55` (negative side). A seeded fifth of the dots (20, never the tiniest
+       scattered ones: scatter size ≥ 0.8×) turn from ink to `Theme.accent`, staggered over `blush`, each over a
+       quarter of it (so few dots sit half-way, where ink and pink blend muddy): the pink share grows in. Hard stays
+       monochrome.
+     - **Got it**: `pairs = (0.3 − c) / 0.1` (positive side). Every other link between neighbours on a ring,
+       mirror-symmetric (counted from 12 o'clock; the 29- and 35-dot rings leave their top dot single): each ring
+       reads as pairs of dots. 1 pt lines in the dots' colour at 40 %, growing out of both dots' edges to meet in
+       the middle, under the dots.
+     - **Easy**: `chains = (0.2 − c) / 0.2`. The other half of the links grows in, closing each ring into a
+       complete chain, and every line darkens to 60 %: Got it = broken pairs on wobbly rings; Easy = three closed,
+       perfect circles. Why not links across rings: with 29 / 32 / 35 dots (even pitch, user's request) no
+       cross-ring mesh is regular (nearest-neighbour links measured 1.8–49° tilt, 9.7–14 pt, 1–3 per dot).
+     - On release the cues stay as held (the settle doesn't close Got it's chains).
+     - Cost: one stroked `Path` (links) and one filled `Path` (dots) per frame, fewer draw calls than before; pink
+       dots are at most 20 extra fills.
    - **Ink**: before a grade (dead zone) all dots are `Theme.secondaryInk` at 60 % opacity; once Hard / Got it or
      Forgot / Easy is reached, all dots are `Theme.ink` at 100 %. No `Theme.accent` (the counter already holds
      the screen's one pink element), no colour per grade (amended 2026-11-22: Forgot's pink share, above).

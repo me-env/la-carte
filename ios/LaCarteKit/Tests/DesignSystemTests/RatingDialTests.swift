@@ -214,12 +214,13 @@ struct RatingDialRewardTests {
   }
 }
 
-/// The grade cues added 2026-11-22 (spec 019 §3 amendment): Forgot's pink share, Got it's ring links, Easy's network.
+/// The grade cues added 2026-11-22 (spec 019 §3 amendment): Forgot's pink share, Got it's pairs, Easy's chains.
 struct RatingDialCueTests {
   typealias Layout = RatingDialLayout
 
-  @Test func forgotTurnsAQuarterOfTheVisibleDotsPink() {
-    #expect(Layout.accentDots.count == Layout.count / 4)
+  @Test func forgotTurnsAFifthOfTheVisibleDotsPink() {
+    #expect(Layout.accentDots.count == 20)
+    #expect(Set(Layout.accentDots.map(\.index)).count == 20)
     #expect(Layout.accentDots.allSatisfy { Layout.scatter[$0.index].diameter >= Layout.diameter * 0.8 })
     for value in [0, 0.125] {
       let layout = Layout(value: value)
@@ -236,18 +237,18 @@ struct RatingDialCueTests {
     }
   }
 
-  @Test func gotItLinksTheRingsAndEasyLinksAcrossThem() {
+  @Test func gotItLinksPairsAndEasyClosesTheChains() {
     for value in [0.0, 0.25, 0.5, 0.55] {
       let layout = Layout(value: value)
-      #expect(layout.ringLinks == 0 && layout.crossLinks == 0, "value \(value)")
+      #expect(layout.pairs == 0 && layout.chains == 0, "value \(value)")
     }
     for value in [0.65, 0.76, 0.8] {
       let layout = Layout(value: value)
-      #expect(layout.ringLinks == 1 && layout.crossLinks == 0, "value \(value)")
+      #expect(layout.pairs == 1 && layout.chains == 0, "value \(value)")
     }
     for value in [0.875, 1] {
       let layout = Layout(value: value)
-      #expect(layout.ringLinks == 1 && layout.crossLinks == 1, "value \(value)")
+      #expect(layout.pairs == 1 && layout.chains == 1, "value \(value)")
     }
   }
 
@@ -257,19 +258,30 @@ struct RatingDialCueTests {
     for step in 1...200 {
       let layout = Layout(value: Double(step) / 200)
       #expect(layout.blush <= previous.blush)
-      #expect(layout.ringLinks >= previous.ringLinks && layout.crossLinks >= previous.crossLinks)
-      for (a, b) in [(layout.blush, previous.blush), (layout.ringLinks, previous.ringLinks), (layout.crossLinks, previous.crossLinks)] {
+      #expect(layout.pairs >= previous.pairs && layout.chains >= previous.chains)
+      for (a, b) in [(layout.blush, previous.blush), (layout.pairs, previous.pairs), (layout.chains, previous.chains)] {
         #expect(abs(a - b) <= 0.15, "value \(Double(step) / 200)")
       }
       previous = layout
     }
   }
 
-  @Test func ringLinksCloseEachRingAndCrossLinksJoinNeighbouringRings() {
-    #expect(Layout.ringLinkPairs.count == Layout.count)
-    #expect(Layout.ringLinkPairs.allSatisfy { Layout.slot($0.0).ring == Layout.slot($0.1).ring })
-    #expect(Layout.crossLinkPairs.allSatisfy { abs(Layout.slot($0.0).ring - Layout.slot($0.1).ring) == 1 })
-    let linked = Set(Layout.crossLinkPairs.flatMap { [$0.0, $0.1] })
-    #expect(linked.count == Layout.count)
+  /// Got it: every dot in at most one pair, the 29- and 35-dot rings leave only their top dot single, the pattern
+  /// is mirror-symmetric. Easy: the two sets together close each ring, every link once.
+  @Test func pairsAreRegularAndChainsCloseEachRing() {
+    let all = Layout.gotItLinks + Layout.easyLinks
+    #expect(all.count == Layout.count)
+    #expect(Set(all.map { [$0.0, $0.1].sorted() }).count == Layout.count)
+    #expect(all.allSatisfy { Layout.slot($0.0).ring == Layout.slot($0.1).ring })
+    var degree = [Int](repeating: 0, count: Layout.count)
+    for (i, j) in Layout.gotItLinks { degree[i] += 1; degree[j] += 1 }
+    #expect(degree.allSatisfy { $0 <= 1 })
+    #expect(degree.enumerated().filter { $0.element == 0 }.map(\.offset) == [0, 61])  // top dots of rings 0 and 2
+    func mirror(_ i: Int) -> Int {
+      let (ring, j, n) = Layout.slot(i)
+      return i - j + (ring == 1 ? n - 1 - j : (n - j) % n)
+    }
+    let pairs = Set(Layout.gotItLinks.map { [$0.0, $0.1].sorted() })
+    #expect(pairs == Set(Layout.gotItLinks.map { [mirror($0.0), mirror($0.1)].sorted() }))
   }
 }
