@@ -446,6 +446,40 @@ final class RatingsUITests: XCTestCase {
     server.stop()
   }
 
+  // MARK: - 019 §3 grade cues: slow sweep for a screen recording (design review frame strips)
+
+  /// Slow drags (60 pt/s, ~0.3 w) so a `--record` run shows the dial passing dead zone → Got it → Easy
+  /// (up) and → Hard → Forgot (down), light then dark. Asserts only the grade each release sends.
+  @MainActor
+  func testRatings_dialSweepRecording() throws {
+    XCUIDevice.shared.appearance = .light
+    let plan: [(dy: Double, rating: String, dark: Bool)] = [
+      (-0.3, "easy", false), (0.3, "again", false), (-0.3, "easy", true), (0.3, "again", true),
+    ]
+    let cards = plan.indices.map { i in
+      StubDeck.Card(id: "FFFFFFF\(i)-1111-1111-1111-111111111111", front: "front \(i)", back: "back \(i)",
+                    due: Date(timeIntervalSince1970: 1_767_225_600 + Double(i) * 60))
+    }
+    let (server, _) = try startReviewStub(cards)
+    let app = launch(api: .live(server.url))
+    for (i, step) in plan.enumerated() {
+      if step.dark { XCUIDevice.shared.appearance = .dark }
+      waitForLabel(el(app, "study.front"), "front \(i)")
+      if el(app, "study.reveal").exists { el(app, "study.card").tap() }
+      waitForLabel(el(app, "study.back"), "back \(i)")
+      Thread.sleep(forTimeInterval: 1)  // a still frame before each sweep
+      let card = el(app, "study.card"), w = card.frame.width
+      let start = card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+      start.press(forDuration: 0.3, thenDragTo: start.withOffset(CGVector(dx: 0, dy: step.dy * w)),
+                  withVelocity: XCUIGestureVelocity(rawValue: 20), thenHoldForDuration: 1.5)
+      let post = try waitForPost(server, count: i + 1)
+      let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(post.body.utf8)) as? [String: Any])
+      XCTAssertEqual(body["rating"] as? String, step.rating, "sweep \(i) sent \(post.body)")
+    }
+    XCUIDevice.shared.appearance = .light
+    server.stop()
+  }
+
   // MARK: - #11 tap / double-tap regression
 
   @MainActor
