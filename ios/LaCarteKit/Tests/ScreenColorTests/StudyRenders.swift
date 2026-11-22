@@ -78,12 +78,13 @@ struct StudyRenders {
   }
 
   /// Spec 017's candidate layouts side by side, revealed, light: `screen-study-layout-<A|B|C>-q<lines>-a<lines>.png`.
+  /// Only cards with a side of 3+ lines: with both sides at 1-2 lines (centred), A, B and C are identical.
   @Test func layouts() throws {
     defer { StudyView.textLayout = .column }
     for (layout, letter) in zip(StudyView.TextLayout.allCases, ["A", "B", "C"]) {
       StudyView.textLayout = layout
       for (q, question) in CardLines.questions {
-        for (a, answer) in CardLines.answers {
+        for (a, answer) in CardLines.answers where q >= 3 || a >= 3 {
           let state = Self.studying(CardLines.card(question, answer), revealed: true)
           _ = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), Self.looks[0],
                          name: "study-layout-\(letter)-q\(q)-a\(a)")
