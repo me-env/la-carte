@@ -17,7 +17,7 @@ light tap on reveal and rating. The card face and caught-up screen stay custom.
 ## Acceptance criteria
 | # | Criterion (observable) | Validated by |
 |---|---|---|
-| 1 | Offline, not set up and token rejected use `ContentUnavailableView` (symbols `wifi.slash`, `link`, `key`), inside the pull-to-refresh scroll view (006). Ids stay: title `study.message`, description `study.detail`, buttons `study.retry` / `study.openSettings` (plain text buttons, ink) | UI (light, dark) |
+| 1 | Offline, not set up and token rejected use `ContentUnavailableView` (symbols `wifi.slash`, `link`, `key`), inside a non-bouncing scroll view (018; was the pull-to-refresh one, 006). Ids stay: title `study.message`, description `study.detail`, buttons `study.retry` / `study.openSettings` (plain text buttons, ink) | UI (light, dark) |
 | 2 | Caught-up stays custom (card-face type, `study.message` + `study.nextDue`) | UI (unchanged) |
 | 3 | `study.remaining` is one `Text`: the number in `Theme.accent`, " to review" in `secondaryInk`, with `.contentTransition(.numericText(countsDown: true))` animated with `Theme.Motion.standard` when a rating removes a card. Still hidden while editing (010) | review + UI screenshot |
 | 4 | When loading lasts more than 0.5 s, `LaCarteLoadingMark` (64 pt, centered, `study.loading`) shows; a load that finishes sooner never shows it. Reduce Motion gives the mark's built-in opacity pulse | unit (TestClock) + UI (stub delays `GET /cards/due` 2 s) |

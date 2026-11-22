@@ -1,6 +1,6 @@
 # 006 — Refresh: pull-to-refresh + reload on foreground
 
-Status: done
+Status: done (pull-to-refresh removed by [018](018-auto-refresh.md); the foreground reload and the refresh rule stay)
 Owners: ios-engineer
 Depends on: 001 (Study, `deckChanged` reveal rule), 002 (Deck)
 Design reference: docs/design/reference/02-editor-light.jpg, 01-editor-dark.jpg (study), 04-list-dark.jpg (deck).

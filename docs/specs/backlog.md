@@ -30,7 +30,7 @@ work in flight (one git worktree per engineer instance). Groomed 2026-11-21.
 | 8 | MCP prompts: "quiz me", "make cards from this text" | Agent ergonomics | done | — | 005 |
 | 9 | Offline review queue | Only if needed: no user report of it yet | deferred | — | |
 | 10 | Undo last rating (`arrow.uturn.backward` on study) | Split from 001. Needs an API undo (restore the card's previous FSRS state + drop the log row): spec after 011, touches Study | backlog | architect | |
-| 11 | **Refresh**: pull-to-refresh on study + deck, reload on return to foreground | Split from 001 | done | — | [006](006-refresh.md) |
+| 11 | **Refresh**: pull-to-refresh on study + deck, reload on return to foreground | Split from 001. Pull-to-refresh removed by 018 | done | — | [006](006-refresh.md) |
 | 12 | Deck pagination beyond 500 cards | Split from 002. Deferred: one personal deck, search is server-side over all cards; revisit when a deck nears 500 | deferred | — | |
 | 13 | **Widget**: Home Screen systemSmall, due-now count + study streak | API part merged (`/stats?tz=`, streak); iOS part in a worktree | in-progress | ios-engineer | [007](007-widget.md) |
 | 14 | Lock Screen widgets (accessoryCircular due count, accessoryRectangular due + streak) | Split from 007. Spec once 007 merges; widget-extension files only, parallel to everything else | backlog | architect → ios-engineer | |
@@ -57,3 +57,5 @@ work in flight (one git worktree per engineer instance). Groomed 2026-11-21.
 | 35 | **Ask about this card (copy)**: "Ask about this card" in the double-tap menu copies the card as a prompt, "Copied" notice | User request, priority. Build with 015b (same files) | ready (with 015b) | ios-engineer | [016](016-ask-ai.md) (016a) |
 | 36 | **Ask AI app (Settings + open)**: pick Vibe / Claude / ChatGPT / Perplexity / Grok / Copy only; open it via universal link (prefill for Claude, ChatGPT) | After 016a; `SettingsFeature` touch (after 009b) | ready (after 016a) | ios-engineer | [016](016-ask-ai.md) (016b) |
 | 37 | More AI apps (Gemini, Copilot, …) + prefill for Vibe / Grok | Split from 016. Needs a device check of their schemes / `?q=` | backlog | architect | |
+| 38 | **Auto-refresh**: no pull-to-refresh or idle bounce; Study reloads on foreground, at `next_due`, and every 30 s while caught up / empty / offline; the visible card is never swapped | User request ("having to refresh is bad design"). Study + Deck view files: after in-flight Study work merges | ready | ios-engineer → qa-validator | [018](018-auto-refresh.md) |
+| 39 | Deck list live update while open (agent adds while the sheet is up) | Split from 018. Needs a cheap change token on `/stats` (e.g. `max(updated_at)` + count) to avoid refetching 500 notes; only if the user asks | backlog | architect | |

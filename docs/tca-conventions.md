@@ -83,7 +83,8 @@ public struct StudyFeature {
 - `let store: StoreOf<Feature>` (or `@Bindable var store` when deriving bindings).
 - Read state directly (`store.cards`), send with `store.send(.x)`. No `WithViewStore`, no `ViewStore`.
 - Views contain zero logic beyond formatting. If an `if` decides behavior, it belongs in the reducer.
-- Pull-to-refresh: `.refreshable { await store.send(.pulledToRefresh).finish() }` so the spinner lasts as long as the load.
+- No pull-to-refresh (spec 018): screens reload by themselves (scene `.active`, a timer for `next_due` / the 30 s
+  idle check). Timers are `clock.sleep` effects with a `CancelID`, tested with `TestClock`.
 - Scene phase: the view forwards it, `.onChange(of: scenePhase) { _, phase in store.send(.scenePhaseChanged(phase)) }`;
   the reducer decides what `.active` means.
 - Every feature view has a `#Preview` using a real `Store` (previews get `previewValue` dependencies).
