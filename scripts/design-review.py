@@ -17,6 +17,7 @@
     uv run scripts/design-review.py --make-synthetic out.png --screen stochastic   # its reference, must PASS
     uv run scripts/design-review.py --frames round8/frames/  (or --frames 'round8/card-frame-*.png')   # an animation
     uv run scripts/design-review.py dotcard-light.svg dotcard-dark.svg --mode outline --dots 24 --home   # dotted outline
+    uv run scripts/design-review.py forgetcurve/curve-*-ink.svg --mode flat [--home]   # solid flat marks (even-odd path)
 
 Prints PASS/FAIL per metric (value vs limit, and WHERE: `at x 385, y 535 (band 5)` in the render's own 1024 px
 coordinates; band = 32 px band counted from where the ink starts rising) and writes an annotated sheet (render,
@@ -57,6 +58,23 @@ Sheet: the render with the dots numbered and ringed by size cluster, pairs under
 and the worst pairs in orange; spacing and gap per pair; 58 / 29 px previews with blurred pairs marked; `--home` adds
 the home-screen mock. `--watch` works; `--frames`, `--make-synthetic`, `--axis`, `--region` and `--screen` are
 halftone only.
+`flat` is for a solid flat mark drawn as one even-odd path (the forgetting-curve marks, ideation-gen/forgetcurve):
+what is too thin to survive at icon size. Strokes and gaps are measured on the medial axis of the ink and of the
+paper inside the ink's bbox (counters, cut-outs, notches; not the outer background): width = 2x the distance to the
+edge, i.e. the pixels across between the two nearest edge pixels. Sharp tips (a spike, a sliver running into a
+tangent, two corners touching where XOR edges cross) narrow to ~0 by construction, so they are set aside and judged
+by the length they lose; runs under 10 px are corner pixels. Metrics (constants FLAT_*):
+- stroke / gap: thinnest px at 1024, >= 35 (1 px at 29), with where and its size at 58 / 29 px. Only necks and
+  strips count (a point no narrower than its neighbours), so the root of a tip is not taken for a stroke.
+- optical centre and bbox margin imbalance, as in the halftone mode.
+- small (58 and 29 px, the same perceived image as check 2): every axis point under 2 icon px is tested across: a
+  stroke survives if its perceived ink exceeds both flanks (1 icon px past its edges) by >= 0.25, a gap if both
+  flanks exceed it by >= 0.25 (~1 icon px at any phase). Strokes that fade and gaps that close over >= 1 icon px are
+  listed with width, length and where (== 0); the longest tip lost (px at 1024, <= 140: a spike blunts, a sliver
+  vanishes); INFO: the smallest neck or strip still separated at 29 px.
+Sheet: the render with the medial axis (tips, corners and crossings in orange), the thinnest stroke / gap cross-
+section ringed, what is lost at 29 px (red: stroke fades, blue: gap closes); 58 / 29 px previews with what is lost
+at that size; `--home` adds the home-screen mock. `--watch` works; the halftone-only options are as in outline.
 
 Screens (`--screen`, the critic picks it per proposal from the render's construction):
 - `lattice` (default): the marks settle onto a hex lattice; order must RISE (checks 3), touching from coverage 0.65.
@@ -308,6 +326,35 @@ OUTLINE_SEPARATED_MIN = {58: 0.90, 29: None}   # min share of separated neighbou
 OUTLINE_SETTLED_SMALL = 1.25    # at 58 and 29 px: the settled dot's perceived ink (mean over a disc of half a pitch)
                                 # / the regular dots' median; it must still read bigger (committed 1.89 / 1.78 at 1.5x)
 OUTLINE_EXACT = ("dots: count", "size: settled dots")   # metrics compared with ==
+
+# ---- Flat mode (`--mode flat`): a solid flat mark drawn as one even-odd path (the forgetting-curve marks,
+# ideation-gen/forgetcurve, 2026-11-22). Calibrated on curve-01..20-ink.svg and straight strokes / slots of known width
+# at every sub-pixel phase (contrast below); proposed to design-lead, to confirm after a round.
+FLAT_OPPOSITE_COS = -0.5        # a medial-axis point: two neighbouring pixels whose nearest boundary points lie >= 120
+                                # degrees apart seen from them (cos <= -0.5): necks, strips and wedges under 60 degrees;
+                                # not 90-degree corners (cos 0) nor anti-aliasing steps on a straight edge (same side)
+FLAT_MIN_PX = 35.0              # thinnest stroke and thinnest gap at 1024, sharp tips excluded: 1 px at 29 (35.3 px)
+FLAT_TIP_PX = 12.0              # a sharp tip (a spike, or two corners meeting where XOR edges cross): a thin run of the
+                                # axis that narrows to <= 12 px (the last pixels before a sharp point drop off the axis)
+                                # and opens like a wedge from there (is_tip). Its width always reaches ~0, so it is
+                                # judged by the length it loses at icon size, not by its width; a hairline seam (near-
+                                # coincident edges) stays even and counts as a stroke or gap
+FLAT_TIP_OPEN = 0.1             # ... or opening both ways at >= 0.1 px of width per px of length (a ~6-degree wedge)
+FLAT_CORNER_PX = 10.0           # a thin run shorter than 10 px (0.3 px at 29) is a point, not a feature: the last pixels
+                                # of a corner, or where two XOR edges cross (two corners touching); set aside with the tips
+FLAT_TEST_MAX = 2.0             # only axis points under 2 icon px wide are tested at 58 / 29 px (wider ones keep
+                                # contrast >= 0.6 at any phase)
+FLAT_CONTRAST = 0.25            # a stroke survives at icon size if its perceived ink exceeds both flanks (1 icon px past
+                                # its edges, across it) by >= 0.25; a gap if both flanks exceed it by >= 0.25. Straight
+                                # stroke or slot, worst / mean of 8 phases at 29 px: 20 px 0.12 / 0.17, 30 px 0.22 / 0.28,
+                                # 35 px 0.27 / 0.33, 50 px 0.43 / 0.47 (gaps the same); so 0.25 = ~1 icon px at any phase
+FLAT_VANISH_LEN = 1.0           # a stroke that fades / a gap that closes counts once its failing run spans >= 1 icon px
+                                # (35 px at 29): a shorter one is not a visible feature at that size (e.g. the root of a
+                                # spike next to its tip, 31 px on curve-07)
+FLAT_TIP_LOSS = {58: 140.0, 29: 140.0}   # max length of a sharp tip lost at icon size, px at 1024 (4 icon px at 29):
+                                # the tooth spikes of curve-01..20 lose 40-130 px at 29 (a point blunts), the XOR
+                                # slivers (a disc's edge running tangent into the curve) 160-250 px (a sliver vanishes)
+FLAT_EXACT = ("small: faded strokes", "small: closed gaps")   # metrics compared with ==
 
 ICON_IDS = [1110145109, 1108187841, 1108185179, 1069512882, 1584215688, 915056765]   # Notes, Reminders,
 # Calendar, Stocks, Clock, Maps: Apple's own apps via the public iTunes lookup API (no personal data).
@@ -580,7 +627,8 @@ def closing_hole_bands(holes):
 
 def higher_is_better(metric):
     return ("min gap" in metric or "polarity mix" in metric or "floor" in metric
-            or metric.startswith(("gap: min", "small: min peak", "small: separated", "small: settled")))
+            or metric.startswith(("gap: min", "small: min peak", "small: separated", "small: settled",
+                                  "stroke: thinnest", "gap: thinnest", "small: smallest surviving")))
 
 
 # ---------------------------------------------------------------- profiles
@@ -1504,6 +1552,230 @@ def outline_sheet(img, dots, spacing, cid, names, bad_pairs, worst_pairs, small_
     fig.tight_layout(); fig.savefig(out, dpi=90); plt.close(fig)
 
 
+# ---------------------------------------------------------------- flat mode
+def medial_points(mask):
+    """Medial-axis points of a binary mask (the ink, or the paper): dict of arrays x, y (the pixel), w (width: the mask
+    pixels between the two nearest boundary pixels across), cx, cy (the midpoint of those two boundary pixels) and
+    ux, uy (unit vector across). A pixel is on the axis when it and a neighbour have their nearest boundary pixels
+    >= 120 degrees apart seen from the pair (FLAT_OPPOSITE_COS); of its neighbours, the widest such pair is kept."""
+    _, (fy, fx) = ndimage.distance_transform_edt(mask, return_indices=True)
+    h, w = mask.shape
+    yy, xx = np.mgrid[:h, :w]
+    best, oy, ox = np.zeros(mask.shape), np.zeros(mask.shape), np.zeros(mask.shape)
+    for dy, dx in ((0, 1), (1, 0), (1, 1), (1, -1)):
+        a = (slice(0, h - dy), slice(max(0, -dx), w - max(0, dx)))
+        b = (slice(dy, h), slice(max(0, dx), w - max(0, -dx)))
+        my, mx = (yy[a] + yy[b]) / 2, (xx[a] + xx[b]) / 2
+        v1, v2 = np.stack([fy[a] - my, fx[a] - mx]), np.stack([fy[b] - my, fx[b] - mx])
+        cos = (v1 * v2).sum(0) / np.maximum(np.hypot(*v1) * np.hypot(*v2), 1e-9)
+        s = np.hypot(fy[a] - fy[b], fx[a] - fx[b])
+        ok = mask[a] & mask[b] & (cos <= FLAT_OPPOSITE_COS)
+        for p, q in ((a, b), (b, a)):
+            upd = ok & (s > best[p])
+            best[p] = np.where(upd, s, best[p])
+            oy[p], ox[p] = np.where(upd, fy[q], oy[p]), np.where(upd, fx[q], ox[p])
+    ys, xs = np.nonzero(best > 0)
+    y1, x1, y2, x2, s = fy[ys, xs], fx[ys, xs], oy[ys, xs], ox[ys, xs], best[ys, xs]
+    return dict(x=xs, y=ys, w=s - 1, cx=(x1 + x2) / 2, cy=(y1 + y2) / 2, ux=(x2 - x1) / s, uy=(y2 - y1) / s)
+
+
+def axis_runs(m, sel):
+    """Connected runs (points within ~2 px) of the selected axis points: index arrays, the longest first."""
+    if not sel.any():
+        return []
+    grid = np.zeros((TILE, TILE), bool)
+    grid[m["y"][sel], m["x"][sel]] = True
+    lab, _ = ndimage.label(ndimage.binary_dilation(grid, iterations=2), structure=np.ones((3, 3)))
+    gid = np.where(sel, lab[m["y"], m["x"]], 0)
+    o = np.argsort(gid, kind="stable")
+    runs = np.split(o, np.nonzero(np.diff(gid[o]))[0] + 1)
+    return sorted((r for r in runs if gid[r[0]]), key=lambda r: -run_length(m, r))
+
+
+def run_length(m, r):
+    return math.hypot(np.ptp(m["x"][r]), np.ptp(m["y"][r]))
+
+
+def is_tip(m, r):
+    """A sharp tip: the run narrows to <= FLAT_TIP_PX, at least doubles in width, and either its narrowest point sits
+    at one end (>= 70% of the run's length from its farthest point: a spike, a sliver running into a tangent) or it
+    opens like a wedge both ways (90% of its points >= FLAT_TIP_OPEN x their distance wider: two corners meeting where
+    XOR edges cross at a shallow angle). A hairline seam or a strip of even width is not a tip."""
+    w, x, y = m["w"][r], m["x"][r], m["y"][r]
+    j = int(np.argmin(w))
+    d = np.hypot(x - x[j], y - y[j])
+    return (w[j] <= FLAT_TIP_PX and w.max() >= 2 * max(w[j], 1)
+            and (d.max() >= 0.7 * run_length(m, r) or (w >= w[j] + FLAT_TIP_OPEN * d - 1).mean() >= 0.9))
+
+
+def run_text(m, r, kind):
+    j = r[np.argmin(m["w"][r])]
+    return f"{kind} {m['w'][r].min():.0f}-{m['w'][r].max():.0f} px wide over {run_length(m, r):.0f} px at x {m['x'][j]}, y {m['y'][j]}"
+
+
+def cross_contrast(small, size, m, stroke):
+    """Per axis point at icon size: how far a stroke's perceived ink stands above both flanks (1 icon px past its
+    edges, across it), or how far both flanks stand above a gap's."""
+    k = TILE / size
+    at = lambda y, x: ndimage.map_coordinates(small, [y / k - 0.5, x / k - 0.5], order=1, mode="nearest")
+    off = m["w"] / 2 + k
+    c = at(m["cy"], m["cx"])
+    f1 = at(m["cy"] - m["uy"] * off, m["cx"] - m["ux"] * off)
+    f2 = at(m["cy"] + m["uy"] * off, m["cx"] + m["ux"] * off)
+    return c - np.maximum(f1, f2) if stroke else np.minimum(f1, f2) - c
+
+
+def review_flat(path, out=None, home=False, quiet=False):
+    """Flat mode: a solid flat mark (one even-odd path). Prints the report and writes the sheet; returns (fails, results)."""
+    img, rgb, _ = load(path, "x")
+    ink, bg, inkc = ink_map(rgb)
+    solid = ink > 0.5
+    if solid.sum() < 100:
+        return nothing_measured(path, quiet, f"{int(solid.sum())} ink px")
+    ys_, xs_ = np.nonzero(solid)
+    x0, x1, y0, y1 = xs_.min(), xs_.max(), ys_.min(), ys_.max()
+    paper = medial_points(~solid)
+    inb = (paper["x"] >= x0) & (paper["x"] <= x1) & (paper["y"] >= y0) & (paper["y"] <= y1)
+    feats = {"stroke": medial_points(solid), "gap": {k: v[inb] for k, v in paper.items()}}
+    results, marks = [], {}
+
+    # at 1024: thinnest stroke / gap, sharp tips (is_tip: runs under the floor narrowing to a point) set aside
+    tip, necks = {}, {}
+    for kind, m in feats.items():
+        tip[kind] = np.zeros(len(m["w"]), bool)
+        runs = axis_runs(m, m["w"] < FLAT_MIN_PX)
+        tips = [r for r in runs if is_tip(m, r)]
+        for r in tips + [r for r in runs if run_length(m, r) < FLAT_CORNER_PX]:
+            tip[kind][r] = True
+        # the thinnest neck or strip: a point no narrower than its neighbours (within its own width, tips included),
+        # so the root of a tip, where the tip was cut off at FLAT_MIN_PX, is not reported as a stroke
+        tree = cKDTree(np.column_stack([m["x"], m["y"]]))
+        rest = [q for q in np.nonzero(~tip[kind])[0] if m["w"][q] <= 1 + min(
+            m["w"][n_] for n_ in tree.query_ball_point((m["x"][q], m["y"][q]), min(max(m["w"][q], 4), 2 * FLAT_MIN_PX)))]
+        necks[kind] = np.array(rest, int)
+        if not rest:
+            results.append(na(f"{kind}: thinnest px", FLAT_MIN_PX, f"no {kind} neck or strip outside sharp tips"))
+            continue
+        j = rest[int(np.argmin(m["w"][rest]))]
+        v = float(m["w"][j])
+        marks[kind] = (m["cx"][j], m["cy"][j], m["ux"][j], m["uy"][j], v)
+        results.append((f"{kind}: thinnest px", v, FLAT_MIN_PX, v >= FLAT_MIN_PX,
+                        f"at x {m['x'][j]}, y {m['y'][j]} (= {v * 58 / TILE:.2f} px at 58, {v * 29 / TILE:.2f} px at 29); "
+                        f"{len(tips)} sharp tip(s) set aside" + (" (counters and cut-outs inside the bbox)" if kind == "gap" else "")))
+
+    # optical centre and margins, as in the halftone mode
+    w = ink.sum()
+    yy, xx = np.mgrid[:TILE, :TILE]
+    cx, cy = (ink * xx).sum() / w, (ink * yy).sum() / w
+    bx, by = (x0 + x1 + 1) / 2, (y0 + y1 + 1) / 2
+    oc = max(abs((cx + bx) / 2 - TILE / 2), abs((cy + by) / 2 - TILE / 2)) / TILE
+    results.append(("optical centre offset / tile", oc, CENTROID_TOL, oc <= CENTROID_TOL,
+                    f"centroid ({cx:.0f}, {cy:.0f}), bbox centre ({bx:.0f}, {by:.0f})"))
+    ml, mr, mt, mb = x0, TILE - 1 - x1, y0, TILE - 1 - y1
+    for nm, a_, b_ in (("left/right", ml, mr), ("top/bottom", mt, mb)):
+        imb = abs(a_ - b_) / TILE
+        results.append((f"bbox margin imbalance {nm} / tile", imb, BBOX_IMBALANCE, imb <= BBOX_IMBALANCE,
+                        f"margins {a_} vs {b_} px"))
+
+    # at 58 / 29 px: what the eye integrates (area downsample + PERCEIVED_BLUR, as in check 2); every axis point under
+    # FLAT_TEST_MAX icon px is tested across: strokes that fade, gaps that close, tips that are lost
+    work = Image.fromarray((np.clip(ink, 0, 1) * 255).astype(np.uint8))
+    previews, lost, survivors = {}, {}, {}
+    for size in (58, 29):
+        k = TILE / size
+        previews[size] = img.resize((size, size), Image.BOX)
+        small = ndimage.gaussian_filter(np.asarray(work.resize((size, size), Image.BOX), dtype=float) / 255, PERCEIVED_BLUR)
+        lost[size], tips_lost = [], []
+        for kind, m in feats.items():
+            fail = (m["w"] < FLAT_TEST_MAX * k) & (cross_contrast(small, size, m, kind == "stroke") < FLAT_CONTRAST)
+            survivors[size, kind] = necks[kind][~fail[necks[kind]]]
+            for r in axis_runs(m, fail):
+                if run_length(m, r) < FLAT_CORNER_PX:
+                    continue
+                if is_tip(m, r) or tip[kind][r[np.argmin(m["w"][r])]]:   # narrows into a tip, corner or crossing
+                    tips_lost.append((run_length(m, r), kind, r))
+                elif run_length(m, r) >= FLAT_VANISH_LEN * k:
+                    lost[size].append((kind, m, r))
+        for kind, word in (("stroke", "faded strokes"), ("gap", "closed gaps")):
+            runs = [r for kd, _, r in lost[size] if kd == kind]
+            results.append((f"small: {word} at {size:>2} px", len(runs), 0, not runs,
+                            "; ".join(run_text(feats[kind], r, kind) for r in runs[:5]) if runs else
+                            f"none (contrast across >= {FLAT_CONTRAST} wherever under {FLAT_TEST_MAX:g} icon px)"))
+        if tips_lost:
+            ln, kind, r = max(tips_lost, key=lambda t: t[0])
+            results.append((f"small: longest tip lost at {size:>2} px", ln, FLAT_TIP_LOSS[size], ln <= FLAT_TIP_LOSS[size],
+                            f"px at 1024 (= {ln / k:.1f} icon px); worst {run_text(feats[kind], r, kind + ' tip')}; "
+                            f"{len(tips_lost)} tip(s) blunted"))
+            lost[size] += [(kind, feats[kind], r) for ln_, kind, r in tips_lost if ln_ > FLAT_TIP_LOSS[size]]
+        else:
+            results.append((f"small: longest tip lost at {size:>2} px", 0.0, FLAT_TIP_LOSS[size], True, "no sharp tip lost"))
+    sv = [(float(feats[kd]["w"][survivors[29, kd]].min()), kd) for kd in feats if len(survivors[29, kd])]
+    if sv:
+        v, kd = min(sv)
+        results.append(("small: smallest surviving at 29 px", v, float("nan"), True,
+                        f"INFO: the thinnest {kd} neck or strip (px at 1024) still separated at 29 px (= {v * 29 / TILE:.2f} icon px)"))
+
+    name = Path(path).name
+    fails = sum(not x[3] for x in results)
+    out = Path(out) if out else default_out(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    home_img = home_mock(img, out.with_name(f"{Path(path).stem}-home.png")) if home else None
+    flat_sheet(img, feats, tip, marks, lost, previews, results, out, home_img)
+    if quiet:
+        return fails, results
+    print(f"design-review {name}: mode flat, ink bbox x {x0}-{x1}, y {y0}-{y1}; medial axis: "
+          f"{len(feats['stroke']['w'])} ink px, {len(feats['gap']['w'])} paper px inside the bbox")
+    print(f"{'METRIC':<40}{'VALUE':>8}{'LIMIT':>8}  RESULT")
+    for m_, v, lim, ok, note in results:
+        cmp = "==" if m_.startswith(FLAT_EXACT) else ">=" if higher_is_better(m_) else "<="
+        lims = "-" if lim != lim else f"{lim:.3g}"
+        print(f"{m_:<40}{fmt(v)}{cmp:>4}{lims:<5} {'N/A ' if v != v else 'PASS' if ok else 'FAIL'}  {note}")
+    print(f"RESULT: {'FAIL' if fails else 'PASS'} ({fails} of {len(results)} metrics failed)")
+    print(f"sheet: {out}" + (f"\nhome:  {out.with_name(Path(path).stem + '-home.png')}" if home else ""))
+    return fails, results
+
+
+def flat_sheet(img, feats, tip, marks, lost, previews, results, out, home_img):
+    """The render with the medial axis (grey; sharp tips orange), the thinnest stroke (red) and gap (blue) cross-section,
+    and what is lost at 29 px (red: strokes that fade, blue: gaps that close, thick); 58 / 29 px previews with what is
+    lost at that size; the results."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    colors = {"stroke": "red", "gap": "tab:blue"}
+    fig = plt.figure(figsize=(14, 11 + (5 if home_img is not None else 0)))
+    gs = fig.add_gridspec(2 + (home_img is not None), 4, height_ratios=[3, 1] + ([1.6] if home_img is not None else []))
+    ax = fig.add_subplot(gs[0, :3])
+    ax.imshow(img, extent=(0, TILE, TILE, 0))
+    for kind, m in feats.items():
+        ax.scatter(m["x"][~tip[kind]], m["y"][~tip[kind]], s=0.2, c="0.6")
+        ax.scatter(m["x"][tip[kind]], m["y"][tip[kind]], s=0.6, c="orange")
+    for kind, m, r in lost[29]:
+        ax.scatter(m["x"][r], m["y"][r], s=4, c=colors[kind])
+    for kind, (x, y, ux, uy, v) in marks.items():         # the cross-section, ringed
+        ax.plot([x - ux * v / 2, x + ux * v / 2], [y - uy * v / 2, y + uy * v / 2], color=colors[kind], lw=2.5)
+        ax.add_patch(matplotlib.patches.Circle((x, y), max(v / 2, 10) + 8, fill=False, color=colors[kind], lw=1.5))
+        ax.text(x + max(v / 2, 10) + 12, y, f"thinnest {kind} {v:.0f} px", color=colors[kind], fontsize=9, va="center",
+                weight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.8))
+    ax.set_xlim(0, TILE); ax.set_ylim(TILE, 0)
+    ax.set_title("medial axis (grey; sharp tips, corners, crossings orange); ringed line = thinnest stroke (red) / gap (blue)\n"
+                 "lost at 29 px: red = stroke fades, blue = gap closes, tips beyond the limit", fontsize=9)
+    pv = gs[0, 3].subgridspec(2, 1)
+    for k, size in enumerate((58, 29)):
+        a = fig.add_subplot(pv[k])
+        a.imshow(previews[size].resize((232, 232), Image.NEAREST), extent=(0, TILE, TILE, 0))
+        for kind, m, r in lost[size]:
+            a.scatter(m["x"][r], m["y"][r], s=1.5, c=colors[kind], alpha=0.6)
+        a.set_title(f"{size} px, enlarged ({len(lost[size])} lost)", fontsize=8)
+        a.axis("off")
+    txt = fig.add_subplot(gs[1, :]); txt.axis("off")
+    txt.text(0, 1, "\n".join(f"{'N/A ' if v != v else 'PASS' if ok else 'FAIL'} {m}: {v:.3f}  {note[:150]}"
+                             for m, v, _, ok, note in results), fontsize=7, va="top", family="monospace")
+    if home_img is not None:
+        a = fig.add_subplot(gs[2, :]); a.imshow(home_img); a.axis("off")
+    fig.tight_layout(); fig.savefig(out, dpi=90); plt.close(fig)
+
+
 # ---------------------------------------------------------------- sheet
 def sheet(img, curves, bands, ramp, rows_px, bad_x, bad_pts, flip, axis, previews, results, out, home_img):
     import matplotlib
@@ -1810,9 +2082,10 @@ if __name__ == "__main__":
                     help="lattice (default): order must rise to a hex lattice; stochastic: blue noise, order must "
                          "stay even (NN floor, no clumps or voids), touching allowed from coverage "
                          f"{TOUCH_OK_COVERAGE_STOCHASTIC}")
-    ap.add_argument("--mode", choices=("halftone", "outline"), default="halftone",
+    ap.add_argument("--mode", choices=("halftone", "outline", "flat"), default="halftone",
                     help="halftone (default): the dots-into-a-card ramp checks above; outline: a card outline traced "
-                         "by separate dots (count, spacing, edge gaps, size rhythm, symmetry, 58/29 px legibility)")
+                         "by separate dots (count, spacing, edge gaps, size rhythm, symmetry, 58/29 px legibility); "
+                         "flat: a solid flat mark (thinnest stroke / gap, what fades or closes at 58/29 px)")
     ap.add_argument("--dots", type=int, metavar="N", help="outline mode: the expected dot count (default: report only)")
     ap.add_argument("--make-synthetic", metavar="OUT.png", help="write the smooth reference ramp (of --screen) and review it")
     ap.add_argument("--watch", action="store_true", help="re-run when a render changes; one PASS/FAIL line per run")
@@ -1829,11 +2102,12 @@ if __name__ == "__main__":
         ap.error("--out takes one render (frame sheets go to $TMPDIR/design-review/<frames' folders>/)")
     if a.watch and a.frames:
         ap.error("--watch takes renders, not --frames")
-    if a.mode == "outline" and (a.frames or a.make_synthetic):
-        ap.error("--mode outline takes renders (no --frames, no --make-synthetic)")
+    if a.mode != "halftone" and (a.frames or a.make_synthetic):
+        ap.error(f"--mode {a.mode} takes renders (no --frames, no --make-synthetic)")
     region = tuple(int(v) for v in a.region.split(",")) if a.region else None
-    if a.mode == "outline":
-        run = lambda p, quiet=False: review_outline(p, a.out, a.home, quiet=quiet, expected=a.dots)
+    if a.mode != "halftone":
+        run = ((lambda p, quiet=False: review_outline(p, a.out, a.home, quiet=quiet, expected=a.dots))
+               if a.mode == "outline" else (lambda p, quiet=False: review_flat(p, a.out, a.home, quiet=quiet)))
         if a.watch:
             watch(a.render, lambda p: run(p, quiet=True))
             sys.exit(0)
