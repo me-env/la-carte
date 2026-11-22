@@ -19,12 +19,6 @@ public struct StudyView: View {
   @State private var isCardScrollable = false
   /// Flashes the scroll indicators on each reveal, never as a card leaves.
   @State private var revealCount = 0
-  /// The edit field's global frame: a touch that starts inside it moves the caret instead of ending the edit.
-  @State private var fieldFrame = CGRect.zero
-  /// Where the current touch started and whether that was in the field, read as it starts: tapping the field can
-  /// bring the keyboard back, which moves the field before the touch ends. Keyed by the start point, so a cancelled
-  /// touch (which never ends) can't leave its answer to the next one.
-  @State private var touchStart: (location: CGPoint, inField: Bool)?
   @State private var reportMenuHeight: CGFloat = 360
   /// Each side's saved text as laid out in the card's column (spec 017): its line count picks the alignment.
   @State private var frontMeasure = TextMeasure()
@@ -337,22 +331,8 @@ public struct StudyView: View {
       .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
     .contentShape(.rect)
-    // While editing, a tap or a downward swipe that starts outside the field drops focus, which ends the edit.
-    // Simultaneous, so the scroll view and the field keep their own touches.
-    .simultaneousGesture(
-      DragGesture(minimumDistance: 0, coordinateSpace: .global).onChanged { drag in
-        if touchStart?.location != drag.startLocation {
-          touchStart = (drag.startLocation, fieldFrame.contains(drag.startLocation))
-        }
-      }
-      .onEnded { drag in
-        defer { touchStart = nil }
-        guard touchStart?.inField == false else { return }
-        let isTap = abs(drag.translation.width) < 10 && abs(drag.translation.height) < 10
-        if isTap || drag.translation.height > 30 { focusedField = nil }
-      },
-      isEnabled: store.editing != nil
-    )
+    // While editing, a tap or a downward swipe that starts off the field drops focus, which ends the edit.
+    .gesture(TapAway(isEnabled: store.editing != nil) { focusedField = nil })
   }
 
   /// A sheet sized to its rows: it dims the screen and leaves the centered card visible above it, where a dialog
@@ -430,7 +410,6 @@ public struct StudyView: View {
             .focused($focusedField, equals: field)
             .onSubmit { focusedField = nil }
             .onAppear { focusedField = field }
-            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { fieldFrame = $0 }
             .id(field)
             .accessibilityLabel(field == .front ? "Front" : "Back")
             .accessibilityIdentifier("study.\(name)Field")
