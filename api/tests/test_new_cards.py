@@ -122,7 +122,10 @@ def test_rest_stats_keeps_its_shape_and_serves_every_new_card(client):
         assert client.post("/cards", json={"front": f"w{i}", "back": "x"}).status_code == 201
 
     stats = client.get("/stats").json()
-    assert set(stats) == {"total", "due", "new", "reviewed_today", "next_due", "streak"}
+    assert set(stats) == {
+        *("total", "due", "new", "reviewed_today", "next_due", "streak"),
+        *("new_today", "milestone", "streak_start", "history_start", "history", "due_new"),
+    }  # spec 024 added fields (and 021's new_today / milestone)
     due = client.get("/cards/due", params={"limit": 200}).json()
     assert (stats["due"], stats["new"], len(due)) == (20, 20, 20)
 

@@ -1,5 +1,5 @@
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -130,21 +130,25 @@ def _review_at(session, *times: datetime) -> None:
 
 
 @pytest.mark.parametrize(
-    ("days_ago", "streak"),
-    [
-        ([], 0),
-        ([0], 1),
-        ([0, 1, 2], 3),
-        ([1, 2], 2),  # none today yet: still alive
-        ([2], 0),
-        ([0, 1, 3], 2),  # the gap stops it
-        ([0, 0, 0], 1),  # several reviews on one day count once
+    ("days_ago", "streak", "start_days_ago"),
+    [  # spec 024 AC 2
+        ([], 0, None),
+        ([0], 1, 0),
+        ([0, 1, 2], 3, 2),
+        ([1, 2], 2, 2),  # none today yet: still alive
+        ([2], 2, 2),  # yesterday is frozen while today is open
+        ([3], 0, None),  # two missed days in a row
+        ([0, 1, 3], 4, 3),  # 2 days ago is frozen
+        ([0, 0, 0], 1, 0),  # several reviews on one day count once
+        ([0, 1, 2, 4, 5, 6, 8], 3, 2),  # day 7 is frozen first, so day 3 (within 6 days) is missed
     ],
 )
-def test_streak_in_utc(session, days_ago, streak):
+def test_streak_in_utc(session, days_ago, streak, start_days_ago):
     if days_ago:
         _review_at(session, *(NOON - timedelta(days=d, hours=1) for d in days_ago))
-    assert deck.stats(session, now=NOON).streak == streak
+    stats = deck.stats(session, now=NOON)
+    start = None if start_days_ago is None else NOON.date() - timedelta(days=start_days_ago)
+    assert (stats.streak, stats.streak_start) == (streak, start)
 
 
 def test_streak_ignores_reviews_after_today(session):
@@ -158,8 +162,10 @@ def test_time_zone_with_a_positive_offset(session):
 
     paris = deck.stats(session, now=now, tz=PARIS)
     assert (paris.reviewed_today, paris.streak) == (1, 1)
+    assert (paris.history_start, paris.history) == (date(2026, 11, 21), "s")
     utc = deck.stats(session, now=now)
     assert (utc.reviewed_today, utc.streak) == (0, 1)  # yesterday in UTC, still alive
+    assert (utc.history_start, utc.history) == (date(2026, 11, 20), "sp")
 
 
 def test_time_zone_with_a_negative_offset(session):
@@ -168,8 +174,10 @@ def test_time_zone_with_a_negative_offset(session):
 
     la = deck.stats(session, now=now, tz=LOS_ANGELES)
     assert (la.reviewed_today, la.streak) == (0, 1)
+    assert (la.history_start, la.history) == (date(2026, 11, 20), "sp")
     utc = deck.stats(session, now=now)
     assert (utc.reviewed_today, utc.streak) == (1, 1)
+    assert (utc.history_start, utc.history) == (date(2026, 11, 21), "s")
 
 
 def test_streak_across_a_dst_change(session):
@@ -179,6 +187,7 @@ def test_streak_across_a_dst_change(session):
 
     stats = deck.stats(session, now=now, tz=PARIS)
     assert (stats.reviewed_today, stats.streak) == (1, 5)
+    assert (stats.history_start, stats.history) == (date(2026, 3, 27), "sssss")
 
 
 def test_reviewed_today_uses_the_local_day_on_a_dst_day(session):
@@ -190,6 +199,7 @@ def test_reviewed_today_uses_the_local_day_on_a_dst_day(session):
     )
     stats = deck.stats(session, now=datetime(2026, 3, 29, 12, 0, tzinfo=UTC), tz=PARIS)
     assert (stats.reviewed_today, stats.streak) == (0, 1)
+    assert (stats.history_start, stats.history) == (date(2026, 3, 28), "sp")
 
 
 def test_time_zone_rejects_unknown_names():

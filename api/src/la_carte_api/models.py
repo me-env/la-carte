@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from uuid import UUID, uuid4
 
@@ -305,7 +305,15 @@ class DeckStats(BaseModel):
     new: int
     reviewed_today: int
     next_due: datetime | None  # earliest time after now a card becomes servable; null if none
-    streak: int  # consecutive local days with a review, ending today or yesterday (spec 007)
+    new_today: int  # distinct cards first reviewed today (local day in tz), from ReviewLog (021)
+    milestone: int  # the new-card milestone size M, 1-200 (spec 021)
+    streak: int  # days in the current run, frozen days included (spec 024 decision 4)
+    streak_start: date | None  # the run's first local day; null when streak = 0
+    history_start: date  # the first local review day, or today when there are none
+    # One letter per local day from history_start to today: s studied, f frozen, m missed,
+    # p today not yet studied (spec 024).
+    history: str
+    due_new: int  # never-reviewed cards in the servable queue (a subset of `due`)
 
 
 class NewCardsStatus(BaseModel):

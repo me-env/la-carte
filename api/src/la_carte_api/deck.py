@@ -64,6 +64,7 @@ LEARNING = (CardState.learning, CardState.relearning)  # never buried; wins with
 # decision 2026-11-22): nothing is held back. A card is introduced at its first review.
 NEW_CARD_WINDOW = timedelta(hours=24)
 MAX_NEW_CARDS_PER_DAY = 200
+DEFAULT_MILESTONE = 15  # `/stats.milestone` when the stored value is 0 (spec 021 decision 3)
 
 Side = tuple[str, ...]  # field names, in the type's field order
 Way = tuple[Side, Side]  # (prompt, answer): a direction, normalized
@@ -668,8 +669,9 @@ def _balanced_due(
 
 
 def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> DeckStats:
-    """Deck counts at `now`. `due` / `next_due` follow the servable queue (burying applied);
-    `total` / `new` count cards; `reviewed_today` and `streak` use calendar days in `tz`."""
+    """Deck counts at `now`. `due` / `next_due` / `due_new` follow the servable queue (burying
+    applied); `total` / `new` count cards; `reviewed_today`, `new_today`, `streak` and `history`
+    use calendar days in `tz` (specs 007, 021, 024)."""
     now = now or utcnow()
     today = now.astimezone(tz).date()
     start_of_day, end_of_day = _local_midnight(today, tz), _local_midnight(today + _DAY, tz)
@@ -683,11 +685,21 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
             col(ReviewLog.reviewed_at) < end_of_day,
         )
     ).one()
-    review_times = session.exec(
-        select(ReviewLog.reviewed_at)
-        .where(col(ReviewLog.reviewed_at) < end_of_day)
-        .order_by(col(ReviewLog.reviewed_at).desc())
+    first_reviews = (
+        select(func.min(ReviewLog.reviewed_at).label("first"))
+        .group_by(col(ReviewLog.card_id))
+        .subquery()
     )
+    new_today = session.exec(
+        select(func.count())
+        .select_from(first_reviews)
+        .where(first_reviews.c.first >= start_of_day, first_reviews.c.first < end_of_day)
+    ).one()
+    review_times = session.exec(
+        select(ReviewLog.reviewed_at).where(col(ReviewLog.reviewed_at) < end_of_day)
+    )
+    history_start, history = _history({t.astimezone(tz).date() for t in review_times}, today)
+    streak, streak_start = _streak(history, history_start)
     queue, next_due = _queue(session, now)
     return DeckStats(
         total=count(),
@@ -695,10 +707,13 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
         new=count(col(Card.last_review).is_(None)),
         reviewed_today=reviewed_today,
         next_due=next_due,
-        streak=_streak(
-            (t.astimezone(tz).date() for t in review_times),
-            last_day=today if reviewed_today else today - _DAY,  # alive until the end of today
-        ),
+        new_today=new_today,
+        milestone=get_settings(session).new_cards_per_day or DEFAULT_MILESTONE,
+        streak=streak,
+        streak_start=streak_start,
+        history_start=history_start,
+        history=history,
+        due_new=sum(card.last_review is None for card, _ in queue),
     )
 
 
@@ -840,12 +855,34 @@ def _local_midnight(day: date, tz: tzinfo) -> datetime:
     return datetime.combine(day, time(), tzinfo=tz).astimezone(UTC)
 
 
-def _streak(review_days: Iterable[date], last_day: date) -> int:
-    """Consecutive review days ending on `last_day`. `review_days`: local dates, newest first."""
-    streak, expected = 0, last_day
-    for day in review_days:
-        if day == expected:
-            streak, expected = streak + 1, expected - _DAY
-        elif day < expected:
-            break  # a gap; a later day is another review on a day already counted
-    return streak
+def _history(studied: set[date], today: date) -> tuple[date, str]:
+    """(first day, one letter per local day from it to `today`), spec 024 decision 3.
+
+    `s` studied, `f` frozen, `m` missed, `p` today not yet studied. Walking chronologically, a
+    missed day is frozen when the day before is studied, no frozen day lies in the 6 days before
+    it, and the day after is studied or is today (so a missed yesterday is frozen provisionally)."""
+    start = min(studied, default=today)
+    letters, last_freeze, day = [], None, start
+    while day < today:
+        if day in studied:
+            letters.append("s")
+        elif (
+            day - _DAY in studied
+            and (last_freeze is None or day - last_freeze > 6 * _DAY)
+            and (day + _DAY in studied or day + _DAY == today)
+        ):
+            letters.append("f")
+            last_freeze = day
+        else:
+            letters.append("m")
+        day += _DAY
+    letters.append("s" if today in studied else "p")
+    return start, "".join(letters)
+
+
+def _streak(history: str, start: date) -> tuple[int, date | None]:
+    """(days in the current run, its first day): the trailing studied/frozen days, ending today,
+    or yesterday while today is pending."""
+    run = history.removesuffix("p")
+    streak = len(run) - len(run.rstrip("sf"))
+    return streak, start + (len(run) - streak) * _DAY if streak else None

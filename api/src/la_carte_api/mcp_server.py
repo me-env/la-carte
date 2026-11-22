@@ -324,9 +324,16 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         first studied in the last 24 h, how many are left in today's target and beyond it.
         Read-only.
 
-        `streak`: consecutive days with at least one review, ending today or yesterday, in `tz`.
-        Pass the user's IANA time zone (e.g. `Europe/Paris`) when you know it; `reviewed_today`
-        and `streak` use it. Defaults to UTC; an unknown name is an error."""
+        `due_new`: the never-reviewed cards among `due`. `new_today`: new cards first studied
+        today; `milestone`: the size of the app's daily steps of new cards.
+
+        `streak`: days in a row with at least one review, ending today or yesterday, in `tz`;
+        it forgives one missed day per 7 (a frozen day; two missed days in a row end it).
+        `streak_start`: its first day (null when 0). `history`: one letter per local day from
+        `history_start` (the first review day) to today:
+        s studied, f frozen, m missed, p today not yet studied.
+        Pass the user's IANA time zone (e.g. `Europe/Paris`) when you know it; every per-day
+        field uses it. Defaults to UTC; an unknown name is an error."""
         try:
             zone = deck.time_zone(tz)
         except deck.UnknownTimeZone as error:

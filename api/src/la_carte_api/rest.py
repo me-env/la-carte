@@ -116,7 +116,8 @@ def report_card(session: SessionDep, card_id: UUID, body: ReportCreate, response
 
 @router.get("/stats", response_model=DeckStats)
 def stats(session: SessionDep, tz: str = "UTC"):
-    """`tz`: IANA time zone defining "today" for `reviewed_today` and `streak`."""
+    """`tz`: IANA time zone defining the local days of `reviewed_today`, `new_today`, `streak`
+    and `history`."""
     try:
         zone = deck.time_zone(tz)
     except deck.UnknownTimeZone as error:

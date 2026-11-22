@@ -108,7 +108,7 @@ Rules:
 | GET/PATCH/DELETE | `/cards/{id}` | PATCH `{front?, back?}` edits the note field this card shows on that side (422 if the side has several fields: use `PATCH /notes/{note_id}`); DELETE removes the direction, and the note with its last card | `Card` / 204 |
 | POST | `/cards/{id}/review` | `{rating: again\|hard\|good\|easy, confidence?: 0–1}` (`confidence`: optional measured drag value, stored in `ReviewLog`, not used by FSRS; outside [0, 1] → 422 — spec 013) | rescheduled `Card` |
 | POST | `/cards/{id}/report` | `{reason: wrong\|drop\|doubt\|rephrase\|other\|broken_photo, comment?: string}` (`comment` trimmed, 1–500 chars, required for `other`; bad reason/comment → 422 `{"detail": …}`; unknown card → 404 — spec 015) | `Report` (201); the card is held out of study. `broken_photo` (filed by the app) is idempotent: an active one on the card is returned with 200, no new row |
-| GET | `/stats` | `?tz=` (IANA name, default `UTC`; unknown → 422 `{"detail": "Unknown time zone: <name>"}`) | `{total, due, new, reviewed_today, next_due, streak}` (`due` / `next_due`: servable queue, see burying — spec 014; `reviewed_today` and `streak` (consecutive review days ending today or yesterday) use local days in `tz` — spec 007) |
+| GET | `/stats` | `?tz=` (IANA name, default `UTC`; unknown → 422 `{"detail": "Unknown time zone: <name>"}`) | `{total, due, new, reviewed_today, next_due, new_today, milestone, streak, streak_start, history_start, history, due_new}` (`due` / `next_due`: servable queue, see burying — spec 014; `due_new`: never-reviewed cards in that queue; `new_today`: distinct cards first reviewed today, `milestone`: the stored new-card size, 0 → 15 — spec 021; `history`: one letter per local day from `history_start` (first review day, or today) to today, `s` studied / `f` frozen / `m` missed / `p` today not yet studied; a missed day is frozen when the day before is studied, no freeze in the 6 days before, and the day after is studied or today; `streak` = trailing `s`/`f` days ending today, or yesterday while today is `p`, starting `streak_start` (null when 0) — spec 024; all per-day fields use local days in `tz` — spec 007) |
 
 `Note` = `{id, type, fields, cards: [{id, prompt, answer, state, due, last_review}], created_at, updated_at}`.
 `Card` = `{id, note_id, type, prompt, answer, fields, front, back, state: new|learning|review|relearning, due,
@@ -125,7 +125,8 @@ nothing on a validation error), `find_notes(query, type, limit=50)`, `update_not
 
 Cards (thin wrappers with the `/cards` semantics; docstrings start "Prefer the note tools"): `add_cards` (basic
 notes; same duplicate rule on basic fronts, returns `{added: [Card], skipped: [Card]}`), `list_cards`, `update_card`,
-`delete_card`, `due_cards` (servable queue), `review_card(card_id, rating, confidence=None)`, `deck_stats(tz="UTC")`.
+`delete_card`, `due_cards` (servable queue), `review_card(card_id, rating, confidence=None)`, `deck_stats(tz="UTC")`
+(the `/stats` fields, freezes and the `history` alphabet explained in its docstring, plus `new_cards`).
 REST `POST /notes` / `POST /cards` always add.
 
 New-card target (spec 021, MCP only; a target, not a limit): `new_cards_per_day(value=None)` reads the target, or
