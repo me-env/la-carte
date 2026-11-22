@@ -76,4 +76,36 @@ struct LaCarteLogoTests {
     #expect(abs(bounds.midX - 50) <= 0.5)
     #expect(abs(bounds.midY - 50) <= 0.5)
   }
+
+  /// Just after the curve starts the trimmed line is degenerate; it must not turn the card pink (QA logo-131 bug 1).
+  @Test(arguments: [1e-7, 5e-7, 1e-6, 3e-6, 7e-6, 1e-5])
+  func aJustStartedCurveIsNotTheCard(epsilon: Double) {
+    let geometry = LogoGeometry(progress: LogoGeometry.linePhase.lowerBound + epsilon)
+    #expect(!Self.coversTheCard(geometry.lineOutside))
+    #expect(geometry.cardBody.contains(CGPoint(x: LogoGeometry.card.midX, y: LogoGeometry.card.maxY - 10)))
+  }
+
+  /// Every frame of the draw-in, including just past each phase boundary: the pink line never covers the card.
+  @Test func theLineNeverCoversTheCard() {
+    let line = LogoGeometry.linePhase
+    let reset = LogoGeometry.resetRange
+    let boundaries = [line.lowerBound] + [reset.lowerBound, reset.upperBound].map {
+      line.lowerBound + $0 * (line.upperBound - line.lowerBound)
+    }
+    let near = boundaries.flatMap { b in [1e-9, 1e-7, 1e-6, 1e-5, 1e-4].flatMap { [b - $0, b + $0] } }
+    let sweep = (0...1000).map { Double($0) / 1000 }
+    for progress in sweep + near {
+      let geometry = LogoGeometry(progress: progress)
+      #expect(!Self.coversTheCard(geometry.lineOutside), "progress \(progress)")
+      if geometry.cardOpacity > 0 {
+        #expect(geometry.cardBody.contains(CGPoint(x: LogoGeometry.card.midX, y: LogoGeometry.card.maxY - 10)), "progress \(progress)")
+      }
+    }
+  }
+
+  /// The lower card is never part of the line, so pink there means the card itself was painted.
+  private static func coversTheCard(_ path: Path) -> Bool {
+    let card = LogoGeometry.card
+    return path.contains(CGPoint(x: card.midX, y: card.maxY - 10)) || path.boundingRect.contains(card)
+  }
 }

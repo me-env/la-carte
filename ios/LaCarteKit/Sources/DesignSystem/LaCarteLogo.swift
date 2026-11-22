@@ -100,13 +100,19 @@ struct LogoGeometry: Equatable {
         .union(Self.rising(Self.barFoot, radius: Self.barFootRadius, rise: rise, from: Self.bar))
     }
     if lineTrim > reset.upperBound {
-      line = line.union(Self.stroked(Self.centreline.trimmedPath(from: reset.upperBound, to: lineTrim)))
+      let decay2 = Self.stroked(Self.centreline.trimmedPath(from: reset.upperBound, to: lineTrim))
+      if !decay2.isEmpty {
+        line = line.union(decay2)
+      }
     }
     return line
   }
 
+  /// The stroked centreline, or an empty path when the trim is too short to stroke: a degenerate path isn't `isEmpty`,
+  /// and boolean ops with it misbehave (`degenerate.subtracting(card)` returns the whole card).
   static func stroked(_ path: Path) -> Path {
-    path.strokedPath(StrokeStyle(lineWidth: strokeWidth, lineCap: .round, lineJoin: .round))
+    let stroke = path.strokedPath(StrokeStyle(lineWidth: strokeWidth, lineCap: .round, lineJoin: .round))
+    return stroke.boundingRect.isEmpty ? Path() : stroke
   }
 
   static let centreline: Path = Path { $0.addLines(curve) }
