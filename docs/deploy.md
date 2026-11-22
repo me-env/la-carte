@@ -8,7 +8,8 @@ see `release.md`) and any MCP agent talk to the same deck.
 docker-compose.yml (repo root)
   service "api"  build ./api  (api/Dockerfile: uv, Python 3.13 slim, non-root)
     listens 0.0.0.0:8000, not published on the host, Traefik reaches it on the Docker network
-    env      LA_CARTE_API_TOKEN (required)  → Authorization: Bearer … on everything except /health
+    env      LA_CARTE_API_TOKEN (required)  → Authorization: Bearer … on everything except /health and the icons
+             LA_CARTE_PUBLIC_URL (optional) → https base URL; MCP serverInfo then lists <url>/icon.png
     volume   la-carte-data → /data/la-carte.db
 ```
 

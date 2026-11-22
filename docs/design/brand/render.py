@@ -16,10 +16,13 @@ Writes, from docs/design/brand/:
   logo-{light,dark,mono,tinted}.svg, png/logo-{light,dark}-{64,256,1024}.png, png/logo-mono-1024.png
   app-icon/app-icon-{light,dark,tinted}.svg + .png (1024) + -58.png + -29.png, copied into AppIcon.appiconset
   ../../../ios/LaCarteKit/Sources/DesignSystem/LaCarteLogoGeometry.swift
+  ../../../api/src/la_carte_api/static/: the API's favicon.ico (16, 32, 48), icon.png (512), apple-touch-icon.png
+  (180) and icon.svg, all the light app icon (the white-background artwork the user prefers)
 """
 
 from __future__ import annotations
 
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -170,6 +173,32 @@ def rsvg(src: Path, size: int, dst: Path) -> None:
     subprocess.run(["rsvg-convert", "-w", str(size), "-h", str(size), str(src), "-o", str(dst)], check=True)
 
 
+def ico(pngs: list[tuple[int, bytes]]) -> bytes:
+    """A multi-size .ico whose entries are PNGs (supported by every browser since Windows Vista)."""
+    head = struct.pack("<HHH", 0, 1, len(pngs))
+    offset = len(head) + 16 * len(pngs)
+    entries = b""
+    for size, data in pngs:
+        entries += struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(data), offset)
+        offset += len(data)
+    return head + entries + b"".join(data for _, data in pngs)
+
+
+def api_icons(svg: Path) -> None:
+    """The API serves these (favicon for clients that show a connector's site icon, MCP serverInfo icons)."""
+    static = ROOT / "api" / "src" / "la_carte_api" / "static"
+    static.mkdir(exist_ok=True)
+    (static / "icon.svg").write_bytes(svg.read_bytes())
+    rsvg(svg, 512, static / "icon.png")
+    rsvg(svg, 180, static / "apple-touch-icon.png")
+    pngs = []
+    for size in (16, 32, 48):
+        rsvg(svg, size, static / "_ico.png")
+        pngs.append((size, (static / "_ico.png").read_bytes()))
+    (static / "_ico.png").unlink()
+    (static / "favicon.ico").write_bytes(ico(pngs))
+
+
 def main() -> None:
     f = frozen()
     card0, line0 = f["check"]
@@ -207,6 +236,8 @@ def main() -> None:
         for size in (58, 29):
             rsvg(svg, size, HERE / "app-icon" / f"app-icon-{name}-{size}.png")
         (iconset / f"app-icon-{name}.png").write_bytes((HERE / "app-icon" / f"app-icon-{name}.png").read_bytes())
+
+    api_icons(HERE / "app-icon" / "app-icon-light.svg")
 
     out = ROOT / "ios" / "LaCarteKit" / "Sources" / "DesignSystem" / "LaCarteLogoGeometry.swift"
     out.write_text(swift(L))

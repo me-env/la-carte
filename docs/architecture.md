@@ -78,6 +78,7 @@ Rules:
 | Method | Path | Body / query | Returns |
 |---|---|---|---|
 | GET | `/health` | — | `{status, build}` (no auth); `build` = 12-hex sha256 of the API's `.py` source (`build.py`) |
+| GET | `/favicon.ico`, `/icon.png` (512), `/apple-touch-icon.png` (180), `/icon.svg` | — | The la-carte icon (no auth, cached 1 day), from `docs/design/brand/render.py`; MCP serverInfo `icons` points at it when `LA_CARTE_PUBLIC_URL` is set |
 | GET | `/notes` | `?query=&type=basic\|person&limit=` (≤ 500, default 100; `query` = casefolded substring of any field but `photo`) | `[Note]` newest first |
 | POST | `/notes` | `{type, fields, directions?: [{prompt: [field], answer?: [fields]}]}` (one prompt field, answer = the rest; no duplicate check) | `Note` (201) |
 | GET/PATCH/DELETE | `/notes/{id}` | PATCH `{fields?, directions?}`: `fields` merged key by key (`""` clears); `directions` = the full desired set (kept ones keep card + schedule, new ones due now, missing ones deleted) | `Note` / 204 (note + all its cards) |

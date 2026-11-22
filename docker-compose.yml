@@ -8,6 +8,8 @@ services:
     restart: unless-stopped
     environment:
       LA_CARTE_API_TOKEN: ${LA_CARTE_API_TOKEN:?Set LA_CARTE_API_TOKEN (openssl rand -hex 32)}
+      # Optional: the public https URL, so MCP serverInfo can list the icon (/icon.png).
+      LA_CARTE_PUBLIC_URL: ${LA_CARTE_PUBLIC_URL:-}
     expose:
       - "8000"
     volumes:

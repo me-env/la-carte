@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
@@ -111,3 +112,22 @@ def test_review_rejects_a_confidence_outside_0_1(client):
         assert response.status_code == 422
     assert client.get(f"/cards/{card['id']}").json() == card  # not rescheduled
     assert _logs(client) == []
+
+
+@pytest.mark.parametrize(
+    ("path", "media_type"),
+    [
+        ("/favicon.ico", "image/x-icon"),
+        ("/icon.png", "image/png"),
+        ("/apple-touch-icon.png", "image/png"),
+        ("/icon.svg", "image/svg+xml"),
+    ],
+)
+def test_icons_are_served_without_the_token(path, media_type):
+    app = create_app(Settings(database_url="sqlite://", api_token="secret", _env_file=None))
+    with TestClient(app) as client:
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith(media_type)
+        assert "max-age" in response.headers["cache-control"]
+        assert response.content

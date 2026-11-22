@@ -6,6 +6,7 @@ from uuid import UUID
 
 from mcp.server.mcpserver import MCPServer, UserMessage
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import Icon
 from pydantic import Field
 from sqlalchemy.engine import Engine
 from sqlmodel import Session
@@ -150,8 +151,20 @@ Rules:
 """
 
 
-def build_mcp(engine: Engine) -> MCPServer:
-    mcp = MCPServer(name="la-carte", instructions=INSTRUCTIONS)
+def server_icons(public_url: str | None) -> list[Icon] | None:
+    """The la-carte icon at the API's public URL (clients fetch it to show the connector)."""
+    if not public_url:
+        return None
+    base = public_url.rstrip("/")
+    return [
+        Icon(src=f"{base}/icon.png", mime_type="image/png", sizes=["512x512"]),
+        Icon(src=f"{base}/icon.svg", mime_type="image/svg+xml", sizes=["any"]),
+    ]
+
+
+def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
+    """The deck as MCP tools. With `public_url`, serverInfo lists the icons the API serves there."""
+    mcp = MCPServer(name="la-carte", instructions=INSTRUCTIONS, icons=server_icons(public_url))
 
     def run(operation, *args):
         with Session(engine) as session:

@@ -282,3 +282,15 @@ async def test_handle_reports_prompt(engine):
         text = (await client.get_prompt("handle_reports")).messages[0].content.text
         for expected in ("`list_reports`", "`update_report`", "`waiting_user`", "wait"):
             assert expected in text
+
+
+async def test_server_info_lists_the_icon_at_the_public_url(engine):
+    async with Client(build_mcp(engine, "https://carte.example.com/")) as client:
+        icons = client.server_info.icons
+        assert icons is not None
+        assert [(i.src, i.mime_type) for i in icons] == [
+            ("https://carte.example.com/icon.png", "image/png"),
+            ("https://carte.example.com/icon.svg", "image/svg+xml"),
+        ]
+    async with Client(build_mcp(engine)) as client:
+        assert client.server_info.icons is None
