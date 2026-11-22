@@ -100,7 +100,17 @@ layer, e.g. 8+ months and 1+ week), the coarse dots instead flow as one sequence
 Freezes inside a completed week, month or year don't show: a coarse dot is just done. When `d = 0` and today is
 studied, today has just completed a unit, so the row is all "not yet" and no pink shows. That's accepted.
 
-**Dots** (design-lead, mockup v4). The grid pitch is 19 pt; the grid is 133 pt wide and at most 76 pt tall.
+**Unit marks: pending the user's pick (2026-11-22).** The user rejected size as the unit cue ("feels more like a UI
+bug than a feature") and wants a shape per unit, all the same size. Mockups in `docs/design/renders/024/`:
+- `marks-A-letters.png`: variant A, the letters D / W / M / Y. The critic gave it 4/10 and design-lead advises against it.
+- `marks-B-shapes-pentagon.png`: variant B, recommended. Day circle, week rounded square, month pentagon, year star.
+  All have the same ink area (about 64 pt²). Frozen is the same shape, hollow.
+- `marks-B-shapes-diamond.png`: variant B with a diamond month.
+- `marks-B-month-compare.png`: the pentagon and the diamond side by side.
+
+Once the user picks, the week / month / year rows of the table below are replaced by the chosen marks.
+
+**Dots** (design-lead, mockup v4; superseded for week / month / year by the pick above). The grid pitch is 19 pt; the grid is 133 pt wide and at most 76 pt tall.
 
 | Dot | Shape | Full colour (all themes, tokens) |
 |---|---|---|
