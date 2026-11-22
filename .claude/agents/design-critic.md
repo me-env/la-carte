@@ -36,6 +36,8 @@ stop weak work before it reaches them. Be specific and unsentimental. You don't 
 
 Check pixels, don't guess: open the renders, compare sizes side by side (you may generate comparison
 sheets in the scratchpad, e.g. with `sips`/ImageMagick if installed, or ask a sub-agent to).
+Screens: judge only real-view renders or UI-test screenshots (glass only on the latter), and measure colours,
+contrast and gaps with `uv run scripts/screen-sample.py` (docs/testing.md, "Study renders").
 
 ## Measured review (mandatory, every proposal)
 Run on each 1024 render (or its SVG), light and dark:

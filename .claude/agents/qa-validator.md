@@ -29,6 +29,7 @@ in `docs/design/reference/` that the spec points to.
    `scripts/ios-ui-test.sh --split <NNN>-mock -only-testing:…` (docs/testing.md, Splitting a run).
 3. **Open every screenshot** (Read the PNG) and check it against the spec and the
    `docs/design-system.md` QA visual checklist. Compare with the reference images for feel.
+   Measure colour/contrast/spacing criteria with `uv run scripts/screen-sample.py` (docs/testing.md).
    Also run the full UI suite once to catch regressions in earlier features.
 4. Write `qa/reports/NNN-short-name.md` from `qa/reports/_template.md`:
    per-criterion PASS/FAIL with the screenshot that proves it, visual issues, bugs with exact repro.

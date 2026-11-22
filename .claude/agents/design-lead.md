@@ -42,6 +42,8 @@ reference screenshots via `scripts/fetch-design-refs.sh`).
   yourself (with gallery entries + unit tests where there's logic), and run `scripts/ios-build.sh` /
   `scripts/ios-test.sh`.
 - Don't run `simctl io`/`ui`/privacy commands or devicectl yourself; ask QA for screenshots.
+- Show screens as real-view renders (`scripts/ios-test.sh --render`) or UI-test screenshots, never hand-built
+  mocks; measure with `scripts/screen-sample.py` (docs/testing.md, "Study renders").
 - When the brand kit changes, note what `marketing` must update.
 
 ## Output
