@@ -15,6 +15,14 @@ suite is skipped in normal runs and on CI. It also writes `gallery-<light|dark|f
 the gallery's content without its ScrollView (`DesignSystemGalleryContent`), since `ImageRenderer` draws a
 ScrollView as empty.
 
+**Study renders.** `scripts/ios-test.sh --render -only-testing:ScreenColorTests/StudyRenders` (about 30 s) draws
+the real `StudyView` in a window (`Screen`, 402 × 874 pt at 3×) and writes 44 PNGs to the same folder,
+`screen-study-<state>-<theme>-<scheme>.png`: front short / medium / long / overflowing, revealed short and long
+answer, rating drag held at ease 0, 0.25, 0.5, 0.76 and 1, editing the back, in light, dark and forest; empty and
+done also in system. Liquid Glass is hidden (`layer.render` blanks on it; `drawHierarchy` draws nothing in the test
+process), so judge glass on UI-test screenshots. Add a state as one line in `catalogue` in
+`ios/LaCarteKit/Tests/ScreenColorTests/StudyRenders.swift`, using only store state.
+
 ## Script output and exit codes
 
 - **Live:** `ios-test.sh`, `ios-ui-test.sh` and `e2e.sh` print each test as it finishes, even redirected to a

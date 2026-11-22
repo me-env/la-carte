@@ -127,6 +127,11 @@ iPhone 17 Pro), `Theme.background`, radius 22, 16 pt padding, on a `Theme.surfac
 | Editor, one centered message (01, 02) | **Setup/error message** ("Connect your deck", "Token rejected"): `.body` ink message, `.meta` `secondaryInk` detail, quiet text button ("Open Settings"), centered (spec 008) |
 
 ## QA visual checklist
+Screen visuals are judged on real-view renders (`scripts/ios-test.sh --render`) or UI-test screenshots, never hand-built mocks. Glass is judged only on UI-test screenshots.
+Study screen catalogue: `scripts/ios-test.sh --render -only-testing:ScreenColorTests/StudyRenders` writes
+`screen-study-<state>-<theme>-<scheme>.png`; the states are listed in
+`ios/LaCarteKit/Tests/ScreenColorTests/StudyRenders.swift` (docs/testing.md).
+
 - Background is `Theme.background` edge to edge, light **and** dark.
 - Nothing competes with the centered text; no default iOS blue tint (button tint = ink). Pink appears only in the 4 accent places.
 - Buttons are the circle style, 44pt hit area, aligned to the same top margin.

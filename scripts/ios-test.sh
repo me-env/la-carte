@@ -4,6 +4,7 @@
 # so it never waits behind an app build or a UI suite, and only waits when $UNIT_POOL_SIZE unit runs are going.
 # --render (or LA_CARTE_RENDER_DIR=dir) also writes logo + gallery PNGs (DesignSystemTests/RenderTests).
 # Other args go to xcodebuild, e.g. scripts/ios-test.sh --render -only-testing:DesignSystemTests/RenderTests
+# Real StudyView screens: scripts/ios-test.sh --render -only-testing:ScreenColorTests/StudyRenders (screen-study-*.png)
 # Each finished test prints as it finishes (also into a file), then a `TESTS: …` summary line.
 # Exit code = xcodebuild's (65 test failure, 75 lock timeout); the summary only warns if it fails.
 set -euo pipefail
@@ -28,7 +29,7 @@ set +e
 "$LOCK" "$KIT_BUILD_LOCK" "$ROOT/scripts/_sim-pool.sh" \
   /bin/sh -c 'exec $BUILD_SLOT xcodebuild test $BUILD_JOBS_FLAGS -scheme LaCarteKit-Package -destination "$POOL_DESTINATION" "$@"' sh \
   -skipMacroValidation -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} 2>&1 \
-  | grep --line-buffered -E "^(✔|✘|🔒)|Test [Cc]ase .*(passed|failed|skipped)|error:|TEST( EXECUTE)? (SUCCEEDED|FAILED)"
+  | grep --line-buffered -E "^(✔|✘|🔒|StudyRenders:)|Test [Cc]ase .*(passed|failed|skipped)|error:|TEST( EXECUTE)? (SUCCEEDED|FAILED)"
 STATUS=${PIPESTATUS[0]}
 set -e
 if [ ! -d "$RESULT" ]; then
