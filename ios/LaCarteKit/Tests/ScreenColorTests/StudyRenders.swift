@@ -96,14 +96,15 @@ struct StudyRenders {
     }
   }
 
-  /// Layout D under a wide 2-line question, revealed, light: a short answer, centred on the full column, and a long
-  /// one, leading in the question's width (`screen-study-d-wide-<short|long>.png`, amended 2026-11-22).
-  @Test func layoutDWideQuestion() throws {
-    let question = "Who composed The Magic Flute?"
+  /// Layout D under a 2-line question that fills ~68 % of the column, revealed, light: a short answer, centred, and a
+  /// long one, leading; both in the full column (`screen-study-d-wrapped-<short|long>.png`, amended 2026-11-22).
+  @Test func layoutDNarrowWrappingQuestion() throws {
+    let dir = try #require(ProcessInfo.processInfo.environment["LA_CARTE_RENDER_DIR"])
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
     for (name, answer) in [("short", "Wolfgang Amadeus Mozart"), ("long", CardLines.answers[2].1)] {
-      let state = Self.studying(CardLines.card(question, answer), revealed: true)
+      let state = Self.studying(CardLines.card(CardLines.narrowWrapping, answer), revealed: true)
       _ = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), Self.looks[0],
-                     name: "study-d-wide-\(name)")
+                     name: "study-d-wrapped-\(name)")
     }
   }
 }
@@ -125,8 +126,12 @@ enum CardLines {
     (92, "the Mediterranean Sea"),
     (98, "What does ephemeral mean?"),
   ]
-  /// The questions layout D lays the answer inside: 2+ lines, or one line of at least 85 % of the column.
-  static let wide = questions.filter { $0.0 >= 2 }.map(\.1) + singleLines.filter { $0.0 >= 85 }.map(\.1)
+  /// Wraps, but its widest drawn line fills only ~68 % of the column.
+  static let narrowWrapping = "Who composed The Magic Flute?"
+  /// The questions layout D lays a leading answer inside: their widest drawn line fills at least 85 % of the column
+  /// (the other 2+ line questions: 91-93 %).
+  static let wide = questions.filter { $0.0 >= 2 && $0.1 != narrowWrapping }.map(\.1)
+    + singleLines.filter { $0.0 >= 85 }.map(\.1)
   static let answers = [
     (1, "the sea"),
     (2, "Jupiter, a gas giant mostly made of hydrogen and helium"),

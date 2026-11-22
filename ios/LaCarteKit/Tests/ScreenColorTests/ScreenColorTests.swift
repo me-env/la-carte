@@ -63,7 +63,8 @@ struct ScreenColorTests {
 
   /// Spec 017: the question depends only on itself, in every candidate layout. Revealing the answer doesn't change a
   /// pixel of it, and short, 2-line and 4-line answers leave it at the same horizontal place (the stack's vertical
-  /// centring may differ). In layout D, a leading answer under a wide question stays within its width.
+  /// centring may differ). In layout D, a leading answer under a wide question (widest line ≥ 85 % of the column)
+  /// stays within its width, and under any other question starts at the column's edge.
   @Test(arguments: StudyView.TextLayout.allCases, CardLines.questions.map(\.1) + CardLines.singleLines.map(\.1))
   func questionStaysPut(_ layout: StudyView.TextLayout, _ question: String) throws {
     let defaultLayout = StudyView.textLayout
@@ -85,12 +86,16 @@ struct ScreenColorTests {
       let ink = try #require(front.inkBounds(in: front.band(0.14, 0.85)), "no question drawn")
       #expect(revealed.changedPixels(from: front, in: ink) == 0, "question moved on reveal (answer: \(answer))")
       columns.append(ink.minX...ink.maxX)
-      guard layout == .questionWidth, CardLines.wide.contains(question) else { continue }
+      guard layout == .questionWidth else { continue }
       let bottom = revealed.band(0, 0.85).maxY
       let below = CGRect(x: 0, y: ink.maxY + 1, width: revealed.size.width, height: bottom - ink.maxY - 1)
       let answerInk = try #require(revealed.inkBounds(in: below), "no answer drawn")
-      if questionLines >= 3 || answerLines >= 3 {  // a leading answer
-
+      let leading = questionLines >= 3 || answerLines >= 3
+      if leading, !CardLines.wide.contains(question) {
+        // Amended 2026-11-22 (user): a question under 85 % of the column, even wrapped, leaves the answer the column.
+        #expect(answerInk.minX < 16 + 3 && answerInk.width > ink.width,  // at the column's 16 pt edge
+                "answer held to a narrow question: \(answerInk) vs \(ink) (answer: \(answer))")
+      } else if leading {
         // Ink, not frames: a glyph's ink starts a little inside its advance (side bearings differ by letter). Measured
         // with the space a wrapped line breaks at, the answer overhung a centred question by ~3.5 pt; laid out in the
         // full column, by 10+ pt.
@@ -109,7 +114,7 @@ struct ScreenColorTests {
   /// Amadeus Mozart" fits one line of the column but not the 2-line question's width, so it's wider than the question.
   @Test func centredAnswerIgnoresTheQuestionWidth() throws {
     var state = StudyFeature.State()
-    state.cards = [CardLines.card("Who composed The Magic Flute?", "Wolfgang Amadeus Mozart")]
+    state.cards = [CardLines.card(CardLines.narrowWrapping, "Wolfgang Amadeus Mozart")]
     state.phase = .studying
     let front = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), Self.looks[0])
     state.isRevealed = true

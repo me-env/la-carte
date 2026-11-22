@@ -515,12 +515,12 @@ public struct StudyView: View {
     return Self.referenceWidth(question: frontMeasure, answer: answerAlignment)
   }
 
-  /// Layout D: a question that wraps, or fills at least 85 % of the column on one line, reads as a full-width block,
-  /// so its widest line as drawn becomes a leading answer's column: a leading answer wider than it would overhang its
-  /// left edge. A centred answer (1-2 lines in the full column) isn't constrained (user, 2026-11-22), and below 85 %
-  /// the question is short display text with wide margins, so the answer keeps the full column too.
+  /// Layout D: a question whose widest line as drawn fills at least 85 % of the column reads as a full-width block,
+  /// so that line becomes a leading answer's column: a leading answer wider than it would overhang its left edge.
+  /// Below 85 %, wrapped or not, the question is display text with wide margins, and a centred answer (1-2 lines in
+  /// the full column) is never constrained: both keep the full column (user, 2026-11-22).
   static func referenceWidth(question: TextMeasure, answer: TextAlignment) -> CGFloat? {
-    guard answer == .leading, question.width > 0, question.wraps || question.width >= 0.85 * question.column
+    guard answer == .leading, question.drawnWidth > 0, question.drawnWidth >= 0.85 * question.column
     else { return nil }
     return question.drawnWidth
   }
@@ -538,45 +538,38 @@ public struct StudyView: View {
     return (answer - question) / 2
   }
 
-  /// A hidden copy of a side's saved text in the column, cut to one line, then to two, with the full
-  /// text over them: a full text taller than a cut one has more lines. Laid out with the card, so it follows the
-  /// width and text size. One callback per side: two writes to the same state in one layout pass lost one of them.
+  /// A hidden copy of a side's saved text in the column, cut to two lines, with the full text over it: a full text
+  /// taller than the cut one has more lines. Laid out with the card, so it follows the width and text size. One
+  /// callback per side: two writes to the same state in one layout pass lost one of them.
   private func probe(
     _ text: String, font cardFont: CardFont, into measure: Binding<TextMeasure>
   ) -> some View {
     let font = cardFont.font
     let textSize = min(dynamicTypeSize, .accessibility2)  // the card text's `dynamicTypeSize` cap
-    return Text(text).font(font).lineLimit(1)
+    return Text(text).font(font).lineLimit(2).fixedSize(horizontal: false, vertical: true)
       .frame(maxWidth: .infinity)
       .overlay(alignment: .top) {
-        Text(text).font(font).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-          .frame(maxWidth: .infinity)
-          .overlay(alignment: .top) {
-            Text(text).font(font).fixedSize(horizontal: false, vertical: true)
-              .onGeometryChange(for: TextMeasure.self) { proxy in
-                let oneLine = proxy.bounds(of: .named(Self.oneLine))
-                return TextMeasure(
-                  width: proxy.size.width, height: proxy.size.height,
-                  oneLine: oneLine?.height ?? proxy.size.height,
-                  twoLines: proxy.bounds(of: .named(Self.twoLines))?.height ?? proxy.size.height,
-                  column: oneLine?.width ?? proxy.size.width
-                )
-              } action: { measured in
-                var measured = measured
-                let drawn = Self.drawnWidth(of: text, font: cardFont.uiFont(textSize), in: measured.column)
-                measured.drawnWidth = min(drawn, measured.width)
-                measure.wrappedValue = measured
-              }
+        Text(text).font(font).fixedSize(horizontal: false, vertical: true)
+          .onGeometryChange(for: TextMeasure.self) { proxy in
+            let twoLines = proxy.bounds(of: .named(Self.twoLines))
+            return TextMeasure(
+              width: proxy.size.width, height: proxy.size.height,
+              twoLines: twoLines?.height ?? proxy.size.height,
+              column: twoLines?.width ?? proxy.size.width
+            )
+          } action: { measured in
+            var measured = measured
+            let drawn = Self.drawnWidth(of: text, font: cardFont.uiFont(textSize), in: measured.column)
+            measured.drawnWidth = min(drawn, measured.width)
+            measure.wrappedValue = measured
           }
-          // After the overlay, which doesn't change the size: the space is the cut text's, the full text inside it.
-          .coordinateSpace(.named(Self.twoLines))
       }
-      .coordinateSpace(.named(Self.oneLine))
+      // After the overlay, which doesn't change the size: the space is the cut text's, the full text inside it.
+      .coordinateSpace(.named(Self.twoLines))
       .hidden()
       .accessibilityHidden(true)
   }
 
-  nonisolated private static let oneLine = "study.oneLine"
   nonisolated private static let twoLines = "study.twoLines"
 
   /// The width a side's edit field keeps (the shown block's): a leading block's in B, C and D, a leading D answer's
@@ -594,13 +587,11 @@ public struct StudyView: View {
     /// The widest line's width as drawn, without that space.
     var drawnWidth: CGFloat = 0
     var height: CGFloat = 0
-    /// The text's height cut to one line, and to two.
-    var oneLine: CGFloat = 0
+    /// The text's height cut to two lines.
     var twoLines: CGFloat = 0
     /// The width the text was laid out in.
     var column: CGFloat = 0
 
-    var wraps: Bool { height > oneLine + 1 }
     /// 3+ lines: the side is leading-aligned.
     var isMultiline: Bool { height > twoLines + 1 }
   }
