@@ -63,8 +63,33 @@ extension XCTestCase {
     }
     app.launchArguments += arguments
     if let theme { app.launchArguments += ["-theme", theme] }
-    app.launch()
+    launchRetryingTimeout(app)
     return app
+  }
+
+  /// Infrastructure retry, not a test retry: the first launch on a cold CI simulator can fail with "Timed out while
+  /// launching application via Xcode" (the next test then fails with "background assertion … pid 0"). Only that
+  /// error is caught (as an expected failure); it's logged, the app is terminated and launched once more.
+  @MainActor
+  private func launchRetryingTimeout(_ app: XCUIApplication) {
+    final class Flag: @unchecked Sendable { var raised = false }
+    let timedOut = Flag()
+    let options = XCTExpectedFailure.Options()
+    options.isStrict = false
+    options.issueMatcher = { issue in
+      let match = issue.compactDescription.contains("Timed out while launching")
+      if match { timedOut.raised = true }
+      return match
+    }
+    let stopOnFailure = continueAfterFailure
+    continueAfterFailure = true  // or the recorded launch issue would end the test before the retry
+    XCTExpectFailure("cold-simulator launch timeout, retried once", options: options) { app.launch() }
+    continueAfterFailure = stopOnFailure
+    guard timedOut.raised else { return }
+    print("launch(): launch timed out (cold simulator); terminating and retrying once")
+    if app.state != .notRunning { app.terminate() }
+    Thread.sleep(forTimeInterval: 3)
+    app.launch()
   }
 
   /// Waits until `element.label == expected`; fails with the actual label otherwise.

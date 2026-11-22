@@ -351,7 +351,9 @@ final class ReportUITests: XCTestCase {
     let photo = el(app, "study.photo"), lee = el(app, "study.front").staticTexts["Lee Park"]
     var sawBrokenPrompt = false, sawNotice = false
     let skipped = poll(timeout: 15) {
-      if photo.exists, el(app, "study.reveal").exists, photo.label == "Photo, not loaded" { sawBrokenPrompt = true }
+      // A snapshot, not `photo.label`: the card can be skipped between the check and the read (seen on CI), and
+      // reading the label of a vanished element fails the test.
+      if el(app, "study.reveal").exists, (try? photo.snapshot())?.label == "Photo, not loaded" { sawBrokenPrompt = true }
       if el(app, "study.reportNotice").exists { sawNotice = true }
       return lee.exists
     }

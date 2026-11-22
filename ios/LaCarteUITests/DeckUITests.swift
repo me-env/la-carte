@@ -84,8 +84,7 @@ final class DeckUITests: XCTestCase {
     waitForRows(app, Self.ids)
     let search = deckSearch(app)
     XCTAssertEqual(search.placeholderValue, "Search", "search prompt")
-    search.tap()
-    search.typeText("ser")
+    replaceText(search, with: "ser")  // waits for focus, checks the field reads "ser"
     waitForRows(app, [Self.ids[0]])
     snapshot("deck-search", appearance: .light)
     // The field's own clear button ("Clear text" in English), not delete keystrokes (flaky on CI).
@@ -334,7 +333,10 @@ final class DeckUITests: XCTestCase {
 
     swipeAndDelete(app, felineID)
     waitForAbsence(row(app, felineID), "feline row still shown after delete")
+    // On CI the synthesized drag right after the delete moved the sheet halfway and it sprang back (recording):
+    // swipe once more if it's still up. Dismissal by swipe is checked in testDeck_openFromStudy.
     swipeSheetDown(app, from: deckTitle(app))
+    if !poll(timeout: 3, { !self.deckTitle(app).exists }) { swipeSheetDown(app, from: deckTitle(app)) }
     waitForAbsence(deckTitle(app))
     openDeck(app)
     waitUntil("2 rows after reopening") { self.rowIDs(app).count == 2 }
@@ -490,8 +492,8 @@ final class DeckUITests: XCTestCase {
       openDeck(app)
       waitForRows(app, Self.ids)
       let search = deckSearch(app)
-      search.tap()
-      search.typeText("ser")
+      // Waits for focus and checks the field reads "ser": typing right after the tap left "s" on CI (rows 1 and 3).
+      replaceText(search, with: "ser")
       waitForRows(app, [Self.ids[0]])
       // The cursor blinks (~0.5 s on, ~0.5 s off): one screenshot can land in the off phase (seen on CI, iOS 26).
       // Capture frames back to back over ~1.2 s first (no pixel work in between, so the sampling stays dense),
