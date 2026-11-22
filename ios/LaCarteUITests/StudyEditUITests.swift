@@ -387,19 +387,10 @@ final class StudyEditUITests: XCTestCase {
     return field
   }
 
+  /// The caret goes to the end first (a previous tap may have moved it).
   @MainActor
-  private func hasFocus(_ element: XCUIElement) -> Bool {
-    (element.value(forKey: "hasKeyboardFocus") as? Bool) ?? false
-  }
-
-  @MainActor
-  private func replaceText(_ field: XCUIElement, with text: String) {
-    let current = field.value as? String ?? ""
-    // Move the caret to the end first (a previous tap may have moved it).
-    field.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.95)).tap()
-    field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count + 2))
-    field.typeText(text)
-    XCTAssertEqual(field.value as? String, text, "field content after typing")
+  private func replaceText(_ field: XCUIElement, with text: String, file: StaticString = #filePath, line: UInt = #line) {
+    replaceText(field, with: text, caret: CGVector(dx: 0.99, dy: 0.95), file: file, line: line)
   }
 
   /// The keyboard's Done (return) key: system keyboard keys have no identifier, so match its label.
