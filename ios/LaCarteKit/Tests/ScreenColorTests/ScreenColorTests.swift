@@ -38,8 +38,7 @@ struct ScreenColorTests {
     screen.expectBackground()
     // Top bar: "3 to review" between the glass circles (glass is checked in the UI tests); the number is the accent
     // (design-system rule 4), the words secondary ink.
-    // One thin digit at 2x: its core never reaches the full pink on light paper (#BF3F64 for #B8325A).
-    screen.expectText(in: screen.band(0, 0.2, x: 0.3, 0.7), screen.palette.accent, "study.remaining number", tolerance: 16)
+    screen.expectText(in: screen.band(0, 0.2, x: 0.3, 0.7), screen.palette.accent, "study.remaining number")
     screen.expectText(in: screen.band(0, 0.2, x: 0.46, 0.7), screen.palette.secondaryInk, "study.remaining words")
     screen.expectText(in: screen.band(0.4, 0.6), screen.palette.ink, "study.front")
     screen.expectText(in: screen.band(0.85, 1), screen.palette.ink, "study.reveal")
@@ -128,12 +127,12 @@ struct Palette: Sendable {
     background: 0x0E1913, surface: 0x16241B, ink: 0xEEF2EC, secondaryInk: 0x83938A, accent: 0xED6E8C)
 }
 
-/// A view hosted in a window at iPhone 17 Pro size (402 × 874 pt) and drawn with `CALayer.render` at 2×, sampled in
+/// A view hosted in a window at iPhone 17 Pro size (402 × 874 pt) and drawn with `CALayer.render` at 3×, sampled in
 /// points. A window, not `ImageRenderer`: the native screens are UIKit-backed (NavigationStack, Form, toolbar,
 /// searchable), which `ImageRenderer` can't draw and which crashed the test process when it tried.
 @MainActor
 struct Screen {
-  static let scale: CGFloat = 2
+  static let scale: CGFloat = 3
   let size: CGSize
   /// What the screen must show.
   let palette: Palette
@@ -197,11 +196,16 @@ struct Screen {
     return UInt32(pixels[i]) << 16 | UInt32(pixels[i + 1]) << 8 | UInt32(pixels[i + 2])
   }
 
+  /// The pixel columns and rows covered by `rect` (default: the whole screen).
+  private func pixelRanges(_ rect: CGRect?) -> (xs: Range<Int>, ys: Range<Int>) {
+    let r = rect ?? CGRect(origin: .zero, size: size)
+    return (max(Int(r.minX * Self.scale), 0)..<min(Int(r.maxX * Self.scale), width),
+            max(Int(r.minY * Self.scale), 0)..<min(Int(r.maxY * Self.scale), height))
+  }
+
   /// Pixels in `rect` (as r, g, b) that match `predicate`, and how many pixels `rect` has.
   private func count(in rect: CGRect? = nil, where predicate: (Int, Int, Int) -> Bool) -> (matching: Int, total: Int) {
-    let r = rect ?? CGRect(origin: .zero, size: size)
-    let xs = max(Int(r.minX * Self.scale), 0)..<min(Int(r.maxX * Self.scale), width)
-    let ys = max(Int(r.minY * Self.scale), 0)..<min(Int(r.maxY * Self.scale), height)
+    let (xs, ys) = pixelRanges(rect)
     var n = 0
     pixels.withUnsafeBufferPointer { p in
       for y in ys {
@@ -241,18 +245,19 @@ struct Screen {
   }
   /// Text is anti-aliased, and light-on-dark glyphs overshoot a little at their edges: the commonest colour among the
   /// pixels furthest from the background in `rect` (within 90 % of the furthest) should be the token (± 10).
-  func expectText(in rect: CGRect, _ expected: UInt32, _ what: String, tolerance: Int = 10,
-                  sourceLocation: SourceLocation = #_sourceLocation) {
-    var colors: [UInt32] = []
-    for y in stride(from: rect.minY, to: rect.maxY, by: 1 / Self.scale) {
-      for x in stride(from: rect.minX, to: rect.maxX, by: 1 / Self.scale) {
-        colors.append(color(at: CGPoint(x: x, y: y)))
+  func expectText(in rect: CGRect, _ expected: UInt32, _ what: String, sourceLocation: SourceLocation = #_sourceLocation) {
+    let (xs, ys) = pixelRanges(rect)
+    let colors = ys.flatMap { y in
+      xs.map { x in
+        let i = (y * width + x) * 4
+        let color = UInt32(pixels[i]) << 16 | UInt32(pixels[i + 1]) << 8 | UInt32(pixels[i + 2])
+        return (color: color, distance: Self.distance(color, palette.background))
       }
     }
-    let furthest = colors.map { Self.distance($0, palette.background) }.max() ?? 0
-    let core = Dictionary(grouping: colors.filter { Self.distance($0, palette.background) * 10 >= furthest * 9 }) { $0 }
-    let text = core.max { $0.value.count < $1.value.count }?.key ?? palette.background
-    #expect(Self.isClose(text, expected, tolerance: tolerance), "\(what) text is \(Self.hex(text)), expected \(Self.hex(expected))",
+    let furthest = colors.map(\.distance).max() ?? 0
+    let core = Dictionary(colors.filter { $0.distance * 10 >= furthest * 9 }.map { ($0.color, 1) }, uniquingKeysWith: +)
+    let text = core.max { $0.value < $1.value }?.key ?? palette.background
+    #expect(Self.isClose(text, expected, tolerance: 10), "\(what) text is \(Self.hex(text)), expected \(Self.hex(expected))",
             sourceLocation: sourceLocation)
   }
 
@@ -266,7 +271,10 @@ struct Screen {
     distances(a, b).allSatisfy { $0 <= tolerance }
   }
 
-  static func distance(_ a: UInt32, _ b: UInt32) -> Int { distances(a, b).reduce(0, +) }
+  static func distance(_ a: UInt32, _ b: UInt32) -> Int {
+    abs(Int(a >> 16 & 0xFF) - Int(b >> 16 & 0xFF)) + abs(Int(a >> 8 & 0xFF) - Int(b >> 8 & 0xFF))
+      + abs(Int(a & 0xFF) - Int(b & 0xFF))
+  }
 
   private static func distances(_ a: UInt32, _ b: UInt32) -> [Int] {
     [16, 8, 0].map { abs(Int(a >> $0 & 0xFF) - Int(b >> $0 & 0xFF)) }
