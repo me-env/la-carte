@@ -1,5 +1,8 @@
 # Launch videos: shot lists
 
+> Superseded in part (2026-11-22): the app cut is now built from XCUITest frames, see `app-demo.md`; the agent
+> video storyboard is `agent-video.md`. The notes below still hold for a real-motion recording.
+
 Two videos and one README GIF, built with the pipeline in `video-tools.md` (simctl + a demo XCUITest for the app,
 VHS + real Claude Code for the terminal, ffmpeg to compose, gifski for the GIF). Deck: `demo-deck.md`, fresh seed
 per take.
