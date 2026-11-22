@@ -135,8 +135,9 @@ final class RefreshUITests: XCTestCase {
   // MARK: - 018 #12 (next_due reached → card shows by itself)
 
   /// 018 #12: caught up with one card due 8 s after the app's first request → the card shows by itself (no tap or
-  /// drag), unrevealed, "1 to review", after it's due and within 7 s of it. The due time is anchored to the app's first
-  /// request, not to the test's clock, so a slow launch can't make the card due before "All caught up" shows.
+  /// drag), unrevealed, "1 to review", after it's due, from a reload the app makes within 10 s of it. The due time is
+  /// anchored to the app's first request, not to the test's clock, so a slow launch can't make the card due before
+  /// "All caught up" shows.
   @MainActor
   func testStudy_autoRefreshAtNextDue() throws {
     for appearance in [XCUIDevice.Appearance.light, .dark] {
@@ -160,9 +161,14 @@ final class RefreshUITests: XCTestCase {
       snapshot("study-auto-due-before", appearance: appearance)
 
       let due = try XCTUnwrap(dueAt.withLock { $0 }, "the app made no request")
-      waitForLabel(el(app, "study.front"), "canine", timeout: max(due.addingTimeInterval(7).timeIntervalSinceNow, 0.1))
-      XCTAssertLessThanOrEqual(Date().timeIntervalSince(due), 7.5, "card shown later than 7 s after it was due")
+      // Timing is judged on the app's own reload request, not on when the UI test sees the card (a loaded machine
+      // delays the render and the accessibility snapshot by seconds). The 30 s poll armed at launch would reload
+      // ~22 s after `due`; a reload within 10 s of it can only be the next-due timer.
+      waitForLabel(el(app, "study.front"), "canine", timeout: max(due.addingTimeInterval(25).timeIntervalSinceNow, 0.1))
       XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(due), -0.5, "card shown before it was due")
+      let reload = try XCTUnwrap(server.requests.first { $0.time >= due }, "no request after the card was due")
+      XCTAssertLessThanOrEqual(reload.time.timeIntervalSince(due), 10,
+                               "first reload \(reload.time.timeIntervalSince(due)) s after due: not the next-due timer")
       assertFront(app, "canine", remaining: "1 to review")
       XCTAssertFalse(el(app, "study.message").exists, "study.message still shown with the card")
       snapshot("study-auto-due", appearance: appearance)

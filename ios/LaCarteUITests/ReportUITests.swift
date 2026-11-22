@@ -490,6 +490,8 @@ final class ReportUITests: XCTestCase {
       _ = poll(timeout: 2) { paste.exists || pasteButton.exists }
     }
     XCTAssertTrue(paste.exists || pasteButton.exists, "no Paste in the edit menu", file: file, line: line)
+    // CI once pasted nothing: log what the edit menu offered (logs/<test>.txt).
+    print("pastedText: menu items \(app.menuItems.allElementsBoundByIndex.map(\.label)), Paste button \(pasteButton.exists)")
     (paste.exists ? paste : pasteButton).tap()
     Thread.sleep(forTimeInterval: 1)
     snapshot("study-ask-pasted", appearance: .light)

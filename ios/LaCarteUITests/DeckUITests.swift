@@ -646,7 +646,8 @@ final class DeckUITests: XCTestCase {
     waitForSheet(app, "New card", file: file, line: line)
     XCTAssertEqual(fieldText(app, "editor.front"), "", "editor.front not empty", file: file, line: line)
     XCTAssertEqual(fieldText(app, "editor.back"), "", "editor.back not empty", file: file, line: line)
-    waitUntil("editor.front focused on a new card", timeout: 5, file: file, line: line) {
+    // The app focuses the field when it appears; on CI (no GPU) the sheet + Form take several seconds to build.
+    waitUntil("editor.front focused on a new card", timeout: 15, file: file, line: line) {
       self.hasFocus(self.el(app, "editor.front"))
     }
     XCTAssertFalse(el(app, "editor.save").isEnabled, "editor.save enabled with empty fields", file: file, line: line)

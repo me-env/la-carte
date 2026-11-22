@@ -74,11 +74,14 @@ fi
 # Serial run: classes in alphabetical order, which e2e.sh's live tests rely on (parallel testing
 # reorders classes even with a single worker).
 PARALLEL=(-parallel-testing-enabled NO)
+# A test stuck past 10 min (CI: a launch that timed out left the next launch hanging > 50 min) is killed and reported
+# as failed, and the run goes on. Longest tests today: ≈ 90 s locally, ≈ 180 s on CI.
+TIMEOUTS=(-test-timeouts-enabled YES -default-test-execution-time-allowance 600)
 if [ "$STATUS" -eq 0 ]; then
   ui_test_with_retry "$RUN" "$RESULT" env TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" \
     TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \
     SIM_POOL=ui "$ROOT/scripts/_sim-pool.sh" /bin/sh -c 'exec xcodebuild test-without-building -destination "$POOL_DESTINATION" "$@"' \
-    sh -testProductsPath "$PRODUCTS" "${PARALLEL[@]}" \
+    sh -testProductsPath "$PRODUCTS" "${PARALLEL[@]}" "${TIMEOUTS[@]}" \
     -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} \
     | grep --line-buffered -E "$FILTER"
   STATUS=${PIPESTATUS[0]}
