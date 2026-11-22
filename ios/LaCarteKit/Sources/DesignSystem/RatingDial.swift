@@ -1,32 +1,84 @@
 import SwiftUI
 
 /// The dial around the finger during a rating drag (spec 019): 96 dots whose order is the grade. Toward "Got it" /
-/// "Easy" they settle into three rings, evenly spaced along each ring, all one size (fully ordered at Easy); toward "Hard" /
-/// "Forgot" they scatter, with varied sizes (fully scattered at Forgot). The scatter is seeded per dot, so it never
-/// flickers, and follows `value` continuously with no animation of its own. Once a grade is reached the dots turn
-/// ink and pulse once. Ink tokens only, so it reads in grayscale. Drawn in a `Canvas` (96 dots redrawn per frame).
+/// "Easy" they settle into three rings, evenly spaced along each ring, all one size (fully ordered at Easy); toward
+/// "Hard" / "Forgot" they scatter, with varied sizes (fully scattered at Forgot). The scatter is seeded per dot, so it
+/// never flickers, and follows `value` continuously with no animation of its own. Once a grade is reached the dots
+/// turn ink and pulse once. Ink tokens only, so it reads in grayscale. Drawn in a `Canvas` (96 dots per frame).
+///
+/// Released on a positive grade (`release`), the dial plays its reward over the next card, which is already fading
+/// in: Got it settles into the rings and fades (0.5 s, success haptic); Easy settles, a ripple runs out through the
+/// rings and it fades a little larger (0.6 s, success haptic and a second beat). Reduce Motion: a 0.15 s fade and the
+/// haptics, nothing moves. It never takes touches; the caller removes it after `Release.duration`.
 public struct RatingDial: View {
+  /// The reward a positive release earns.
+  public enum Release: Equatable, Sendable {
+    case settle, burst
+
+    /// Got it settles, Easy bursts, anything else earns nothing (011's bin edges, on the ease).
+    public init?(value: Double) {
+      if value >= 0.875 {
+        self = .burst
+      } else if value >= 0.65 {
+        self = .settle
+      } else {
+        return nil
+      }
+    }
+
+    /// How long the reward lasts; the dial is invisible after it.
+    public func duration(reduceMotion: Bool) -> Double {
+      reduceMotion ? 0.15 : self == .settle ? 0.5 : 0.6
+    }
+  }
+
   let value: Double
   let radius: CGFloat
+  let release: Release?
+  /// Renders only: the reward at this time instead of the clock.
+  var fixedTime: Double?
   @Environment(\.self) private var environment
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var pulses = 0
+  @State private var releasedAt: Date?
+  @State private var beats = 0
 
-  /// `value` is the ease 0...1 (0.5 = touch-down); `radius` is the distance from the center to the middle ring.
-  public init(value: Double, radius: CGFloat) {
+  /// `value` is the ease 0...1 (0.5 = touch-down; while `release` plays, the ease at release); `radius` is the
+  /// distance from the center to the outer ring.
+  public init(value: Double, radius: CGFloat, release: Release? = nil) {
     self.value = value
     self.radius = radius
+    self.release = release
   }
 
   public var body: some View {
-    let layout = RatingDialLayout(value: value, radius: radius)
+    TimelineView(.animation(paused: release == nil || fixedTime != nil)) { context in
+      let t = fixedTime ?? releasedAt.map { context.date.timeIntervalSince($0) } ?? 0
+      let frame = release.map { RatingDialReward(release: $0, time: t, reduceMotion: reduceMotion) } ?? RatingDialReward()
+      dots(frame)
+        .scaleEffect(frame.scale)
+        .opacity(frame.opacity)
+    }
+    .onChange(of: release) { _, new in releasedAt = new == nil ? nil : .now }
+    .sensoryFeedback(.success, trigger: release) { _, new in new != nil }
+    .sensoryFeedback(.impact(weight: .heavy), trigger: beats)
+    .task(id: release) {
+      // Easy's second beat, as the ripple reaches the outer ring.
+      guard release == .burst else { return }
+      try? await Task.sleep(for: .seconds(RatingDialReward.burstBeat))
+      beats += 1
+    }
+  }
+
+  private func dots(_ frame: RatingDialReward) -> some View {
+    let layout = RatingDialLayout(value: value, radius: radius, settle: frame.settle)
     let armed = layout.stage != .none
     let color = (armed ? Theme.ink : Theme.secondaryInk).resolve(in: environment)
     let side = 2 * RatingDialLayout.extent(radius: radius)
-    KeyframeAnimator(initialValue: 1.0, trigger: pulses) { pulse in
+    return KeyframeAnimator(initialValue: 1.0, trigger: pulses) { pulse in
       Canvas { context, size in
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
-        for dot in layout.dots {
+        for dot in frame.applied(to: layout.dots) {
           let d = dot.diameter * (armed ? pulse : 1)
           let rect = CGRect(x: center.x + dot.x - d / 2, y: center.y + dot.y - d / 2, width: d, height: d)
           context.fill(Path(ellipseIn: rect), with: .color(color))
@@ -41,8 +93,84 @@ public struct RatingDial: View {
     }
     .frame(width: side, height: side)
     .onChange(of: layout.stage) { old, new in
-      if new > old, !reduceMotion { pulses += 1 }
+      if new > old, !reduceMotion, release == nil { pulses += 1 }
     }
+  }
+}
+
+/// One frame of a positive release's reward, a pure function of the time since release (tested in
+/// `RatingDialTests`, rendered frame by frame in `RenderTests`).
+struct RatingDialReward: Equatable {
+  /// 0 = the layout as released, 1 = fully ordered.
+  var settle = 0.0
+  /// Per ring (inner to outer): outward push in points and dot-size factor, for the ripple and the settle's tick.
+  var ringOffset: [CGFloat] = [0, 0, 0]
+  var ringGrowth: [CGFloat] = [1, 1, 1]
+  var scale: CGFloat = 1
+  var opacity = 1.0
+
+  /// When Easy's ripple reaches the outer ring: its second haptic beat.
+  static let burstBeat = 0.26
+
+  init() {}
+
+  init(release: RatingDial.Release, time t: Double, reduceMotion: Bool) {
+    if reduceMotion {
+      opacity = 1 - Self.ramp(t, 0, 0.15)
+      return
+    }
+    switch release {
+    case .settle:
+      // A critically damped settle (no overshoot) done by 0.28 s, a soft tick of every dot as it lands, then the dial
+      // grows a little as it fades.
+      settle = Self.damped(t, tau: 0.05, end: 0.28)
+      let tick = 1 + 0.12 * Self.bump(t, at: 0.24, width: 0.08)
+      ringGrowth = [tick, tick, tick]
+      let out = Self.ramp(t, 0.28, 0.5)
+      scale = 1 + 0.08 * Self.easeOut(out)
+      opacity = 1 - out * out
+    case .burst:
+      // Settles faster, then a ripple runs out through the rings (inner first, 70 ms apart): each ring steps out (3 pt,
+      // never touching the next ring; the outer one, with nothing outside it, 6 pt) and its dots swell by 30 %, a
+      // bigger event than Got it's tick; then the dial grows more as it fades.
+      settle = Self.damped(t, tau: 0.04, end: 0.2)
+      for ring in 0..<3 {
+        let wave = Self.bump(t, at: 0.12 + 0.07 * Double(ring), width: 0.06)
+        ringOffset[ring] = (ring == 2 ? 6 : 3) * wave
+        ringGrowth[ring] = 1 + 0.3 * wave
+      }
+      let out = Self.ramp(t, 0.32, 0.6)
+      scale = 1 + 0.15 * Self.easeOut(Self.ramp(t, 0.3, 0.6))
+      opacity = 1 - out * out
+    }
+  }
+
+  /// The layout's dots with each ring's push and growth applied (before `scale` and `opacity`).
+  func applied(to dots: [RatingDialLayout.Dot]) -> [RatingDialLayout.Dot] {
+    dots.enumerated().map { i, dot in
+      let ring = RatingDialLayout.slot(i).ring
+      let r = max(hypot(dot.x, dot.y), 0.001)
+      let push = (r + ringOffset[ring]) / r
+      return .init(x: dot.x * push, y: dot.y * push, diameter: dot.diameter * ringGrowth[ring])
+    }
+  }
+
+  static func ramp(_ t: Double, _ start: Double, _ end: Double) -> Double {
+    min(max((t - start) / (end - start), 0), 1)
+  }
+
+  static func easeOut(_ x: Double) -> Double { 1 - pow(1 - x, 3) }
+
+  /// A smooth 0 → 1 → 0 hump centred on `at`, zero outside `at ± width`.
+  static func bump(_ t: Double, at center: Double, width: Double) -> CGFloat {
+    let x = (t - center) / width
+    return abs(x) >= 1 ? 0 : CGFloat(pow(cos(x * .pi / 2), 2))
+  }
+
+  /// A critically damped approach to 1, normalised to land exactly at `end`.
+  static func damped(_ t: Double, tau: Double, end: Double) -> Double {
+    func raw(_ t: Double) -> Double { 1 - (1 + t / tau) * exp(-t / tau) }
+    return t >= end ? 1 : max(raw(t), 0) / raw(end)
   }
 }
 
@@ -91,9 +219,9 @@ struct RatingDialLayout: Equatable {
   var disorder: Double
   var dots: [Dot]
 
-  /// Half the frame: the outer ring plus the furthest drift and the largest pulsed dot.
+  /// Half the frame: the outer ring plus the furthest drift, the release ripple (6 pt) and the largest grown dot.
   static func extent(radius: CGFloat) -> CGFloat {
-    radius * (1 + radialDrift) + diameter * sizeRange.upperBound * 1.3 / 2 + 1
+    radius * (1 + radialDrift) + 6 + diameter * sizeRange.upperBound * 1.3 / 2 + 1
   }
 
   /// Dot `i`'s ring, and its place `j` among that ring's `n` dots (inner ring first).
@@ -164,7 +292,7 @@ struct RatingDialLayout: Equatable {
     return dots
   }
 
-  init(value: Double, radius: CGFloat = 108) {
+  init(value: Double, radius: CGFloat = 108, settle: Double = 0) {
     let m = min(abs(value - 0.5) * 2, 1)
     // 011's bin edges (`StudyFeature.rating(forEase:)`), written on the value so the two always agree.
     stage =
@@ -179,7 +307,7 @@ struct RatingDialLayout: Equatable {
     }
     let disorder = m < 0.3 ? hold(Self.rest, near, m / 0.3) : hold(near, far, (m - 0.3) / 0.45)
     self.disorder = disorder
-    let c = CGFloat(disorder), k = radius / Self.referenceRadius
+    let c = CGFloat(disorder * (1 - settle)), k = radius / Self.referenceRadius
     let blend = (0..<Self.count).map { i in
       let a = Self.latticePoint(i), b = Self.scatter[i]
       return Dot(

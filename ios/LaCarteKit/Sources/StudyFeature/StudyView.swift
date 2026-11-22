@@ -10,6 +10,9 @@ public struct StudyView: View {
   @FocusState private var focusedField: StudyFeature.State.Field?
   /// Where the rating drag came down, in the card's coordinates: the dial's center. Visual only.
   @State private var touchDown: CGPoint?
+  /// A positive release's reward, playing over the next card (spec 019 §6). The rating is already sent: this never
+  /// delays the next card, takes no touches, and a new drag cancels it. Visual only.
+  @State private var reward: Reward?
   @State private var cardSize = CGSize.zero
   /// A long card scrolls, so a vertical first movement is left to the scroll view (spec 019).
   @State private var isCardScrollable = false
@@ -256,9 +259,13 @@ public struct StudyView: View {
       .gesture(
         RatingPan(isEnabled: store.canRate, isScrollable: isCardScrollable) { start, translation in
           touchDown = start
+          reward = nil
           store.send(.swipeChanged(fraction: swipeFraction(translation)))
         } onEnd: { translation in
-          store.send(.swipeEnded(fraction: swipeFraction(translation)))
+          let fraction = swipeFraction(translation)
+          let ease = StudyFeature.ease(forSwipe: fraction)
+          reward = store.canRate ? RatingDial.Release(value: ease).map { Reward(ease: ease, release: $0) } : nil
+          store.send(.swipeEnded(fraction: fraction))
         }
       )
       .onGeometryChange(for: CGSize.self, of: \.size) { cardSize = $0 }
@@ -539,9 +546,15 @@ public struct StudyView: View {
     }
   }
 
+  struct Reward: Equatable {
+    var ease: Double
+    var release: RatingDial.Release
+  }
+
   /// The dial around the touch-down point while a drag is held, 16 pt outside the drag's full length so the finger
-  /// stays inside it. Released in a grade it grows to 1.12 as it fades; cancelled it shrinks to 0.6 toward the
-  /// touch point. The transition is the one set while held, so it follows the last grade. Reduce Motion: fades.
+  /// stays inside it. Released on Got it / Easy it stays for its reward (`RatingDial`), then goes at once; on
+  /// Hard / Forgot it fades shrinking a little (0.94), neutral; cancelled it shrinks to 0.6 toward the touch point.
+  /// The transition is the one set in the last frame it was shown. Reduce Motion: fades.
   private var swipeRing: some View {
     let center = touchDown ?? CGPoint(x: cardSize.width / 2, y: cardSize.height / 2)
     let anchor = UnitPoint(
@@ -549,19 +562,30 @@ public struct StudyView: View {
       y: cardSize.height > 0 ? center.y / cardSize.height : 0.5
     )
     return ZStack {
-      if let ease = store.swipeEase {
-        RatingDial(value: ease, radius: StudyFeature.ringRadius * cardSize.width + 16)
-          .position(center)
-          .accessibilityElement()
-          .accessibilityLabel("Rating")
-          .accessibilityValue(store.swipeRating.map(Self.title) ?? "None")
-          .accessibilityIdentifier("study.swipeRing")
-          .transition(
-            reduceMotion
+      if let ease = store.swipeEase ?? reward?.ease {
+        let rewarding = store.swipeEase == nil
+        RatingDial(
+          value: ease, radius: StudyFeature.ringRadius * cardSize.width + 16, release: rewarding ? reward?.release : nil
+        )
+        .position(center)
+        .accessibilityElement()
+        .accessibilityLabel("Rating")
+        .accessibilityValue(store.swipeRating.map(Self.title) ?? "None")
+        .accessibilityIdentifier("study.swipeRing")
+        .accessibilityHidden(rewarding)
+        .transition(
+          rewarding
+            ? .identity
+            : reduceMotion
               ? .opacity
-              : .opacity.combined(with: .scale(scale: store.swipeRating == nil ? 0.6 : 1.12, anchor: anchor))
-          )
+              : .opacity.combined(with: .scale(scale: store.swipeRating == nil ? 0.6 : 0.94, anchor: anchor))
+        )
       }
+    }
+    .task(id: reward) {
+      guard let reward else { return }
+      try? await Task.sleep(for: .seconds(reward.release.duration(reduceMotion: reduceMotion)))
+      self.reward = nil
     }
     .allowsHitTesting(false)
     .animation(Theme.Motion.standard, value: store.swipeEase == nil)

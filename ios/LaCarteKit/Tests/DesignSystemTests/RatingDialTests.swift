@@ -139,3 +139,77 @@ struct RatingDialTests {
     }
   }
 }
+
+struct RatingDialRewardTests {
+  @Test func gotItSettlesAndEasyBursts() {
+    #expect(RatingDial.Release(value: 0.65) == .settle)
+    #expect(RatingDial.Release(value: 0.8) == .settle)
+    #expect(RatingDial.Release(value: 0.875) == .burst)
+    #expect(RatingDial.Release(value: 1) == .burst)
+    #expect(RatingDial.Release(value: 0.64) == nil)
+    #expect(RatingDial.Release(value: 0) == nil)
+  }
+
+  @Test(arguments: [RatingDial.Release.settle, .burst])
+  func theRewardStartsAsReleasedSettlesThenFadesOutByItsDuration(release: RatingDial.Release) {
+    let start = RatingDialReward(release: release, time: 0, reduceMotion: false)
+    #expect(start.settle == 0 && start.scale == 1 && start.opacity == 1)
+    var previous = -1.0
+    for step in 0...60 {
+      let settle = RatingDialReward(release: release, time: Double(step) / 100, reduceMotion: false).settle
+      #expect(settle >= previous - 1e-12)
+      previous = settle
+    }
+    #expect(RatingDialReward(release: release, time: 0.3, reduceMotion: false).settle == 1)
+    let end = RatingDialReward(release: release, time: release.duration(reduceMotion: false), reduceMotion: false)
+    #expect(end.opacity == 0)
+    #expect(end.scale > 1)
+  }
+
+  @Test func easyGrowsMoreAndLastsLongerThanGotIt() {
+    let gotIt = RatingDial.Release.settle, easy = RatingDial.Release.burst
+    #expect(easy.duration(reduceMotion: false) > gotIt.duration(reduceMotion: false))
+    let gotItEnd = RatingDialReward(release: gotIt, time: 0.5, reduceMotion: false)
+    let easyEnd = RatingDialReward(release: easy, time: 0.6, reduceMotion: false)
+    #expect(easyEnd.scale > gotItEnd.scale)
+  }
+
+  @Test func easysRippleRunsOutwardAndItsSecondBeatLandsOnTheOuterRing() {
+    func peak(_ ring: Int) -> Double {
+      (0...60).map { Double($0) / 100 }.max { a, b in
+        RatingDialReward(release: .burst, time: a, reduceMotion: false).ringOffset[ring]
+          < RatingDialReward(release: .burst, time: b, reduceMotion: false).ringOffset[ring]
+      }!
+    }
+    #expect(peak(0) < peak(1) && peak(1) < peak(2))
+    #expect(abs(peak(2) - RatingDialReward.burstBeat) < 0.011)
+    let gotIt = (0...50).map { RatingDialReward(release: .settle, time: Double($0) / 100, reduceMotion: false) }
+    #expect(gotIt.allSatisfy { $0.ringOffset == [0, 0, 0] })
+  }
+
+  @Test(arguments: [RatingDial.Release.settle, .burst])
+  func reduceMotionOnlyFades(release: RatingDial.Release) {
+    #expect(release.duration(reduceMotion: true) == 0.15)
+    for step in 0...20 {
+      let frame = RatingDialReward(release: release, time: Double(step) / 100, reduceMotion: true)
+      #expect(frame.settle == 0 && frame.scale == 1 && frame.ringOffset == [0, 0, 0] && frame.ringGrowth == [1, 1, 1])
+    }
+    #expect(RatingDialReward(release: release, time: 0.15, reduceMotion: true).opacity == 0)
+  }
+
+  @Test(arguments: [(RatingDial.Release.settle, 0.7), (.burst, 1.0)])
+  func noDotsTouchDuringTheReward(release: RatingDial.Release, value: Double) {
+    for step in 0...60 {
+      let frame = RatingDialReward(release: release, time: Double(step) / 100, reduceMotion: false)
+      let dots = frame.applied(to: RatingDialLayout(value: value, settle: frame.settle).dots)
+      var smallest = CGFloat.infinity
+      for i in dots.indices {
+        for j in dots.indices where j > i {
+          smallest = min(
+            smallest, hypot(dots[i].x - dots[j].x, dots[i].y - dots[j].y) - (dots[i].diameter + dots[j].diameter) / 2)
+        }
+      }
+      #expect(smallest >= RatingDialLayout.minGap - 0.05, "t \(Double(step) / 100)")
+    }
+  }
+}

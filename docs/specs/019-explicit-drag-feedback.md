@@ -62,12 +62,27 @@ The held drag must say, at a glance, **which grade a release gives and when a th
    `Theme.secondaryInk`. Label changes use `.contentTransition(.opacity)`. The buttons keep their positions, their
    ids `study.rate.again` / `study.rate.good` and their actions (a tap still sends `again` / `good`). At `p ≈ 0`
    and after release, the row is at rest ("Forgot" / "Got it", ink, regular).
-6. **Release**: in a grade, the armed dial scales to **1.12** while fading out over `Theme.Motion.standard`
-   (0.25 s); the row label stays until the next card. In the dead zone (cancel), the dial **shrinks to 0.6**
-   toward the touch point while fading (same 0.25 s), the text returns to 1, the row returns to rest.
-   Reduce Motion: both releases are opacity-only.
+6. **Release** (revised 2026-11-22, user feedback: "when you pick Easy or Got it you get some dopamine"; constraint:
+   "I don't want it to increase the time to the next question").
+   - **Timing**: the release sends the rating at once and the next card starts its fade-in at once, exactly as
+     before. The reward is an **overlay** playing over the next card: the dial (`RatingDial(…, release:)`) stays
+     in `StudyView` for the reward's duration, takes no touches, is hidden from accessibility, and a **new drag
+     cancels it** (the dial goes straight back to following the finger). Nothing in the reducer waits for it.
+   - **Got it** (`Release.settle`, 0.5 s): the dots settle from their slight disorder into the perfect rings
+     (critically damped, no overshoot, done by 0.28 s); every dot ticks once as it lands (size 1 → 1.12 → 1,
+     centred at 0.24 s, ±0.08 s); then the dial grows to 1.08 while fading out (0.28 → 0.5 s). Haptic:
+     `.success` at release.
+   - **Easy** (`Release.burst`, 0.6 s): the same settle, faster (done by 0.2 s); a ripple runs out through the
+     rings, inner first, 70 ms apart (centres 0.12 / 0.19 / 0.26 s, ±0.06 s): each ring steps out (3 pt, never
+     touching the next ring; the outer ring 6 pt) and its dots swell 1.3×, a bigger event than Got it's tick; then the dial grows to 1.15 while fading out (0.3 → 0.6 s).
+     Haptics: `.success` at release and a heavy impact at 0.26 s, as the ripple reaches the outer ring.
+   - **Hard / Forgot**: neutral, no reward: the dial fades while shrinking to 0.94 over `Theme.Motion.standard`.
+   - **Cancel** (dead zone): the dial shrinks to 0.6 toward the touch point while fading (0.25 s), the text
+     returns to 1, the row returns to rest. The row label stays until the next card after a grade.
+   - **Reduce Motion**: nothing moves; Got it and Easy fade out in 0.15 s with their haptics; Hard / Forgot /
+     cancel fade (opacity only).
 7. **Reduce Motion** otherwise: the fill follows the finger continuously (it is a fill, not a movement); only the
-   pulse and the release scales are dropped. (011's five-bin drawings go away with the noise ring.)
+   pulse, the release scales and the reward's movement are dropped. (011's five-bin drawings go away with the noise ring.)
 
 ## Acceptance criteria
 | # | Criterion (observable) | Validated by |
@@ -82,6 +97,7 @@ The held drag must say, at a glance, **which grade a release gives and when a th
 | 8 | Long card (011 #10 stub): a vertical drag scrolls and shows no ring; a drag starting at 45° up-right shows the ring and rates | UI (stub) |
 | 9 | 011 #6–#9, #11–#14, #17, #19, #20 still pass (release, cancel, unrevealed, editing, double-tap, haptics, VoiceOver actions, live API) | UI + unit (regression) |
 | 10 | Visual: scattered (varied sizes) toward Forgot, ordered (one size) toward Easy, readable at a glance on iPhone 17 Pro light/dark/forest; ink once armed; text fade, row echo, pulse, release scales match "What changes" 3–6; Reduce Motion drops pulse and scales | design-critic (screenshots) + device check |
+| 11 | Release reward (pure, `RatingDialReward` / `RatingDial.Release`): only values ≥ 0.65 earn one (≥ 0.875 burst); each starts at the released layout, settles monotonically to fully ordered by 0.3 s, ends at opacity 0 and scale > 1 at its duration (0.5 / 0.6 s), Easy grows more and lasts longer; Easy's ripple peaks inner → outer and its second beat lands on the outer ring's peak; Got it never pushes rings; no two dots touch at any frame; Reduce Motion: 0.15 s, opacity only. **The next card is never delayed**: with a clock that never advances, a Got it / Easy release still sends the review and shows the next card | unit (DesignSystemTests `RatingDialRewardTests`, StudyFeatureTests `StudyReleaseTimingTests`) + design-critic (frame strip `dial-release-*` from `RenderTests`) + device check (haptics) |
 
 ## Accessibility identifiers
 Unchanged: `study.card`, `study.swipeRing` (label "Rating", value = grade or "None"), `study.rate.again`,

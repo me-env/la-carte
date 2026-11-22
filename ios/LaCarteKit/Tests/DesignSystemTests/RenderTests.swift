@@ -50,6 +50,26 @@ struct RenderTests {
     }
   }
 
+  /// The positive release rewards frame by frame (spec 019 §6): `dial-release-<settle|burst>-<ms>-<theme>.png`, the
+  /// dial at the study size (radius 108) on a 300 pt square, Got it released at 0.76 and Easy at 1.0.
+  @Test func dialRelease() throws {
+    for (release, value) in [(RatingDial.Release.settle, 0.76), (.burst, 1.0)] {
+      for ms in stride(from: 0, through: 600, by: 50) {
+        for (name, theme, scheme) in Self.themes where name != "forest" {
+          var dial = RatingDial(value: value, radius: 108, release: release)
+          dial.fixedTime = Double(ms) / 1000
+          let view = dial
+            .frame(width: 300, height: 300)
+            .background(Theme.background)
+            .environment(\.appTheme, theme)
+            .environment(\.colorScheme, scheme)
+          let kind = release == .settle ? "settle" : "burst"
+          try write(view, scale: 3, to: "dial-release-\(kind)-\(String(format: "%03d", ms))-\(name).png", expectedPixels: nil)
+        }
+      }
+    }
+  }
+
   private func write(_ view: some View, scale: CGFloat, to file: String, expectedPixels: CGSize?) throws {
     let renderer = ImageRenderer(content: view)
     renderer.scale = scale
