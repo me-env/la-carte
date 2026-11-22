@@ -60,9 +60,9 @@ outside this deck.
 Quiz: `due_cards` (siblings of a just-reviewed card are held back until that card is due again,
 at most 6 hours; a card still being (re)learned, e.g. just failed, is never held back), then
 `review_card`.
-New cards: at most N per day enter study (default 15, oldest first); the rest wait. After adding,
-tell the user how many wait and for about how many days (`new_cards`). Change the cap with
-`new_cards_per_day` only when the user asks.
+New cards: N per day is a daily target (default 15), not a limit: every new card is always
+available to study. After adding, you may tell the user how many new cards are beyond today's
+target (`new_cards`). Change the target with `new_cards_per_day` only when the user asks.
 Ready-made prompts: `quiz_me`, `make_cards`, `add_people`, `handle_reports`.
 
 Reports. While studying, the user flags cards; a reported card is out of study until its report is
@@ -180,7 +180,7 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
                 raise ToolError(str(error)) from error
 
     def with_new_cards(reply, operation):
-        """`operation`'s result plus the new-card cap's status right after it."""
+        """`operation`'s result plus the new-card target's status right after it."""
 
         def run_it(session: Session, *args):
             result = operation(session, *args)
@@ -192,9 +192,8 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
 
     @mcp.tool()
     def add_notes(notes: list[NoteCreate], allow_duplicates: bool = False) -> AddNotesReply:
-        """Add one or more notes, each with its cards (directions), due immediately, subject to
-        the daily new-card cap (see `new_cards`). Add a whole batch ("these 30 words") in one
-        call.
+        """Add one or more notes, each with its cards (directions), due immediately. Add a whole
+        batch ("these 30 words") in one call.
 
         basic: fields front + back; no `directions` = front -> back only. Add back -> front only
         when recalling that way is useful to the user. person: fields photo (public http(s) URL,
@@ -209,8 +208,8 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         note is returned in `skipped`: edit it (`update_note`, `add_direction`) instead.
         allow_duplicates=true adds it anyway: use only when the user explicitly asks.
         All or nothing: if one note is invalid, nothing is added and the error names it.
-        Returns {added: [Note], skipped: [Note], new_cards}: `new_cards.waiting` cards wait for
-        about `new_cards.days` days; tell the user."""
+        Returns {added: [Note], skipped: [Note], new_cards}: how the new cards compare with the
+        daily new-card target (a target, not a limit: all of them can be studied now)."""
         add = partial(deck.add_notes, skip_duplicates=not allow_duplicates)
         return run(with_new_cards(AddNotesReply, add), notes)
 
@@ -259,7 +258,7 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
     @mcp.tool()
     def add_cards(cards: list[CardCreate], allow_duplicates: bool = False) -> AddCardsReply:
         """Prefer the note tools (`add_notes`). Adds basic notes, one card front -> back each,
-        due immediately, subject to the daily new-card cap (see `new_cards`).
+        due immediately (`new_cards`: the daily new-card target, see `add_notes`).
 
         Minimalist cards: front = a word or short question, back = the shortest answer (no
         explanations). One fact per card. Check `list_cards` first; if a card exists, don't re-add
@@ -298,8 +297,6 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         """Cards to review now, most overdue first, at most one per note. A card whose sibling was
         just reviewed is held back until that sibling is due again, at most 6 hours; a card still
         being (re)learned (e.g. just failed) is never held back and comes first within its note.
-        Never-reviewed cards also wait for the daily new-card cap (`new_cards_per_day`; at most one
-        new card per note per day).
         Show the `fields` named by `prompt`, then those named by `answer`."""
         return run(deck.due_cards, limit)
 
@@ -321,8 +318,9 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
     def deck_stats(tz: str = "UTC") -> AgentDeckStats:
         """How many cards in total, due now (as `due_cards` serves them), never reviewed, and
         reviewed today, and when the next card not servable now becomes servable (`next_due`,
-        UTC, null if none). `new_cards`: the daily new-card cap, how many never-reviewed cards
-        were introduced in the last 24 h, are let in now, and wait (about `days` days). Read-only.
+        UTC, null if none). `new_cards`: the daily new-card target, how many new cards were
+        first studied in the last 24 h, how many are left in today's target and beyond it.
+        Read-only.
 
         `streak`: consecutive days with at least one review, ending today or yesterday, in `tz`.
         Pass the user's IANA time zone (e.g. `Europe/Paris`) when you know it; `reviewed_today`
@@ -335,12 +333,14 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
 
     @mcp.tool()
     def new_cards_per_day(value: int | None = None) -> NewCardsStatus:
-        """At most `per_day` never-reviewed cards enter study per rolling 24 h, oldest first, one
-        per note per day. 0 pauses new cards. Change it only when the user asks.
+        """The user's daily target of new cards to learn (default 15): a target, not a limit.
+        Every new card stays available to study; nothing is held back. Change it only when the
+        user asks.
 
         No `value`: reads the setting (read-only). `value` (0-200): sets it, saved for every
-        client. Returns {per_day, introduced (first reviewed in the last 24 h), available (let in
-        now), waiting, days (about how many days the waiting cards take; null when paused)}."""
+        client. Returns {per_day, introduced (new cards first studied in the last 24 h),
+        available (new cards left in today's target), waiting (new cards beyond it), days (about
+        how many days of targets those make; null when per_day = 0)}."""
         if value is None:
             return run(deck.new_cards_status)
         return run(deck.set_new_cards_per_day, value)

@@ -155,7 +155,7 @@ class Settings(SQLModel, table=True):
     """Deck-wide settings (spec 021): a single row, id 1. A missing row means the defaults."""
 
     id: int = Field(default=1, primary_key=True)
-    new_cards_per_day: int = 15  # never-reviewed cards let into study per rolling 24 h; 0 = paused
+    new_cards_per_day: int = 15  # daily target of new cards (rolling 24 h), not a limit
 
 
 # --- Public schemas (REST + MCP) ---------------------------------------------------------------
@@ -307,17 +307,17 @@ class DeckStats(BaseModel):
 
 
 class NewCardsStatus(BaseModel):
-    """The daily new-card cap at a moment (spec 021). MCP only."""
+    """The daily new-card target at a moment (spec 021). MCP only. Counters: no card is held."""
 
-    per_day: int  # the cap N (0 = paused)
+    per_day: int  # the target N
     introduced: int  # cards first reviewed in the last 24 h
-    available: int  # never-reviewed cards let into the queue now (servable or buried)
-    waiting: int  # never-reviewed cards held back by the cap or the one-per-note rule
+    available: int  # never-reviewed cards left in today's target
+    waiting: int  # never-reviewed cards beyond it (still studyable)
     days: int | None  # ceil(waiting / per_day), rough; null when per_day = 0
 
 
 class AgentDeckStats(DeckStats):
-    """`deck_stats` over MCP: the REST `/stats` body plus the new-card cap."""
+    """`deck_stats` over MCP: the REST `/stats` body plus the new-card target."""
 
     new_cards: NewCardsStatus
 

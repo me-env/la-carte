@@ -63,20 +63,14 @@ Rules:
 - **Held cards (spec 015)**: a card with any `Report` whose status is `open` or `waiting_user` is left out of the
   servable queue entirely (so out of `/cards/due`, `due_cards`, `stats.due`, `stats.next_due`; it doesn't bury its
   siblings). It still counts in `total` and shows in `/cards`, `/notes`. Its FSRS state is never touched.
-- **Daily new-card cap (spec 021)**: a never-reviewed card enters the servable queue only if `deck._admit_new` lets
-  it in. A card is *introduced* when its first `ReviewLog` row falls in the rolling window `(now - 24 h, now]`
-  (`deck.NEW_CARD_WINDOW`; no calendar day, no time zone); counted from `ReviewLog`, so deleting it doesn't free the
-  slot. One pass over the never-reviewed, non-held cards in `_card_order` (oldest `created_at`, then field order;
-  a batch keeps its insertion order) allows the first `per_day - introduced`, skipping a card whose note had a card
-  introduced in the window or already allowed in this pass: **one new card per note per window** (this replaces the
-  6 h hold for new siblings; the 014 hold still applies on top, and an allowed but buried card keeps its slot). Cards
-  already reviewed (incl. `learning` / `relearning`) are never held back; report-held cards take no slot and don't
-  wait. **`next_due`**: a waiting card counts only at the time it can be let in: `max(slot frees, its note's window
-  ends, its ready time)`, where one more slot (beyond the cards allowed now) frees when the
-  `(introduced - per_day + available + 1)`-th oldest introduction leaves the window (now if a slot is unused); none
-  when paused (`per_day = 0`), when no such introduction exists, or when it waits behind a sibling allowed now. `stats.new`
-  still counts every never-reviewed card. No REST change: `/cards/due` and `/stats` just follow the cap.
-- **`settings` table** (spec 021): one row, `id = 1`, `new_cards_per_day` (default 15, 0–200; 0 pauses). A missing
+- **Daily new-card target (spec 021, hotfixed 2026-11-22)**: the user rejected hiding new cards, so
+  `new_cards_per_day` is a daily *target*, not a limit: the servable queue serves every new card exactly as before
+  spec 021 (the 014 sibling hold applies to new siblings as to any card; no one-per-note rule). It only feeds the
+  MCP counters (`deck.new_cards_status`): a card is *introduced* when its first `ReviewLog` row falls in the rolling
+  window `(now - 24 h, now]` (`deck.NEW_CARD_WINDOW`; counted from `ReviewLog`, so a deleted card still counts);
+  `available = min(per_day - introduced, new)`, `waiting` = the other never-reviewed cards (report-held ones not
+  counted). An architect is re-speccing it as a daily milestone (app UI included).
+- **`settings` table** (spec 021): one row, `id = 1`, `new_cards_per_day` (default 15, 0–200). A missing
   row means the defaults (`deck.get_settings`); `deck.set_new_cards_per_day` upserts it (`InvalidSetting` outside
   0–200). Migration 021 creates the table on a pre-021 database (backup `<db>.pre-021-<timestamp>.bak`).
 - **`report` table**: `{id, card_id, note_id, reason: wrong|drop|doubt|rephrase|other|broken_photo, comment, status:
@@ -125,10 +119,10 @@ notes; same duplicate rule on basic fronts, returns `{added: [Card], skipped: [C
 `delete_card`, `due_cards` (servable queue), `review_card(card_id, rating, confidence=None)`, `deck_stats(tz="UTC")`.
 REST `POST /notes` / `POST /cards` always add.
 
-New-card cap (spec 021, MCP only): `new_cards_per_day(value=None)` reads the cap, or sets it (0–200, else
-`ToolError` "new_cards_per_day must be between 0 and 200 (0 pauses new cards)."), and returns `NewCardsStatus` =
-`{per_day, introduced, available, waiting, days}` (`available`: never-reviewed cards let in now, servable or buried;
-`waiting`: held by the cap or the one-per-note rule; `days` = `ceil(waiting / per_day)`, null when paused). The same
+New-card target (spec 021, MCP only; a target, not a limit): `new_cards_per_day(value=None)` reads the target, or
+sets it (0–200, else `ToolError` "new_cards_per_day must be between 0 and 200."), and returns `NewCardsStatus` =
+`{per_day, introduced, available, waiting, days}` (`available`: new cards left in today's target; `waiting`: new
+cards beyond it, still studyable; `days` = `ceil(waiting / per_day)`, null when 0). The same
 block is added as `new_cards` to the MCP replies of `deck_stats` (`AgentDeckStats`), `add_notes` (`AddNotesReply`)
 and `add_cards` (`AddCardsReply`), taken after the insert; REST `/stats`, `POST /notes`, `POST /cards` keep their
 models.
@@ -142,8 +136,8 @@ also `all` or one status). `update_report(report_id, outcome, note)` stores `not
 Server `instructions` (sent on initialize, `mcp_server.INSTRUCTIONS`) explain notes vs cards and siblings, both
 types, "edit the note, not loose cards", "choose directions deliberately", minimalist cards, photo privacy, and the
 burying (until the reviewed sibling is due again, at most 6 hours; (re)learning cards never held), and how to handle
-each report reason (doubt / rephrase: ask the user before changing anything), and the new-card cap (tell the user
-how many wait and for about how many days; change it with `new_cards_per_day` only when the user asks).
+each report reason (doubt / rephrase: ask the user before changing anything), and the new-card target (a target, not a
+limit: every new card stays available; change it with `new_cards_per_day` only when the user asks).
 `allow_duplicates` is only for when the user explicitly asks.
 
 ### MCP prompts (spec 005, 014, 015)

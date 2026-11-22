@@ -5,7 +5,7 @@ A note is one thing the user knows (typed, named fields); a card is one directio
 Public functions return the read schemas (`NoteRead`, `CardRead`) shared by REST and MCP.
 """
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from itertools import islice
@@ -16,7 +16,6 @@ from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import fsrs
-from sqlalchemy import literal_column
 from sqlmodel import Session, col, delete, func, select
 
 from la_carte_api.models import (
@@ -57,8 +56,8 @@ _DAY = timedelta(days=1)
 SIBLING_BURY = timedelta(hours=6)
 LEARNING = (CardState.learning, CardState.relearning)  # never buried; wins within its note
 
-# At most `Settings.new_cards_per_day` never-reviewed cards enter study per rolling window, one
-# per note (spec 021). A card is introduced at its first review.
+# `Settings.new_cards_per_day` is a daily target for new cards, not a limit (spec 021, user
+# decision 2026-11-22): nothing is held back. A card is introduced at its first review.
 NEW_CARD_WINDOW = timedelta(hours=24)
 MAX_NEW_CARDS_PER_DAY = 200
 
@@ -531,81 +530,15 @@ def _introductions(session: Session, now: datetime) -> list[tuple[UUID, datetime
     )
 
 
-def _admit_new(
-    session: Session, new: list[Card], now: datetime, ready_at: Callable[[Card], datetime]
-) -> tuple[set[UUID], list[datetime], NewCardsStatus]:
-    """The never-reviewed cards let into the queue (spec 021), the times a waiting card can be
-    let in, and the status. `new`: never-reviewed cards not held by a report, in `_card_order`.
-
-    One pass: the first `per_day - introduced` cards are allowed, skipping a card whose note had
-    a card introduced in the window or already allowed in this pass (one new card per note per
-    day). A waiting card can be let in once one more slot frees (beyond those of the cards
-    allowed now) and its note's window has ended, never before its `ready_at`. A card waiting
-    behind a sibling allowed now, or with no slot ever freeing by itself (paused, or no
-    introduction left to leave the window), sets no time."""
-    per_day = get_settings(session).new_cards_per_day
-    intros = _introductions(session, now)
-    note_of = dict(
-        session.exec(
-            select(Card.id, Card.note_id).where(col(Card.id).in_([c for c, _ in intros]))
-        ).all()
-    )
-    window_end: dict[UUID, datetime] = {}  # note -> end of its latest introduction's window
-    for card_id, first in intros:
-        if card_id in note_of:
-            window_end[note_of[card_id]] = first + NEW_CARD_WINDOW
-
-    slots = max(per_day - len(intros), 0)
-    allowed: set[UUID] = set()
-    picked: set[UUID] = set()  # notes with a card allowed in this pass
-    waiting: list[Card] = []
-    for card in new:
-        if len(allowed) < slots and card.note_id not in window_end and card.note_id not in picked:
-            allowed.add(card.id)
-            picked.add(card.note_id)
-        else:
-            waiting.append(card)
-
-    # One more card fits once intros[k] (and older) left the window; k < 0: a slot is free now.
-    k = len(intros) - per_day + len(allowed)
-    if per_day == 0 or k >= len(intros):
-        slot_at = None
-    else:
-        slot_at = now if k < 0 else intros[k][1] + NEW_CARD_WINDOW
-    later = [
-        max(slot_at, window_end.get(card.note_id, slot_at), ready_at(card))
-        for card in waiting
-        if slot_at is not None and card.note_id not in picked
-    ]
-    status = NewCardsStatus(
-        per_day=per_day,
-        introduced=len(intros),
-        available=len(allowed),
-        waiting=len(waiting),
-        days=ceil(len(waiting) / per_day) if per_day else None,
-    )
-    return allowed, later, status
-
-
-@dataclass(frozen=True)
-class _Queue:
-    servable: list[tuple[Card, Note]]
-    next_due: datetime | None  # the next time a card not servable now becomes servable
-    new_cards: NewCardsStatus
-
-
-def _queue(session: Session, now: datetime) -> _Queue:
-    """The servable queue, the next time a card not servable now becomes servable, and the
-    new-card cap's status.
+def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], datetime | None]:
+    """The servable queue and the next time a card not servable now becomes servable.
 
     A sibling's latest review at `t` buries a card until `min(t + SIBLING_BURY, sibling.due)`:
     never longer than until that sibling is due again (its own reviews don't bury it). The
     sibling's current `due` is the one set by that latest review. A (re)learning card is never
     buried: a card the user failed comes back at its own due. Servable = due, not buried, at most
     one card per note (a (re)learning card wins, then the most overdue), most overdue first.
-    Held cards (an active report, spec 015) are left out entirely: they don't bury siblings.
-    Never-reviewed cards first pass the daily cap (`_admit_new`, spec 021): a waiting one is not
-    in the queue and only sets `next_due` at a time it can be let in."""
+    Held cards (an active report, spec 015) are left out entirely: they don't bury siblings."""
     held = set(
         session.exec(select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))).all()
     )
@@ -619,10 +552,7 @@ def _queue(session: Session, now: datetime) -> _Queue:
     rows = [
         (card, note)
         for card, note in session.exec(
-            # insertion order: cards of one batch share `created_at`; the sorts below are stable
-            select(Card, Note)
-            .join(Note, col(Card.note_id) == col(Note.id))
-            .order_by(literal_column("card.rowid"))
+            select(Card, Note).join(Note, col(Card.note_id) == col(Note.id))
         )
         if card.id not in held
     ]
@@ -638,17 +568,12 @@ def _queue(session: Session, now: datetime) -> _Queue:
             return card.due
         return max([card.due, *(t for cid, t in holds.get(card.note_id, []) if cid != card.id)])
 
-    new = [card for card, note in sorted(rows, key=lambda row: _card_order(*row))
-           if card.last_review is None]  # fmt: skip
-    admitted, later, new_cards = _admit_new(session, new, now, ready_at)
-
     servable: list[tuple[Card, Note]] = []
     served_notes: set[UUID] = set()
+    later: list[datetime] = []
     for card, note in sorted(
         rows, key=lambda row: (row[0].state not in LEARNING, row[0].due, *_card_order(*row))
     ):
-        if card.last_review is None and card.id not in admitted:
-            continue
         ready = ready_at(card)
         if ready > now:
             later.append(ready)
@@ -656,12 +581,12 @@ def _queue(session: Session, now: datetime) -> _Queue:
             served_notes.add(card.note_id)
             servable.append((card, note))
     servable.sort(key=lambda row: (row[0].due, *_card_order(*row)))
-    return _Queue(servable, min(later, default=None), new_cards)
+    return servable, min(later, default=None)
 
 
 def due_cards(session: Session, limit: int = 20, now: datetime | None = None) -> list[CardRead]:
     """The servable queue (see `_queue`): what can be studied now."""
-    queue = _queue(session, now or utcnow()).servable
+    queue, _ = _queue(session, now or utcnow())
     return [CardRead.of(card, note) for card, note in queue[:limit]]
 
 
@@ -704,13 +629,13 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
         .where(col(ReviewLog.reviewed_at) < end_of_day)
         .order_by(col(ReviewLog.reviewed_at).desc())
     )
-    queue = _queue(session, now)
+    queue, next_due = _queue(session, now)
     return DeckStats(
         total=count(),
-        due=len(queue.servable),
+        due=len(queue),
         new=count(col(Card.last_review).is_(None)),
         reviewed_today=reviewed_today,
-        next_due=queue.next_due,
+        next_due=next_due,
         streak=_streak(
             (t.astimezone(tz).date() for t in review_times),
             last_day=today if reviewed_today else today - _DAY,  # alive until the end of today
@@ -719,12 +644,12 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
 
 
 def agent_stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> AgentDeckStats:
-    """`stats` plus the new-card cap's status (MCP `deck_stats`)."""
+    """`stats` plus the new-card target's status (MCP `deck_stats`)."""
     now = now or utcnow()
     return AgentDeckStats(**dict(stats(session, now, tz)), new_cards=new_cards_status(session, now))
 
 
-# --- Daily new-card cap (spec 021) ------------------------------------------------------------
+# --- Daily new-card target (spec 021) ------------------------------------------------------------
 
 
 def get_settings(session: Session) -> Settings:
@@ -732,18 +657,33 @@ def get_settings(session: Session) -> Settings:
 
 
 def new_cards_status(session: Session, now: datetime | None = None) -> NewCardsStatus:
-    """How many never-reviewed cards the cap lets in now and how many wait (see `_admit_new`)."""
-    return _queue(session, now or utcnow()).new_cards
+    """Today's new-card target and where the deck stands against it. Counters only: every new
+    card stays in the queue (user decision 2026-11-22). Report-held cards are not counted."""
+    now = now or utcnow()
+    per_day = get_settings(session).new_cards_per_day
+    introduced = len(_introductions(session, now))
+    held = select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))
+    new = session.exec(
+        select(func.count())
+        .select_from(Card)
+        .where(col(Card.last_review).is_(None), col(Card.id).not_in(held))
+    ).one()
+    available = min(max(per_day - introduced, 0), new)
+    return NewCardsStatus(
+        per_day=per_day,
+        introduced=introduced,
+        available=available,
+        waiting=new - available,
+        days=ceil((new - available) / per_day) if per_day else None,
+    )
 
 
 def set_new_cards_per_day(
     session: Session, value: int, now: datetime | None = None
 ) -> NewCardsStatus:
-    """Sets the cap (0 pauses new cards) and returns the status under it."""
+    """Sets the daily new-card target and returns the status under it."""
     if not 0 <= value <= MAX_NEW_CARDS_PER_DAY:
-        raise InvalidSetting(
-            f"new_cards_per_day must be between 0 and {MAX_NEW_CARDS_PER_DAY} (0 pauses new cards)."
-        )
+        raise InvalidSetting(f"new_cards_per_day must be between 0 and {MAX_NEW_CARDS_PER_DAY}.")
     settings = get_settings(session)
     settings.new_cards_per_day = value
     session.add(settings)  # inserts row 1 the first time
