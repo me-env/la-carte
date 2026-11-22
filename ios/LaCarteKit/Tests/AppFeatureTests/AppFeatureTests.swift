@@ -86,7 +86,7 @@ struct AppFeatureTests {
   @Test func deletingFromTheDeckRefreshesStudy() async {
     let cards = [Card].fixtures
     let notes = [Note].fixtures
-    let clock = TestClock()
+    let (deckReload, releaseDeckReload) = AsyncStream.makeStream(of: Void.self)
     var state = AppFeature.State()
     state.study.cards = IdentifiedArray(uniqueElements: cards)
     state.study.phase = .studying
@@ -96,9 +96,9 @@ struct AppFeatureTests {
     } withDependencies: {
       $0.apiClient.isConfigured = { true }
       $0.apiClient.deleteNote = { _ in }
-      // The deck's reload waits on the clock so the two reloads arrive in a fixed order.
+      // The deck's reload waits for the test's go so the two reloads arrive in a fixed order.
       $0.apiClient.notes = { _ in
-        try await clock.sleep(for: .seconds(1))
+        for await _ in deckReload { break }
         return Array(notes.dropFirst())
       }
       $0.apiClient.dueCards = { _ in Array(cards.dropFirst()) }
@@ -113,7 +113,7 @@ struct AppFeatureTests {
     await store.receive(\.study.cardsResponse.success) {
       $0.study.cards = IdentifiedArray(uniqueElements: cards.dropFirst())
     }
-    await clock.advance(by: .seconds(1))
+    releaseDeckReload.yield()
     await store.receive(\.destination.deck.notesResponse.success) {
       $0.destination?.modify(\.deck) {
         $0.notes = IdentifiedArray(uniqueElements: notes.dropFirst())

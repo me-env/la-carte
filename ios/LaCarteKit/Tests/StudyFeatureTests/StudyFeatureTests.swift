@@ -392,22 +392,21 @@ struct StudyFeatureTests {
   }
 
   @Test func aNewLoadCancelsTheOneInFlight() async {
-    let clock = TestClock()
     let loads = LockIsolated(0)
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: { [cards] in
       $0.apiClient.isConfigured = { true }
+      // Only cancellation ends the first load: if the refresh didn't cancel it, the store would finish with it in flight.
       $0.apiClient.dueCards = { _ in
         let load = loads.withValue { $0 += 1; return $0 }
-        try await clock.sleep(for: .seconds(1))
-        return load == 1 ? [cards[0]] : [cards[1]]
+        if load == 1 { try await Task.never() }
+        return [cards[1]]
       }
     }
 
     await store.send(.onAppear)
     await store.send(.pulledToRefresh)
-    await clock.advance(by: .seconds(1))
     await store.receive(\.cardsResponse.success) {
       $0.cards = [self.cards[1]]
       $0.phase = .studying
@@ -832,15 +831,12 @@ struct StudyFeatureTests {
   }
 
   @Test func startingAnEditCancelsALoadInFlight() async {
-    let clock = TestClock()
     let store = TestStore(initialState: revealed(cards)) {
       StudyFeature()
-    } withDependencies: { [cards] in
+    } withDependencies: {
       $0.apiClient.isConfigured = { true }
-      $0.apiClient.dueCards = { _ in
-        try await clock.sleep(for: .seconds(1))
-        return [cards[1]]
-      }
+      // Only cancellation ends this load: if the edit didn't cancel it, the store would finish with it in flight.
+      $0.apiClient.dueCards = { _ in try await Task.never() }
     }
 
     await store.send(.scenePhaseChanged(.active))
@@ -848,7 +844,6 @@ struct StudyFeatureTests {
       $0.editing = .back
       $0.draft = "finding something good without looking for it"
     }
-    await clock.run()
   }
 
   @Test func whileASaveIsInFlightNoEditStartsAndRefreshIsSkipped() async {

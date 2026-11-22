@@ -212,20 +212,17 @@ struct DeckFeatureTests {
   }
 
   @Test func swipingCancelsALoadInFlightSoTheRowCantComeBack() async {
-    let clock = TestClock()
     let deck = LockIsolated(notes)
     let loads = LockIsolated(0)
     let store = TestStore(initialState: loaded(notes)) {
       DeckFeature()
     } withDependencies: {
       $0.apiClient.isConfigured = { true }
-      $0.continuousClock = clock
+      // Only cancellation ends the first load: if the swipe didn't cancel it, the store would finish with it in flight.
       $0.apiClient.notes = { _ in
-        // Snapshot before the delete lands, like a slow response from the server.
-        let snapshot = deck.value
-        loads.withValue { $0 += 1 }
-        try await clock.sleep(for: .seconds(1))
-        return snapshot
+        let load = loads.withValue { $0 += 1; return $0 }
+        if load == 1 { try await Task.never() }
+        return deck.value
       }
       $0.apiClient.deleteNote = { id in deck.withValue { $0.removeAll { $0.id == id } } }
     }
@@ -237,7 +234,6 @@ struct DeckFeatureTests {
     }
     await store.receive(\.deleteResponse.success)
     await store.receive(\.delegate.deckChanged)
-    await clock.advance(by: .seconds(1))
     await store.receive(\.notesResponse.success)
     #expect(store.state.notes.ids == [notes[0].id, notes[2].id, notes[3].id])
     #expect(loads.value == 2)
@@ -270,7 +266,6 @@ struct DeckFeatureTests {
     await store.receive(\.notesResponse.success) {
       $0.notes = [self.notes[0]]
     }
-    await clock.run()
     #expect(queries.value == ["ser"])
   }
 
