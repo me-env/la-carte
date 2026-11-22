@@ -475,17 +475,22 @@ final class DeckUITests: XCTestCase {
       search.tap()
       search.typeText("ser")
       waitForRows(app, [Self.ids[0]])
-      var pink: [CGPoint] = []
-      var field = CGRect.zero
-      // The cursor blinks: retry until it's drawn once, so "no pink at all" can't pass by accident.
-      _ = poll(timeout: 3) {
-        let probe = ColorProbe(screenOf: app)
-        field = search.frame
-        pink = self.pinkPoints(probe, in: app.windows.firstMatch.frame, theme: look.theme, appearance: look.appearance)
-        return pink.contains { field.contains($0) }
-      }
+      // The cursor blinks (~0.5 s on, ~0.5 s off): one screenshot can land in the off phase (seen on CI, iOS 26).
+      // Capture frames back to back over ~1.2 s first (no pixel work in between, so the sampling stays dense),
+      // then pass if any frame shows the accent inside the field, and that frame shows it nowhere else.
+      let field = search.frame, window = app.windows.firstMatch.frame
+      var frames: [CGImage] = []
+      let end = Date().addingTimeInterval(1.2)
+      repeat {
+        frames.append(XCUIScreen.main.screenshot().image.cgImage!)
+        Thread.sleep(forTimeInterval: 0.05)
+      } while Date() < end
       snapshot("deck-search-focused\(look.name)", appearance: look.appearance)
-      XCTAssertTrue(pink.contains { field.contains($0) }, "search cursor is not Theme.accent (no pink inside \(field))")
+      // Scan only the field per frame (cheap); then the whole screen of the frame that shows the cursor.
+      let probes = frames.map { ColorProbe($0, pointWidth: window.width) }
+      let lit = probes.first { !pinkPoints($0, in: field, theme: look.theme, appearance: look.appearance).isEmpty }
+      XCTAssertNotNil(lit, "search cursor is not Theme.accent (no pink inside \(field) in \(frames.count) frames over 1.2 s)")
+      let pink = pinkPoints(lit ?? probes[0], in: window, theme: look.theme, appearance: look.appearance)
       let outside = pink.filter { !field.insetBy(dx: -2, dy: -2).contains($0) }
       if let box = outside.first.map({ p in outside.reduce(CGRect(origin: p, size: .zero)) { $0.union(CGRect(origin: $1, size: .zero)) } }) {
         XCTFail("pink outside the search field (\(outside.count) pt) in \(box), look \(look.theme)/\(look.appearance)")

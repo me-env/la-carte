@@ -21,16 +21,26 @@ final class ReportUITests: XCTestCase {
 
   // MARK: - Menu (015b #1, #4; 016a #1)
 
-  /// 015b #1 / 016a #1 (light, dark): double-tapping the revealed card outside the text opens the menu with no
-  /// title: Ask, then the five reasons in order, all the same height, below the answer (audit 2026-11-22 P0-1/2).
+  /// 015b #1 / 016a #1 (light, dark, forest): double-tapping the revealed card outside the text opens the menu with no
+  /// title: Ask, then the five reasons in order, all the same height, below the answer, with the screen behind dimmed
+  /// (audit 2026-11-22 P0-1/2/3).
   /// #4: dismissing it closes it, the card stays revealed, nothing changes.
   @MainActor
   func testReport_menuOpensAndCancels() {
-    for appearance in Self.appearances {
+    let looks: [(appearance: XCUIDevice.Appearance, theme: String, name: String)] = [
+      (.light, "system", ""), (.dark, "system", ""), (.light, "forest", "-forest"),
+    ]
+    for (appearance, theme, name) in looks {
       XCUIDevice.shared.appearance = appearance
-      let app = launch(api: .mock)
+      let app = launch(api: .mock, theme: theme)
       reveal(app)
+      // Audit P0-3: the menu dims what's behind it. Probe the page left of the card, above the sheet.
+      let behind = CGPoint(x: 3, y: app.windows.firstMatch.frame.height * 0.2)
+      let undimmed = ColorProbe(screenOf: app).color(at: behind)
       openMenu(app)
+      let dimmed = ColorProbe(screenOf: app).color(at: behind)
+      XCTAssertLessThan(dimmed.luminance, undimmed.luminance - (appearance == .dark || theme == "forest" ? 3 : 20),
+                        "nothing dims behind the menu: \(undimmed) -> \(dimmed)")
       for item in Self.menu {
         XCTAssertTrue(el(app, "study.report.\(item.id)").exists, "dialog button '\(item.title)' has no study.report.\(item.id) id")
       }
@@ -48,8 +58,8 @@ final class ReportUITests: XCTestCase {
       XCTAssertFalse(app.staticTexts["Report this card"].exists, "dialog still has the title 'Report this card' (016 #5)")
       XCTAssertFalse(app.buttons["Broken photo"].exists || el(app, "study.report.broken_photo").exists,
                      "menu offers broken_photo")
-      snapshot("study-report-menu", appearance: appearance)
-      snapshot("study-ask-menu", appearance: appearance)
+      snapshot("study-report-menu\(name)", appearance: appearance)
+      snapshot("study-ask-menu\(name)", appearance: appearance)
 
       cancelMenu(app)
       waitForAbsence(buttons[1], "dialog still shown after Cancel")
