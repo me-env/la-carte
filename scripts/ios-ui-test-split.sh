@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Split one UI test run across several UI pool simulators (scripts/_sim-pool.sh), so it finishes sooner.
 #
-#   scripts/ios-ui-test.sh --split [N] [--wait] <run-name> [-only-testing:LaCarteUITests/<Class>[/<test>] ...]
+#   scripts/ios-ui-test.sh --split [N] [--wait] [--record] <run-name> [-only-testing:LaCarteUITests/<Class>[/<test>] ...]
 #
 # Builds for testing once (same lock and private products copy as ios-ui-test.sh), lists the selected test
 # methods from the built bundle (xcodebuild -enumerate-tests: it launches the runner, so it runs on a pool slot under
@@ -15,17 +15,23 @@
 # --wait: N (default UI_POOL_SIZE) is capped only by UI_POOL_SIZE and the test count; shards that find no free slot
 # wait for one in scripts/_sim-pool.sh (up to LOCK_TIMEOUT). A shard that gets none is reported "not run (no simulator
 # within <s>s)", exit 75, and is not retried. A caller already holding a simulator always gets 1 shard.
+# --record (or UI_RECORD=1): every shard keeps passing tests' screen recordings too (ios-ui-test.sh --record), merged
+# into qa/screenshots/<run-name>/recordings/ (same test name in two classes: <Class>-<test>.mp4).
+# A shard whose simulator refuses the test runner before any test ran is run once more (scripts/_ui-retry.sh,
+# `infra-retry: yes` in the TESTS line); refused again, its tests are "not run (simulator refused the runner)".
 # Results: screenshots merged into qa/screenshots/<run-name>/, shard bundles merged into <run-name>.xcresult, one
 # `TESTS: …` line (wall time, "not run" count) plus the failed and not-run tests.
 # Exit code = first failing shard's code (xcodebuild's, 75 for no simulator) or the build's, else 65 if a test was
 # still not run; merge/summary failures only warn.
 set -euo pipefail
 source "$(dirname "$0")/_ios-env.sh"
+source "$(dirname "$0")/_ui-retry.sh"
 N=""; WAIT=""
-while :; do  # leading options, any order: --split, N, --wait
+while :; do  # leading options, any order: --split, N, --wait, --record
   case "${1:-}" in
     --split) shift ;;
     --wait) WAIT=1; shift ;;
+    --record) export UI_RECORD=1; shift ;;
     *) if [ -z "$N" ] && [[ "${1:-}" =~ ^[0-9]+$ ]]; then N="$1"; shift; else break; fi ;;
   esac
 done
@@ -70,6 +76,8 @@ set +e
 STATUS=${PIPESTATUS[0]}
 set -e
 [ "$STATUS" -eq 0 ] || { echo "TESTS: none run (exit $STATUS: build failed or lock timeout)"; exit "$STATUS"; }
+# --record: every shard tests these products, so one edit covers them all.
+[ -z "$UI_RECORD" ] || ui_keep_recordings "$PRODUCTS" || { echo "TESTS: none run (--record: could not keep the recordings)"; exit 1; }
 
 # 3. List the selected tests from the built bundle (catches tests declared in extensions) and deal them into N shards.
 # Listing launches the test runner on the destination, so it takes a pool slot like a shard: on a simulator another
@@ -120,24 +128,32 @@ echo "🔀 $N shards, $BUSY waiting for a free UI simulator" >&2
 shard() {  # <name>: runs the tests in $WORK/<name>.args into $WORK/<name>.xcresult, log lines prefixed [<name>]
   ARGS=(); while IFS= read -r a; do ARGS+=("$a"); done <"$WORK/$1.args"
   set +e
-  TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \
-  SIM_POOL=ui "$ROOT/scripts/_sim-pool.sh" /bin/sh -c 'exec xcodebuild test-without-building -destination "$POOL_DESTINATION" "$@"' \
+  ui_test_with_retry "shard $1" "$WORK/$1.xcresult" \
+    env TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \
+    SIM_POOL=ui "$ROOT/scripts/_sim-pool.sh" /bin/sh -c 'exec xcodebuild test-without-building -destination "$POOL_DESTINATION" "$@"' \
     sh -testProductsPath "$PRODUCTS" -collect-test-diagnostics never -resultBundlePath "$WORK/$1.xcresult" \
-    "${ARGS[@]}" "${PASS[@]+"${PASS[@]}"}" 2>&1 | grep --line-buffered -E "$FILTER" | sed -l "s/^/[$1] /"
+    "${ARGS[@]}" "${PASS[@]+"${PASS[@]}"}" | grep --line-buffered -E "$FILTER" | sed -l "s/^/[$1] /"
   exit "${PIPESTATUS[0]}"
 }
 PIDS=()
 for k in $(seq 1 "$N"); do ( shard "$k" ) & PIDS+=($!); done
 trap 'kill "${PIDS[@]}" 2>/dev/null; rm -rf "$PRODUCTS" "$WORK"' INT TERM
 NOSIM="no simulator within ${LOCK_TIMEOUT:-3600}s"
+REFUSED="simulator refused the runner"
 for k in $(seq 1 "$N"); do
   wait "${PIDS[$((k - 1))]}" && S=0 || S=$?
   [ "$STATUS" -ne 0 ] || STATUS=$S
   # _sim-pool.sh gave up waiting (75, no bundle): its tests are "not run", never retried (that would wait again)
   if [ "$S" -eq 75 ] && [ ! -d "$WORK/$k.xcresult" ]; then mv "$WORK/$k.args" "$WORK/$k.nosim"; fi
+  # refused the runner twice (scripts/_ui-retry.sh): "not run" too, its empty bundle dropped
+  if [ "$(cat "$WORK/$k.xcresult.infra" 2>/dev/null)" = refused ]; then rm -rf "$WORK/$k.xcresult"; mv "$WORK/$k.args" "$WORK/$k.refused"; fi
 done
 BUNDLES=(); for k in $(seq 1 "$N"); do [ -d "$WORK/$k.xcresult" ] && BUNDLES+=("$WORK/$k.xcresult"); done
 cat "$WORK"/*.nosim >"$WORK/nosim.list" 2>/dev/null || true
+cat "$WORK"/*.refused >"$WORK/refused.list" 2>/dev/null || true
+if [ ${#BUNDLES[@]} -eq 0 ] && [ -s "$WORK/refused.list" ] && [ ! -s "$WORK/nosim.list" ]; then
+  echo "TESTS: infra failure ($REFUSED)"; exit "$STATUS"
+fi
 [ ${#BUNDLES[@]} -gt 0 ] || { echo "TESTS: none run (exit $STATUS: no shard produced results$([ -s "$WORK/nosim.list" ] && echo ", $NOSIM"))"; exit "$STATUS"; }
 
 # 5. Selected tests with no result in any bundle (a crash ends a shard early): retry them once, in one run.
@@ -165,10 +181,12 @@ if not_run retry; then
   echo "🔁 retrying $RETRIED not-run tests" >&2
   ( shard retry ) && S=0 || S=$?
   [ "$STATUS" -ne 0 ] || STATUS=$S
+  if [ "$(cat "$WORK/retry.xcresult.infra" 2>/dev/null)" = refused ]; then rm -rf "$WORK/retry.xcresult"; fi
   [ -d "$WORK/retry.xcresult" ] && BUNDLES+=("$WORK/retry.xcresult")
   not_run still && { [ "$STATUS" -ne 0 ] || STATUS=65; }
 fi
 WALL=$((SECONDS - START))
+INFRA_RETRY=""; grep -qx retried "$WORK"/*.infra 2>/dev/null && INFRA_RETRY=1
 
 # 6. Merge: screenshots, one xcresult, durations, summary.
 warn() { echo "⚠️  $1 failed (exit code unchanged: $STATUS)" >&2; }
@@ -187,7 +205,10 @@ for test in json.load(open(manifest)) if os.path.exists(manifest) else []:
         name = os.path.splitext(a["suggestedHumanReadableName"])[0]
         if name.startswith("Screen Recording"):  # Xcode records each UI test
             os.makedirs(os.path.join(out, "recordings"), exist_ok=True)
-            os.rename(src, os.path.join(out, "recordings", test_name + ext))
+            dest = os.path.join(out, "recordings", test_name + ext)
+            if os.path.exists(dest):  # same test name in another class or shard: "<Class>-<test>.mp4"
+                dest = os.path.join(out, "recordings", re.sub(r"\W", "", test["testIdentifier"].split("/")[-2]) + "-" + test_name + ext)
+            os.rename(src, dest)
         else:  # "home-dark_0_<UUID>" → "home-dark"
             os.rename(src, os.path.join(out, re.sub(r"_\d+_[0-9A-F-]{36}$", "", name) + ext))
 PY
@@ -200,14 +221,16 @@ if [ ${#BUNDLES[@]} -eq 1 ]; then mv "${BUNDLES[0]}" "$RESULT"; BUNDLES=("$RESUL
 else xcrun xcresulttool merge "${BUNDLES[@]}" --output-path "$RESULT" >/dev/null || warn "xcresult merge"; fi
 echo "📸 screenshots: $OUT  (xcresult: $RESULT)"
 ls -R "$OUT" || true
+ui_recordings_summary "$OUT"
 # TESTS: 22 passed, 0 failed, 1 skipped, 1 not run, 4 not run (no simulator within 3600s) (3.1 min wall, 3 shards,
-# 2 retried), then one line per failed and per not-run test.
-python3 -I - "$WALL" "$N" "$RETRIED" "$WORK/still.args" "$WORK/nosim.list" "$NOSIM" "$DURATIONS" "${BUNDLES[@]}" <<'PY' || warn "summary"
+# 2 retried[, infra-retry: yes]), then one line per failed and per not-run test.
+python3 -I - "$WALL" "$N" "$RETRIED" "$WORK/still.args" "$WORK/nosim.list" "$NOSIM" "$DURATIONS" "$WORK/refused.list" \
+  "$REFUSED" "$INFRA_RETRY" "${BUNDLES[@]}" <<'PY' || warn "summary"
 import json, os, subprocess, sys
 wall, n, retried = float(sys.argv[1]), sys.argv[2], int(sys.argv[3])
-still, nosim_list, nosim, durations, bundles = *sys.argv[4:8], sys.argv[8:]
+still, nosim_list, nosim, durations, refused_list, refused, infra_retry, bundles = *sys.argv[4:11], sys.argv[11:]
 strip = lambda path: [l.strip().removeprefix("-only-testing:LaCarteUITests/") for l in open(path)]
-not_run, no_sim = strip(still), strip(nosim_list)
+not_run, no_sim, no_runner = strip(still), strip(nosim_list), strip(refused_list)
 get = lambda kind, b: json.loads(subprocess.run(["xcrun", "xcresulttool", "get", "test-results", kind, "--path", b],
                                                 capture_output=True, check=True).stdout)
 passed = failed = skipped = 0; failures = []
@@ -230,12 +253,16 @@ with open(durations, "w") as f:
 took = f"{wall / 60:.1f} min" if wall >= 120 else f"{wall:.0f} s"
 print(f"TESTS: {passed} passed, {failed} failed, {skipped} skipped" + (f", {len(not_run)} not run" if not_run else "")
       + (f", {len(no_sim)} not run ({nosim})" if no_sim else "")
-      + f" ({took} wall, {n} shards" + (f", {retried} retried" if retried else "") + ")")
+      + (f", {len(no_runner)} not run ({refused})" if no_runner else "")
+      + f" ({took} wall, {n} shards" + (f", {retried} retried" if retried else "")
+      + (", infra-retry: yes" if infra_retry else "") + ")")
 for f in failures:
     print(f"  ✘ {f['testIdentifierString']}: {f['failureText'][:200]}")
 for t in not_run:
     print(f"  ⊘ {t}: not run")
 for t in no_sim:
     print(f"  ⊘ {t}: not run ({nosim})")
+for t in no_runner:
+    print(f"  ⊘ {t}: not run ({refused})")
 PY
 exit "$STATUS"

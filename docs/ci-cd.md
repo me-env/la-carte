@@ -38,9 +38,10 @@ Speed settings (measured 2026-11-22, run 45032373007):
 - `ci/boot-simulator.sh --start` / `--wait`: the boot (CoreSimulator start ≈ 1 min, data migration ≈ 2 min,
   appearance switch, one system-app launch so SpringBoard is not "Busy") overlaps the build or the download.
   It prints how long each phase took.
-- `ci/ui-test.sh` wraps every UI run: when the simulator, not a test, failed (the runner was refused with
-  "Application failed preflight checks … Busy", or prebuilt products ran no test at all) it waits 30 s and
-  retries once, with a `CI infra` warning. A failing test is never retried.
+- A runner refused by the simulator ("Application failed preflight checks … Busy") is retried once inside
+  `scripts/ios-ui-test.sh` (`scripts/_ui-retry.sh`, `CI infra` warning); refused twice prints
+  `TESTS: infra failure (…)` and fails. `ci/ui-test.sh` wraps every UI run and only covers prebuilt products
+  that ran no test at all (`TESTS: none run`): it waits 30 s and retries once. A failing test is never retried.
 
 Screenshots: each UI job uploads its own artifact (`screenshots-smoke`, `screenshots-<shard>`, `screenshots-e2e`).
 

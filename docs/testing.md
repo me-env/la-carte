@@ -30,6 +30,11 @@ process), so judge glass on UI-test screenshots. Add a state as one line in `cat
   `tail -f` the file to follow a long run.
 - **Summary:** the last line is `TESTS: 69 passed, 0 failed, 6 skipped (49.3 min)` (from the xcresult), followed by
   one `✘ Class/test(): message` line per failed test. `TESTS: none run (exit N…)` means the build failed or a lock timed out.
+- **Infra retry:** if the simulator refuses the test runner before any test ran (`preflight checks` / `reason: Busy`,
+  no test result), the test step runs once more without rebuilding, after `UI_INFRA_RETRY_WAIT` s (10; 30 on GitHub
+  Actions, plus a `::warning`), on a freshly taken pool slot (it may be the same simulator; `scripts/_ui-retry.sh`, also per `--split` shard and in
+  `e2e.sh`). It prints `⚠️ INFRA: …` and adds `infra-retry: yes` to the TESTS line; refused again, the line is
+  `TESTS: infra failure (simulator refused the runner)` (exit code still non-zero). A run where any test ran is never retried.
 - **Exit code** = xcodebuild's: 0 green, 65 build or test failure, 75 lock timeout. Screenshot export, renaming,
   the summary and the contact sheet only print a ⚠️ warning when they fail. `e2e.sh` exits with `ios-ui-test.sh`'s code.
 - **Contact sheet:** when `uv` is on PATH, `ios-ui-test.sh` runs `scripts/contact-sheet.py` on the run's
@@ -61,7 +66,7 @@ verdict on them. Accessibility identifiers stay: they are how UI tests find elem
 
 ## Splitting a run
 
-`scripts/ios-ui-test.sh --split [N] [--wait] <run> [-only-testing:LaCarteUITests/<Class>[/<test>] …]` builds once, lists
+`scripts/ios-ui-test.sh --split [N] [--wait] [--record] <run> [-only-testing:LaCarteUITests/<Class>[/<test>] …]` builds once, lists
 the tests from the built bundle on a pool simulator (no filter or `-only-testing:LaCarteUITests` = all), deals
 the selected test methods into N shards (balanced by the last measured durations in
 `<results dir>/ui-test-durations.tsv`, else by count) and runs them at once, one UI pool simulator each. Output is
@@ -93,8 +98,12 @@ sends a token for the same reason.
 ```
 qa/screenshots/<run>/home-light.png
 qa/screenshots/<run>/home-dark.png
-qa/screenshots/<run>/recordings/<test>.mp4   # when Xcode records the run
+qa/screenshots/<run>/recordings/<test>.mp4   # Xcode's screen recording: failed tests only, every test with --record
 ```
+`scripts/ios-ui-test.sh --record <run> …` (or `UI_RECORD=1`; with `--split` too) keeps the recordings of passing
+tests as well, for that run only: it sets the attachment lifetime to `keepAlways` in the run's own copy of the test
+products, never in the scheme. The run ends with `🎬 recordings: N files, SIZE`; about 1–10 MB per test, so record
+only the tests you need. A test name found in two classes becomes `<Class>-<test>.mp4`.
 `qa/screenshots/` is gitignored; the QA report references the run, and the manager shows the user the key images.
 Colour, contrast and spacing criteria are measured, not eyeballed: QA cites `uv run scripts/screen-sample.py`
 output (`at`, `region`, `diff`, `contrast`, `gap`; coordinates in points) per criterion in `qa/reports/`.
