@@ -109,10 +109,13 @@ in `deploy.md` → Backups.
 
 ## Expected timings
 
-| Run | Before (run 45032373007, 2026-11-22) | After |
+| Run | Before (run 45032373007, 2026-11-22) | After (run 45037833157) |
 |---|---|---|
-| PR | unit 13 min; smoke ≈ 15 min build + boot + tests | to be measured on the next PR |
-| push to main, iOS | 43 min (4 shards of 27–32 min: boot 3–4.5, build ≈ 15, tests 8–10; E2E after unit, 30 min). 8 classes (≈ 50 tests) never ran | pending (next main run) |
+| PR | unit 13 min; smoke ≈ 15 min build + boot + tests | unit 9.3–10.5 min; smoke ≈ 7 min build (boot overlapped) + tests: to be measured on the next PR |
+| push to main, iOS | 43 min (4 shards of 27–32 min: boot 3–4.5, build ≈ 15, tests 8–10; E2E after unit, 30 min). 8 classes (≈ 50 tests) never ran | UI build 6.8 min once; shards (download 2.3 + boot wait ≈ 1–3 + tests 16–20) 21–27 min, E2E 13.9 min (done at +21); iOS done at ≈ +38 min with all classes (≈ 95 mock tests instead of 45) |
 | API live after push to main | ~5 min, only after API tests pass | unchanged |
 
-Before: every UI job built the app itself at `-jobs 1`.
+Before: every UI job built the app itself at `-jobs 1`. Test steps have timeouts (shard 40, E2E 30, smoke 20 min;
+unit and build jobs 30): a hung test held a shard for over 50 min (and main's run queue behind it).
+Next levers: the artifact download (2.3 min for 224 MB), a 5th shard once the unit job is shorter (free-plan limit
+of 5 macOS jobs), caching SwiftPM/DerivedData for the PR build.

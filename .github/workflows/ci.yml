@@ -79,6 +79,7 @@ jobs:
   ios-unit:
     name: iOS unit tests
     runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90  # v1.7.0
@@ -103,6 +104,7 @@ jobs:
         run: ci/boot-simulator.sh --wait
       # The smoke set: core flows, light only. Owner of the list: qa-validator (docs/ci-cd.md).
       - name: UI smoke tests (mock deck)
+        timeout-minutes: 20  # a hung test must not hold the runner (and main's queue) for 6 h
         env:
           UI_TEST_PRODUCTS: ${{ runner.temp }}/LaCarte.xctestproducts
         run: |
@@ -128,6 +130,7 @@ jobs:
     name: iOS UI build (once, for all UI jobs)
     if: github.event_name != 'pull_request'
     runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90  # v1.7.0
@@ -199,6 +202,7 @@ jobs:
       - name: Wait for the simulator
         run: ci/boot-simulator.sh --wait
       - name: UI tests (mock deck, light + dark)
+        timeout-minutes: 40  # ≈ 2× a shard; a hung test held run 45037833157 for > 50 min
         env:
           UI_TEST_PRODUCTS: ${{ runner.temp }}/LaCarte.xctestproducts
         run: ci/ui-test.sh scripts/ios-ui-test.sh ci-${{ matrix.shard.name }} ${{ matrix.shard.tests }}
@@ -231,6 +235,7 @@ jobs:
       - name: Wait for the simulator
         run: ci/boot-simulator.sh --wait
       - name: E2E (fresh API + seeded deck)
+        timeout-minutes: 30
         env:
           UI_TEST_PRODUCTS: ${{ runner.temp }}/LaCarte.xctestproducts
         run: ci/ui-test.sh scripts/e2e.sh ci-e2e
