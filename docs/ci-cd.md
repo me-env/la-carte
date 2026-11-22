@@ -19,7 +19,7 @@ push to main ──┬─ API ────────────────�
                ├─ API image ─────────────────────────┤
                ├─ iOS unit tests                     ├─► Deploy API (Dokploy) → wait → scripts/api-live-check.sh
                └─ iOS UI build (once: build-for-testing → artifact `ui-products`)
-                    ├─ iOS E2E (live API), same build ┘    ≈ 25 min after the run starts
+                    ├─ iOS E2E (live API), same build ┘    ≈ 19 min after the run starts
                     └─ iOS UI, 4 shards in parallel (light + dark), no build: download, boot, test
                          deck-settings-study │ setup-report-launch │ theme-ratings │ rest
 
@@ -107,8 +107,10 @@ add it to `rest`'s skips) when `rest` gets too long. `MarketingUITests` (demo fr
 Dokploy's auto-deploy is **off** for the API compose service. The job `deploy-api` runs
 `ci/deploy-api.sh`:
 
-1. If `main` has moved on since this commit, it skips: Dokploy builds the head of `main`, and the newer run
-   deploys it.
+1. Dokploy builds the head of `main`, not a given commit. If `main` has moved on since this commit, it deploys
+   only when the head has the same `api/` and `docker-compose.yml` (so the image is the tested one); otherwise it
+   skips and the newer run deploys. Without this, busy days (a push every few minutes, deploy ≈ 18 min into the
+   run) never deployed (run 45071709294 skipped).
 2. If the live `/health` build hash already equals this commit's and `api/` + `docker-compose.yml` did not
    change since the previous push, it skips (nothing to deploy).
 3. `POST $DOKPLOY_URL/api/compose.deploy` with header `x-api-key` and `{"composeId", "title": "CI <sha7>"}`.
@@ -154,11 +156,11 @@ in `deploy.md` → Backups.
 |---|---|---|
 | PR | unit 13 min; smoke ≈ 15 min build + boot + tests | unit 9.3–10.5 min; smoke ≈ 7 min build (boot overlapped) + tests: to be measured on the next PR |
 | push to main, iOS | 43 min (4 shards of 27–32 min: boot 3–4.5, build ≈ 15, tests 8–10; E2E after unit, 30 min). 8 classes (≈ 50 tests) never ran | UI build 6.8 min once; shards (download 2.3 + boot wait ≈ 1–3 + tests 16–20) 21–27 min, E2E 13.9 min (done at +21); iOS done at ≈ +38 min with all classes (≈ 95 mock tests instead of 45) |
-| API live after push to main | ~5 min, only after API tests pass | ≈ 25 min after the run starts: also gated on E2E (2026-11-22, path filters) |
+| API live after push to main | ~5 min, only after API tests pass | ≈ 19 min after the run starts (run 45071709294): also gated on E2E (2026-11-22, path filters) |
 
 Path filters (2026-11-22): before, 15 of the 18 pushes to `main` between 18:06 and 20:42 UTC were cancelled while
 waiting, and the last full run (45058790864) waited 40 min for the slot, then took 45 min.
-Of the 136 commits on 2026-11-22, 36 were docs-only (now ≈ 1 min), 7 API-only (≈ 25 min: UI build + E2E, no
+Of the 136 commits on 2026-11-22, 36 were docs-only (now ≈ 1 min), 7 API-only (≈ 19 min: UI build + E2E, no
 shards or unit) and 93 touched the app (full run). A waiting run covers the union since the last green run, so
 most runs stay full: the filters mainly stop docs pushes from holding the slot; the real cost is the 45 min full run.
 
