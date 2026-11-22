@@ -114,7 +114,7 @@ struct StudyFeatureTests {
     }
   }
 
-  @Test func emptyDeckShowsCaughtUpWithoutNextDue() async {
+  @Test func emptyDeckShowsTheEmptyState() async {
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: {
@@ -126,12 +126,11 @@ struct StudyFeatureTests {
     await store.send(.onAppear)
     await store.receive(\.cardsResponse.success)
     await store.receive(\.statsResponse.success) {
-      $0.phase = .caughtUp(nextDue: nil)
+      $0.phase = .empty
     }
   }
 
   @Test func nextDueText() {
-    #expect(StudyView.nextDueText(nil) == "Your deck is empty")
     #expect(StudyView.nextDueText(Date.now.addingTimeInterval(23 * 3600 + 60)) == "Next card in 23 hours")
   }
 

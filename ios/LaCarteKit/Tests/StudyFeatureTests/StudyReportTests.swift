@@ -139,7 +139,8 @@ struct StudyReportTests {
       $0.apiClient.isConfigured = { true }
       $0.apiClient.reportCard = { _, _, _ in }
       $0.apiClient.dueCards = { _ in [] }
-      $0.apiClient.stats = { DeckStats(total: 3, due: 0, new: 0, reviewedToday: 0, nextDue: nil) }
+      // The reported card is held, not deleted: it still counts in `total` (spec 015 decision 7).
+      $0.apiClient.stats = { DeckStats(total: 1, due: 0, new: 0, reviewedToday: 0, nextDue: nil) }
     }
 
     await store.send(.reportReasonTapped(.drop)) {
@@ -264,6 +265,7 @@ struct StudyReportTests {
       $0.reportedBrokenPhotos = [photoCard.id]
       $0.cards.removeFirst()
     }
+    await store.receive(\.brokenPhotoReportResponse)
     #expect(sent.value.map(\.0) == [photoCard.id])
     #expect(sent.value.map(\.1) == [.brokenPhoto])
     #expect(sent.value.map(\.2) == [String(repeating: "x", count: 500)])
@@ -274,7 +276,32 @@ struct StudyReportTests {
     #expect(sent.value.count == 1)
   }
 
-  @Test func skippingTheLastCardShowsCaughtUp() async {
+  @Test func skippingTheLastCardRefetchesOnlyOnceTheReportLanded() async {
+    let photoCard = Card(note: person, card: person.cards[0])
+    let sibling = Card(note: person, card: person.cards[1])
+    let held = LockIsolated(false)
+    let store = TestStore(initialState: studying([photoCard])) {
+      StudyFeature()
+    } withDependencies: {
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.reportCard = { _, _, _ in held.setValue(true) }
+      // Sibling burying: the API serves the sibling only once the photo card is held.
+      $0.apiClient.dueCards = { _ in held.value ? [sibling] : [photoCard] }
+    }
+
+    await store.send(.photoLoadFailed(cardID: photoCard.id, url: "https://example.org/a.jpg", side: .front)) {
+      $0.reportedBrokenPhotos = [photoCard.id]
+      $0.cards = []
+      $0.phase = .loading
+    }
+    await store.receive(\.brokenPhotoReportResponse)
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = [sibling]
+      $0.phase = .studying
+    }
+  }
+
+  @Test func aSkippedCardWhoseReportFailedComesBackOnTheNextLoad() async {
     let photoCard = Card(note: person, card: person.cards[0])
     let store = TestStore(initialState: studying([photoCard])) {
       StudyFeature()
@@ -288,10 +315,18 @@ struct StudyReportTests {
     await store.send(.photoLoadFailed(cardID: photoCard.id, url: "https://example.org/a.jpg", side: .front)) {
       $0.reportedBrokenPhotos = [photoCard.id]
       $0.cards = []
+      $0.phase = .loading
     }
-    await store.receive(\.cardsResponse.success)
+    await store.receive(\.brokenPhotoReportResponse) {
+      $0.reportedBrokenPhotos = []
+    }
     await store.receive(\.statsResponse.success) {
       $0.phase = .caughtUp(nextDue: nil)
+    }
+    await store.send(.pulledToRefresh)
+    await store.receive(\.cardsResponse.success) {
+      $0.cards = [photoCard]
+      $0.phase = .studying
     }
   }
 
@@ -307,6 +342,7 @@ struct StudyReportTests {
     await store.send(.photoLoadFailed(cardID: nameCard.id, url: "https://example.org/a.jpg", side: .back)) {
       $0.reportedBrokenPhotos = [nameCard.id]
     }
+    await store.receive(\.brokenPhotoReportResponse)
     await store.send(.cardsResponse(.success([nameCard, cards[0]])))
     await store.send(.photoLoadFailed(cardID: nameCard.id, url: "https://example.org/a.jpg", side: .back))
     #expect(sent.value.map(\.0) == [nameCard.id])
@@ -324,6 +360,7 @@ struct StudyReportTests {
     await store.send(.photoLoadFailed(cardID: photoCard.id, url: "https://example.org/a.jpg", side: .front)) {
       $0.reportedBrokenPhotos = [photoCard.id]
     }
+    await store.receive(\.brokenPhotoReportResponse)
   }
 
   private func revealed(_ cards: [Card]) -> StudyFeature.State {

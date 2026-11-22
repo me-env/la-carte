@@ -64,7 +64,8 @@ public struct StudyFeature {
     }
 
     enum Phase: Equatable {
-      case loading, studying, caughtUp(nextDue: Date?), offline, notSetUp, unauthorized
+      /// `empty` only when the deck has no card at all: held (reported) cards still count (spec 015 decision 7).
+      case loading, studying, caughtUp(nextDue: Date?), empty, offline, notSetUp, unauthorized
     }
   }
 
@@ -96,6 +97,7 @@ public struct StudyFeature {
     case reportReasonTapped(ReportReason)
     case reportCommentSubmitted
     case reportResponse(Result<Void, any Error>, cardID: Card.ID)
+    case brokenPhotoReportResponse(Result<Void, any Error>, cardID: Card.ID)
     case noticeExpired
     /// A photo on the card couldn't be loaded (error or 10 s timeout); `side` is where it shows.
     case photoLoadFailed(cardID: Card.ID, url: String, side: State.Field)
@@ -234,12 +236,10 @@ public struct StudyFeature {
           state.phase = .studying
           return .none
         }
-        return .run { [apiClient] send in
-          await send(.statsResponse(Result { try await apiClient.stats() }))
-        }
+        return fetchStats()
 
       case let .statsResponse(.success(stats)):
-        state.phase = .caughtUp(nextDue: stats.nextDue)
+        state.phase = stats.total == 0 ? .empty : .caughtUp(nextDue: stats.nextDue)
         return .none
 
       case let .reviewResponse(.success(card)):
@@ -298,17 +298,32 @@ public struct StudyFeature {
         return .none
 
       case let .photoLoadFailed(cardID, url, side):
-        var send = Effect<Action>.none
-        if state.reportedBrokenPhotos.insert(cardID).inserted {
-          let comment = String(url.prefix(500))
-          send = .run { [apiClient] _ in try? await apiClient.reportCard(cardID, .brokenPhoto, comment) }
-        }
         // A broken answer photo leaves the card studyable; a broken prompt can't be asked, so it's skipped.
-        guard side == .front, state.cards.first?.id == cardID else { return send }
-        state.cards.removeFirst()
-        state.isRevealed = false
-        state.swipeEase = nil
-        return .merge(send, state.cards.isEmpty ? fetchDueCards(&state) : .none)
+        if side == .front, state.cards.first?.id == cardID {
+          state.cards.removeFirst()
+          state.isRevealed = false
+          state.swipeEase = nil
+        }
+        guard state.reportedBrokenPhotos.insert(cardID).inserted else {
+          return state.cards.isEmpty && state.phase == .studying ? fetchDueCards(&state) : .none
+        }
+        // Until the report lands the API still serves this card instead of its sibling: the refetch waits for it.
+        if state.cards.isEmpty, state.phase == .studying { state.phase = .loading }
+        let comment = String(url.prefix(500))
+        return .run { [apiClient] send in
+          await send(
+            .brokenPhotoReportResponse(Result { try await apiClient.reportCard(cardID, .brokenPhoto, comment) }, cardID: cardID)
+          )
+        }
+
+      case .brokenPhotoReportResponse(.success, _):
+        return state.cards.isEmpty && state.phase == .loading ? fetchDueCards(&state) : .none
+
+      case let .brokenPhotoReportResponse(.failure, cardID):
+        // Not held by the API, so it may come back on the next load; refetching now would only loop on it.
+        state.reportedBrokenPhotos.remove(cardID)
+        guard state.cards.isEmpty, state.phase == .loading else { return .none }
+        return fetchStats().cancellable(id: CancelID.load, cancelInFlight: true)
 
       case .delegate:
         return .none
@@ -342,6 +357,12 @@ public struct StudyFeature {
         await send(.reportResponse(Result { try await apiClient.reportCard(card.id, reason, comment) }, cardID: card.id))
       }
     )
+  }
+
+  private func fetchStats() -> Effect<Action> {
+    .run { [apiClient] send in
+      await send(.statsResponse(Result { try await apiClient.stats() }))
+    }
   }
 
   private func expireNotice() -> Effect<Action> {

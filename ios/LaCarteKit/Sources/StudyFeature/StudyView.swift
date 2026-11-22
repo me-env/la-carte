@@ -45,11 +45,13 @@ public struct StudyView: View {
     .sensoryFeedback(.success, trigger: store.notice) { _, new in new == .reported }
     .alert("What's wrong?", isPresented: $store.isReportCommentShown) {
       TextField("", text: $store.reportComment)
-        .accessibilityIdentifier("study.report.comment")
       Button("Report") { store.send(.reportCommentSubmitted) }
         .disabled(store.reportComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         .accessibilityIdentifier("study.report.send")
       Button("Cancel", role: .cancel) {}
+    }
+    .task(id: store.isReportCommentShown) {
+      if store.isReportCommentShown { await Self.identifyAlertTextField("study.report.comment") }
     }
     .sensoryFeedback(trigger: store.swipeRating) { _, new in
       switch new {
@@ -68,8 +70,9 @@ public struct StudyView: View {
       .accessibilityIdentifier("study.deck")
 
       ZStack {
-        if store.phase == .studying, store.editing == nil {
-          if store.editFailed {
+        // The notice outlives the session: reporting the last card still shows "Reported" once caught up.
+        if store.editing == nil {
+          if store.phase == .studying, store.editFailed {
             counterText("Couldn't save the edit")
               .accessibilityIdentifier("study.editError")
               .transition(.opacity)
@@ -77,7 +80,7 @@ public struct StudyView: View {
             counterText(Self.text(notice))
               .accessibilityIdentifier("study.reportNotice")
               .transition(.opacity)
-          } else if !store.cards.isEmpty {
+          } else if store.phase == .studying, !store.cards.isEmpty {
             counterText("\(store.cards.count) to review")
               .accessibilityIdentifier("study.remaining")
           }
@@ -121,19 +124,10 @@ public struct StudyView: View {
       }
 
     case let .caughtUp(nextDue):
-      pullable {
-        VStack(spacing: Theme.Spacing.s) {
-          Text("All caught up")
-            .font(.cardFace)
-            .foregroundStyle(Theme.ink)
-            .accessibilityIdentifier("study.message")
-          Text(Self.nextDueText(nextDue))
-            .font(.meta)
-            .foregroundStyle(Theme.secondaryInk)
-            .accessibilityIdentifier("study.nextDue")
-        }
-        .multilineTextAlignment(.center)
-      }
+      caughtUp(subtitle: nextDue.map(Self.nextDueText))
+
+    case .empty:
+      caughtUp(subtitle: "Your deck is empty")
 
     case .offline:
       pullable {
@@ -510,9 +504,42 @@ public struct StudyView: View {
     }
   }
 
-  static func nextDueText(_ nextDue: Date?) -> String {
-    guard let nextDue else { return "Your deck is empty" }
-    return "Next card " + nextDue.formatted(.relative(presentation: .numeric))
+  private func caughtUp(subtitle: String?) -> some View {
+    pullable {
+      VStack(spacing: Theme.Spacing.s) {
+        Text("All caught up")
+          .font(.cardFace)
+          .foregroundStyle(Theme.ink)
+          .accessibilityIdentifier("study.message")
+        if let subtitle {
+          Text(subtitle)
+            .font(.meta)
+            .foregroundStyle(Theme.secondaryInk)
+            .accessibilityIdentifier("study.nextDue")
+        }
+      }
+      .multilineTextAlignment(.center)
+    }
+  }
+
+  /// SwiftUI drops `accessibilityIdentifier` on an alert's text field, so it's set on the UIKit field once shown.
+  private static func identifyAlertTextField(_ id: String) async {
+    for _ in 0..<40 {
+      let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+      for window in windows {
+        var top = window.rootViewController
+        while let presented = top?.presentedViewController { top = presented }
+        if let field = (top as? UIAlertController)?.textFields?.first {
+          field.accessibilityIdentifier = id
+          return
+        }
+      }
+      try? await Task.sleep(for: .milliseconds(50))
+    }
+  }
+
+  static func nextDueText(_ nextDue: Date) -> String {
+     "Next card " + nextDue.formatted(.relative(presentation: .numeric))
   }
 }
 
