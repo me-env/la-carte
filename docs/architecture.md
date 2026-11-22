@@ -34,7 +34,8 @@ Rules:
   (`PRAGMA foreign_keys=OFF` around it, condition re-checked under `BEGIN IMMEDIATE`) after a
   `VACUUM INTO <db>.pre-<spec>-<timestamp>.bak` copy of the file; any failure rolls back.
   Steps: 012 (reviewlog loses its FK), 013 (`reviewlog.confidence`), 014 (cards → notes, below), 015 (creates
-  `report` through `_rebuild_if`: backup + one transaction; skipped once it exists).
+  `report` through `_rebuild_if`: backup + one transaction; skipped once it exists), 021 (creates `settings` the
+  same way, no row).
 - Review history (`ReviewLog`) is never deleted: `card_id` has no foreign key, so deleting a card keeps its reviews
   and `streak` / `reviewed_today` don't change (spec 012).
 
@@ -62,6 +63,21 @@ Rules:
 - **Held cards (spec 015)**: a card with any `Report` whose status is `open` or `waiting_user` is left out of the
   servable queue entirely (so out of `/cards/due`, `due_cards`, `stats.due`, `stats.next_due`; it doesn't bury its
   siblings). It still counts in `total` and shows in `/cards`, `/notes`. Its FSRS state is never touched.
+- **Daily new-card cap (spec 021)**: a never-reviewed card enters the servable queue only if `deck._admit_new` lets
+  it in. A card is *introduced* when its first `ReviewLog` row falls in the rolling window `(now - 24 h, now]`
+  (`deck.NEW_CARD_WINDOW`; no calendar day, no time zone); counted from `ReviewLog`, so deleting it doesn't free the
+  slot. One pass over the never-reviewed, non-held cards in `_card_order` (oldest `created_at`, then field order;
+  a batch keeps its insertion order) allows the first `per_day - introduced`, skipping a card whose note had a card
+  introduced in the window or already allowed in this pass: **one new card per note per window** (this replaces the
+  6 h hold for new siblings; the 014 hold still applies on top, and an allowed but buried card keeps its slot). Cards
+  already reviewed (incl. `learning` / `relearning`) are never held back; report-held cards take no slot and don't
+  wait. **`next_due`**: a waiting card counts only at the time it can be let in: `max(slot frees, its note's window
+  ends, its ready time)`, where a slot frees at the `(introduced - per_day + 1)`-th oldest introduction + 24 h (now
+  if a slot is unused); none when paused (`per_day = 0`) or when it waits behind a card allowed now. `stats.new`
+  still counts every never-reviewed card. No REST change: `/cards/due` and `/stats` just follow the cap.
+- **`settings` table** (spec 021): one row, `id = 1`, `new_cards_per_day` (default 15, 0–200; 0 pauses). A missing
+  row means the defaults (`deck.get_settings`); `deck.set_new_cards_per_day` upserts it (`InvalidSetting` outside
+  0–200). Migration 021 creates the table on a pre-021 database (backup `<db>.pre-021-<timestamp>.bak`).
 - **`report` table**: `{id, card_id, note_id, reason: wrong|drop|doubt|rephrase|other|broken_photo, comment, status:
   open|waiting_user|resolved|dismissed, resolution, created_at, updated_at, resolved_at}`. `card_id` / `note_id` have
   no foreign key (like `ReviewLog`): a report outlives its card.
@@ -108,6 +124,14 @@ notes; same duplicate rule on basic fronts, returns `{added: [Card], skipped: [C
 `delete_card`, `due_cards` (servable queue), `review_card(card_id, rating, confidence=None)`, `deck_stats(tz="UTC")`.
 REST `POST /notes` / `POST /cards` always add.
 
+New-card cap (spec 021, MCP only): `new_cards_per_day(value=None)` reads the cap, or sets it (0–200, else
+`ToolError` "new_cards_per_day must be between 0 and 200 (0 pauses new cards)."), and returns `NewCardsStatus` =
+`{per_day, introduced, available, waiting, days}` (`available`: never-reviewed cards let in now, servable or buried;
+`waiting`: held by the cap or the one-per-note rule; `days` = `ceil(waiting / per_day)`, null when paused). The same
+block is added as `new_cards` to the MCP replies of `deck_stats` (`AgentDeckStats`), `add_notes` (`AddNotesReply`)
+and `add_cards` (`AddCardsReply`), taken after the insert; REST `/stats`, `POST /notes`, `POST /cards` keep their
+models.
+
 Reports (spec 015): `list_reports(status="active")` → `[Report]`, oldest first (`active` = open + waiting_user;
 also `all` or one status). `update_report(report_id, outcome, note)` stores `note` (non-blank) as `resolution`:
 `waiting_user` (card stays held), `fixed` → resolved, `kept` → dismissed (both: card back in study, unchanged),
@@ -117,7 +141,8 @@ also `all` or one status). `update_report(report_id, outcome, note)` stores `not
 Server `instructions` (sent on initialize, `mcp_server.INSTRUCTIONS`) explain notes vs cards and siblings, both
 types, "edit the note, not loose cards", "choose directions deliberately", minimalist cards, photo privacy, and the
 burying (until the reviewed sibling is due again, at most 6 hours; (re)learning cards never held), and how to handle
-each report reason (doubt / rephrase: ask the user before changing anything).
+each report reason (doubt / rephrase: ask the user before changing anything), and the new-card cap (tell the user
+how many wait and for about how many days; change it with `new_cards_per_day` only when the user asks).
 `allow_duplicates` is only for when the user explicitly asks.
 
 ### MCP prompts (spec 005, 014, 015)

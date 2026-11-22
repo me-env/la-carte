@@ -5,22 +5,25 @@ A note is one thing the user knows (typed, named fields); a card is one directio
 Public functions return the read schemas (`NoteRead`, `CardRead`) shared by REST and MCP.
 """
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from itertools import islice
+from math import ceil
 from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import fsrs
+from sqlalchemy import literal_column
 from sqlmodel import Session, col, delete, func, select
 
 from la_carte_api.models import (
     ACTIVE_REPORT,
     AddCardsResult,
     AddNotesResult,
+    AgentDeckStats,
     Card,
     CardCreate,
     CardRead,
@@ -28,6 +31,7 @@ from la_carte_api.models import (
     CardUpdate,
     DeckStats,
     Direction,
+    NewCardsStatus,
     Note,
     NoteCreate,
     NoteRead,
@@ -41,6 +45,7 @@ from la_carte_api.models import (
     ReportReason,
     ReportStatus,
     ReviewLog,
+    Settings,
     utcnow,
 )
 
@@ -51,6 +56,11 @@ _DAY = timedelta(days=1)
 # that card's own next due (user decision 2026-11-22: a weak note comes back sooner).
 SIBLING_BURY = timedelta(hours=6)
 LEARNING = (CardState.learning, CardState.relearning)  # never buried; wins within its note
+
+# At most `Settings.new_cards_per_day` never-reviewed cards enter study per rolling window, one
+# per note (spec 021). A card is introduced at its first review.
+NEW_CARD_WINDOW = timedelta(hours=24)
+MAX_NEW_CARDS_PER_DAY = 200
 
 Side = tuple[str, ...]  # field names, in the type's field order
 Way = tuple[Side, Side]  # (prompt, answer): a direction, normalized
@@ -113,6 +123,10 @@ class InvalidReport(ValueError):
 class InvalidNote(ValueError):
     """A note, its fields or its directions break a rule. The message is written for an LLM
     reader and names the field or direction, never a field's value (photos are private)."""
+
+
+class InvalidSetting(ValueError):
+    pass
 
 
 class UnknownTimeZone(ValueError):
@@ -503,15 +517,96 @@ def delete_card(session: Session, card_id: UUID) -> None:
 # --- Studying ----------------------------------------------------------------------------------
 
 
-def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], datetime | None]:
-    """The servable queue and the next time a card not servable now becomes servable.
+def _introductions(session: Session, now: datetime) -> list[tuple[UUID, datetime]]:
+    """(card id, first review) of the cards first reviewed in `(now - NEW_CARD_WINDOW, now]`,
+    oldest first. From `ReviewLog`, so a deleted card still counts."""
+    first = func.min(ReviewLog.reviewed_at)
+    return list(
+        session.exec(
+            select(ReviewLog.card_id, first)
+            .group_by(col(ReviewLog.card_id))
+            .having(first > now - NEW_CARD_WINDOW, first <= now)
+            .order_by(first)
+        ).all()
+    )
+
+
+def _admit_new(
+    session: Session, new: list[Card], now: datetime, ready_at: Callable[[Card], datetime]
+) -> tuple[set[UUID], list[datetime], NewCardsStatus]:
+    """The never-reviewed cards let into the queue (spec 021), the times a waiting card can be
+    let in, and the status. `new`: never-reviewed cards not held by a report, in `_card_order`.
+
+    One pass: the first `per_day - introduced` cards are allowed, skipping a card whose note had
+    a card introduced in the window or already allowed in this pass (one new card per note per
+    day). A waiting card can be let in once a slot frees and its note's window has ended, never
+    before its `ready_at`. A card waiting behind a sibling allowed now, or with no slot ever
+    freeing by itself (paused, or every free slot taken now), sets no time."""
+    per_day = get_settings(session).new_cards_per_day
+    intros = _introductions(session, now)
+    note_of = dict(
+        session.exec(
+            select(Card.id, Card.note_id).where(col(Card.id).in_([c for c, _ in intros]))
+        ).all()
+    )
+    window_end: dict[UUID, datetime] = {}  # note -> end of its latest introduction's window
+    for card_id, first in intros:
+        if card_id in note_of:
+            window_end[note_of[card_id]] = first + NEW_CARD_WINDOW
+
+    slots = max(per_day - len(intros), 0)
+    allowed: set[UUID] = set()
+    picked: set[UUID] = set()  # notes with a card allowed in this pass
+    waiting: list[Card] = []
+    for card in new:
+        if len(allowed) < slots and card.note_id not in window_end.keys() | picked:
+            allowed.add(card.id)
+            picked.add(card.note_id)
+        else:
+            waiting.append(card)
+
+    if per_day == 0:
+        slot_at = None
+    elif len(intros) >= per_day:  # when the oldest introduction that must go leaves the window
+        slot_at = intros[len(intros) - per_day][1] + NEW_CARD_WINDOW
+    elif len(allowed) < slots:  # a slot is free now
+        slot_at = now
+    else:  # every free slot went to a card now: none frees until those are studied
+        slot_at = None
+    later = [
+        max(slot_at, window_end.get(card.note_id, slot_at), ready_at(card))
+        for card in waiting
+        if slot_at is not None and card.note_id not in picked
+    ]
+    status = NewCardsStatus(
+        per_day=per_day,
+        introduced=len(intros),
+        available=len(allowed),
+        waiting=len(waiting),
+        days=ceil(len(waiting) / per_day) if per_day else None,
+    )
+    return allowed, later, status
+
+
+@dataclass(frozen=True)
+class _Queue:
+    servable: list[tuple[Card, Note]]
+    next_due: datetime | None  # the next time a card not servable now becomes servable
+    new_cards: NewCardsStatus
+
+
+def _queue(session: Session, now: datetime) -> _Queue:
+    """The servable queue, the next time a card not servable now becomes servable, and the
+    new-card cap's status.
 
     A sibling's latest review at `t` buries a card until `min(t + SIBLING_BURY, sibling.due)`:
     never longer than until that sibling is due again (its own reviews don't bury it). The
     sibling's current `due` is the one set by that latest review. A (re)learning card is never
     buried: a card the user failed comes back at its own due. Servable = due, not buried, at most
     one card per note (a (re)learning card wins, then the most overdue), most overdue first.
-    Held cards (an active report, spec 015) are left out entirely: they don't bury siblings."""
+    Held cards (an active report, spec 015) are left out entirely: they don't bury siblings.
+    Never-reviewed cards first pass the daily cap (`_admit_new`, spec 021): a waiting one is not
+    in the queue and only sets `next_due` at a time it can be let in."""
     held = set(
         session.exec(select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))).all()
     )
@@ -525,7 +620,10 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
     rows = [
         (card, note)
         for card, note in session.exec(
-            select(Card, Note).join(Note, col(Card.note_id) == col(Note.id))
+            # insertion order: cards of one batch share `created_at`; the sorts below are stable
+            select(Card, Note)
+            .join(Note, col(Card.note_id) == col(Note.id))
+            .order_by(literal_column("card.rowid"))
         )
         if card.id not in held
     ]
@@ -541,12 +639,17 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
             return card.due
         return max([card.due, *(t for cid, t in holds.get(card.note_id, []) if cid != card.id)])
 
+    new = [card for card, note in sorted(rows, key=lambda row: _card_order(*row))
+           if card.last_review is None]  # fmt: skip
+    admitted, later, new_cards = _admit_new(session, new, now, ready_at)
+
     servable: list[tuple[Card, Note]] = []
     served_notes: set[UUID] = set()
-    later: list[datetime] = []
     for card, note in sorted(
         rows, key=lambda row: (row[0].state not in LEARNING, row[0].due, *_card_order(*row))
     ):
+        if card.last_review is None and card.id not in admitted:
+            continue
         ready = ready_at(card)
         if ready > now:
             later.append(ready)
@@ -554,12 +657,12 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
             served_notes.add(card.note_id)
             servable.append((card, note))
     servable.sort(key=lambda row: (row[0].due, *_card_order(*row)))
-    return servable, min(later, default=None)
+    return _Queue(servable, min(later, default=None), new_cards)
 
 
 def due_cards(session: Session, limit: int = 20, now: datetime | None = None) -> list[CardRead]:
     """The servable queue (see `_queue`): what can be studied now."""
-    queue, _ = _queue(session, now or utcnow())
+    queue = _queue(session, now or utcnow()).servable
     return [CardRead.of(card, note) for card, note in queue[:limit]]
 
 
@@ -602,18 +705,51 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
         .where(col(ReviewLog.reviewed_at) < end_of_day)
         .order_by(col(ReviewLog.reviewed_at).desc())
     )
-    queue, next_due = _queue(session, now)
+    queue = _queue(session, now)
     return DeckStats(
         total=count(),
-        due=len(queue),
+        due=len(queue.servable),
         new=count(col(Card.last_review).is_(None)),
         reviewed_today=reviewed_today,
-        next_due=next_due,
+        next_due=queue.next_due,
         streak=_streak(
             (t.astimezone(tz).date() for t in review_times),
             last_day=today if reviewed_today else today - _DAY,  # alive until the end of today
         ),
     )
+
+
+def agent_stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> AgentDeckStats:
+    """`stats` plus the new-card cap's status (MCP `deck_stats`)."""
+    now = now or utcnow()
+    return AgentDeckStats(**dict(stats(session, now, tz)), new_cards=new_cards_status(session, now))
+
+
+# --- Daily new-card cap (spec 021) ------------------------------------------------------------
+
+
+def get_settings(session: Session) -> Settings:
+    return session.get(Settings, 1) or Settings()
+
+
+def new_cards_status(session: Session, now: datetime | None = None) -> NewCardsStatus:
+    """How many never-reviewed cards the cap lets in now and how many wait (see `_admit_new`)."""
+    return _queue(session, now or utcnow()).new_cards
+
+
+def set_new_cards_per_day(
+    session: Session, value: int, now: datetime | None = None
+) -> NewCardsStatus:
+    """Sets the cap (0 pauses new cards) and returns the status under it."""
+    if not 0 <= value <= MAX_NEW_CARDS_PER_DAY:
+        raise InvalidSetting(
+            f"new_cards_per_day must be between 0 and {MAX_NEW_CARDS_PER_DAY} (0 pauses new cards)."
+        )
+    settings = get_settings(session)
+    settings.new_cards_per_day = value
+    session.add(settings)  # inserts row 1 the first time
+    session.commit()
+    return new_cards_status(session, now)
 
 
 # --- Reports (spec 015) -----------------------------------------------------------------------

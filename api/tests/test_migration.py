@@ -108,7 +108,7 @@ def test_is_idempotent(tmp_path):
     make_engine(url).dispose()
 
     assert _snapshot(path) == once
-    assert len(list(tmp_path.glob("*.bak"))) == 3  # pre-012, pre-014, pre-015; second start: none
+    assert len(list(tmp_path.glob("*.bak"))) == 4  # pre-012, -014, -015, -021; second start: none
 
 
 def test_fresh_database_has_no_foreign_key_and_skips_the_rebuild(tmp_path):
@@ -285,7 +285,7 @@ def test_notes_migration_is_idempotent(tmp_path):
     make_engine(url).dispose()
 
     assert (_snapshot(path), _notes_snapshot(path)) == once
-    assert len(list(tmp_path.glob("*.bak"))) == 2  # pre-014 + pre-015; second start: none
+    assert len(list(tmp_path.glob("*.bak"))) == 3  # pre-014, pre-015, pre-021; second start: none
 
 
 def test_failed_notes_migration_leaves_the_old_tables_intact(tmp_path, monkeypatch):

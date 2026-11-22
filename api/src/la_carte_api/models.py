@@ -151,6 +151,13 @@ class Report(SQLModel, table=True):
     resolved_at: datetime | None = Field(default=None, sa_type=UTCDateTime)
 
 
+class Settings(SQLModel, table=True):
+    """Deck-wide settings (spec 021): a single row, id 1. A missing row means the defaults."""
+
+    id: int = Field(default=1, primary_key=True)
+    new_cards_per_day: int = 15  # never-reviewed cards let into study per rolling 24 h; 0 = paused
+
+
 # --- Public schemas (REST + MCP) ---------------------------------------------------------------
 
 
@@ -299,6 +306,22 @@ class DeckStats(BaseModel):
     streak: int  # consecutive local days with a review, ending today or yesterday (spec 007)
 
 
+class NewCardsStatus(BaseModel):
+    """The daily new-card cap at a moment (spec 021). MCP only."""
+
+    per_day: int  # the cap N (0 = paused)
+    introduced: int  # cards first reviewed in the last 24 h
+    available: int  # never-reviewed cards let into the queue now (servable or buried)
+    waiting: int  # never-reviewed cards held back by the cap or the one-per-note rule
+    days: int | None  # ceil(waiting / per_day), rough; null when per_day = 0
+
+
+class AgentDeckStats(DeckStats):
+    """`deck_stats` over MCP: the REST `/stats` body plus the new-card cap."""
+
+    new_cards: NewCardsStatus
+
+
 class AddCardsResult(BaseModel):
     added: list[CardRead]
     skipped: list[CardRead]  # existing cards whose front matched
@@ -307,6 +330,14 @@ class AddCardsResult(BaseModel):
 class AddNotesResult(BaseModel):
     added: list[NoteRead]
     skipped: list[NoteRead]  # existing notes whose duplicate key matched
+
+
+class AddCardsReply(AddCardsResult):
+    new_cards: NewCardsStatus  # after the insert (MCP only)
+
+
+class AddNotesReply(AddNotesResult):
+    new_cards: NewCardsStatus  # after the insert (MCP only)
 
 
 class ReportCreate(BaseModel):

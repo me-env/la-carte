@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 from la_carte_api import deck
 from la_carte_api.mcp_server import build_mcp
 from la_carte_api.models import (
+    Card,
     CardCreate,
     Direction,
     NoteCreate,
@@ -253,10 +254,25 @@ def _person(session, now):
     return note
 
 
+def _seasoned(session, cards, now):
+    """Makes `cards` review cards first reviewed long ago, due in their order just before `now`:
+    the 6 h sibling hold applies to them, not the new-card rules of spec 021."""
+    for i, card in enumerate(cards):
+        deck.review_card(session, card.id, Rating.easy, now=now - timedelta(days=40))
+        row = session.get(Card, card.id)
+        row.due = now - timedelta(days=1) + timedelta(seconds=i)
+        session.add(row)
+    session.commit()
+    return cards
+
+
+def _seasoned_person(session, now):
+    return _seasoned(session, _person(session, now - timedelta(days=41)).cards, now)
+
+
 def test_due_queue_serves_one_card_per_note_and_buries_siblings_for_6_hours(session):
     now = utcnow()
-    note = _person(session, now - timedelta(minutes=1))
-    a, b = note.cards
+    a, b = _seasoned_person(session, now)
     assert [c.id for c in deck.due_cards(session, now=now)] == [a.id]  # most overdue, one per note
 
     assert deck.review_card(session, a.id, Rating.easy, now=now).due > now + timedelta(days=1)
@@ -270,7 +286,7 @@ def test_due_queue_serves_one_card_per_note_and_buries_siblings_for_6_hours(sess
 
 def test_a_card_rated_again_frees_its_sibling_and_wins_at_its_due(session):
     now = utcnow()
-    a, b = _person(session, now - timedelta(minutes=1)).cards
+    a, b = _seasoned_person(session, now)
     again = deck.review_card(session, a.id, Rating.again, now=now).due
     assert now < again < now + deck.SIBLING_BURY
 
@@ -310,7 +326,7 @@ def _three_ways(session, now):
 
 def test_a_hold_follows_the_reviewed_cards_latest_review_and_every_sibling_holds(session):
     now = utcnow()
-    a, b, c = _three_ways(session, now - timedelta(minutes=1))
+    a, b, c = _seasoned(session, _three_ways(session, now - timedelta(days=41)), now)
     deck.review_card(session, a.id, Rating.again, now=now)
     later = now + timedelta(minutes=1)
     deck.review_card(session, a.id, Rating.easy, now=later)  # A's latest review: due in days
@@ -329,8 +345,8 @@ def test_a_hold_follows_the_reviewed_cards_latest_review_and_every_sibling_holds
 
 def test_a_card_rated_good_with_a_long_interval_holds_its_sibling_6_hours(session):
     now = utcnow()
-    a, b = _person(session, now - timedelta(minutes=1)).cards
-    step = deck.review_card(session, a.id, Rating.good, now=now).due  # learning step
+    a, b = _seasoned_person(session, now)
+    step = deck.review_card(session, a.id, Rating.again, now=now).due  # relearning step
     later = step + timedelta(minutes=1)
     due = deck.review_card(session, a.id, Rating.good, now=later).due  # graduates: days
     assert due > later + deck.SIBLING_BURY
@@ -352,13 +368,13 @@ def test_burying_never_touches_other_notes(session):
 
 def test_stats_due_matches_the_queue_and_next_due_is_the_end_of_burying(session):
     now = utcnow()
-    a, _ = _person(session, now).cards
+    a, _ = _seasoned_person(session, now)
     assert deck.stats(session, now=now).due == len(deck.due_cards(session, limit=500, now=now)) == 1
 
     deck.review_card(session, a.id, Rating.easy, now=now)  # A due in days; B buried
 
     stats = deck.stats(session, now=now + timedelta(minutes=1))
-    assert (stats.total, stats.due, stats.new) == (2, 0, 1)
+    assert (stats.total, stats.due, stats.new) == (2, 0, 0)
     assert stats.next_due == now + deck.SIBLING_BURY
 
 

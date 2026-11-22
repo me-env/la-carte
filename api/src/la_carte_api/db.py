@@ -55,6 +55,7 @@ def _migrate(engine: Engine) -> None:
       id holding its front/back, and `card` is rebuilt without front/back.
     - Spec 014a amendment: person `role` and `context` fold into `description` (data only).
     - Spec 015: the `report` table is created (with a backup, like the rebuilds).
+    - Spec 021: the `settings` table is created, without a row (a missing row = the defaults).
     """
     raw = engine.raw_connection()
     db = raw.driver_connection  # sqlite3: explicit BEGIN/COMMIT, so DDL is transactional too
@@ -70,6 +71,10 @@ def _migrate(engine: Engine) -> None:
         _rebuild_if(
             db, engine, "015", lambda: bool(_columns(db, "card")) and not _columns(db, "report"),
             _create_reports,
+        )  # fmt: skip
+        _rebuild_if(
+            db, engine, "021", lambda: bool(_columns(db, "card")) and not _columns(db, "settings"),
+            _create_settings,
         )  # fmt: skip
     finally:
         db.execute("PRAGMA foreign_keys=ON")
@@ -206,6 +211,12 @@ def _create_reports(db, dialect) -> None:
     db.execute(str(CreateTable(table).compile(dialect=dialect)))
     for index in table.indexes:
         db.execute(str(CreateIndex(index).compile(dialect=dialect)))
+
+
+def _create_settings(db, dialect) -> None:
+    from la_carte_api.models import Settings
+
+    db.execute(str(CreateTable(Settings.__table__).compile(dialect=dialect)))
 
 
 def sessions(engine: Engine) -> Iterator[Session]:
