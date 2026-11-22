@@ -59,9 +59,10 @@ Rules:
   (`deck._queue`) = due, not buried, at most one card per note, in one order (specs 021, 022): `learning` /
   `relearning` cards by `due`, then `review` cards lowest FSRS retrievability first
   (`Scheduler.get_card_retrievability` at `now`), then new cards oldest first (`_card_order`); ties by `due`, then
-  `_card_order`, then id. The first card of a note in that order is its one servable card. It backs `/cards/due`, `due_cards`, `stats.due`, and `stats.next_due` (earliest time a card not
-  servable now becomes servable: `max(due, every sibling's hold)`, just `due` for a (re)learning card). `total` /
-  `new` count cards.
+  `_card_order`, then id. The first card of a note in that order is its one servable card. It backs
+  `/cards/due`, `due_cards`, `stats.due`, and `stats.next_due` (earliest time a card not servable now
+  becomes servable: `max(due, every sibling's hold)`, just `due` for a (re)learning card). `total` / `new` count
+  cards.
 - **Held cards (spec 015)**: a card with any `Report` whose status is `open` or `waiting_user` is left out of the
   servable queue entirely (so out of `/cards/due`, `due_cards`, `stats.due`, `stats.next_due`; it doesn't bury its
   siblings). It still counts in `total` and shows in `/cards`, `/notes`. Its FSRS state is never touched.
