@@ -21,12 +21,24 @@ if [ -z "${DEVICE:-}" ]; then
   # JSON goes to its own file: devicectl also prints a human-readable table on stdout.
   JSON="$(mktemp)"; trap 'rm -f "$JSON"' EXIT
   xcrun devicectl list devices --json-output "$JSON" >/dev/null
+  # Xcode 27.2+ also lists simulators (hardwareProperties.reality == "simulated"): skip them, keep
+  # paired iPhones, connected ones first. On failure, list what devicectl saw (names only, no IDs).
   DEVICE="$(python3 -I -c '
 import json, sys
 devices = json.load(open(sys.argv[1]))["result"]["devices"]
-phones = [d for d in devices if d["hardwareProperties"].get("deviceType") == "iPhone"
-          and d["hardwareProperties"].get("reality") == "physical"]
-print(phones[0]["hardwareProperties"]["udid"] if phones else "")' "$JSON")"
+def hw(d): return d.get("hardwareProperties", {})
+def conn(d): return d.get("connectionProperties", {})
+phones = [d for d in devices if hw(d).get("deviceType") == "iPhone"
+          and hw(d).get("reality") != "simulated"
+          and conn(d).get("pairingState") == "paired"]
+phones.sort(key=lambda d: conn(d).get("tunnelState") != "connected")
+if phones:
+    print(hw(phones[0]).get("udid") or phones[0]["identifier"])
+else:
+    for d in devices:
+        if hw(d).get("reality") != "simulated":
+            print(d.get("deviceProperties", {}).get("name"), hw(d).get("deviceType"), hw(d).get("reality"),
+                  conn(d).get("pairingState"), conn(d).get("tunnelState"), sep=" | ", file=sys.stderr)' "$JSON")"
   [ -n "$DEVICE" ] || { echo "No paired iPhone found (xcrun devicectl list devices)"; exit 1; }
 fi
 

@@ -92,6 +92,9 @@ GitHub Actions "iOS Ad Hoc" (.github/workflows/adhoc.yml, macos-26, environment:
 scripts/ios-install-device.sh   downloads the latest .ipa (gh) → xcrun devicectl install → launch
 ```
 
+`ios-install-device.sh` picks the first paired, non-simulated iPhone in `devicectl list devices`, preferring connected ones
+(since Xcode 27.2 that list also includes simulators). Override with `DEVICE=<udid or name>`.
+
 There's no .p12 or provisioning profile to manage. With `-allowProvisioningUpdates`, Xcode creates or
 downloads the Apple Distribution certificate and an Ad Hoc profile ("iOS Team Ad Hoc Provisioning
 Profile: <bundle ID>") containing **every device registered on the team**. Both are valid
