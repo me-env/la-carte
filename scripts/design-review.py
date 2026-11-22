@@ -23,6 +23,8 @@
     uv run scripts/design-review.py forgetcurve/curve-*-ink.svg --mode flat [--home]   # solid flat marks (even-odd path)
     uv run scripts/design-review.py forgetcurve/curve-93-ink.svg --mode line [--home] [--card x0,y0,x1,y1[,r]]   # the line
     uv run scripts/design-review.py --mode line --make-synthetic DIR   # clean line mark + one SVG per defect (regression)
+    uv run scripts/design-review.py <master.png|svg>... --against <approved.svg|png> [--variants light,dark,tinted]
+                         [--region x0,y0,x1,y1] [--card x0,y0,x1,y1[,r]] [--json] [--out sheet.png|DIR/]   # master vs approved
 
 Prints PASS/FAIL per metric (value vs limit, and WHERE: `at x 385, y 535 (band 5)` in the render's own 1024 px
 coordinates; band = 32 px band counted from where the ink starts rising) and writes an annotated sheet (render,
@@ -127,6 +129,27 @@ each (r = the median arc radius, theta = the turn) is left out of width, smoothn
 unequal gaps), reviews each and checks that the clean one passes every geometry metric and each defect fails its own
 (exit 1 otherwise). Sheet: centre samples by element, junctions and skip zones, fitted exponentials, arcs, kinks,
 crossings, width along x, 58 / 29 px previews. `--watch` and `--home` work.
+
+`--against APPROVED` compares each render (a production master: the app icon PNG, png/logo-*.png, a SwiftUI
+snapshot) with the approved render, both rasterised to 1024 (an SVG through rsvg-convert, alpha kept: a transparent
+logo is not flattened onto black). Ink = alpha (transparent) or the mix of the background (corner median) and one
+palette colour (opaque); the palette = the modes of the flat (3x3-uniform) ink pixels. PASS / FAIL per metric
+(constants AGAINST_*, agreed with design-lead 2026-11-22), exit 1 on any FAIL:
+- shift: the master's ink translation, phase correlation (skimage, sub-pixel), <= 1 px (when the scale is off by more
+  than 1 %, the offset of the ink bbox centres instead); scale: ink bbox width and height ratios within 0.5 %.
+- colour: each approved palette colour vs the master's nearest one (CIEDE2000), mean over each colour's interior
+  (mask eroded by 2 px, so anti-aliased edges don't decide), <= 2; the background too when both are opaque.
+- shape: ink-mask IoU after removing the shift >= 0.99; INFO: share of the ink whose coverage differs by > 0.5 px.
+- accent outside card (the logo's idea, pink where the curve leaves the card): |master - approved| share of the
+  accent ink (the most chromatic colour, else the least common: tinted) outside the card, <= 0.02, a DRAFT limit
+  awaiting design-lead's OK. The card = the bbox of the most common colour's ink, its radius from the paper missing
+  in its right corners (line mode's card_find takes logo 131's pink bar for the card's left edge); `--card` overrides.
+`--variants light,dark,tinted`: one pair per variant, that word swapped into both file names (the listed word found
+last in each name), one PASS / FAIL per pair. `--region x0,y0,x1,y1` (the existing flag and format, 1024 px corners,
+not x,y,w,h) restricts every metric to that window. `--json`: every number (offset dx / dy, scale x / y, dE per colour,
+IoU, accent shares, spots, sheet path) as JSON instead of the table. Sheet: approved | master as is (the approved
+outline in cyan) | difference after removing the shift (red-orange), shape spots <= 256 px and colour spots circled;
+default $TMPDIR/design-review/<master's last 3 folders>/<master>-vs-<approved>.png, never next to the inputs.
 
 Screens (`--screen`, the critic picks it per proposal from the render's construction):
 - `lattice` (default): the marks settle onto a hex lattice; order must RISE (checks 3), touching from coverage 0.65.
@@ -474,6 +497,22 @@ LINE_APPLE_INK = 0.25           # an Apple glyph pixel differs from that border 
 LINE_INFO = ("ends", "edge AA", "decay G2", "palette", "corners",   # INFO rows (no limit)
              "occupancy: ink share")  # INFO until a broader reference exists: only 2 Apple icons have a uniform
                                       # border (Reminders, Calendar: 0.05-0.09), which FAILed the leader curve-93 (0.23)
+
+# --against (a production master vs the approved render; limits agreed with design-lead 2026-11-22)
+AGAINST_SHIFT_PX = 1.0          # ink translation (phase correlation, sub-pixel), px at 1024
+AGAINST_SCALE = 0.005           # ink bbox width / height ratio within 0.5 %
+AGAINST_DE = 2.0                # CIEDE2000 per brand colour (flat interiors), and the background when both are opaque
+AGAINST_IOU = 0.99              # ink-mask IoU after removing the shift
+AGAINST_ACCENT_OUT = 0.02       # DRAFT, awaiting design-lead OK: |master - approved| share of the accent (pink) ink
+                                # outside the card (the logo's idea: the curve turns pink where it leaves the card)
+AGAINST_ERODE_PX = 2            # colour masks are eroded by 2 px: anti-aliased edges don't decide a colour
+AGAINST_MERGE_DE = 6.0          # palette: flat colours within this (CIE76) of a more common one are the same colour
+AGAINST_MIN_SHARE = 0.005       # palette: a colour needs >= 0.5 % of the flat ink pixels
+AGAINST_ACCENT_CHROMA = 15.0    # the accent = the most chromatic colour (C* >= 15); else (tinted) the least common
+AGAINST_DIFF_COV = 0.5          # INFO: a pixel "differs" when its coverage is off by more than half a pixel
+AGAINST_SPOT_PX = 30            # a failing spot on the heat map has >= 30 px (after a 2 px dilation) ...
+AGAINST_SPOT_MAX = 256          # ... and a shape spot spans <= 256 px (a shift / scale lights the whole outline: the heat
+                                # map shows it); a colour spot (dE above the limit) is circled whatever its size
 
 ICON_IDS = [1110145109, 1108187841, 1108185179, 1069512882, 1584215688, 915056765]   # Notes, Reminders,
 # Calendar, Stocks, Clock, Maps: Apple's own apps via the public iTunes lookup API (no personal data).
@@ -3329,6 +3368,304 @@ def synthetic_line(out_dir):
     return 1 if bad else 0
 
 
+# ---------------------------------------------------------------- --against (production master vs approved)
+def against_load(path):
+    """(rgb 1024 x 1024 x 3 in 0..1, alpha or None if opaque, background rgb or None). Like load(), but keeps the
+    alpha channel: a transparent logo (logo-light.svg) flattened to RGB would sit on black."""
+    path = Path(path)
+    if path.suffix.lower() == ".svg":
+        png = Path(tempfile.mkdtemp()) / "render.png"
+        subprocess.run(["rsvg-convert", "-w", str(TILE), "-h", str(TILE), str(path), "-o", str(png)], check=True)
+        path = png
+    img = Image.open(path).convert("RGBA")
+    if img.size != (TILE, TILE):
+        img = img.resize((TILE, TILE), Image.LANCZOS)
+    a = np.asarray(img, dtype=float) / 255
+    rgb, alpha = a[..., :3], a[..., 3]
+    if alpha.min() > 0.99:
+        c = 16
+        bg = np.median(np.concatenate([rgb[:c, :c], rgb[:c, -c:], rgb[-c:, :c], rgb[-c:, -c:]]).reshape(-1, 3), axis=0)
+        return rgb, None, bg
+    return rgb, alpha, None
+
+
+def against_palette(rgb, alpha, bg):
+    """The ink colours: modes of the flat (3x3-uniform) ink pixels, merged within AGAINST_MERGE_DE, kept while
+    >= AGAINST_MIN_SHARE of them. Returns rgb rows, biggest first."""
+    from skimage.color import rgb2lab
+    ink = alpha >= 0.99 if alpha is not None else np.linalg.norm(rgb - bg, axis=2) > INK_MIN_CONTRAST
+    flat = np.ones(ink.shape, bool)
+    for ch in range(3):
+        v = rgb[..., ch]
+        flat &= (ndimage.maximum_filter(v, 3) - ndimage.minimum_filter(v, 3)) < 3 / 255
+    q = np.round(rgb[ink & flat] * 255).astype(int)
+    if not len(q):
+        return np.zeros((0, 3))
+    cols, counts = np.unique(q, axis=0, return_counts=True)
+    order = np.argsort(-counts)[:2000]
+    cols, counts = cols[order] / 255, counts[order]
+    lab = rgb2lab(cols[None])[0]
+    left, out, total = np.ones(len(cols), bool), [], counts.sum()
+    while left.any():
+        i = np.nonzero(left)[0][0]                       # the most common colour not yet taken
+        near = left & (np.linalg.norm(lab - lab[i], axis=1) < AGAINST_MERGE_DE)
+        if counts[near].sum() < AGAINST_MIN_SHARE * total:
+            break
+        out.append(cols[i])
+        left &= ~near
+    return np.array(out)
+
+
+def against_coverage(rgb, alpha, bg, pal):
+    """(coverage 0..1, palette label per pixel). Transparent: coverage = alpha, label = nearest colour. Opaque: each
+    pixel is a mix of the background and one ink colour; the colour whose bg -> ink segment it lies closest to wins
+    (on a tie, e.g. tinted's grey on the black -> white line, the one it covers most)."""
+    if alpha is not None:
+        d = np.linalg.norm(rgb[:, :, None] - pal[None, None], axis=3)
+        return alpha, d.argmin(2)
+    v = pal - bg                                         # k x 3
+    t = np.clip(np.einsum("hwc,kc->hwk", rgb - bg, v) / (v * v).sum(1), 0, 1)
+    resid = np.linalg.norm(rgb[:, :, None] - (bg + t[..., None] * v[None, None]), axis=3)
+    lab = (resid + 0.05 * (1 - t)).argmin(2)             # on a tie: the colour it covers most
+    cov = np.take_along_axis(t, lab[..., None], 2)[..., 0]
+    d = np.linalg.norm(rgb[:, :, None] - pal[None, None], axis=3)  # a pixel of an ink colour is that colour, even when
+    exact = d.min(2) < 3 / 255                                       # it lies on another's segment (tinted: grey on
+    lab[exact], cov[exact] = d.argmin(2)[exact], 1.0                 # black -> white)
+    return cov, lab
+
+
+def against_card(cov, lab, k):
+    """The card (x0, y0, x1, y1, r) in 1024 px: the bbox of the card colour's ink (colour k, the most common one),
+    r from the paper missing in its two right corners (r^2 (1 - pi/4) each). Line mode's card_find doesn't apply:
+    logo 131's pink bar sits on the card's left edge and is the outermost straight edge there."""
+    m = (lab == k) & (cov > 0.5)
+    if not m.any():
+        return None
+    ys, xs = np.nonzero(m)
+    x0, y0, x1, y1 = xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
+    R = int(0.3 * min(x1 - x0, y1 - y0))
+    miss = [(~m[y0:y0 + R, x1 - R:x1]).sum(), (~m[y1 - R:y1, x1 - R:x1]).sum()]
+    return float(x0), float(y0), float(x1), float(y1), math.sqrt(np.mean(miss) / (1 - math.pi / 4))
+
+
+def against_pair(master, approved, out=None, region=None, card=None, quiet=False):
+    """Compare a production master with the approved render. Returns (fails, record dict)."""
+    from skimage.color import deltaE_ciede2000, rgb2lab
+    from skimage.registration import phase_cross_correlation
+    A, M = against_load(approved), against_load(master)
+    pa, pm = against_palette(*A), against_palette(*M)
+    rec = {"master": str(master), "approved": str(approved), "region": region, "metrics": {}, "colours": []}
+    rows = []                                            # (metric, value, limit, ok, note); ok None = INFO / N/A
+
+    def row(name, value, limit, ok, note=""):
+        ok = None if ok is None else bool(ok)            # numpy bools aren't `is False`
+        rows.append((name, value, limit, ok, note))
+        rec["metrics"][name] = {"value": None if value is None or value != value else round(float(value), 4),
+                                "limit": limit, "pass": None if ok is None else bool(ok), "note": note}
+    if not len(pa) or not len(pm):
+        row("ink", None, None, False, f"no ink in the {'approved render' if not len(pa) else 'master'}")
+        return against_report(rec, rows, quiet)
+    ca, la = against_coverage(*A, pa)
+    cm, lm = against_coverage(*M, pm)
+    x0, y0, x1, y1 = region if region else (0, 0, TILE, TILE)
+    win = (slice(y0, y1), slice(x0, x1))
+    cw_a, cw_m = ca[win], cm[win]
+    ink_a, ink_m = cw_a > 0.5, cw_m > 0.5
+    if not ink_a.any() or not ink_m.any():
+        row("ink", None, None, False, "no ink inside --region")
+        return against_report(rec, rows, quiet)
+
+    # (a) shift and scale
+    def bbox(m):
+        ys, xs = np.nonzero(m)
+        return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
+    ba, bm = bbox(ink_a), bbox(ink_m)
+    sx, sy = (bm[2] - bm[0]) / (ba[2] - ba[0]), (bm[3] - bm[1]) / (ba[3] - ba[1])
+    worst = max(abs(sx - 1), abs(sy - 1))
+    reg, _, _ = phase_cross_correlation(cw_a, cw_m, upsample_factor=100, normalization=None)
+    how = "phase correlation"
+    if worst > 2 * AGAINST_SCALE:                        # scaled: correlation locks onto one part, use the bbox centres
+        reg = np.array([(ba[1] + ba[3] - bm[1] - bm[3]) / 2, (ba[0] + ba[2] - bm[0] - bm[2]) / 2], float)
+        how = "ink bbox centres (the scale differs)"
+    dy, dx = -reg                                        # the master's ink relative to the approved ink
+    shift = math.hypot(dx, dy)
+    rec["offset_px"] = {"dx": round(float(dx), 3), "dy": round(float(dy), 3), "method": how}
+    row("shift", shift, AGAINST_SHIFT_PX, shift <= AGAINST_SHIFT_PX,
+        f"master ink offset dx {dx:+.2f}, dy {dy:+.2f} px ({how})")
+    rec["scale_xy"] = {"x": round(float(sx), 5), "y": round(float(sy), 5)}
+    row("scale", worst, AGAINST_SCALE, worst <= AGAINST_SCALE,
+        f"ink bbox master / approved: x {sx:.4f}, y {sy:.4f} (approved {ba[2] - ba[0]} x {ba[3] - ba[1]} px)")
+
+    # (c) shape, the master moved back onto the approved
+    cm_reg = ndimage.shift(cw_m, reg, order=1, mode="constant")
+    lm_reg = ndimage.shift(lm[win], reg, order=0, mode="nearest")
+    rgb_m_reg = np.stack([ndimage.shift(M[0][win][..., ch], reg, order=1, mode="nearest") for ch in range(3)], -1)
+    im = cm_reg > 0.5
+    iou = (ink_a & im).sum() / (ink_a | im).sum()
+    row("shape: IoU", iou, AGAINST_IOU, iou >= AGAINST_IOU, "ink masks after removing the shift")
+    dc = np.abs(cw_a - cm_reg)
+    differ = (dc > AGAINST_DIFF_COV).sum() / (ink_a | im).sum()
+    row("shape: px differing", differ, None, None,
+        f"share of the ink (union) whose coverage differs by > {AGAINST_DIFF_COV} after the shift (INFO)")
+
+    # (b) colour: each approved colour vs the master's nearest one, flat interiors only (edges eroded)
+    lab_pa, lab_pm = rgb2lab(pa[None])[0], rgb2lab(pm[None])[0]
+    k_m = [int(np.argmin(deltaE_ciede2000(np.repeat(l[None], len(lab_pm), 0), lab_pm))) for l in lab_pa]
+
+    def interior(rgb_, lab_, cov, k):
+        m = ndimage.binary_erosion((lab_ == k) & (cov > 0.5), iterations=AGAINST_ERODE_PX)
+        return (rgb2lab(rgb_[m][None])[0].mean(0), int(m.sum())) if m.any() else (None, 0)
+    chroma = np.hypot(lab_pa[:, 1], lab_pa[:, 2])
+    accent = int(np.argmax(chroma)) if chroma.max() >= AGAINST_ACCENT_CHROMA else (len(pa) - 1 if len(pa) > 1 else None)
+    for k, km in enumerate(k_m):
+        la_, na_ = interior(A[0][win], la[win], cw_a, k)
+        lm_, nm_ = interior(rgb_m_reg, lm_reg, cm_reg, km)
+        hex_a, hex_m = (("#%02X%02X%02X" % tuple(np.round(c * 255).astype(int))) for c in (pa[k], pm[km]))
+        name = f"colour {k + 1} {hex_a}" + (" (accent)" if k == accent else "")
+        if la_ is None or lm_ is None:
+            row(name, None, AGAINST_DE, None, "N/A: no flat interior inside the region")
+            continue
+        de = float(deltaE_ciede2000(la_, lm_))
+        row(name, de, AGAINST_DE, bool(de <= AGAINST_DE), f"CIEDE2000 vs master {hex_m} ({na_} / {nm_} interior px)")
+        rec["colours"].append({"approved": hex_a, "master": hex_m, "dE2000": round(de, 3), "accent": k == accent,
+                               "pass": bool(de <= AGAINST_DE)})
+    if A[2] is not None and M[2] is not None:            # both opaque: the ground is a brand colour too
+        de = float(deltaE_ciede2000(rgb2lab(A[2][None, None])[0, 0], rgb2lab(M[2][None, None])[0, 0]))
+        row("colour: background", de, AGAINST_DE, de <= AGAINST_DE, "corner medians")
+
+    # (d) the defining idea: the accent's share outside the card
+    shares, cards = [], []
+    for cov_full, lab_full, km, kc in ((ca, la, accent, 0), (cm, lm, k_m[accent] if accent is not None else None, k_m[0])):
+        c = card or against_card(cov_full, lab_full, kc)
+        cards.append("(" + ", ".join(f"{v:.0f}" for v in c) + ")" if c else "-")
+        if km is None or c is None:
+            shares.append(None)
+            why = "no accent colour" if km is None else "card not found (pass --card x0,y0,x1,y1[,r])"
+            continue
+        acc = (lab_full == km) & (cov_full > 0.5)
+        acc[:y0], acc[y1:], acc[:, :x0], acc[:, x1:] = False, False, False, False
+        ys, xs = np.nonzero(acc)
+        shares.append((rrect_sd(xs + 0.5, ys + 0.5, c)[0] > 0).mean() if len(xs) else None)
+        why = "no accent ink inside the region"
+    if None in shares:
+        row("accent outside card", None, AGAINST_ACCENT_OUT, None, "N/A: " + why)
+    else:
+        d = abs(shares[1] - shares[0])
+        row("accent outside card", d, AGAINST_ACCENT_OUT, d <= AGAINST_ACCENT_OUT,
+            f"cards {cards[0]} / {cards[1]}; |master - approved| share of accent ink outside the card: master {shares[1]:.3f}, approved "
+            f"{shares[0]:.3f} (draft limit, awaiting design-lead OK)")
+        rec["accent_outside"] = {"master": round(float(shares[1]), 4), "approved": round(float(shares[0]), 4),
+                                 "cards_approved_master": cards}
+
+    # (e) the diff sheet: approved | master | heat map
+    both = ndimage.binary_erosion(ink_a & im, iterations=1)
+    de_px = np.zeros(dc.shape)
+    if both.any():
+        de_px[both] = deltaE_ciede2000(rgb2lab(A[0][win][both][None])[0], rgb2lab(rgb_m_reg[both][None])[0])
+    heat = np.clip(np.maximum(dc, de_px / (2 * AGAINST_DE)), 0, 1)    # 0.5 = coverage off by half / dE at the limit
+    spots = []                                           # shape spots (capped in size) and colour spots (whole)
+    for bad, cap in ((dc > AGAINST_DIFF_COV, AGAINST_SPOT_MAX), (de_px > AGAINST_DE, TILE)):
+        lbl, n = ndimage.label(ndimage.binary_dilation(bad, iterations=2))
+        sizes = ndimage.sum(np.ones_like(heat), lbl, range(1, n + 1)) if n else []
+        objs = ndimage.find_objects(lbl)
+        for i in np.argsort(-np.asarray(sizes))[:12]:
+            sl = objs[i]
+            if sizes[i] >= AGAINST_SPOT_PX and max(sl[0].stop - sl[0].start, sl[1].stop - sl[1].start) <= cap:
+                spots.append((sl[1].start + x0, sl[0].start + y0, sl[1].stop + x0, sl[0].stop + y0))
+    rec["spots"] = [list(map(int, s)) for s in spots]
+    fails = sum(1 for r in rows if r[3] is False)
+    rec["verdict"] = "FAIL" if fails else "PASS"
+    out = Path(out) if out else default_out(master).with_name(f"{Path(master).stem}-vs-{Path(approved).stem}.png")
+    against_sheet(A + (ca > 0.5,), M, heat, (x0, y0, x1, y1), spots, rows, rec["verdict"], out,
+                  f"dx {-dx:+.2f}, dy {-dy:+.2f} px")
+    rec["sheet"] = str(out)
+    return against_report(rec, rows, quiet)
+
+
+def against_report(rec, rows, quiet):
+    fails = sum(1 for r in rows if r[3] is False)
+    rec.setdefault("verdict", "FAIL" if fails else "PASS")
+    if not quiet:
+        print(f"design-review --against: {Path(rec['master']).name} vs approved {Path(rec['approved']).name}"
+              + (f" (region {','.join(map(str, rec['region']))})" if rec["region"] else ""))
+        for name, v, lim, ok, note in rows:
+            tag = "INFO" if ok is None else ("PASS" if ok else "FAIL")
+            val = "     N/A" if v is None or v != v else f"{v:>8.4f}"
+            print(f"  {tag:<4} {name:<30}{val}  (limit {lim if lim is not None else '-'})  {note}")
+        if rec.get("spots"):
+            print(f"  failing spots (x0,y0,x1,y1 at 1024): {'; '.join(','.join(map(str, s)) for s in rec['spots'])}")
+        print(f"RESULT: {rec['verdict']}" + (f"  sheet: {rec['sheet']}" if rec.get("sheet") else ""))
+    return fails, rec
+
+
+def against_sheet(A, M, heat, region, spots, rows, verdict, out, shift):
+    """approved | master (as is) | heat map (master moved onto the approved), 512 px each, failing spots circled."""
+    def panel(rgb, alpha):
+        if alpha is not None:                            # transparent: a light-grey checker shows the edges
+            yy, xx = np.mgrid[:TILE, :TILE]
+            chk = np.where(((yy // 32 + xx // 32) % 2)[..., None] == 0, 0.86, 0.74)
+            rgb = rgb * alpha[..., None] + chk * (1 - alpha[..., None])
+        return Image.fromarray(np.round(rgb * 255).astype(np.uint8))
+    x0, y0, x1, y1 = region
+    full = np.zeros((TILE, TILE))
+    full[y0:y1, x0:x1] = heat
+    base = np.zeros((TILE, TILE))
+    base[y0:y1, x0:x1] = A[3][y0:y1, x0:x1]
+    g = (0.12 + 0.18 * base)[..., None]                  # the approved ink in grey, the difference in red-orange
+    h = g * (1 - full[..., None]) + np.array([1.0, 0.25, 0.1]) * full[..., None]
+    tiles = [panel(*A[:2]), panel(*M[:2]), Image.fromarray(np.round(h * 255).astype(np.uint8))]
+    edge = A[3] ^ ndimage.binary_erosion(A[3], iterations=2)   # the approved outline over the master: shift / scale show
+    mp = np.asarray(tiles[1]).copy()
+    mp[edge] = (0, 190, 255)
+    tiles[1] = Image.fromarray(mp)
+    s = 512 / TILE
+    W, top = 3 * 512 + 4 * 16, 40
+    sheet_ = Image.new("RGB", (W, top + 512 + 16 + 18 * (len(rows) + 1)), "white")
+    d = ImageDraw.Draw(sheet_)
+    labels = ("approved", "master as is (approved outline in cyan)", f"difference after moving the master by {shift}")
+    for j, (t, lab) in enumerate(zip(tiles, labels)):
+        x = 16 + j * (512 + 16)
+        sheet_.paste(t.resize((512, 512), Image.LANCZOS), (x, top))
+        d.text((x, top - 16), lab, fill="black")
+        if region != (0, 0, TILE, TILE):
+            d.rectangle([x + x0 * s, top + y0 * s, x + x1 * s, top + y1 * s], outline=(0, 120, 255))
+        if j:
+            for sx0, sy0, sx1, sy1 in spots:
+                cx, cy = x + (sx0 + sx1) / 2 * s, top + (sy0 + sy1) / 2 * s
+                r = max(sx1 - sx0, sy1 - sy0) / 2 * s + 8
+                d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(230, 0, 0), width=3)
+    d.text((16, 8), f"design-review --against: {verdict}", fill=(200, 0, 0) if verdict == "FAIL" else (0, 130, 0))
+    y = top + 512 + 16
+    for name, v, lim, ok, note in rows:
+        tag = "INFO" if ok is None else ("PASS" if ok else "FAIL")
+        val = "N/A" if v is None or v != v else f"{v:.4f}"
+        d.text((16, y), f"{tag}  {name}: {val} (limit {lim if lim is not None else '-'})  {note}",
+               fill=(200, 0, 0) if ok is False else "black")
+        y += 18
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sheet_.save(out)
+
+
+def against_pairs(masters, approved, variants):
+    """[(master, approved)]: without --variants, each master vs the approved; with it, for each variant v, the
+    variant named in each file name (its last listed variant token) replaced by v."""
+    if not variants:
+        return [(Path(m), Path(approved)) for m in masters]
+
+    def swap(p, v):
+        p = Path(p)
+        hits = [(m.start(), m.end()) for w in variants for m in re.finditer(rf"(?<![A-Za-z]){re.escape(w)}(?![A-Za-z])", p.stem)]
+        if not hits:
+            sys.exit(f"design-review --variants: none of {','.join(variants)} in the file name {p.name}")
+        s, e = max(hits)
+        return p.with_name(p.stem[:s] + v + p.stem[e:] + p.suffix)
+    pairs = [(swap(m, v), swap(approved, v)) for m in masters for v in variants]
+    missing = [str(p) for pair in pairs for p in pair if not p.exists()]
+    if missing:
+        sys.exit(f"design-review --variants: missing {', '.join(missing)}")
+    return pairs
+
+
 # ---------------------------------------------------------------- main
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -3342,7 +3679,8 @@ if __name__ == "__main__":
                                         "does not relax: it only caps how far the bbox alone may sit off-centre.")
     ap.add_argument("render", nargs="*", help="render-1024.png or .svg (several: each is reviewed)")
     ap.add_argument("--axis", choices=("x", "y"), default="x", help="transition axis (default x)")
-    ap.add_argument("--region", help="x0,y0,x1,y1 in 1024 px (default: the ink bounding box)")
+    ap.add_argument("--region", help="x0,y0,x1,y1 in 1024 px (default: the ink bounding box; with --against: the "
+                                     "whole tile, and every metric is restricted to the region)")
     ap.add_argument("--home", action="store_true", help="also render home-screen rows with Apple's icons")
     ap.add_argument("--out", help="sheet path (default: $TMPDIR/design-review/<render's last 3 folders>/<name>-review.png); "
                                   "a directory (existing or ending with /): <dir>/<name>-review.png per render; a file "
@@ -3359,8 +3697,14 @@ if __name__ == "__main__":
                          "line: the forgetting-curve line, alone or XOR a card (width, kinks, decay shape, cycles, resets, "
                          "plateaus, fillets, gaps, crossings, 58/29 px contrast, occupancy)")
     ap.add_argument("--dots", type=int, metavar="N", help="outline mode: the expected dot count (default: report only)")
-    ap.add_argument("--card", metavar="x0,y0,x1,y1[,r]", help="line mode: the card in 1024 px (default: found from the "
-                                                              "longest straight edges of the ink)")
+    ap.add_argument("--card", metavar="x0,y0,x1,y1[,r]", help="line mode and --against: the card in 1024 px (default: "
+                                                              "found from the longest straight edges of the ink)")
+    ap.add_argument("--against", metavar="APPROVED.svg|png",
+                    help="compare each render (a production master) with the approved render: shift, scale, colour "
+                         "(CIEDE2000), shape (IoU), accent outside the card; diff sheet; exit 1 on FAIL")
+    ap.add_argument("--variants", metavar="light,dark,tinted",
+                    help="--against: check each pair with that variant name swapped into both file names")
+    ap.add_argument("--json", action="store_true", help="--against: print every number as JSON instead of the table")
     ap.add_argument("--make-synthetic", metavar="OUT.png|DIR",
                     help="write the smooth reference ramp (of --screen) and review it; with --mode line: a DIR of a clean "
                          "line mark + one SVG per defect, reviewed as a regression check")
@@ -3369,6 +3713,35 @@ if __name__ == "__main__":
                     help="an animation's frames (a directory or a quoted glob): every metric on every frame, worst "
                          "frame per metric; repeatable")
     a = ap.parse_args()
+    if a.against:
+        if a.mode or a.frames or a.watch or a.make_synthetic or a.home:
+            ap.error("--against takes renders only (no --mode, --frames, --watch, --make-synthetic, --home)")
+        if not a.render:
+            ap.error("--against: give the production master(s) to compare")
+        card = tuple(float(v) for v in a.card.split(",")) if a.card else None
+        card = card + (0.0,) if card and len(card) == 4 else card
+        region = tuple(int(v) for v in a.region.split(",")) if a.region else None
+        pairs = against_pairs(a.render, a.against, [v for v in (a.variants or "").split(",") if v])
+        fails, recs = 0, []
+        for k, (m, ap_) in enumerate(pairs):
+            if a.out:                                # a dir: <dir>/<master>-vs-<approved>.png; a file: as other modes
+                o = Path(a.out)
+                if a.out.endswith("/") or o.is_dir():
+                    o = o / f"{m.stem}-vs-{ap_.stem}.png"
+                elif len(pairs) > 1:
+                    o = o.with_name(f"{o.stem}-{m.stem}-vs-{ap_.stem}{o.suffix or '.png'}")
+            if k and not a.json:
+                print()
+            f, rec = against_pair(m, ap_, o if a.out else None, region, card, quiet=a.json)
+            fails += bool(f)
+            recs.append(rec)
+        if a.json:
+            print(json.dumps({"verdict": "FAIL" if fails else "PASS", "pairs": recs}, indent=1))
+        elif len(pairs) > 1:
+            print(f"\n--against: {len(pairs) - fails} of {len(pairs)} pairs PASS")
+        sys.exit(1 if fails else 0)
+    if a.variants or a.json:
+        ap.error("--variants and --json are for --against")
     if a.mode == "line" and a.make_synthetic:
         sys.exit(synthetic_line(a.make_synthetic))
     if a.make_synthetic:
@@ -3393,7 +3766,7 @@ if __name__ == "__main__":
     if a.mode not in (None, "halftone") and (a.frames or a.make_synthetic):
         ap.error(f"--mode {a.mode} takes renders (no --frames, no --make-synthetic)")
     if a.card and a.mode != "line":
-        ap.error("--card is for --mode line")
+        ap.error("--card is for --mode line and --against")
     region = tuple(int(v) for v in a.region.split(",")) if a.region else None
     if not a.make_synthetic and a.mode in (None, "halftone"):        # guard: a mark of a few shapes is not a halftone
         for path in a.render:

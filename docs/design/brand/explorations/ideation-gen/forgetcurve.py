@@ -7,6 +7,10 @@
 filters) and, with --sheet, review PNGs (numbered sheet, 58/29 px sheet, home-screen preview).
 
     uv run docs/design/brand/explorations/ideation-gen/forgetcurve.py <out-dir> [--sheet] [--palette ink|dark|forest]
+                                                                       [--only 93,131]
+
+`--only` takes variant numbers, i.e. the function's (v131 -> `--only 131` -> curve-131-<palette>.svg), not
+positions in VARIANTS; an unknown number, or two functions with the same number, is an error.
 
 The curve, in basic shapes. Retention starts at 100 % (the peak line), decays, and each review jumps it straight
 back up; intervals widen and decays get shallower. One "tooth" (the area under one decay) is
@@ -23,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
 from pathlib import Path
 
 from shapely import affinity
@@ -1401,7 +1406,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("out", type=Path)
     ap.add_argument("--palette", choices=PALETTES, default="ink")
-    ap.add_argument("--only", default="", help="comma list of variant numbers")
+    ap.add_argument("--only", default="", help="comma list of variant numbers (the function's: 131 -> v131 -> curve-131-<palette>.svg)")
     ap.add_argument("--mode", choices=["ellipse", "circle"], default="ellipse", help="decay shape")
     ap.add_argument("--soften", type=float, default=0.0, help="round convex corners (the peaks) by this many px")
     ap.add_argument("--weight", type=float, default=1.0, help="multiply every stroke width")
@@ -1411,9 +1416,16 @@ def main() -> None:
     MODE, WEIGHT = a.mode, a.weight
     a.out.mkdir(parents=True, exist_ok=True)
     bg, fg = PALETTES[a.palette]
+    nums = [int(fn.__name__[1:]) for fn in VARIANTS]  # a variant's number is its function's: v131 -> 131
+    dupes = sorted({n for n in nums if nums.count(n) > 1})
+    if dupes:
+        sys.exit(f"forgetcurve: duplicate variant numbers in VARIANTS: {', '.join(map(str, dupes))}")
     only = {int(x) for x in a.only.split(",") if x}
+    unknown = sorted(only - set(nums))
+    if unknown:
+        sys.exit(f"forgetcurve: --only: no variant {', '.join(map(str, unknown))} (known: {min(nums)}-{max(nums)})")
     files = []
-    for i, fn in enumerate(VARIANTS, 1):
+    for i, fn in zip(nums, VARIANTS):
         if only and i not in only:
             continue
         f = a.out / f"curve-{i:02d}-{a.palette}.svg"
