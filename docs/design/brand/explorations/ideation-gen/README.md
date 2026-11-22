@@ -75,6 +75,19 @@ construction from the pitch p:
 - The settled dot: the bottom-centre dot, 1.5x the diameter, at the same pitch.
 - Icon placement: p = 100 px in the 1024 icon, card 527 x 727 (about 5:7), side margins 217 px.
 
+**Smoother corners (user feedback: "smaller dots on the round corners"), `dotcard-round-{forest,light,dark}.svg`.**
+The critic's pick from `round-4/clean/corners-compare.png` (#0 current, #1 to #3 variants; home previews in
+`corners-home.png`) is #1:
+- Construction: `--edges 3,5 --arc 2 --corner-scale 0.75 --corner-end 0.75`.
+- Corner arcs: 2 pitches long (radius 1.27p).
+- Dots: still 24, at a constant arc-length pitch. The 2 dots on each arc are 0.75x, and only the settled dot is
+  bigger (1.5x).
+- Rejected alternatives: extra dots on 1-pitch arcs made bead-like clumps (first try in
+  `round-4/clean/corners-try1/`); 0.6x corner dots fade out at 58 px; a 20-dot version with an apex dot reads as a
+  capsule or phone.
+- The scaling rule (`--corner-scale`, `--corner-end`) is the same in SwiftUI: each dot's size is a function of its
+  arc-length distance to the corner apex.
+
 `--edges 2,4` builds a 16-dot master for small sizes, in case 29 px needs it.
 
 It maps 1:1 to a SwiftUI `Shape`:

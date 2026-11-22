@@ -7,7 +7,9 @@ card outline, one larger "settled" dot. Writes a flat SVG (no filters, no gradie
     uv run docs/design/brand/explorations/ideation-gen/dotcard.py <out.svg> [--count 20] [--aspect 0.68] ...
 
 `--edges 4,6` is the critic-approved #1 (R4-1.1): 24 dots, 5 top / 7 per side / 5 bottom, corner arcs exactly one
-pitch long with no dot on them, so the spacing is perfectly even all round.
+pitch long with no dot on them, so the spacing is perfectly even all round. `--corner-dots k` adds k smaller dots on
+each corner arc (user feedback: smoother corners), easing from `--corner-end` at the arc ends to `--corner-scale` at
+the apex.
 
 Geometry, all derived from the card height H (so a SwiftUI Shape can use the same numbers):
 - card: width = aspect * H, corner radius = radius * H; dots sit ON this path.
@@ -61,14 +63,20 @@ def perimeter(w: float, h: float, r: float) -> float:
     return 2 * (w - 2 * r) + 2 * (h - 2 * r) + 2 * math.pi * r
 
 
+def corner_starts(ea: int, eb: int, arc: int, p: float) -> list[float]:
+    """Arc length (from the bottom centre) where each corner arc starts, in `--edges` mode (arcs are `arc` pitches)."""
+    s0 = ea / 2 * p
+    return [s0, s0 + (arc + eb) * p, s0 + (2 * arc + eb + ea) * p, s0 + (3 * arc + 2 * eb + ea) * p]
+
+
 def build(a: argparse.Namespace) -> str:
     size = a.size
     h = a.height * size
     if a.edges:  # pitch-exact card: straight edges a and b pitches long, each corner arc exactly 1 pitch
         ea, eb = (int(x) for x in a.edges.split(","))
-        a.count = 2 * ea + 2 * eb + 4
-        p = h / (eb + 4 / math.pi)
-        r = 2 * p / math.pi
+        a.count = round(2 * ea + 2 * eb + 4 * a.arc)
+        p = h / (eb + 4 * a.arc / math.pi)
+        r = 2 * a.arc * p / math.pi
         w = ea * p + 2 * r
     else:
         w = a.aspect * h
@@ -85,6 +93,25 @@ def build(a: argparse.Namespace) -> str:
     for i in range(a.count):
         x, y = perimeter_point(w, h, r, start + i * pitch)
         dots.append((cx + x, cy + y, d / 2))
+    if a.edges and (a.corner_dots or a.corner_scale != 1 or a.corner_end != 1):
+        # Smaller dots round the corners, so the corner reads as a smooth curve. Every dot on a corner arc (the
+        # base dots, plus --corner-dots extra ones) eases from --corner-end at the arc ends to --corner-scale
+        # at the apex.
+        half = a.arc * p / 2
+
+        def scale_at(s_pos: float) -> float:
+            for c0 in corner_starts(ea, eb, a.arc, p):
+                off = abs(s_pos - (c0 + half))
+                if off <= half + 1e-6:
+                    return a.corner_scale + (a.corner_end - a.corner_scale) * off / half
+            return 1.0
+
+        dots = [(x, y, rr * scale_at(i * p)) for i, (x, y, rr) in enumerate(dots)]
+        for c0 in corner_starts(ea, eb, a.arc, p):
+            for k in range(1, a.corner_dots + 1):
+                s_pos = c0 + k * a.arc * p / (a.corner_dots + 1)
+                x, y = perimeter_point(w, h, r, start + s_pos)
+                dots.append((cx + x, cy + y, d / 2 * scale_at(s_pos)))
     if a.at in ("bottom", "corner"):
         x, y, _ = dots[0]
         dots[0] = (x, y, big / 2)
@@ -107,9 +134,14 @@ def main() -> None:
     ap.add_argument("--radius", type=float, default=0.14, help="corner radius as a fraction of card height")
     ap.add_argument("--count", type=int, default=20)
     ap.add_argument("--edges", default="", help="'4,6': straight top/bottom and side lengths in pitches; corner "
-                    "arcs are 1 pitch (r = 2p/pi), count = 2a + 2b + 4; overrides --aspect, --radius, --count")
+                    "arcs are --arc pitches (r = 2*arc*p/pi), count = 2a + 2b + 4*arc; overrides --aspect, --radius, --count")
     ap.add_argument("--dot", type=float, default=0.5, help="dot diameter / pitch")
     ap.add_argument("--settled", type=float, default=1.8, help="settled dot diameter / dot diameter")
+    ap.add_argument("--arc", type=int, default=1, help="corner arc length in pitches (--edges mode; 2 = rounder)")
+    ap.add_argument("--corner-dots", type=int, default=0, help="extra dots per corner arc (--edges mode)")
+    ap.add_argument("--corner-scale", type=float, default=1.0, help="corner apex dot size / dot size")
+    ap.add_argument("--corner-end", type=float, default=1.0, help="size of the edge end dots at the arc ends; "
+                    "corner dots ease from this to --corner-scale at the apex")
     ap.add_argument("--at", choices=["bottom", "corner", "inside"], default="bottom")
     ap.add_argument("--drop", type=float, default=0.0, help="vertical offset of the card centre, fraction of canvas")
     ap.add_argument("--bg", default="#1F3A2E")
