@@ -365,7 +365,7 @@ struct DeckFeatureTests {
       $0.apiClient.notes = { _ in throw APIError(statusCode: 403, message: "Forbidden") }
     }
 
-    await store.send(.pulledToRefresh)
+    await store.send(.scenePhaseChanged(.active))
     await store.receive(\.notesResponse.failure) {
       $0.notes = []
       $0.phase = .unauthorized
@@ -483,28 +483,6 @@ struct DeckFeatureTests {
     await store.receive(\.destination.dismiss) {
       $0.destination = nil
     }
-  }
-
-  @Test func pullingReloadsWithTheQueryKeepingRowsUntilTheResponse() async {
-    let queries = LockIsolated<[String?]>([])
-    var state = loaded(notes)
-    state.query = "ser"
-    let store = TestStore(initialState: state) {
-      DeckFeature()
-    } withDependencies: { [notes] in
-      $0.apiClient.isConfigured = { true }
-      $0.apiClient.notes = { query in
-        queries.withValue { $0.append(query) }
-        return [notes[0]]
-      }
-    }
-
-    // No delegate and no query change: exhaustivity fails the test on either.
-    await store.send(.pulledToRefresh)
-    await store.receive(\.notesResponse.success) {
-      $0.notes = [self.notes[0]]
-    }
-    #expect(queries.value == ["ser"])
   }
 
   @Test func onlyBecomingActiveReloadsWithTheQuery() async {

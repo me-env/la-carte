@@ -209,6 +209,7 @@ struct StudyReportTests {
     await store.receive(\.noticeExpired) {
       $0.notice = nil
     }
+    await store.send(.scenePhaseChanged(.background))
   }
 
   @Test func aFailedReportKeepsTheCardAndSaysSoUntilTheNextRating() async {
@@ -245,7 +246,6 @@ struct StudyReportTests {
     state.isReviewing = true
     let store = TestStore(initialState: state) { StudyFeature() }
 
-    await store.send(.pulledToRefresh)
     await store.send(.scenePhaseChanged(.active))
   }
 
@@ -411,6 +411,7 @@ struct StudyReportTests {
     let store = TestStore(initialState: studying([photoCard])) {
       StudyFeature()
     } withDependencies: {
+      $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.reportCard = { _, _, _ in throw Offline() }
       $0.apiClient.dueCards = { _ in [photoCard] }
@@ -428,7 +429,7 @@ struct StudyReportTests {
     await store.receive(\.statsResponse.success) {
       $0.phase = .caughtUp(nextDue: nil)
     }
-    await store.send(.pulledToRefresh)
+    await store.send(.scenePhaseChanged(.active))
     await store.receive(\.cardsResponse.success) {
       $0.cards = [photoCard]
       $0.phase = .studying

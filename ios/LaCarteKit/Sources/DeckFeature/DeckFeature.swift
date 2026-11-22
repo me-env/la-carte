@@ -88,7 +88,6 @@ public struct DeckFeature {
     case settingsButtonTapped
     case rowTapped(Note.ID)
     case rowSwipedToDelete(Note.ID)
-    case pulledToRefresh
     case retryButtonTapped
     case scenePhaseChanged(ScenePhase)
     case notesResponse(Result<[Note], any Error>)
@@ -116,7 +115,7 @@ public struct DeckFeature {
       case .binding(\.query):
         return loadNotes(&state, after: .seconds(0.3))
 
-      case .onAppear, .pulledToRefresh, .scenePhaseChanged(.active):
+      case .onAppear, .scenePhaseChanged(.active):
         return loadNotes(&state)
 
       case .scenePhaseChanged:

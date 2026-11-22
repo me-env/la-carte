@@ -88,8 +88,9 @@ public struct StudyFeature {
     case addButtonTapped
     case openSettingsTapped
     case deckChanged
-    case pulledToRefresh
     case scenePhaseChanged(ScenePhase)
+    /// The caught-up / empty / offline timer elapsed (spec 018).
+    case autoRefreshFired
     case cardsResponse(Result<[Card], any Error>)
     case statsResponse(Result<DeckStats, any Error>)
     case reviewResponse(Result<Card, any Error>)
@@ -115,8 +116,12 @@ public struct StudyFeature {
   @Dependency(\.apiClient) var apiClient
   @Dependency(\.askAI) var askAI
   @Dependency(\.continuousClock) var clock
+  @Dependency(\.date) var date
 
-  private enum CancelID { case load, notice }
+  private enum CancelID { case load, notice, autoRefresh }
+
+  /// How often Study checks for new cards while there is nothing to study (spec 018).
+  static let autoRefreshInterval: Duration = .seconds(30)
 
   public init() {}
 
@@ -163,18 +168,22 @@ public struct StudyFeature {
       case .onAppear, .deckChanged:
         return fetchDueCards(&state)
 
-      case .pulledToRefresh, .scenePhaseChanged(.active):
+      case .autoRefreshFired, .scenePhaseChanged(.active):
         // The review's or the edit's response updates the queue; a list fetched meanwhile could undo it.
         // While editing, a new list could replace the card under the user's fingers.
-        guard !state.isReviewing, state.editing == nil, !state.isSavingEdit else { return .none }
+        // Dropped, the timer starts over from the current phase (none while studying).
+        guard !state.isReviewing, state.editing == nil, !state.isSavingEdit else { return armAutoRefresh(state) }
         return fetchDueCards(&state)
+
+      case .scenePhaseChanged(.background):
+        return .cancel(id: CancelID.autoRefresh)
 
       case .scenePhaseChanged:
         return .none
 
       case .retryButtonTapped:
         state.phase = .loading
-        return fetchDueCards(&state)
+        return .merge(.cancel(id: CancelID.autoRefresh), fetchDueCards(&state))
 
       case .revealTapped:
         state.isRevealed = true
@@ -235,6 +244,10 @@ public struct StudyFeature {
       case var .cardsResponse(.success(cards)):
         // The report may not have landed yet (or failed): a skipped card must not come back.
         cards.removeAll { $0.id != state.cards.first?.id && state.reportedBrokenPhotos.contains($0.id) }
+        // Never yank the visible card: while the server still serves it, it stays first.
+        if let index = cards.firstIndex(where: { $0.id == state.cards.first?.id }) {
+          cards.insert(cards.remove(at: index), at: 0)
+        }
         if cards.first?.id != state.cards.first?.id {
           state.isRevealed = false
           state.swipeEase = nil
@@ -242,13 +255,13 @@ public struct StudyFeature {
         state.cards = IdentifiedArray(uniqueElements: cards)
         guard cards.isEmpty else {
           state.phase = .studying
-          return .none
+          return armAutoRefresh(state)
         }
         return fetchStats()
 
       case let .statsResponse(.success(stats)):
         state.phase = stats.total == 0 ? .empty : .caughtUp(nextDue: stats.nextDue)
-        return .none
+        return armAutoRefresh(state)
 
       case let .reviewResponse(.success(card)):
         state.isReviewing = false
@@ -262,7 +275,7 @@ public struct StudyFeature {
         // The card and its pan leave the screen, so a held drag may never send its release.
         state.swipeEase = nil
         state.phase = (error as? APIError)?.isUnauthorized == true ? .unauthorized : .offline
-        return .none
+        return armAutoRefresh(state)
 
       case .cardDoubleTapped:
         guard state.canReport else { return .none }
@@ -379,6 +392,26 @@ public struct StudyFeature {
     )
   }
 
+  /// One quiet reload when the next card is due (at most 30 s, at least 1 s away), or every 30 s while there is
+  /// nothing to study, to pick up cards an agent adds. Any other phase stops it (spec 018).
+  private func armAutoRefresh(_ state: State) -> Effect<Action> {
+    let delay: Duration
+    switch state.phase {
+    case let .caughtUp(nextDue?):
+      let untilDue = Duration.seconds(nextDue.timeIntervalSince(date.now))
+      delay = min(max(untilDue, .seconds(1)), Self.autoRefreshInterval)
+    case .caughtUp(nil), .empty, .offline:
+      delay = Self.autoRefreshInterval
+    case .loading, .studying, .notSetUp, .unauthorized:
+      return .cancel(id: CancelID.autoRefresh)
+    }
+    return .run { [clock] send in
+      try await clock.sleep(for: delay)
+      await send(.autoRefreshFired)
+    }
+    .cancellable(id: CancelID.autoRefresh, cancelInFlight: true)
+  }
+
   private func fetchStats() -> Effect<Action> {
     .run { [apiClient] send in
       await send(.statsResponse(Result { try await apiClient.stats() }))
@@ -427,7 +460,7 @@ public struct StudyFeature {
       state.phase = .notSetUp
       state.cards = []
       state.isRevealed = false
-      return .cancel(id: CancelID.load)
+      return .merge(.cancel(id: CancelID.load), .cancel(id: CancelID.autoRefresh))
     }
     return .run { [apiClient] send in
       await send(.cardsResponse(Result { try await apiClient.dueCards(100) }))

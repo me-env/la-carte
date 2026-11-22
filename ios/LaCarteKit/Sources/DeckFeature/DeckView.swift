@@ -41,7 +41,8 @@ public struct DeckView: View {
       // Rows, menus and swipe-delete keep the system tint; the search cursor's pink is `Theme.tintSearchFields()`.
       .tint(Color?.none)
       .background(Theme.background)
-      .refreshable { await store.send(.pulledToRefresh).finish() }
+      // No pull-to-refresh (spec 018): a short list or a message doesn't bounce.
+      .scrollBounceBehavior(.basedOnSize)
       .navigationTitle("Cards")
       .toolbar { toolbar }
       .searchable(text: $store.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
@@ -74,7 +75,7 @@ public struct DeckView: View {
     }
   }
 
-  // In a scroll view so the message can be pulled to refresh.
+  // In a scroll view so the message can still scroll at large text sizes.
   private func messageView(_ message: DeckFeature.State.Message) -> some View {
     ScrollView {
       Group {

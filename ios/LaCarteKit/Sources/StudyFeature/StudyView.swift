@@ -25,7 +25,8 @@ public struct StudyView: View {
       topBar
       content
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .refreshable { await store.send(.pulledToRefresh).finish() }
+        // No pull-to-refresh (spec 018): content that fits doesn't move under a drag.
+        .scrollBounceBehavior(.basedOnSize)
     }
     .padding(.horizontal, Theme.Spacing.m)
     .padding(.bottom, Theme.Spacing.m)
@@ -114,7 +115,7 @@ public struct StudyView: View {
   @ViewBuilder private var content: some View {
     switch store.phase {
     case .loading:
-      pullable { Color.clear }
+      centeredMessage { Color.clear }
 
     case .studying:
       if let card = store.cards.first {
@@ -125,7 +126,7 @@ public struct StudyView: View {
       caughtUp(subtitle: nextDue.map(Self.nextDueText))
 
     case .empty:
-      pullable {
+      centeredMessage {
         VStack(spacing: Theme.Spacing.s) {
           message("No cards yet")
           detail("Ask your agent to add some")
@@ -133,7 +134,7 @@ public struct StudyView: View {
       }
 
     case .offline:
-      pullable {
+      centeredMessage {
         VStack(spacing: Theme.Spacing.m) {
           message("Can't reach your deck")
           CircleIconButton("arrow.clockwise", accessibilityLabel: "Retry") {
@@ -169,7 +170,7 @@ public struct StudyView: View {
 
   /// "Connect your deck" and "Token rejected": both are fixed in Settings (spec 008).
   private func settingsPrompt(_ text: String, detail: String) -> some View {
-    pullable {
+    centeredMessage {
       VStack(spacing: Theme.Spacing.m) {
         VStack(spacing: Theme.Spacing.s) {
           message(text)
@@ -182,10 +183,10 @@ public struct StudyView: View {
     }
   }
 
-  /// A scroll view the size of the content area, so a centered message can be pulled to refresh.
+  /// A scroll view the size of the content area, so a centered message can still scroll at large text sizes.
   /// Width comes from the proposal, not `containerRelativeFrame(.horizontal)`: that one resolved to the full
   /// window width, which the vertical scroll view adopted, pushing the top bar past its margins.
-  private func pullable(@ViewBuilder _ message: () -> some View) -> some View {
+  private func centeredMessage(@ViewBuilder _ message: () -> some View) -> some View {
     ScrollView {
       message()
         .frame(maxWidth: .infinity)
@@ -550,7 +551,7 @@ public struct StudyView: View {
   }
 
   private func caughtUp(subtitle: String?) -> some View {
-    pullable {
+    centeredMessage {
       VStack(spacing: Theme.Spacing.s) {
         Text("All caught up")
           .font(.cardFace)

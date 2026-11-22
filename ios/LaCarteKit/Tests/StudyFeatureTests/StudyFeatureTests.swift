@@ -70,6 +70,8 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.continuousClock = TestClock()
+      $0.date = .constant(nextDue)
       $0.apiClient.isConfigured = { true }
       $0.apiClient.review = { _, _ in cards[0] }
       $0.apiClient.dueCards = { _ in [] }
@@ -88,6 +90,7 @@ struct StudyFeatureTests {
     await store.receive(\.statsResponse.success) {
       $0.phase = .caughtUp(nextDue: nextDue)
     }
+    await store.send(.scenePhaseChanged(.background))
   }
 
   @Test func ratingTheLastCardPicksUpCardsBeyondTheLimit() async {
@@ -118,6 +121,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: {
+      $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in [] }
       $0.apiClient.stats = { DeckStats(total: 0, due: 0, new: 0, reviewedToday: 0, nextDue: nil) }
@@ -128,6 +132,7 @@ struct StudyFeatureTests {
     await store.receive(\.statsResponse.success) {
       $0.phase = .empty
     }
+    await store.send(.scenePhaseChanged(.background))
   }
 
   @Test func nextDueText() {
@@ -138,6 +143,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: {
+      $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in throw Offline() }
     }
@@ -146,12 +152,14 @@ struct StudyFeatureTests {
     await store.receive(\.cardsResponse.failure) {
       $0.phase = .offline
     }
+    await store.send(.scenePhaseChanged(.background))
   }
 
   @Test func statsFailureShowsOffline() async {
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: {
+      $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in [] }
       $0.apiClient.stats = { throw Offline() }
@@ -162,6 +170,7 @@ struct StudyFeatureTests {
     await store.receive(\.statsResponse.failure) {
       $0.phase = .offline
     }
+    await store.send(.scenePhaseChanged(.background))
   }
 
   @Test func reviewFailureShowsOffline() async {
@@ -170,6 +179,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: {
+      $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.review = { _, _ in throw Offline() }
     }
@@ -181,6 +191,7 @@ struct StudyFeatureTests {
       $0.isReviewing = false
       $0.phase = .offline
     }
+    await store.send(.scenePhaseChanged(.background))
   }
 
   @Test func ratingIsIgnoredWhileAReviewIsInFlight() async {
@@ -218,6 +229,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.review = { _, _ in throw Offline() }
       $0.apiClient.dueCards = { _ in cards }
@@ -299,7 +311,7 @@ struct StudyFeatureTests {
     }
   }
 
-  @Test func pullingWhenCaughtUpShowsANewCardWithoutLoading() async {
+  @Test func becomingActiveWhenCaughtUpShowsANewCardWithoutLoading() async {
     var state = StudyFeature.State()
     state.phase = .caughtUp(nextDue: nil)
     let store = TestStore(initialState: state) {
@@ -309,26 +321,9 @@ struct StudyFeatureTests {
       $0.apiClient.dueCards = { _ in [cards[0]] }
     }
 
-    await store.send(.pulledToRefresh)
+    await store.send(.scenePhaseChanged(.active))
     await store.receive(\.cardsResponse.success) {
       $0.cards = [self.cards[0]]
-      $0.phase = .studying
-    }
-  }
-
-  @Test func pullingWhenOfflineReloads() async {
-    var state = StudyFeature.State()
-    state.phase = .offline
-    let store = TestStore(initialState: state) {
-      StudyFeature()
-    } withDependencies: { [cards] in
-      $0.apiClient.isConfigured = { true }
-      $0.apiClient.dueCards = { _ in cards }
-    }
-
-    await store.send(.pulledToRefresh)
-    await store.receive(\.cardsResponse.success) {
-      $0.cards = IdentifiedArray(uniqueElements: self.cards)
       $0.phase = .studying
     }
   }
@@ -359,7 +354,7 @@ struct StudyFeatureTests {
       $0.apiClient.dueCards = { _ in [cards[1], cards[2]] }
     }
 
-    await store.send(.pulledToRefresh)
+    await store.send(.scenePhaseChanged(.active))
     await store.receive(\.cardsResponse.success) {
       $0.cards = [self.cards[1], self.cards[2]]
       $0.isRevealed = false
@@ -373,7 +368,6 @@ struct StudyFeatureTests {
     // `dueCards` is unimplemented: calling it fails the test.
     let store = TestStore(initialState: state) { StudyFeature() }
 
-    await store.send(.pulledToRefresh)
     await store.send(.scenePhaseChanged(.active))
   }
 
@@ -406,7 +400,7 @@ struct StudyFeatureTests {
     }
 
     await store.send(.onAppear)
-    await store.send(.pulledToRefresh)
+    await store.send(.scenePhaseChanged(.active))
     await store.receive(\.cardsResponse.success) {
       $0.cards = [self.cards[1]]
       $0.phase = .studying
@@ -469,7 +463,7 @@ struct StudyFeatureTests {
     }
   }
 
-  @Test func pullingWhenNotSetUpChecksAgainAndLoadsOnceConfigured() async {
+  @Test func becomingActiveWhenNotSetUpChecksAgainAndLoadsOnceConfigured() async {
     let configured = LockIsolated(false)
     var state = StudyFeature.State()
     state.phase = .notSetUp
@@ -480,7 +474,7 @@ struct StudyFeatureTests {
       $0.apiClient.dueCards = { _ in cards }
     }
 
-    await store.send(.pulledToRefresh)
+    await store.send(.scenePhaseChanged(.active))
     configured.setValue(true)
     await store.send(.scenePhaseChanged(.active))
     await store.receive(\.cardsResponse.success) {
@@ -548,6 +542,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: {
+      $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in throw APIError(statusCode: 500, message: "Internal Server Error") }
     }
@@ -556,6 +551,7 @@ struct StudyFeatureTests {
     await store.receive(\.cardsResponse.failure) {
       $0.phase = .offline
     }
+    await store.send(.scenePhaseChanged(.background))
   }
 
   // MARK: Inline edit (spec 010)
@@ -826,7 +822,6 @@ struct StudyFeatureTests {
     // `dueCards` is unimplemented: calling it fails the test.
     let store = TestStore(initialState: state) { StudyFeature() }
 
-    await store.send(.pulledToRefresh)
     await store.send(.scenePhaseChanged(.active))
   }
 
@@ -867,7 +862,6 @@ struct StudyFeatureTests {
       $0.isSavingEdit = true
     }
     await store.send(.textDoubleTapped(.front))
-    await store.send(.pulledToRefresh)
     await store.send(.scenePhaseChanged(.active))
     var saved = cards[0]
     saved.setText("a happy accident", for: .back)
@@ -1060,6 +1054,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: revealed(cards)) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.review = { _, _ in throw Offline() }
       $0.apiClient.dueCards = { _ in cards }
@@ -1125,6 +1120,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: {
+      $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in throw Offline() }
     }
@@ -1134,6 +1130,7 @@ struct StudyFeatureTests {
       $0.phase = .offline
       $0.swipeEase = nil
     }
+    await store.send(.scenePhaseChanged(.background))
   }
 
   @Test func aReleaseAfterTheDragLostItsCardClearsTheRingWithoutAReview() async {
