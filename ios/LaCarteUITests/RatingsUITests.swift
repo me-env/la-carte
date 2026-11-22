@@ -121,7 +121,7 @@ final class RatingsUITests: XCTestCase {
       XCTAssertEqual(Array(body.keys), ["rating"], "review body must only have `rating`: \(post.body)")
       XCTAssertEqual(body["rating"] as? String, step.rating, "\(step.action) sent \(post.body)")
     }
-    waitForLabel(el(app, "study.message"), "All caught up")
+    waitForLabel(el(app, "study.message"), "No cards yet")  // the review stub deletes reviewed cards: the deck ends empty
     XCTAssertFalse(ring(app).exists)
     server.stop()
   }

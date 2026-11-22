@@ -17,8 +17,6 @@ public enum Theme {
   public static let accent = ThemeColor(light: 0xB8325A, dark: 0xED6E8C, forest: 0xED6E8C)
   /// The accent on an `ink` fill (the logo's front card): the opposite pair, so it keeps ≥ 5:1 on the card.
   public static let accentOnInk = ThemeColor(light: 0xED6E8C, dark: 0xB8325A, forest: 0xB8325A)
-  /// Soft lift under circle buttons in light mode; the dark themes use `hairline` instead.
-  public static let shadow = ThemeColor(light: .black.opacity(0.06), dark: .clear, forest: .clear)
 
   public enum Spacing {
     /// A caption tight under its sample (gallery swatches, logo sizes).

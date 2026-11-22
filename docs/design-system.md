@@ -19,7 +19,6 @@ Reference: **Vyst** (App Store id 6760647645). Screenshots in `docs/design/refer
 | `Theme.ink` | `#1C1C1C` | `#F2F2F0` | `#EEF2EC` | primary text, icons |
 | `Theme.secondaryInk` | `#9D9D9B` | `#8A8A88` | `#83938A` | metadata, hints |
 | `Theme.hairline` | black 8% | white 8% | white 8% | dark/forest button border |
-| `Theme.shadow` | black 6% | none | none | light-mode circle button lift |
 | `Theme.accent` | `#B8325A` | `#ED6E8C` | `#ED6E8C` | pink, very small amounts only (rule below) |
 | `Theme.accentOnInk` | `#ED6E8C` | `#B8325A` | `#B8325A` | the logo's word on the ink card |
 
@@ -59,9 +58,9 @@ screen; longer card text scrolls (its scroll indicators flash on reveal).
 Spacing `Theme.Spacing.xs/s/m/l/xl` = 4/8/16/24/40 (`xs` only for a caption tight under its sample). Radius `Theme.Radius.row` 12, `Theme.Radius.photo` 20 (card-face photo, continuous). Photo sizes `Theme.Photo.thumbnail/preview/card/cardCompact` = 44/88/240/160 pt (card is a width, 4:5 portrait; compact at accessibility sizes; spec 014). Screen side margin 16–24.
 
 ## Components
-- `CircleIconButton(systemImage, accessibilityLabel:)` — 44pt, surface fill, soft shadow (light) /
-  hairline (dark). SF Symbols at regular weight: `list.bullet`, `plus`, `xmark`, `checkmark`, `gearshape`,
-  `arrow.uturn.backward`, `arrow.clockwise`. The icon is a fixed 15pt so the 44pt circle never grows with Dynamic Type; instead the
+- `CircleIconButton(systemImage, accessibilityLabel:)` — 44pt Liquid Glass circle, like the system toolbar buttons on
+  Deck, Settings and the editor. SF Symbols at regular weight: `list.bullet`, `plus`, `xmark`, `checkmark`, `gearshape`,
+  `arrow.uturn.backward`, `arrow.clockwise`. The icon is a fixed 17pt (the toolbar glyph size) so the 44pt circle never grows with Dynamic Type; instead the
   button supports the large content viewer (long-press shows the icon and its label large), the system
   fallback for fixed-size chrome.
 - List row (deck, spec 002): surface fill, radius 12, meta line on top (due left, state right), front and back

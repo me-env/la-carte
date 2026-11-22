@@ -81,7 +81,7 @@ final class RefreshUITests: XCTestCase {
     XCUIDevice.shared.appearance = .light
     let (server, deck) = try startStub([])
     let app = launch(api: .live(server.url))
-    waitForLabel(el(app, "study.message"), "All caught up")
+    waitForLabel(el(app, "study.message"), "No cards yet")  // an empty deck (audit 2026-11-22 P0-5)
 
     // #5
     deck.add(card(Self.idA, "canine", "dog"))

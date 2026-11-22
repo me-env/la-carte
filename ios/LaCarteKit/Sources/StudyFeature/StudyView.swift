@@ -13,6 +13,7 @@ public struct StudyView: View {
   @State private var cardSize = CGSize.zero
   /// The edit field's global frame: a touch that starts inside it moves the caret instead of ending the edit.
   @State private var fieldFrame = CGRect.zero
+  @State private var reportMenuHeight: CGFloat = 360
 
   public init(store: StoreOf<StudyFeature>) {
     self.store = store
@@ -32,6 +33,7 @@ public struct StudyView: View {
     // the top bar, which must stay at the top of the safe area, not drop to the middle.
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     .background(Theme.background)
+    .sheet(isPresented: $store.isReportMenuShown) { reportMenu }
     .onAppear { store.send(.onAppear) }
     .onChange(of: scenePhase) { _, phase in
       if phase == .background { focusedField = nil }
@@ -43,16 +45,6 @@ public struct StudyView: View {
     .sensoryFeedback(.selection, trigger: store.editing) { _, new in new != nil }
     .sensoryFeedback(.error, trigger: store.editFailed) { _, new in new }
     .sensoryFeedback(.success, trigger: store.notice) { _, new in new == .reported }
-    .alert("What's wrong?", isPresented: $store.isReportCommentShown) {
-      TextField("", text: $store.reportComment)
-      Button("Report") { store.send(.reportCommentSubmitted) }
-        .disabled(store.reportComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        .accessibilityIdentifier("study.report.send")
-      Button("Cancel", role: .cancel) {}
-    }
-    .task(id: store.isReportCommentShown) {
-      if store.isReportCommentShown { await Self.identifyAlertTextField("study.report.comment") }
-    }
     .sensoryFeedback(trigger: store.swipeRating) { _, new in
       switch new {
       case .hard, .good: .selection
@@ -81,7 +73,7 @@ public struct StudyView: View {
               .accessibilityIdentifier("study.reportNotice")
               .transition(.opacity)
           } else if store.phase == .studying, !store.cards.isEmpty {
-            counterText("\(store.cards.count) to review")
+            counterText(Text("\(Text(store.cards.count, format: .number).foregroundStyle(Theme.accent)) to review"))
               .accessibilityIdentifier("study.remaining")
           }
         }
@@ -107,7 +99,12 @@ public struct StudyView: View {
   }
 
   private func counterText(_ text: String) -> some View {
-    Text(text)
+    counterText(Text(text))
+  }
+
+  /// Secondary ink; an interpolated `Text` keeps its own style (the count's accent, design-system rule 4).
+  private func counterText(_ text: Text) -> some View {
+    text
       .font(.meta)
       .foregroundStyle(Theme.secondaryInk)
       .multilineTextAlignment(.center)
@@ -128,7 +125,12 @@ public struct StudyView: View {
       caughtUp(subtitle: nextDue.map(Self.nextDueText))
 
     case .empty:
-      caughtUp(subtitle: "Your deck is empty")
+      pullable {
+        VStack(spacing: Theme.Spacing.s) {
+          message("No cards yet")
+          detail("Ask your agent to add some")
+        }
+      }
 
     case .offline:
       pullable {
@@ -157,17 +159,21 @@ public struct StudyView: View {
       .accessibilityIdentifier("study.message")
   }
 
+  private func detail(_ text: String) -> some View {
+    Text(text)
+      .font(.meta)
+      .foregroundStyle(Theme.secondaryInk)
+      .multilineTextAlignment(.center)
+      .accessibilityIdentifier("study.detail")
+  }
+
   /// "Connect your deck" and "Token rejected": both are fixed in Settings (spec 008).
   private func settingsPrompt(_ text: String, detail: String) -> some View {
     pullable {
       VStack(spacing: Theme.Spacing.m) {
         VStack(spacing: Theme.Spacing.s) {
           message(text)
-          Text(detail)
-            .font(.meta)
-            .foregroundStyle(Theme.secondaryInk)
-            .multilineTextAlignment(.center)
-            .accessibilityIdentifier("study.detail")
+          self.detail(detail)
         }
         Button { store.send(.openSettingsTapped) } label: { textButtonLabel("Open Settings") }
           .buttonStyle(.plain)
@@ -243,11 +249,8 @@ public struct StudyView: View {
         }
       }
       .accessibilityIdentifier("study.card")
-      .confirmationDialog("", isPresented: $store.isReportMenuShown, titleVisibility: .hidden) {
-        reportMenu
-      }
-      // After the card's identifier, so the ring keeps its own.
-      .overlay { swipeRing }
+      // Behind the card text, so the dots never cross it; after the card's identifier, so the ring keeps its own.
+      .background { swipeRing }
       #if DEBUG
         .onChange(of: store.canRate, initial: true) { _, canRate in
           guard canRate, let fraction = Self.swipePreview else { return }
@@ -285,15 +288,47 @@ public struct StudyView: View {
     )
   }
 
-  /// System buttons, no destructive role: every report is reversible (spec 015).
-  @ViewBuilder private var reportMenu: some View {
-    Button("Ask about this card") { store.send(.askTapped) }
-      .accessibilityIdentifier("study.report.ask")
-    ForEach(Self.reportReasons, id: \.reason) { reason, title in
-      Button(title) { store.send(.reportReasonTapped(reason)) }
-        .accessibilityIdentifier("study.report.\(reason.rawValue)")
+  /// A sheet sized to its rows: it dims the screen and leaves the centered card visible above it, where a dialog
+  /// anchored to the card would pop over the answer. No destructive role: every report is reversible (spec 015).
+  private var reportMenu: some View {
+    List {
+      Section {
+        menuItem("Ask about this card", id: "ask") { store.send(.askTapped) }
+      }
+      Section {
+        ForEach(Self.reportReasons, id: \.reason) { reason, title in
+          menuItem(title, id: reason.rawValue) { store.send(.reportReasonTapped(reason)) }
+        }
+      }
     }
-    Button("Cancel", role: .cancel) {}
+    .listSectionSpacing(.compact)
+    // 44 pt rows (the minimum tap target), not the taller default, so the sheet stays below the card's answer.
+    .environment(\.defaultMinListRowHeight, 44)
+    .contentMargins(.top, Theme.Spacing.m, for: .scrollContent)
+    .scrollContentBackground(.hidden)
+    .scrollBounceBehavior(.basedOnSize)
+    .onScrollGeometryChange(for: CGFloat.self, of: \.contentSize.height) { _, height in reportMenuHeight = height }
+    .presentationDetents([.height(reportMenuHeight)])
+    .presentationBackground(Theme.background)
+    .alert("What's wrong?", isPresented: $store.isReportCommentShown) {
+      TextField("", text: $store.reportComment)
+      Button("Report") { store.send(.reportCommentSubmitted) }
+        .disabled(store.reportComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .accessibilityIdentifier("study.report.send")
+      Button("Cancel", role: .cancel) {}
+    }
+    .task(id: store.isReportCommentShown) {
+      if store.isReportCommentShown { await Self.identifyAlertTextField("study.report.comment") }
+    }
+  }
+
+  private func menuItem(_ title: String, id: String, action: @escaping () -> Void) -> some View {
+    Button(title, action: action)
+      .font(.body)
+      .foregroundStyle(Theme.ink)
+      .listRowInsets(EdgeInsets(top: 0, leading: Theme.Spacing.m, bottom: 0, trailing: Theme.Spacing.m))
+      .listRowBackground(Rectangle().fill(Theme.surface))
+      .accessibilityIdentifier("study.report.\(id)")
   }
 
   /// The menu's reasons in order; `brokenPhoto` is filed by the app alone, never offered.

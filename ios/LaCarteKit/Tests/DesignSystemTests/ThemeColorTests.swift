@@ -23,13 +23,12 @@ struct ThemeColorTests {
     #expect(hex(Theme.secondaryInk, environment) == secondaryInk)
   }
 
-  @Test func forestHasAWhiteHairlineAndNoShadowLikeDark() {
+  @Test func forestHasAWhiteHairlineLikeDark() {
     for theme in [AppTheme.dark, .forest] {
       let environment = environment(theme, .dark)
       let hairline = Theme.hairline.resolve(in: environment).resolve(in: environment)
       #expect(hairline.red == 1 && hairline.green == 1 && hairline.blue == 1)
       #expect(abs(hairline.opacity - 0.08) < 0.001)
-      #expect(Theme.shadow.resolve(in: environment).resolve(in: environment).opacity == 0)
     }
   }
 

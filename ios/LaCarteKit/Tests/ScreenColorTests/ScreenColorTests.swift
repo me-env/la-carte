@@ -36,10 +36,11 @@ struct ScreenColorTests {
     let screen = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), look)
 
     screen.expectBackground()
-    // Top bar: `study.deck` and `study.add` circles at the sides, "3 to review" between them.
-    #expect(screen.share(of: screen.palette.surface, in: screen.band(0, 0.2, x: 0, 0.25)) > 0.05, "study.deck circle")
-    #expect(screen.share(of: screen.palette.surface, in: screen.band(0, 0.2, x: 0.75, 1)) > 0.05, "study.add circle")
-    screen.expectText(in: screen.band(0, 0.2, x: 0.3, 0.7), screen.palette.secondaryInk, "study.remaining")
+    // Top bar: "3 to review" between the glass circles (glass is checked in the UI tests); the number is the accent
+    // (design-system rule 4), the words secondary ink.
+    // One thin digit at 2x: its core never reaches the full pink on light paper (#BF3F64 for #B8325A).
+    screen.expectText(in: screen.band(0, 0.2, x: 0.3, 0.7), screen.palette.accent, "study.remaining number", tolerance: 16)
+    screen.expectText(in: screen.band(0, 0.2, x: 0.46, 0.7), screen.palette.secondaryInk, "study.remaining words")
     screen.expectText(in: screen.band(0.4, 0.6), screen.palette.ink, "study.front")
     screen.expectText(in: screen.band(0.85, 1), screen.palette.ink, "study.reveal")
     screen.expectNoBlue()
@@ -101,7 +102,6 @@ struct ScreenColorTests {
     screen.expect(at: CGPoint(x: 3, y: 3), screen.palette.background, "gallery background top-left")
     screen.expect(at: CGPoint(x: 3, y: screen.size.height - 3), screen.palette.background, "gallery background bottom")
     #expect(screen.share(of: screen.palette.background) > 0.5, "gallery mostly \(Screen.hex(screen.palette.background))")
-    #expect(screen.share(of: screen.palette.surface) > 0.01, "gallery has \(Screen.hex(screen.palette.surface)) circle buttons")
     screen.expectNoBlue()
   }
 }
@@ -119,10 +119,13 @@ struct Look: CustomTestStringConvertible, Sendable {
 
 /// Token values (spec 004 #4, docs/design-system.md), as 0xRRGGBB. Same values as `Palette` in the UI tests.
 struct Palette: Sendable {
-  let background: UInt32, surface: UInt32, ink: UInt32, secondaryInk: UInt32
-  static let light = Palette(background: 0xF9FAF5, surface: 0xFFFFFF, ink: 0x1C1C1C, secondaryInk: 0x9D9D9B)
-  static let dark = Palette(background: 0x1A1A1A, surface: 0x252525, ink: 0xF2F2F0, secondaryInk: 0x8A8A88)
-  static let forest = Palette(background: 0x0E1913, surface: 0x16241B, ink: 0xEEF2EC, secondaryInk: 0x83938A)
+  let background: UInt32, surface: UInt32, ink: UInt32, secondaryInk: UInt32, accent: UInt32
+  static let light = Palette(
+    background: 0xF9FAF5, surface: 0xFFFFFF, ink: 0x1C1C1C, secondaryInk: 0x9D9D9B, accent: 0xB8325A)
+  static let dark = Palette(
+    background: 0x1A1A1A, surface: 0x252525, ink: 0xF2F2F0, secondaryInk: 0x8A8A88, accent: 0xED6E8C)
+  static let forest = Palette(
+    background: 0x0E1913, surface: 0x16241B, ink: 0xEEF2EC, secondaryInk: 0x83938A, accent: 0xED6E8C)
 }
 
 /// A view hosted in a window at iPhone 17 Pro size (402 × 874 pt) and drawn with `CALayer.render` at 2×, sampled in
@@ -238,7 +241,7 @@ struct Screen {
   }
   /// Text is anti-aliased, and light-on-dark glyphs overshoot a little at their edges: the commonest colour among the
   /// pixels furthest from the background in `rect` (within 90 % of the furthest) should be the token (± 10).
-  func expectText(in rect: CGRect, _ expected: UInt32, _ what: String,
+  func expectText(in rect: CGRect, _ expected: UInt32, _ what: String, tolerance: Int = 10,
                   sourceLocation: SourceLocation = #_sourceLocation) {
     var colors: [UInt32] = []
     for y in stride(from: rect.minY, to: rect.maxY, by: 1 / Self.scale) {
@@ -249,7 +252,7 @@ struct Screen {
     let furthest = colors.map { Self.distance($0, palette.background) }.max() ?? 0
     let core = Dictionary(grouping: colors.filter { Self.distance($0, palette.background) * 10 >= furthest * 9 }) { $0 }
     let text = core.max { $0.value.count < $1.value.count }?.key ?? palette.background
-    #expect(Self.isClose(text, expected, tolerance: 10), "\(what) text is \(Self.hex(text)), expected \(Self.hex(expected))",
+    #expect(Self.isClose(text, expected, tolerance: tolerance), "\(what) text is \(Self.hex(text)), expected \(Self.hex(expected))",
             sourceLocation: sourceLocation)
   }
 

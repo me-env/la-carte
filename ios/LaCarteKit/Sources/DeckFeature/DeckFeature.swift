@@ -42,6 +42,16 @@ public struct DeckFeature {
         }
       }
 
+      /// The same detail line Study shows for the same message.
+      var detail: String? {
+        switch self {
+        case .noCards: "Ask your agent to add some"
+        case .notSetUp: "Add your server URL and token in Settings."
+        case .unauthorized: "Check your token in Settings."
+        case .noMatches, .offline: nil
+        }
+      }
+
       var systemImage: String {
         switch self {
         case .noCards: "rectangle.stack"

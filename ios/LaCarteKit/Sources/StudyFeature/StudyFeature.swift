@@ -143,6 +143,11 @@ public struct StudyFeature {
     BindingReducer()
     Reduce { state, action in
       switch action {
+      case .binding(\.isReportCommentShown):
+        // The comment alert sits on the menu sheet: cancelling it closes both.
+        if !state.isReportCommentShown { state.isReportMenuShown = false }
+        return .none
+
       case .binding:
         return .none
 
@@ -266,6 +271,7 @@ public struct StudyFeature {
 
       case .askTapped:
         guard state.canReport, let card = state.cards.first else { return .none }
+        state.isReportMenuShown = false
         let text = AskText.make(for: card)
         guard let url = state.aiApp.link(for: text) else {
           state.notice = .copied
@@ -361,6 +367,7 @@ public struct StudyFeature {
   /// Sends the report as a rating would: it blocks the buttons, the drag and refresh until it's answered.
   private func report(_ reason: ReportReason, comment: String?, state: inout State) -> Effect<Action> {
     guard state.canReport, let card = state.cards.first else { return .none }
+    state.isReportMenuShown = false
     state.isReviewing = true
     state.editFailed = false
     state.notice = nil

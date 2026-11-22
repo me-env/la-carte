@@ -93,12 +93,16 @@ public struct NoteEditorView: View {
     }
   }
 
-  private var photoSection: some View {
+  /// The preview is its own bare row above the URL's section, so that section keeps its rounded top.
+  @ViewBuilder private var photoSection: some View {
     Section {
       CardPhoto(url: store.photoURL, style: .preview) { failedPhotoURL = store.photoURL }
         .frame(maxWidth: .infinity)
         .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
         .accessibilityIdentifier("editor.photoPreview")
+    }
+    Section {
       field("photo", prompt: "Photo URL")
         .keyboardType(.URL)
         .textInputAutocapitalization(.never)
@@ -184,7 +188,11 @@ public struct NoteEditorView: View {
   private func field(_ name: String, prompt: String) -> some View {
     TextField(
       name.capitalized,
-      text: Binding(get: { store.fields[name] ?? "" }, set: { store.send(.fieldChanged(name, $0)) }),
+      // The field writes its unchanged text back as the sheet goes away; sending that would reach a dismissed editor.
+      text: Binding(
+        get: { store.fields[name] ?? "" },
+        set: { if $0 != store.fields[name] ?? "" { store.send(.fieldChanged(name, $0)) } }
+      ),
       prompt: Text(prompt).foregroundStyle(Theme.secondaryInk),
       axis: .vertical
     )

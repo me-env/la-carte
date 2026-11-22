@@ -21,8 +21,9 @@ final class ReportUITests: XCTestCase {
 
   // MARK: - Menu (015b #1, #4; 016a #1)
 
-  /// 015b #1 / 016a #1 (light, dark): double-tapping the revealed card outside the text opens the dialog with no
-  /// title: Ask, the five reasons in order, Cancel. #4: Cancel closes it, the card stays revealed, nothing changes.
+  /// 015b #1 / 016a #1 (light, dark): double-tapping the revealed card outside the text opens the menu with no
+  /// title: Ask, then the five reasons in order, all the same height, below the answer (audit 2026-11-22 P0-1/2).
+  /// #4: dismissing it closes it, the card stays revealed, nothing changes.
   @MainActor
   func testReport_menuOpensAndCancels() {
     for appearance in Self.appearances {
@@ -40,6 +41,10 @@ final class ReportUITests: XCTestCase {
       }
       let ys = buttons.map(\.frame.midY)
       XCTAssertEqual(ys, ys.sorted(), "menu order: \(zip(Self.menu.map(\.id), ys).map { "\($0)=\($1)" })")
+      let heights = buttons.map(\.frame.height)
+      XCTAssertEqual(heights.max()! - heights.min()!, 0, accuracy: 1, "menu items differ in height: \(heights)")
+      XCTAssertLessThanOrEqual(el(app, "study.back").frame.maxY, buttons[0].frame.minY,
+                               "the menu covers the answer")
       XCTAssertFalse(app.staticTexts["Report this card"].exists, "dialog still has the title 'Report this card' (016 #5)")
       XCTAssertFalse(app.buttons["Broken photo"].exists || el(app, "study.report.broken_photo").exists,
                      "menu offers broken_photo")
@@ -159,7 +164,7 @@ final class ReportUITests: XCTestCase {
 
   // MARK: - Last card (015b #6, #8)
 
-  /// Reporting the only due card: "Reported" shows, then "All caught up" (not "Your deck is empty": the deck holds
+  /// Reporting the only due card: "Reported" shows, then "All caught up" (not "No cards yet": the deck holds
   /// the held-out card).
   @MainActor
   func testReport_lastCardShowsReportedThenCaughtUp() throws {
@@ -183,7 +188,7 @@ final class ReportUITests: XCTestCase {
     XCTAssertTrue(caughtUp, "no message screen after reporting the last card")
     XCTAssertTrue(sawReported, "'Reported' never shown after reporting the last card")
     XCTAssertEqual(el(app, "study.message").label, "All caught up")
-    XCTAssertFalse(app.staticTexts["Your deck is empty"].exists, "empty-deck subtitle instead of caught-up")
+    XCTAssertFalse(app.staticTexts["No cards yet"].exists, "empty-deck message instead of caught-up")
     Thread.sleep(forTimeInterval: 0.5)
     snapshot("study-report-last-caught-up", appearance: .light)
     app.terminate()
@@ -436,7 +441,7 @@ final class ReportUITests: XCTestCase {
     return byID.exists ? byID : app.buttons.matching(NSPredicate(format: "label == %@", title)).firstMatch
   }
 
-  /// The dialog's Cancel (a system button, no id); a popover presentation has none, so tap outside it.
+  /// A dialog's Cancel (a system button, no id); the menu sheet has none, so tap the dimmed screen above it.
   @MainActor
   private func cancelMenu(_ app: XCUIApplication) {
     let cancel = app.buttons.matching(NSPredicate(format: "label == 'Cancel'")).firstMatch

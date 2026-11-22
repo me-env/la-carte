@@ -104,6 +104,8 @@ public struct DeckView: View {
 
   private func listRow(_ note: Note) -> some View {
     row(note)
+      // The lifted preview is the row's own rounded card, not the list cell around it.
+      .contentShape(.contextMenuPreview, .rect(cornerRadius: Theme.Radius.row))
       .listRowInsets(Self.rowInsets)
       .listRowSeparator(.hidden)
       .listRowBackground(Rectangle().fill(Theme.background))
@@ -131,6 +133,11 @@ public struct DeckView: View {
           .accessibilityIdentifier("deck.message")
       } icon: {
         Image(systemName: message.systemImage)
+      }
+    } description: {
+      if let detail = message.detail {
+        Text(detail)
+          .accessibilityIdentifier("deck.detail")
       }
     } actions: {
       if store.showsSettingsButton {

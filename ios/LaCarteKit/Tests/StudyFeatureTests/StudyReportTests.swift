@@ -24,6 +24,55 @@ struct StudyReportTests {
     }
   }
 
+  /// The menu is a sheet: picking an item closes it, except Other…, whose comment alert sits on it until answered.
+  @Test func pickingAnItemClosesTheMenu() async {
+    var state = revealed(cards)
+    state.isReportMenuShown = true
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: {
+      $0.apiClient.reportCard = { _, _, _ in try await Task.never() }
+    }
+
+    await store.send(.reportReasonTapped(.other)) {
+      $0.isReportCommentShown = true
+    }
+    await store.send(.binding(.set(\.isReportCommentShown, false))) {
+      $0.isReportCommentShown = false
+      $0.isReportMenuShown = false
+    }
+    await store.send(.cardDoubleTapped) {
+      $0.isReportMenuShown = true
+    }
+    let task = await store.send(.reportReasonTapped(.wrong)) {
+      $0.isReportMenuShown = false
+      $0.isReviewing = true
+    }
+    await task.cancel()
+  }
+
+  @Test func askingClosesTheMenu() async {
+    var state = revealed(cards)
+    state.isReportMenuShown = true
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: {
+      $0.askAI.copy = { _ in }
+      $0.askAI.open = { _ in true }
+      $0.continuousClock = ImmediateClock()
+    }
+
+    await store.send(.askTapped) {
+      $0.isReportMenuShown = false
+    }
+    await store.receive(\.askOpened) {
+      $0.notice = .copied
+    }
+    await store.receive(\.noticeExpired) {
+      $0.notice = nil
+    }
+  }
+
   @Test func theMenuIsOffNotRevealedEditingOrWithARequestInFlight() async {
     var unrevealed = studying(cards)
     var editing = revealed(cards)

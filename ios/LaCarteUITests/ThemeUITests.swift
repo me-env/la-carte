@@ -384,13 +384,12 @@ final class ThemeUITests: XCTestCase {
                                  file: StaticString = #filePath, line: UInt = #line) {
     let deck = el(app, "study.deck")
     XCTAssertTrue(deck.waitFor(timeout: 10), "study.deck missing", file: file, line: line)
-    let window = app.windows.firstMatch.frame, d = deck.frame
+    let window = app.windows.firstMatch.frame  // study.deck is system glass (not pixel-checked), like the toolbars
     waitForColors(app, [
       ("study background top-left (status bar area)", CGPoint(x: 3, y: 3), p.background),
       ("study background left edge", CGPoint(x: 3, y: window.midY), p.background),
       ("study background right edge", CGPoint(x: window.maxX - 3, y: window.height * 0.35), p.background),
       ("study background bottom-left", CGPoint(x: 8, y: window.maxY - 8), p.background),
-      ("study.deck circle fill", CGPoint(x: d.minX + 7, y: d.midY), p.surface),
     ], context: context, file: file, line: line)
   }
 

@@ -93,7 +93,7 @@ final class StudyUITests: XCTestCase {
 
   // MARK: - Stub-API states (criteria 4, 5, 6, 7)
 
-  /// #6: `/stats` with `next_due: null` → "All caught up" / "Your deck is empty".
+  /// #6: `/stats` with `next_due: null` → "No cards yet" / "Ask your agent to add some" (as Deck and the widget, audit 2026-11-22 P0-5).
   @MainActor
   func testStudy_emptyDeck() throws {
     let server = StubAPIServer { request in
@@ -104,7 +104,7 @@ final class StudyUITests: XCTestCase {
     try server.start()
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .live(server.url))
-    assertCaughtUp(app, nextDueLabel: "Your deck is empty")
+    assertEmptyDeck(app)
     assertCornerButtons(app)
     snapshot("study-empty", appearance: .light)
     server.stop()
@@ -176,7 +176,7 @@ final class StudyUITests: XCTestCase {
     let url = try liveURL("LA_CARTE_EMPTY_API_URL")
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .live(url))
-    assertCaughtUp(app, nextDueLabel: "Your deck is empty")
+    assertEmptyDeck(app)
     snapshot("study-live-empty", appearance: .light)
   }
 
@@ -241,6 +241,23 @@ final class StudyUITests: XCTestCase {
     }
     for gone in ["hard", "easy"] {
       XCTAssertFalse(el(app, "study.rate.\(gone)").exists, "study.rate.\(gone) exists (spec 011)", file: file, line: line)
+    }
+  }
+
+  @MainActor
+  private func assertEmptyDeck(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+    waitForLabel(el(app, "study.message"), "No cards yet", timeout: 10, file: file, line: line)
+    let detail = el(app, "study.detail")
+    XCTAssertTrue(detail.waitFor(timeout: 5), "study.detail missing", file: file, line: line)
+    XCTAssertEqual(detail.label, "Ask your agent to add some", file: file, line: line)
+    let window = app.windows.firstMatch.frame
+    for id in ["study.message", "study.detail"] {
+      XCTAssertEqual(el(app, id).frame.midX, window.midX, accuracy: 1, "\(id) not centered", file: file, line: line)
+    }
+    XCTAssertGreaterThanOrEqual(detail.frame.minY, el(app, "study.message").frame.maxY - 1,
+                                "study.detail not below study.message", file: file, line: line)
+    for id in ["study.remaining", "study.card", "study.reveal", "study.retry", "study.nextDue"] {
+      XCTAssertFalse(el(app, id).exists, "\(id) exists in the empty state", file: file, line: line)
     }
   }
 

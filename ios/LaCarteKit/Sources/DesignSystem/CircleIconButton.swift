@@ -6,8 +6,6 @@ public struct CircleIconButton: View {
   let accessibilityLabel: LocalizedStringKey
   let action: () -> Void
 
-  @Environment(\.self) private var environment
-
   public init(
     _ systemImage: String,
     accessibilityLabel: LocalizedStringKey,
@@ -21,14 +19,14 @@ public struct CircleIconButton: View {
   public var body: some View {
     Button(action: action) {
       Image(systemName: systemImage)
-        .font(.system(size: 15, weight: .regular))
+        .font(.system(size: 17, weight: .regular))
         .foregroundStyle(Theme.ink)
         .frame(width: 44, height: 44)
-        .background(Theme.surface, in: .circle)
-        .overlay(Circle().strokeBorder(Theme.hairline, lineWidth: environment.colorScheme == .dark ? 1 : 0))
-        .shadow(color: Theme.shadow.resolve(in: environment), radius: 8, y: 2)
+        .contentShape(.circle)
     }
     .buttonStyle(.plain)
+    // The same glass circle and 17 pt glyph as the system toolbar buttons on Deck, Settings and the editor.
+    .glassEffect(.regular.interactive(), in: .circle)
     .accessibilityLabel(accessibilityLabel)
     .accessibilityShowsLargeContentViewer {
       Label(accessibilityLabel, systemImage: systemImage)
