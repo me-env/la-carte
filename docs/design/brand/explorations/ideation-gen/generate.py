@@ -5,7 +5,9 @@
 """Logo ideation with the OpenAI Images API: N directions x M variations, numbered contact sheets.
 
 Usage:
-    uv run docs/design/brand/explorations/ideation-gen/generate.py <out-dir> [--only 3,7] [--dry-run]
+    uv run docs/design/brand/explorations/ideation-gen/generate.py <out-dir> [--round 2] [--only 3,7] [--dry-run]
+
+Round 1 writes into <out-dir>; round N > 1 writes into <out-dir>/round-N/.
 
 The API key is read at runtime from ~/.config/la-carte/openai_api_key (never printed or logged).
 Images are written to <out-dir>, which must be outside the repo (the external SSD). Re-running skips
@@ -137,6 +139,134 @@ DIRECTIONS: list[tuple[str, list[str]]] = [
 ]
 
 
+# Round 2+ prompts: added after the design-critic review of the previous round.
+NO_GLOW = (
+    " Strictly flat: no glow, no blur, no gradients, no shadows, no 3D, no texture; solid fills only."
+)
+ROUND_STYLE: dict[int, str] = {2: STYLE + NO_GLOW}
+
+# User-requested priority direction: a knowledge graph inside a card, echoing the app's dots that settle
+# into order. Few nodes, thick edges, so it survives 29 px.
+GRAPH = ("Knowledge graph in a card", [
+    "A single landscape card containing a small graph of 5 solid dots joined by thick straight lines, like a calm constellation.",
+    "A card holding 4 dots connected in a simple diamond with one diagonal link; thick edges, large nodes.",
+    "Left side: 3 loose scattered dots outside the card; right side: inside the card the dots are connected into an ordered graph.",
+    "A card with a 3x2 lattice of dots, some neighbours joined by thick short links, one dot slightly larger as the hub.",
+    "A card whose content is a triangle of 3 large dots connected by thick lines, very minimal.",
+    "A card containing 6 dots: 3 still loose at the top, 3 settled at the bottom and joined by links.",
+    "A card with one central hub dot linked to 4 surrounding dots (star graph), thick lines, generous spacing.",
+    "A tilted card on which 5 dots and 5 links form a small constellation, one dot in an accent color.",
+    "A card outline whose four corners are nodes, plus one centre node linked to them (the card itself is the graph).",
+    "Two stacked cards, the front one holding a tiny graph of 4 connected dots.",
+])
+# Round 2 refinements from the design-critic's review of round 1 (letters = critic's shortlist).
+ROUND2 = [
+    GRAPH,  # generated first, before the critic notes; prompts without the trailing flat reminder
+    ("Graph in a card, refined (from 1.3 / 1.8)", [
+        "Left: three loose dots outside a card. Right: a solid landscape card on which 4 large dots are joined by thick links into a simple graph. Max 7 dots total.",
+        "A solid landscape card with a constellation of 5 large dots and 4 thick links forming an open tree; one dot in the accent color.",
+        "A solid card whose face shows 4 dots linked as a square with one diagonal; two loose dots drift toward it from above.",
+        "A card made of a graph: its 4 corners and 2 mid-edge points are large nodes joined by thick links, the interior empty, landscape 3:2.",
+        "Dots settling into order: top half 3 scattered dots, bottom half a card with 3 dots in a row joined by a thick line.",
+    ]),
+    ("A. Dots settle into a card grid (from 8.1)", [
+        "A 4x3 grid of large dots forming a landscape 3:2 card shape (outline implied, no border), with 3 loose dots of the same size above it on a gentle diagonal. Max 16 dots, grid within 60% of canvas width.",
+        "A 4x3 grid of large dots forming a landscape card; the top-right grid cell is empty and one dot is falling toward exactly that empty spot.",
+        "A 4x3 dot grid card where the dots in the bottom rows are solid and the top row dots are smaller, as if still settling; 2 loose dots above.",
+        "A 4x3 grid of large dots forming a card, with 4 loose dots above it, ink on paper, very calm and sparse.",
+        "A 4x3 grid of large dots forming a landscape card shape with one dot mid-fall above its missing top-right cell; nothing else.",
+    ]),
+    ("A x B. Settling dots + dial arc", [
+        "A solid landscape card at the bottom center; above it an arc of 8 dots (part of a circle) leading down into the card, dots growing slightly in size toward the card.",
+        "A 4x3 dot grid card with a quarter-circle arc of 5 dots sweeping into its top-left corner.",
+        "A ring of 12 large dots with a solid landscape card in the center; the bottom dot of the ring is larger and touches the card's bottom edge.",
+    ]),
+    ("B. Dial ring (from 8.3)", [
+        "A ring of 12 large evenly spaced dots with a solid landscape card in the center; the bottom ring dot larger, in the accent color.",
+        "An arc of 12 dots spanning about 270 degrees, dots growing larger toward one end, where one big dot has settled; reads as a dial, not a loader.",
+        "A ring of 12 large dots around one big solid center dot, very calm.",
+    ]),
+    ("C. Card becomes a dot (from 7.1)", [
+        "Diagonal from top-left to bottom-right: a large landscape card, then a smaller rounded square, then a circle, then a dot, each scaled by x0.62 with equal gaps, filling the square.",
+        "A big landscape card with a single dot beside its lower-right corner, the dot diameter equal to the card's corner radius, as if the corner condensed into the dot.",
+    ]),
+    ("D. Forgetting curve meets a card (from 9.4)", [
+        "Five large dots on a rising curve with gaps growing by x1.4, landing on the top edge of a solid landscape card at the bottom of the icon.",
+        "A solid ink card with five paper-colored dots along a gentle rising curve on its face, the last dot in the accent color.",
+    ]),
+    ("E. One card, one settled dot (from 4.2 / 4.5)", [
+        "A solid landscape card with one dot resting on its top edge at the center, half overlapping it; the dot about 30% of the card height.",
+        "A solid landscape card tilted 6 degrees with one dot perfectly level above its center, implying it is about to land.",
+    ]),
+]
+# Round 3: the user's seeds from round 1 (8.3 dial ring, 12.1 circle/card overlap), the graph-in-a-card
+# priority (critic's round-2 construction notes, from R2-2.3), and their combinations. "Landscape" is avoided:
+# in round 2 the model drew landscape photos.
+CARD = "a horizontal rounded-rectangle card, wider than tall (3:2), blank flat face like an index card"
+ROUND3 = [
+    ("Graph in a card (from R2-2.3)", [
+        f"Centre: {CARD}, about 62% of the icon wide. On it, exactly 5 nodes: 4 at the corners of an inner rectangle and 1 in the centre, joined by the inner rectangle's 4 edges plus one spoke from the centre to one corner. Nodes equal size; edges 40% of the node diameter, round caps.",
+        f"{CARD}, shifted slightly down-right, holding a small graph of 5 equal nodes and 4 edges (rectangle path plus one spoke). 3 loose dots of the same size outside the card on a 45-degree diagonal toward the top-left, evenly spaced, getting slightly smaller further out.",
+        f"{CARD} holding a graph of 4 nodes and 3 edges; one loose dot outside is just touching the card's top-left edge and its edge into the graph is drawn halfway, the settling moment.",
+        f"{CARD}, perfectly upright, holding 5 equal nodes joined by 4 edges forming an open zigzag path; 2 loose dots above the card on a gentle arc. One node in the accent color.",
+        f"{CARD} holding 5 equal nodes: 3 joined in a horizontal line along the middle, 2 above joined to them by short edges, like a tiny tree. Nothing else.",
+        f"{CARD} with 4 nodes at the corners of an inner rectangle joined by edges, and a fifth node in the centre linked to only the top-left one; 2 loose dots outside.",
+        f"Three loose dots on the left half of the icon; on the right, {CARD} holding the same three dots now joined by two edges into an ordered row.",
+        f"{CARD} whose face holds a 3x2 lattice of equal nodes, with horizontal edges joining each row and one vertical edge in the middle.",
+    ]),
+    ("Dial ring (user seed R1-8.3)", [
+        "A ring of 24 evenly spaced small dots (one every 15 degrees) with the bottom dot larger, the settled one. Dots large enough to read at small size.",
+        "A ring of 24 dot slots where only the bottom half is visible, dots growing larger toward the bottom centre where one big dot has settled.",
+        "A ring of 24 small dots, all the same, plus one larger dot settled inside the ring at its bottom, resting against it.",
+        f"A ring of 24 small dots around {CARD} at the centre; the bottom ring dot is larger.",
+        "A ring of 12 large dots (one every 30 degrees), with the bottom dot filled solid and the rest as rings (outlines).",
+        "A 270-degree arc of dots, one every 15 degrees, growing from tiny to large, ending at the bottom with one big settled dot.",
+    ]),
+    ("Circle + card overlap (user seed R1-12.1)", [
+        f"A solid circle on the left overlapping {CARD} on the right; the overlapping region is cut out (negative space, background color). Balanced, centred.",
+        f"A solid circle overlapping the top-left corner of {CARD}; the overlap is filled with a third, intermediate tone.",
+        f"{CARD} with a circle cut out of its right edge (negative space), the missing circle sitting just beside it as a solid dot, as if it popped out.",
+        f"A solid circle and {CARD} of the same height side by side, just overlapping; the overlap cut out as a thin lens of background.",
+        f"An outlined circle (thick stroke) overlapping a solid {CARD}; where they overlap the stroke turns to background color.",
+        f"A solid circle half covered by {CARD} laid over it from below, like a sun behind a card; only two colors, the card edge cut as a gap.",
+    ]),
+    ("Dial ring x graph in a card", [
+        f"{CARD} in the centre holding a small graph of 4 equal nodes and 3 edges; around it, a ring of 24 small dots, one every 15 degrees.",
+        f"An arc of small dots (lower half of a 24-dot ring) sweeping into {CARD}, where they become 4 nodes joined by edges.",
+        "A ring of 12 equal dots where 4 neighbouring dots at the bottom are joined by thick edges into a short path, the rest loose: structure emerging from the dial.",
+        f"{CARD} holding a graph of 5 nodes; the nodes lie on an arc, as if taken from a dial ring, joined by short edges.",
+        "A ring of 8 large dots; inside it, two chords join 4 of the dots into a simple graph; the ring is centered in the icon.",
+    ]),
+    ("Circle + card overlap x graph", [
+        f"A solid circle overlapping {CARD}; inside the overlap region, 3 nodes joined by 2 edges in the background color.",
+        f"{CARD} with a circle cut out of its right edge; the cut-out circle holds one node, and the card face holds 3 nodes joined by edges leading to it.",
+        f"A circle and {CARD} side by side, joined by one thick edge between a node at the circle's centre and a node on the card, like two linked ideas.",
+        f"A solid circle on the left, {CARD} on the right overlapping it; the card face holds a 4-node graph whose last edge reaches into the circle.",
+        "A large circle and a smaller card overlapping; their two centres are nodes joined by an edge, plus one more node on the card; three nodes total, minimal.",
+    ]),
+    ("Dial ring x circle + card", [
+        f"A ring of 24 small dots overlapping {CARD} on its right; dots inside the card are cut out in background color.",
+        f"A solid circle made of a 24-dot ring, overlapping {CARD}; inside the overlap the dots are solid and larger.",
+        f"{CARD} with a quarter of a 24-dot ring wrapping its top-right corner, the ring's last dot settled on the card.",
+    ]),
+    ("Settling grid / card to dots (critic's B and C)", [
+        "A 3x3 grid of large equal dots with one slot empty at the top-right; the missing dot sits 1.5 grid steps away on a 45-degree path, with one smaller trailing dot.",
+        f"Exactly three steps on one 45-degree line: {CARD}, then a dot 40% of the card's height, then a dot 0.6 times that, gaps following the same 0.6 ratio.",
+        f"The reverse: two small dots growing into {CARD}, along one 45-degree diagonal, dots gather into a card.",
+    ]),
+]
+# Round 3 avoids near-black for dot motifs (too close to Vyst's grain-on-black); one dark palette kept for themes.
+ROUND_PALETTES: dict[int, list[str]] = {3: [
+    "Warm off-white paper background (#F4F1EA), near-black ink shapes (#1C1C1E).",
+    "Deep forest green background (#1F3A2E), cream shapes (#EFE9DC), and deep forest green for marks drawn on cream.",
+    "Paper background (#F4F1EA), ink card (#1C1C1E) with paper-colored marks, and one tiny muted amber accent (#E3A64A) at most.",
+    "Deep forest green background (#1F3A2E), cream shapes (#EFE9DC), one tiny muted amber accent (#E3A64A) at most.",
+    "Near-black background (#121214), warm paper-white shapes (#F2EFE8).",
+]}
+ROUNDS: dict[int, list[tuple[str, list[str]]]] = {1: DIRECTIONS, 2: ROUND2, 3: ROUND3}
+ROUND_STYLE[3] = STYLE + NO_GLOW
+
+
 def read_key() -> str:
     path = Path.home() / ".config/la-carte/openai_api_key"
     return path.read_text().strip()
@@ -184,23 +314,61 @@ def sheet(cells: list[tuple[str, Path]], title: str, cols: int, thumb: int, out:
     img.save(out)
 
 
+def small_sheet(cells: list[tuple[str, Path]], out: Path) -> None:
+    """Each image at 58 px and 29 px (1:1 pixels) on a grey home-screen-like ground, for legibility checks."""
+    cols, cell_w, cell_h = 10, 130, 100
+    rows = (len(cells) + cols - 1) // cols
+    img = Image.new("RGB", (cols * cell_w + 20, rows * cell_h + 20), (128, 128, 132))
+    d = ImageDraw.Draw(img)
+    for i, (label, path) in enumerate(cells):
+        x, y = 10 + (i % cols) * cell_w, 10 + (i // cols) * cell_h
+        if path.exists():
+            src = Image.open(path).convert("RGB")
+            img.paste(src.resize((58, 58), Image.LANCZOS), (x, y))
+            img.paste(src.resize((29, 29), Image.LANCZOS), (x + 66, y + 29))
+        d.text((x, y + 64), label, fill="white", font=font(20))
+    img.save(out)
+
+
+def shortlist(root: Path, ids: list[str]) -> None:
+    """Numbered sheet (1..n, with each image's round id) plus its 58/29 px legibility strip."""
+    cells = []
+    for n, ident in enumerate(ids, 1):
+        rnd, dv = ident.strip().removeprefix("R").split("-")
+        d, v = dv.split(".")
+        folder = root if rnd == "1" else root / f"round-{rnd}"
+        cells.append((f"{n}  ({ident.strip()})", folder / f"{int(d):02d}-{v}.png"))
+    sheet(cells, "la-carte logo: critic-approved shortlist (pick a number)", cols=4, thumb=440,
+          out=root / "shortlist.png")
+    small_sheet(cells, root / "shortlist-small.png")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("out", type=Path)
+    ap.add_argument("--round", type=int, default=1)
     ap.add_argument("--only", default="", help="comma-separated direction numbers")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--shortlist", default="", help="ids like R3-1.2,R1-8.3: build shortlist.png, no API calls")
     args = ap.parse_args()
-    out: Path = args.out
+    if args.shortlist:
+        return shortlist(args.out, args.shortlist.split(","))
+    out: Path = args.out if args.round == 1 else args.out / f"round-{args.round}"
+    directions = ROUNDS[args.round]
+    style = ROUND_STYLE.get(args.round, STYLE)
+    palettes = ROUND_PALETTES.get(args.round, PALETTES)
     out.mkdir(parents=True, exist_ok=True)
     only = {int(x) for x in args.only.split(",") if x}
 
     jobs = []
-    for di, (name, variants) in enumerate(DIRECTIONS, 1):
+    for di, (name, variants) in enumerate(directions, 1):
         if only and di not in only:
             continue
         for vi, concept in enumerate(variants, 1):
             path = out / f"{di:02d}-{vi}.png"
-            prompt = f"{STYLE} Concept: {concept} Palette: {PALETTES[(vi - 1) % len(PALETTES)]}"
+            prompt = f"{style} Concept: {concept} Palette: {palettes[(vi - 1) % len(palettes)]}"
+            if args.round > 1:
+                prompt += NO_GLOW  # repeated last: the model ignores it mid-prompt on dark palettes
             if not path.exists():
                 jobs.append((path, prompt))
     print(f"{len(jobs)} images to generate with {MODEL} ({QUALITY})")
@@ -235,11 +403,15 @@ def main() -> None:
     print(f"total spent so far: ${spent:.2f}")
 
     overview = []
-    for di, (name, variants) in enumerate(DIRECTIONS, 1):
+    for di, (name, variants) in enumerate(directions, 1):
         cells = [(f"{di}.{vi}", out / f"{di:02d}-{vi}.png") for vi in range(1, len(variants) + 1)]
         sheet(cells, f"{di}. {name}", cols=5, thumb=360, out=out / f"sheet-{di:02d}.png")
         overview += cells
-    sheet(overview, "la-carte logo ideation: overview (direction.variation)", cols=10, thumb=220,
+        if args.round > 1:  # one row per direction (blank padding) so rows match directions
+            overview += [("", Path("/nonexistent"))] * (max(len(v) for _, v in directions) - len(cells))
+    small_sheet(overview, out / "overview-small.png")
+    cols = 10 if args.round == 1 else max(len(v) for _, v in directions)
+    sheet(overview, f"la-carte logo ideation, round {args.round} (direction.variation)", cols=cols, thumb=220,
           out=out / "overview.png")
 
 
