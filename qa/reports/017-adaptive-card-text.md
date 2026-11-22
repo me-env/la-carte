@@ -4,6 +4,40 @@ Verdict: PASS (re-validation of fix `30a7d0a`; the first run's FAIL on AC 11 is 
 Date: 2026-11-22 · Simulator: iPhone 17 Pro / iOS 27 · light mode (spec: one simulator, light)
 Build: `30a7d0a` (rebased on main incl. spec 018) on `worktree-agent-af2975cb0d52400eb`
 
+## Re-validation 2: layout D fix `0fe916f` (was `f745d04`, rebased on main)
+Verdict: **FAIL** (bug A fixed; bug B: a tap inside the inline edit field still ends the edit, 1 run in 6).
+Date: 2026-11-22 · iPhone 17 Pro / iOS 27 · light
+
+Runs (`qa/screenshots/`, logs in each `<run>/logs/`):
+- `017D2-mock/` StudyLengthsUITests + StudyUITests + StudyEditUITests, `--split 3 --wait`: **20 passed, 1 failed, 3 skipped**,
+  and the one failure is `testStudyLengths_inlineEditLongFront` (bug B)
+- `017D2-edit-1/` … `017D2-edit-5/` `inlineEditLongFront` alone, one after another: 5 of 5 passed
+
+Test change: `testStudyLengths_layoutD` now checks that a leading answer under a centred question starts at the question's
+drawn left edge, `q.minX + (q.width − drawnWidth)/2` (frame, ±1.5 pt), that the two inks line up within 1.1 pt either way,
+and that the answer's ink doesn't stick out past the question's right ink. The backField must not be wider than the
+question (+1 pt, was +7 pt for the old break space).
+
+### Bug A (leading answer overhangs a centred wrapped question): FIXED
+| card | question ink | answer ink | answer frame vs drawn left |
+|---|---|---|---|
+| "Who composed The Magic Flute?" (2 lines) / 5-line answer | 76.7–324.3 | starts 76.5 (was 73.3) | 76.2 vs 77.2 |
+| "Speed of light (km/s)?" (1 line, 89 %) / 5-line answer | 37.5–364.2 | starts 36.9 | 36.2 vs 37.7 |
+Other layout-D cards are the same as before (2-line/1-line answers centred, a short question's answer uses the column, the
+question doesn't move on reveal). Inline edit of that answer: `study.backField` 76–326 vs `study.back` 76.2–325.2, same
+height (128.3 pt), wrapped the same way (`017D2-mock/study-layoutD-2line-long-back-light.png`,
+`…-2line-long-editing-back-light.png`). Checked by eye: the answer's left edge lines up with "Who composed The".
+
+### Bug B (still open): a tap inside the front edit field sometimes ends the edit
+`testStudyLengths_inlineEditLongFront`, at the step after the medium draft "Which treaty, signed in 1648?": the test taps
+`study.frontField` (16–386 × 406.7–439 pt, one line) at (0.99, 0.95) to put the caret at the end. The app commits the draft
+and closes the edit (keyboard goes away, the question re-centres as a medium question), so the next step finds no field.
+Recording `017D2-mock/recordings/testStudyLengths_inlineEditLongFront.mp4`, 17.5 s → 18.65 s. Failed 1 of 6 runs here
+(the 3-shard run, with the Mac busy), 2 of 5 before the fix. Expected: a tap inside the field never ends the edit.
+Repro: `scripts/ios-ui-test.sh --split 3 --wait <run> -only-testing:LaCarteUITests/StudyLengthsUITests
+-only-testing:LaCarteUITests/StudyUITests -only-testing:LaCarteUITests/StudyEditUITests`, or run the single test many
+times (it seems to show up more under load).
+
 ## Addendum: layout D + scroll-bar flash (branch `worktree-agent-aa790f7910fc56c74`, rebased on main `5f30a22`)
 Verdict: **FAIL** (1 bug: a leading answer overhangs a centred wrapped question by 3.3 pt). Scroll-bar fix: PASS.
 Date: 2026-11-22 · iPhone 17 Pro / iOS 27 · light · commits `f9daa19` (scroll flash), `bf0c591`/`97bc1ce` (alignment by lines, layout D default)

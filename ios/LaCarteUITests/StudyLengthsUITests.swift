@@ -382,12 +382,17 @@ final class StudyLengthsUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(a.minX, q.minX - 1, "\(names[i]): answer starts left of the question \(a) vs \(q)")
         XCTAssertLessThanOrEqual(a.maxX, q.maxX + 6, "\(names[i]): answer wider than the question \(a) vs \(q)")
         if c.leadingBack {
-          XCTAssertEqual(a.minX, q.minX, accuracy: 1, "\(names[i]): leading answer not at the question's left edge")
-          // Ink, not frames: the answer's first glyph column vs the question's (AC 13: at most 3 pt left of it).
+          // A centred question's widest line is drawn centred in its frame: the leading answer starts at that line's
+          // drawn left edge, q.minX + (q.width - drawnWidth) / 2 (= q.minX when the line fills the frame).
           let shot = ColorProbe(at3x: XCUIScreen.main.screenshot().image.cgImage!)
-          let qInk = inkMinX(shot, q), aInk = inkMinX(shot, a)
-          note("QA017D \(names[i]) ink left: question \(qInk) answer \(aInk)")
-          XCTAssertGreaterThanOrEqual(aInk, qInk - 3, "\(names[i]): answer ink starts \(qInk - aInk) pt left of the question's")
+          let qInk = inkMinX(shot, q), qInkMax = inkMaxX(shot, q), aInk = inkMinX(shot, a)
+          let drawnLeft = q.minX + (q.width - (qInkMax - qInk)) / 2
+          note("QA017D \(names[i]) ink: question \(qInk)–\(qInkMax) drawnLeft \(drawnLeft) answer frame \(a.minX) ink \(aInk)")
+          XCTAssertEqual(a.minX, drawnLeft, accuracy: 1.5,
+                         "\(names[i]): leading answer \(a) not at the question's drawn left edge \(drawnLeft)")
+          // Ink, not frames: the answer's first glyph column vs the question's, within ~1 pt either way (bug A: 3.3 pt).
+          XCTAssertEqual(aInk, qInk, accuracy: 1.1, "\(names[i]): answer ink starts at \(aInk), question ink at \(qInk)")
+          XCTAssertLessThanOrEqual(inkMaxX(shot, a), qInkMax + 1, "\(names[i]): answer ink overhangs the question's right edge")
         } else {
           XCTAssertEqual(a.midX, q.midX, accuracy: 1, "\(names[i]): one-line answer not centred under the question")
         }
@@ -403,10 +408,10 @@ final class StudyLengthsUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.6)
         note("QA017D edit back \(field.frame) vs \(a)")
         XCTAssertEqual(field.frame.minX, a.minX, accuracy: 1, "backField left edge \(field.frame) vs answer \(a)")
-        // The field takes the answer's column (the question's widest line incl. its break space), so it may be a few
-        // points wider than the Text's own frame, never wider than the question (+ the ~7 pt break space).
+        // The field takes the answer's column (the question's widest line as drawn), so it may be a few points wider
+        // than the Text's own frame (ragged right), never wider than the question.
         XCTAssertGreaterThanOrEqual(field.frame.width, a.width - 1, "backField narrower than the answer \(field.frame) vs \(a)")
-        XCTAssertLessThanOrEqual(field.frame.maxX, q.maxX + 7, "backField wider than the question \(field.frame) vs \(q)")
+        XCTAssertLessThanOrEqual(field.frame.maxX, q.maxX + 1, "backField wider than the question \(field.frame) vs \(q)")
         XCTAssertEqual(field.frame.height, a.height, accuracy: 1, "backField rewraps the answer \(field.frame) vs \(a)")
         snapshot("study-layoutD-2line-long-editing-back", appearance: .light)
         field.typeText("\n")
@@ -533,6 +538,17 @@ final class StudyLengthsUITests: XCTestCase {
       }
     }
     return .infinity
+  }
+
+  /// Rightmost ink x (pt, 1/3 pt steps) in `rect`, same background rule as `inkMinX`.
+  private func inkMaxX(_ probe: ColorProbe, _ rect: CGRect) -> CGFloat {
+    let bg = probe.color(at: CGPoint(x: rect.minX - 8, y: rect.minY))
+    for x in stride(from: rect.maxX + 8, to: rect.minX, by: -1.0 / 3) {
+      for y in stride(from: rect.minY, to: rect.maxY, by: 1.0 / 3) where probe.color(at: CGPoint(x: x, y: y)).distance(to: bg) > 60 {
+        return x
+      }
+    }
+    return -.infinity
   }
 
   /// A line in the console and in the result bundle's activity log (merged split bundles keep no console log).
