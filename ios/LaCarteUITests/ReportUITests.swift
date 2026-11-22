@@ -9,6 +9,9 @@ final class ReportUITests: XCTestCase {
   static let front = "serendipity"
   static let back = "finding something good without looking for it"
   static let base = Date(timeIntervalSince1970: 1_767_225_600)  // 2026-01-01: due now
+  /// Debug-only `-noticeSeconds` (016b #4): notices stay 10 s instead of 2 s, so a slow CI runner still sees them.
+  static let noticeSeconds: TimeInterval = 10
+  static let longNotices = ["-noticeSeconds", "\(Int(noticeSeconds))"]
   /// Menu order (016a #1): Ask first, then the five reasons of 015b. Ids and the titles the spec gives them.
   static let menu: [(id: String, title: String)] = [
     ("ask", "Ask about this card"), ("wrong", "This is wrong"), ("drop", "I don't want this card"),
@@ -107,7 +110,7 @@ final class ReportUITests: XCTestCase {
                     due: Self.base.addingTimeInterval(Double(i) * 60))
     }
     let (server, deck) = try stub(cards)
-    let app = launch(api: .live(server.url))
+    let app = launch(api: .live(server.url), arguments: Self.longNotices)
 
     for (i, reason) in ["wrong", "drop", "doubt", "rephrase"].enumerated() {
       reveal(app, front: words[i], back: "\(words[i]) back")
@@ -125,8 +128,8 @@ final class ReportUITests: XCTestCase {
       XCTAssertEqual(report.cardID, cards[i].id, "reported the wrong card")
       XCTAssertEqual(report.reason, reason)
       XCTAssertFalse(report.hasCommentKey, "\(reason) body has a comment key")
-      // The notice lasts about 2 s, then the counter (decremented) comes back.
-      waitForLabel(el(app, "study.remaining"), "\(4 - i) to review", timeout: 4)
+      // The notice lasts `noticeSeconds` here (2 s by default), then the counter (decremented) comes back.
+      waitForLabel(el(app, "study.remaining"), "\(4 - i) to review", timeout: Self.noticeSeconds + 5)
     }
 
     // Other…: alert straight after the menu, Cancel sends nothing.
@@ -182,12 +185,12 @@ final class ReportUITests: XCTestCase {
     let (server, _) = try stub([
       .init(id: "aaaaaaaa-0000-0000-0000-000000000001", front: Self.front, back: Self.back, due: Self.base)
     ])
-    let app = launch(api: .live(server.url))
+    let app = launch(api: .live(server.url), arguments: Self.longNotices)
     reveal(app)
     openMenu(app)
     menuButton(app, "drop", "I don't want this card").tap()
     var sawReported = false
-    let caughtUp = poll(timeout: 10) {
+    let caughtUp = poll(timeout: Self.noticeSeconds + 10) {
       let n = self.el(app, "study.reportNotice")
       if n.exists && n.label == "Reported" {
         if !sawReported { Thread.sleep(forTimeInterval: 0.5); self.snapshot("study-report-last-reported", appearance: .light) }
@@ -277,21 +280,25 @@ final class ReportUITests: XCTestCase {
         .init(id: "BBBBBBBB-0000-0000-0000-0000000000B2", front: "la carte", back: "the menu",
               due: Self.base.addingTimeInterval(60)),
       ])
-      let app = launch(api: .live(server.url))
+      // Vibe explicitly (the default, checked by SettingsUITests): it opens a plain link, the prompt goes by clipboard.
+      let app = launch(api: .live(server.url), arguments: ["-aiApp", "vibe"] + Self.longNotices)
       reveal(app)
       waitForLabel(el(app, "study.remaining"), "2 to review")
       let before = server.requests.count
       openMenu(app)
       menuButton(app, "ask", "Ask about this card").tap()
       // 016b #6: default Vibe isn't installed on the simulator.
-      waitForLabel(el(app, "study.reportNotice"), "Copied · Vibe isn't installed", timeout: 3)
+      waitForLabel(el(app, "study.reportNotice"), "Copied · Vibe isn't installed", timeout: 5)
       XCTAssertTrue(el(app, "study.reportNotice").label.hasPrefix("Copied"))
       XCTAssertFalse(el(app, "study.remaining").exists, "counter shown next to the Copied notice")
       Thread.sleep(forTimeInterval: 0.5)  // counter cross-fade (Theme.Motion.standard) settled
       snapshot("study-ask-not-installed", appearance: appearance)
+      Thread.sleep(forTimeInterval: 3)  // past the 2 s default: -noticeSeconds 10 keeps it up
+      XCTAssertEqual(el(app, "study.reportNotice").label, "Copied · Vibe isn't installed",
+                     "notice gone after ~3.5 s despite -noticeSeconds 10")
       waitForLabel(el(app, "study.back"), Self.back)
       assertRatingsEnabled(app)
-      waitForLabel(el(app, "study.remaining"), "2 to review", timeout: 4)
+      waitForLabel(el(app, "study.remaining"), "2 to review", timeout: Self.noticeSeconds + 5)
       XCTAssertTrue(deck.reports.isEmpty, "Ask sent a report")
       let writes = server.requests.dropFirst(before).filter { $0.method != "GET" }
       XCTAssertTrue(writes.isEmpty, "Ask sent a request: \(writes.map { "\($0.method) \($0.path)" })")
@@ -311,11 +318,11 @@ final class ReportUITests: XCTestCase {
     let (server, _) = try stub([
       .init(id: "AAAAAAAA-0000-0000-0000-0000000000A1", front: Self.front, back: Self.back, due: Self.base),
     ])
-    let app = launch(api: .live(server.url), arguments: ["-aiApp", "copyOnly"])
+    let app = launch(api: .live(server.url), arguments: ["-aiApp", "copyOnly"] + Self.longNotices)
     reveal(app)
     openMenu(app)
     menuButton(app, "ask", "Ask about this card").tap()
-    waitForLabel(el(app, "study.reportNotice"), "Copied", timeout: 3)
+    waitForLabel(el(app, "study.reportNotice"), "Copied", timeout: 5)
     snapshot("study-ask-copy-only", appearance: .light)
     app.terminate()
     server.stop()
