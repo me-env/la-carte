@@ -50,4 +50,7 @@ docs/design/brand/explorations/round11/**
 docs/design/brand/explorations/round12/**
 !docs/design/brand/explorations/round12/render.py
 !docs/design/brand/explorations/round12/README.md
+docs/design/brand/explorations/round13/**
+!docs/design/brand/explorations/round13/render.py
+!docs/design/brand/explorations/round13/README.md
 docs/design/brand/explorations/*/contact-sheet*.png
