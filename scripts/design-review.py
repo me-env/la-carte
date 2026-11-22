@@ -16,6 +16,7 @@
     uv run scripts/design-review.py <render> --screen stochastic # a blue-noise (random, evenly spaced) screen
     uv run scripts/design-review.py --make-synthetic out.png --screen stochastic   # its reference, must PASS
     uv run scripts/design-review.py --frames round8/frames/  (or --frames 'round8/card-frame-*.png')   # an animation
+    uv run scripts/design-review.py dotcard-light.svg dotcard-dark.svg --mode outline --dots 24 --home   # dotted outline
 
 Prints PASS/FAIL per metric (value vs limit, and WHERE: `at x 385, y 535 (band 5)` in the render's own 1024 px
 coordinates; band = 32 px band counted from where the ink starts rising) and writes an annotated sheet (render,
@@ -29,6 +30,33 @@ measure (blank, or under MIN_MEASURE_MARKS grains: an animation's first frames) 
 metric with nothing to measure (e.g. a ramp under 3 columns). Sheets go to $TMPDIR/design-review/<the render's last
 3 folders>/<name>-review.png (variants a, b, c with the same file names no longer overwrite each other).
 All lengths are in px of a 1024 tile; other sizes are resampled to 1024 first. SVGs go through rsvg-convert.
+
+Modes (`--mode`): `halftone` (default) is everything below this section: dots or holes ramping into a solid card.
+`outline` is for a card outline traced by separate dots (the dotcard logo, ideation-gen/dotcard.py; the halftone
+metrics, coverage ramp, front and overhang, don't apply to it). Dots come from the SVG's circles (exact) or, for a PNG,
+from the peaks of the ink's distance transform (two overlapping dots stay two). The halftone mode's marks stop at 0.2%
+of the tile (r ~26 px), so it never measured the dotcard's 31 px dots or its settled dot, and its touching check
+passed on nothing. Outline metrics, each PASS/FAIL with value and limit (constants OUTLINE_*):
+- dots: count (== `--dots N`; without it, reported only).
+- path: a rounded rectangle fitted to the dot centres (straight edges through the outermost dots, the roundest
+  corner radius that fits);
+  dots are numbered along it clockwise from the settled dot (#1). Spacing = arc length between path neighbours: CV
+  and max deviation from the mean (worst pair); max distance of a dot off the outline.
+- gap: edge gap (centre distance minus both radii) between ANY two dots, min >= 8 px at 1024 (an overlap is a
+  negative gap: every pair under the limit is named with its overlap in px); the CV of the neighbour gaps is INFO
+  (corner chords and the settled / corner dots differ by design).
+- size: diameters clustered (sorted, split at a 12% step; regular = the biggest cluster): outliers > 5% off their
+  cluster's median; exactly one settled dot (>= 1.25x regular) and its ratio.
+- symmetry: mirror about the vertical axis through the fitted card's centre, max position / radius error in px.
+- optical centre, as in the halftone mode.
+- small (58 and 29 px, the same perceived image as check 2): min peak ink over the dots (at 29 px: the outline must
+  not vanish); share of neighbour pairs still separated (the ink between the centres dips below 0.85 x the fainter
+  peak; INFO at 29 px, where a continuous line is acceptable); the settled dot still reads bigger (perceived ink over
+  a disc of half a pitch vs the regular dots' median).
+Sheet: the render with the dots numbered and ringed by size cluster, pairs under the min gap in red, spacing failures
+and the worst pairs in orange; spacing and gap per pair; 58 / 29 px previews with blurred pairs marked; `--home` adds
+the home-screen mock. `--watch` works; `--frames`, `--make-synthetic`, `--axis`, `--region` and `--screen` are
+halftone only.
 
 Screens (`--screen`, the critic picks it per proposal from the render's construction):
 - `lattice` (default): the marks settle onto a hex lattice; order must RISE (checks 3), touching from coverage 0.65.
@@ -251,6 +279,35 @@ EDGE_SPREAD_MAX = {58: 0.045, 29: 0.025}
 # neither passes nor fails anything): order, spacing and profiles need a few marks to mean anything.
 INK_MIN_CONTRAST = 0.1          # RGB distance 0..sqrt(3)
 MIN_MEASURE_MARKS = 8
+
+# ---- Outline mode (`--mode outline`): a card outline traced by separate dots (the dotcard logo, round 4, 2026-11-22).
+# Calibrated on the committed dotcard-light.svg / dotcard-round-light.svg (the intended design: PASS) and scratch
+# variants that must FAIL (two dots overlapping by ~9 px, a dot missing, a dot moved 1/4 pitch along the path).
+OUTLINE_MAX_R = 0.1             # SVG circles under 0.1 x the tile in radius are dots (bigger ones are backgrounds)
+OUTLINE_SPACING_CV = 0.03       # CV of the arc length between path neighbours along the fitted card outline
+                                # (committed 0.003 / 0.000; a dot moved 1/4 pitch 0.072, a missing dot 0.196)
+OUTLINE_SPACING_DEV = 0.10      # max |spacing - mean| / mean along the path (a dot moved 1/4 pitch: 0.25; a missing dot:
+                                # one pair at ~2 pitches)
+OUTLINE_OFFPATH_PX = 3.0        # max distance of a dot centre from the fitted rounded rectangle, px at 1024
+OUTLINE_MIN_GAP_PX = 8.0        # edge gap (centre distance minus both radii) between ANY two dots, px at 1024; <= 0 is
+                                # an overlap. 8 px is 0.45 px at 58 px: below it the pair reads as one blob. The gaps'
+                                # CV is reported, not counted: equal arc spacing makes chords across a corner shorter
+                                # (1-pitch arc: 0.90 p) and the settled / corner dots' gaps differ by design
+OUTLINE_CLUSTER_SPLIT = 1.12    # sorted diameters split into size clusters where one is > 12% above the previous
+OUTLINE_SIZE_TOL = 0.05         # a dot more than 5% off its cluster's median diameter is an outlier
+OUTLINE_SETTLED_MIN = 1.25      # the settled dot = a dot >= 1.25 x the regular (most common) diameter; exactly one
+OUTLINE_SYMMETRY_PX = 2.0       # mirror about the vertical axis through the fitted card's centre: max position or radius
+                                # error of a dot vs its mirror partner, px at 1024 (committed 0.0)
+OUTLINE_PEAK_MIN = {58: 0.55, 29: 0.18}   # min over dots of the perceived peak ink (0 paper .. 1 ink) at icon size;
+                                # at 29 px this is the "outline vanishes" check. Committed equal dots 0.83 / 0.38, round
+                                # corners (0.75x) 0.66 / 0.22; 0.6x corner dots (rejected: "fade out at 58 px") 0.50 / 0.14
+OUTLINE_VALLEY = 0.85           # a neighbour pair stays separated at icon size if the perceived ink between the two
+                                # centres dips below 0.85 x the fainter dot's peak (else they blur into a line)
+OUTLINE_SEPARATED_MIN = {58: 0.90, 29: None}   # min share of separated neighbour pairs (committed 1.00 at 58 px; 0.83 /
+                                # 0.75 at 29 px, where a continuous line is acceptable: reported, not counted)
+OUTLINE_SETTLED_SMALL = 1.25    # at 58 and 29 px: the settled dot's perceived ink (mean over a disc of half a pitch)
+                                # / the regular dots' median; it must still read bigger (committed 1.89 / 1.78 at 1.5x)
+OUTLINE_EXACT = ("dots: count", "size: settled dots")   # metrics compared with ==
 
 ICON_IDS = [1110145109, 1108187841, 1108185179, 1069512882, 1584215688, 915056765]   # Notes, Reminders,
 # Calendar, Stocks, Clock, Maps: Apple's own apps via the public iTunes lookup API (no personal data).
@@ -522,7 +579,8 @@ def closing_hole_bands(holes):
 
 
 def higher_is_better(metric):
-    return "min gap" in metric or "polarity mix" in metric or "floor" in metric
+    return ("min gap" in metric or "polarity mix" in metric or "floor" in metric
+            or metric.startswith(("gap: min", "small: min peak", "small: separated", "small: settled")))
 
 
 # ---------------------------------------------------------------- profiles
@@ -1130,6 +1188,322 @@ def x_report(x, flip):
     return TILE - x if flip else x
 
 
+# ---------------------------------------------------------------- outline mode
+def outline_dots(ink, circles):
+    """Dots (n x 3: x, y, r) of a dotted outline, and how many ink blobs hold more than one dot (merged).
+    SVG: its circles, exact. PNG: peaks of the ink's distance transform, strongest first, each kept unless it lies
+    inside a kept dot, so two overlapping dots stay two (one blob, two peaks); a blob with one peak is measured by
+    its ink-weighted centroid and area (sub-pixel). No size cap: the halftone mode's marks stop at 0.2% of the tile
+    (r ~26 px), so the dotcard's 31 px dots and its settled dot were never measured there."""
+    lab, n = ndimage.label(ink > 0.5)
+    if circles is not None and (circles[:, 2] < OUTLINE_MAX_R * TILE).any():
+        dots = circles[circles[:, 2] < OUTLINE_MAX_R * TILE]
+    else:
+        edt = ndimage.distance_transform_edt(ink > 0.5)
+        ys, xs = np.nonzero((edt == ndimage.maximum_filter(edt, 5)) & (edt >= 2))
+        kept = []
+        for i in np.argsort(-edt[ys, xs], kind="stable"):
+            if all(math.hypot(xs[i] - kx, ys[i] - ky) > kr for kx, ky, kr in kept):
+                kept.append((float(xs[i]), float(ys[i]), float(edt[ys[i], xs[i]]) + 0.5))
+        dots = np.array(kept).reshape(-1, 3)
+        comp = lab[dots[:, 1].astype(int), dots[:, 0].astype(int)]
+        per = np.bincount(comp, minlength=n + 1)
+        for k, c in enumerate(comp):
+            if per[c] == 1:
+                cy, cx = ndimage.center_of_mass(ink, lab, c)
+                dots[k] = cx, cy, math.sqrt(ndimage.sum(ink, lab, c) / math.pi)
+    xi = np.clip(dots[:, 0].round().astype(int), 0, TILE - 1)
+    yi = np.clip(dots[:, 1].round().astype(int), 0, TILE - 1)
+    per = np.bincount(lab[yi, xi], minlength=n + 1)[1:]
+    return dots, int((per > 1).sum())
+
+
+def rounded_rect(cx, cy, a, b, rc, step=0.1):
+    """Points every ~step px along a rounded rectangle (centre, half sizes a and b, corner radius rc), clockwise on
+    screen (y down) from the bottom-edge centre going left, as dotcard.py walks it."""
+    pieces = [("l", (cx, cy + b), (cx - a + rc, cy + b)), ("c", (cx - a + rc, cy + b - rc), 90),
+              ("l", (cx - a, cy + b - rc), (cx - a, cy - b + rc)), ("c", (cx - a + rc, cy - b + rc), 180),
+              ("l", (cx - a + rc, cy - b), (cx + a - rc, cy - b)), ("c", (cx + a - rc, cy - b + rc), 270),
+              ("l", (cx + a, cy - b + rc), (cx + a, cy + b - rc)), ("c", (cx + a - rc, cy + b - rc), 0),
+              ("l", (cx + a - rc, cy + b), (cx, cy + b))]
+    out = []
+    for kind, p0, p1 in pieces:
+        if kind == "l":
+            m = max(2, int(math.dist(p0, p1) / step))
+            out.append(np.linspace(p0, p1, m, endpoint=False))
+        else:
+            m = max(2, int(math.pi / 2 * rc / step))
+            t = np.radians(p1 + np.linspace(0, 90, m, endpoint=False))
+            out.append(np.column_stack([p0[0] + rc * np.cos(t), p0[1] + rc * np.sin(t)]))
+    return np.concatenate(out)
+
+
+def fit_outline(xy):
+    """The card outline the dot centres sit on: a rounded rectangle whose straight edges run through the dots,
+    corner radius on a grid (the largest that fits). Returns (arc position of each dot from the bottom-edge centre, perimeter,
+    distance of each dot off the path, (cx, cy, a, b, rc))."""
+    lo, hi = xy.min(axis=0), xy.max(axis=0)
+    near = 0.1 * (hi - lo)                             # each edge: the median of the dots within 10% of the extreme,
+    lo, hi = (np.array([np.median(xy[xy[:, i] <= lo[i] + near[i], i]) for i in (0, 1)]),   # so one dot pushed out
+              np.array([np.median(xy[xy[:, i] >= hi[i] - near[i], i]) for i in (0, 1)]))   # doesn't move the edge
+    (cx, cy), (a, b) = (lo + hi) / 2, (hi - lo) / 2
+    q0 = np.abs(xy - (cx, cy))
+    fits = []
+    for rc in np.linspace(0, min(a, b), 801):
+        q = q0 - (a - rc, b - rc)
+        fits.append((rc, np.abs(np.hypot(*np.maximum(q, 0).T) + np.minimum(q.max(axis=1), 0) - rc)))
+    # the roundest outline within 0.02 px of the best fit: with no dot on the corner arcs (dotcard --edges 4,6) every
+    # radius up to the true one fits exactly, and the dots' spacing is measured along the true one. Fit = the 90th
+    # percentile of the dots' distances, so one misplaced dot doesn't bend the outline (it shows as off the path)
+    best = min(np.percentile(f[1], 90) for f in fits)
+    rc, off = [f for f in fits if np.percentile(f[1], 90) <= best + 0.02][-1]
+    poly = rounded_rect(cx, cy, a, b, rc)
+    seg = np.hypot(*np.diff(np.vstack([poly, poly[:1]]), axis=0).T)
+    s = np.concatenate([[0], np.cumsum(seg)[:-1]])
+    return s[cKDTree(poly).query(xy)[1]], seg.sum(), off, (cx, cy, a, b, rc)
+
+
+def size_clusters(d):
+    """Diameters -> cluster id per dot (0 = smallest), split where a sorted diameter is > OUTLINE_CLUSTER_SPLIT x the
+    previous one; and the regular cluster (most dots; the bigger one on a tie)."""
+    o = np.argsort(d)
+    cid = np.zeros(len(d), int)
+    cid[o] = np.concatenate([[0], np.cumsum(d[o][1:] / d[o][:-1] > OUTLINE_CLUSTER_SPLIT)])
+    counts = np.bincount(cid)
+    regular = max(range(len(counts)), key=lambda k: (counts[k], k))
+    return cid, regular
+
+
+def review_outline(path, out=None, home=False, quiet=False, expected=None):
+    """Outline mode: a card outline traced by separate dots. Prints the report and writes the sheet; returns
+    (fail count, results)."""
+    img, rgb, circles = load(path, "x")
+    ink, bg, inkc = ink_map(rgb)
+    dots, blobs = outline_dots(ink, circles) if (ink > 0.5).any() else (np.zeros((0, 3)), 0)
+    if len(dots) < 3:
+        return nothing_measured(path, quiet, f"{len(dots)} dots")
+    s_, perim, off_, card = fit_outline(dots[:, :2])
+    o = np.argsort(s_)                                 # along the path, clockwise from the bottom-edge centre
+    big = int(np.argmax(dots[o, 2]))                   # start at the settled dot when there is one
+    if dots[o[big], 2] >= OUTLINE_SETTLED_MIN * np.median(dots[:, 2]):
+        o = np.roll(o, -big)
+    dots, s_, off_ = dots[o], s_[o], off_[o]           # from here on dot k is #k+1 along the path
+    n = len(dots)
+    lab = lambda k: f"#{k % n + 1}"
+    xy, r = dots[:, :2], dots[:, 2]
+    nxt = (np.arange(n) + 1) % n
+    spacing = (s_[nxt] - s_) % perim                   # arc length along the fitted outline
+    gap = np.hypot(*(xy[nxt] - xy).T) - r - r[nxt]     # the visible gap: straight line between the edges
+    pitch = perim / n
+    results, bad_pairs, worst_pairs = [], [], []
+    fromsvg = circles is not None and (circles[:, 2] < OUTLINE_MAX_R * TILE).any()
+
+    # count
+    if expected:
+        results.append(("dots: count", n, expected, n == expected, f"expected {expected} (--dots)"))
+    else:
+        results.append(("dots: count", n, float("nan"), True, "INFO: report only (pass --dots N to check)"))
+
+    # spacing along the path (centre to centre, path neighbours)
+    dev = np.abs(spacing - pitch) / pitch
+    cv = spacing.std() / pitch
+    j = int(np.argmax(dev))
+    pair = f"{lab(j)}-{lab(j + 1)} {spacing[j]:.1f} px"
+    results.append(("spacing: CV", cv, OUTLINE_SPACING_CV, cv <= OUTLINE_SPACING_CV,
+                    f"arc length along the fitted card outline ({2 * card[2]:.0f} x {2 * card[3]:.0f} px, corner "
+                    f"radius {card[4]:.1f} px), mean {pitch:.1f} px over {n} pairs"))
+    results.append(("spacing: max deviation / mean", dev[j], OUTLINE_SPACING_DEV, dev[j] <= OUTLINE_SPACING_DEV,
+                    f"worst {pair}"))
+    worst_pairs += [j] + [int(k) for k in np.nonzero(dev > OUTLINE_SPACING_DEV)[0]]
+    k = int(np.argmax(off_))
+    results.append(("path: max distance off the outline px", off_[k], OUTLINE_OFFPATH_PX, off_[k] <= OUTLINE_OFFPATH_PX,
+                    f"dot centre to the fitted rounded rectangle; worst {lab(k)}"))
+
+    # edge gaps: any two dots (an extra or misplaced dot may touch a non-neighbour), then neighbours by size cluster
+    dd = np.hypot(*(xy[:, None] - xy[None]).T) - r[:, None] - r[None]
+    dd[np.triu_indices(n)] = np.inf
+    a_, b_ = np.unravel_index(np.argmin(dd), dd.shape)
+    low = sorted(zip(*np.nonzero(dd < OUTLINE_MIN_GAP_PX)), key=lambda p: dd[p])
+    words = lambda g: f"overlap {-g:.1f} px" if g <= 0 else f"gap {g:.1f} px"
+    note = (f"closest {lab(b_)}-{lab(a_)} {words(dd[a_, b_])}" if not low else
+            f"{len(low)} pair(s) under the limit: " + ", ".join(f"{lab(q)}-{lab(p)} {words(dd[p, q])}" for p, q in low[:6]))
+    if blobs:
+        note += f"; {blobs} ink blob(s) hold 2+ dots (merged)"
+    results.append(("gap: min edge gap px", dd[a_, b_], OUTLINE_MIN_GAP_PX, dd[a_, b_] >= OUTLINE_MIN_GAP_PX, note))
+    for p, q in low:                                   # p > q; a neighbour pair is drawn as path pair q (or p)
+        p, q = int(p), int(q)
+        bad_pairs.append(q if q + 1 == p else p if (p + 1) % n == q else (q, p))
+    cid, regular = size_clusters(2 * r)
+    gcv = gap.std() / gap.mean() if gap.mean() > 0 else float("nan")
+    k = int(np.argmax(np.abs(gap - np.median(gap))))
+    results.append(("gap: CV of neighbour gaps", gcv, float("nan"), True,
+                    f"INFO (corner chords and the settled / corner dots differ by design); {gap.min():.1f}-"
+                    f"{gap.max():.1f} px, median {np.median(gap):.1f}; furthest from it {lab(k)}-{lab(k + 1)} {gap[k]:.1f} px"))
+    worst_pairs.append(k)
+
+    # size rhythm
+    d = 2 * r
+    reg = float(np.median(d[cid == regular]))
+    med = np.array([np.median(d[cid == c]) for c in range(cid.max() + 1)])
+    off = d / med[cid] - 1
+    outl = np.nonzero(np.abs(off) > OUTLINE_SIZE_TOL)[0]
+    settled = np.nonzero(d >= OUTLINE_SETTLED_MIN * reg)[0]
+    names = []
+    for c in range(cid.max() + 1):
+        nm = "regular" if c == regular else "settled" if (np.isin(np.nonzero(cid == c)[0], settled).all()
+                                                           and c > regular) else "small" if c < regular else "large"
+        names.append(nm)
+    desc = ", ".join(f"{names[c]} {med[c]:.1f} px ({med[c] / reg:.2f}x) x{int((cid == c).sum())}" for c in range(len(med)))
+    results.append(("size: outliers > 5% off their cluster", len(outl), 0, not len(outl),
+                    f"clusters {desc}" + (f"; " + ", ".join(f"{lab(k)} {off[k]:+.0%}" for k in outl[:6]) if len(outl) else "")))
+    results.append(("size: settled dots", len(settled), 1, len(settled) == 1,
+                    f">= {OUTLINE_SETTLED_MIN}x regular; " + (", ".join(f"{lab(k)} {d[k] / reg:.2f}x" for k in settled)
+                                                             if len(settled) else "none")))
+
+    # symmetry about the vertical axis through the fitted card's centre (one misplaced dot doesn't move it)
+    ax_ = card[0]
+    mir = np.column_stack([2 * ax_ - xy[:, 0], xy[:, 1]])
+    dist, m = cKDTree(xy).query(mir)
+    err = np.maximum(dist, np.abs(r - r[m]))
+    k = int(np.argmax(err))
+    results.append(("symmetry: mirror error px", err[k], OUTLINE_SYMMETRY_PX, err[k] <= OUTLINE_SYMMETRY_PX,
+                    f"axis x {ax_:.1f} (tile centre {TILE / 2:.0f}); worst {lab(k)} vs {lab(m[k])}: position "
+                    f"{dist[k]:.1f} px, radius {abs(r[k] - r[m[k]]):.1f} px"))
+
+    # optical centre (as in the halftone mode: midpoint of the bbox centre and the ink centroid)
+    w = ink.sum()
+    yy, xx = np.mgrid[:TILE, :TILE]
+    cx, cy = (ink * xx).sum() / w, (ink * yy).sum() / w
+    bx, by = ((xy - r[:, None]).min(axis=0) + (xy + r[:, None]).max(axis=0)) / 2
+    oc = max(abs((cx + bx) / 2 - TILE / 2), abs((cy + by) / 2 - TILE / 2)) / TILE
+    results.append(("optical centre offset / tile", oc, CENTROID_TOL, oc <= CENTROID_TOL,
+                    f"centroid ({cx:.0f}, {cy:.0f}), bbox centre ({bx:.0f}, {by:.0f})"))
+
+    # small sizes: what the eye integrates at 58 / 29 px (area downsample + PERCEIVED_BLUR, as in check 2)
+    work = Image.fromarray((np.clip(ink, 0, 1) * 255).astype(np.uint8)).convert("RGB")
+    previews, small_info = {}, {}
+    t = np.linspace(0, 1, 65)
+    gy, gx = np.mgrid[-1:1.01:0.1, -1:1.01:0.1]
+    disc = np.column_stack([gx.ravel(), gy.ravel()])[np.hypot(gx, gy).ravel() <= 1] * pitch / 2
+    for size in (58, 29):
+        previews[size] = img.resize((size, size), Image.BOX)
+        small = np.asarray(work.resize((size, size), Image.BOX), dtype=float)[:, :, 0] / 255
+        small = ndimage.gaussian_filter(small, PERCEIVED_BLUR)
+        kk = TILE / size
+        at = lambda p: ndimage.map_coordinates(small, [p[..., 1].ravel() / kk - 0.5, p[..., 0].ravel() / kk - 0.5],
+                                               order=1, mode="nearest").reshape(p.shape[:-1])
+        peak = at(xy)
+        seg = at(xy[:, None] + (xy[nxt] - xy)[:, None] * t[None, :, None])
+        valley = seg.min(axis=1)
+        sep = valley < OUTLINE_VALLEY * np.minimum(peak, peak[nxt])
+        mass = at(xy[:, None] + disc[None]).mean(axis=1)
+        small_info[size] = (peak, sep)
+        j = int(np.argmin(peak))
+        results.append((f"small: min peak ink at {size:>2} px", peak[j], OUTLINE_PEAK_MIN[size],
+                        peak[j] >= OUTLINE_PEAK_MIN[size],
+                        f"faintest {lab(j)}, median {np.median(peak):.2f}" + ("; the outline vanishes below the limit" if size == 29 else "")))
+        share = sep.mean()
+        lim = OUTLINE_SEPARATED_MIN[size]
+        cont = ", ".join(f"{lab(q)}-{lab(q + 1)}" for q in np.nonzero(~sep)[0][:6])
+        results.append((f"small: separated pairs at {size:>2} px", share, lim if lim else float("nan"),
+                        lim is None or share >= lim,
+                        ("INFO (a continuous line is acceptable at 29 px); " if lim is None else "")
+                        + f"{int(sep.sum())} of {n}: ink between the centres dips below {OUTLINE_VALLEY} x the fainter peak"
+                        + (f"; blurred: {cont}" if cont else "")))
+        if len(settled) == 1:
+            s = int(settled[0])
+            regm = cid == regular
+            ratio = mass[s] / np.median(mass[regm])
+            results.append((f"small: settled reads bigger at {size:>2} px", ratio, OUTLINE_SETTLED_SMALL,
+                            ratio >= OUTLINE_SETTLED_SMALL,
+                            f"{lab(s)}: perceived ink over a disc of half a pitch / regular median; peak "
+                            f"{peak[s]:.2f} vs {np.median(peak[regm]):.2f}"))
+        else:
+            results.append(na(f"small: settled reads bigger at {size:>2} px", OUTLINE_SETTLED_SMALL,
+                              f"{len(settled)} settled dots"))
+
+    name = Path(path).name
+    fails = sum(not x[3] for x in results)
+    out = Path(out) if out else default_out(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    home_img = home_mock(img, out.with_name(f"{Path(path).stem}-home.png")) if home else None
+    outline_sheet(img, dots, spacing, cid, names, bad_pairs, worst_pairs, small_info, previews, results, out, home_img)
+    if quiet:
+        return fails, results
+    print(f"design-review {name}: mode outline, {n} dots ({'SVG circles' if fromsvg else 'PNG distance-transform peaks'}), "
+          f"mean pitch {pitch:.1f} px; dots numbered along the path, clockwise from {lab(0)}"
+          f"{' (the settled dot)' if len(settled) == 1 and settled[0] == 0 else ''}")
+    print(f"{'METRIC':<40}{'VALUE':>8}{'LIMIT':>8}  RESULT")
+    for m_, v, lim, ok, note in results:
+        cmp = "==" if m_.startswith(OUTLINE_EXACT) else ">=" if higher_is_better(m_) else "<="
+        lims = "-" if lim != lim else f"{lim:.3g}"
+        print(f"{m_:<40}{fmt(v)}{cmp:>4}{lims:<5} {'N/A ' if v != v else 'PASS' if ok else 'FAIL'}  {note}")
+    print(f"RESULT: {'FAIL' if fails else 'PASS'} ({fails} of {len(results)} metrics failed)")
+    print(f"sheet: {out}" + (f"\nhome:  {out.with_name(Path(path).stem + '-home.png')}" if home else ""))
+    return fails, results
+
+
+def outline_sheet(img, dots, spacing, cid, names, bad_pairs, worst_pairs, small_info, previews, results, out, home_img):
+    """The render with dots numbered along the path and ringed by size cluster, pairs under the min gap in red (a
+    dashed line when they are not path neighbours), spacing failures and the worst pairs in orange; spacing / gap per pair; 58 / 29 px
+    previews with the dots blurred into their neighbour ringed; the results."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    n = len(dots)
+    colors = {"regular": "tab:blue", "small": "tab:green", "settled": "tab:purple", "large": "tab:red"}
+    rows = 2 + (home_img is not None)
+    fig = plt.figure(figsize=(14, 13 + (5 if home_img is not None else 0)))
+    gs = fig.add_gridspec(rows, 4, height_ratios=[3, 1] + ([1.6] if home_img is not None else []))
+    ax = fig.add_subplot(gs[0, :3])
+    ax.imshow(img, extent=(0, TILE, TILE, 0))
+    for k, (x, y, r) in enumerate(dots):
+        c = colors[names[cid[k]]]
+        ax.add_patch(matplotlib.patches.Circle((x, y), r + 3, fill=False, color=c, lw=1.5))
+        ax.text(x, y, str(k + 1), color="white", fontsize=8, ha="center", va="center", weight="bold",
+                bbox=dict(boxstyle="round,pad=0.15", fc=c, ec="none", alpha=0.85))
+    for p in worst_pairs:
+        a, b = dots[p, :2], dots[(p + 1) % n, :2]
+        ax.plot([a[0], b[0]], [a[1], b[1]], color="orange", lw=3, alpha=0.8)
+    for p in bad_pairs:
+        i, j = (p, (p + 1) % n) if isinstance(p, int) else p
+        ax.plot([dots[i, 0], dots[j, 0]], [dots[i, 1], dots[j, 1]], color="red", lw=3,
+                ls="-" if isinstance(p, int) else "--")
+    ax.set_xlim(0, TILE); ax.set_ylim(TILE, 0)
+    ax.set_title("dots numbered along the path; ring = size cluster (" + ", ".join(
+        f"{nm} {colors[nm].split(':')[1]}" for nm in dict.fromkeys(names)) + ")\nred = pair under the min gap "
+        "(dashed: not path neighbours), orange = spacing off the limit or the worst spacing / gap pair", fontsize=9)
+    pv = gs[0, 3].subgridspec(2, 1)
+    for k, size in enumerate((58, 29)):
+        a = fig.add_subplot(pv[k])
+        a.imshow(previews[size].resize((232, 232), Image.NEAREST), extent=(0, TILE, TILE, 0))
+        peak, sep = small_info[size]
+        for q in np.nonzero(~sep)[0]:                  # pairs blurred into a line at this size
+            i, j = q, (q + 1) % n
+            a.plot([dots[i, 0], dots[j, 0]], [dots[i, 1], dots[j, 1]], color="orange", lw=1.5, alpha=0.7)
+        a.set_title(f"{size} px, enlarged ({int(sep.sum())}/{n} pairs separated; orange = blurred)", fontsize=8)
+        a.axis("off")
+    a = fig.add_subplot(gs[1, :3])
+    xy, r = dots[:, :2], dots[:, 2]
+    nxt = (np.arange(n) + 1) % n
+    idx = np.arange(1, n + 1)
+    a.bar(idx - 0.2, spacing / spacing.mean(), 0.4, color="0.5", label="spacing / mean")
+    a2 = a.twinx()
+    a2.bar(idx + 0.2, np.hypot(*(xy[nxt] - xy).T) - r - r[nxt], 0.4, color="tab:blue", label="edge gap px")
+    a2.axhline(OUTLINE_MIN_GAP_PX, color="red", lw=0.8, ls="--")
+    a.axhline(1 + OUTLINE_SPACING_DEV, color="0.3", lw=0.8, ls=":"); a.axhline(1 - OUTLINE_SPACING_DEV, color="0.3", lw=0.8, ls=":")
+    a.set_ylim(0, max(1.5, (spacing / spacing.mean()).max() * 1.05)); a.set_xticks(idx)
+    a.set_xticklabels([f"{k}-{k % n + 1}" for k in idx], fontsize=6, rotation=90)
+    a.set_title("per pair along the path: arc spacing / mean (grey, dotted = limit), edge gap px (blue, red dashed = min)",
+                fontsize=9, loc="left")
+    txt = fig.add_subplot(gs[1, 3]); txt.axis("off")
+    txt.text(0, 1, "\n".join(f"{'N/A ' if v != v else 'PASS' if ok else 'FAIL'} {m}: {v:.3f}" for m, v, _, ok, _ in results),
+             fontsize=6.5, va="top", family="monospace")
+    if home_img is not None:
+        a = fig.add_subplot(gs[2, :]); a.imshow(home_img); a.axis("off")
+    fig.tight_layout(); fig.savefig(out, dpi=90); plt.close(fig)
+
+
 # ---------------------------------------------------------------- sheet
 def sheet(img, curves, bands, ramp, rows_px, bad_x, bad_pts, flip, axis, previews, results, out, home_img):
     import matplotlib
@@ -1436,6 +1810,10 @@ if __name__ == "__main__":
                     help="lattice (default): order must rise to a hex lattice; stochastic: blue noise, order must "
                          "stay even (NN floor, no clumps or voids), touching allowed from coverage "
                          f"{TOUCH_OK_COVERAGE_STOCHASTIC}")
+    ap.add_argument("--mode", choices=("halftone", "outline"), default="halftone",
+                    help="halftone (default): the dots-into-a-card ramp checks above; outline: a card outline traced "
+                         "by separate dots (count, spacing, edge gaps, size rhythm, symmetry, 58/29 px legibility)")
+    ap.add_argument("--dots", type=int, metavar="N", help="outline mode: the expected dot count (default: report only)")
     ap.add_argument("--make-synthetic", metavar="OUT.png", help="write the smooth reference ramp (of --screen) and review it")
     ap.add_argument("--watch", action="store_true", help="re-run when a render changes; one PASS/FAIL line per run")
     ap.add_argument("--frames", action="append", metavar="DIR|GLOB",
@@ -1451,7 +1829,20 @@ if __name__ == "__main__":
         ap.error("--out takes one render (frame sheets go to $TMPDIR/design-review/<frames' folders>/)")
     if a.watch and a.frames:
         ap.error("--watch takes renders, not --frames")
+    if a.mode == "outline" and (a.frames or a.make_synthetic):
+        ap.error("--mode outline takes renders (no --frames, no --make-synthetic)")
     region = tuple(int(v) for v in a.region.split(",")) if a.region else None
+    if a.mode == "outline":
+        run = lambda p, quiet=False: review_outline(p, a.out, a.home, quiet=quiet, expected=a.dots)
+        if a.watch:
+            watch(a.render, lambda p: run(p, quiet=True))
+            sys.exit(0)
+        fails = 0
+        for k, path in enumerate(a.render):
+            if k:
+                print()
+            fails += run(path)[0]
+        sys.exit(1 if fails else 0)
     if a.watch:
         watch(a.render, lambda p: review(p, a.axis, region, a.out, a.home, quiet=True, screen=a.screen))
         sys.exit(0)
