@@ -120,7 +120,7 @@ iPhone 17 Pro), `Theme.background`, radius 22, 16 pt padding, on a `Theme.surfac
 ## Screen patterns from the reference
 | Vyst | la-carte |
 |---|---|
-| Editor: single word centered, icons in corners (01, 02) | **Study**: card front centered; tap reveals back below in `secondaryInk`; "Show answer" then a quiet "Forgot / Got it" text row at the bottom (specs 001, 011); dragging the revealed card fills a 24-dot `RatingDial` around the finger, discs clockwise toward Got it / Easy (up, right), rings counter-clockwise toward Hard / Forgot (down, left), and the row echoes the grade (specs 011, 019) |
+| Editor: single word centered, icons in corners (01, 02) | **Study**: card front centered; tap reveals back below in `secondaryInk`; "Show answer" then a quiet "Forgot / Got it" text row at the bottom (specs 001, 011); dragging the revealed card shows a 96-dot `RatingDial` around the finger whose order is the grade: the dots settle into an even 3-ring lattice, one size, toward Got it / Easy (up, right) and scatter with varied sizes toward Hard / Forgot (down, left), and the row echoes the grade (specs 011, 019) |
 | Notes list in dark (04) | **Deck**: list of cards, add + settings in the title row, search field below (spec 002) |
 | Detail sheet with title + word count + round actions (03) | **Card editor** and **Settings** sheets: title top-left, round `checkmark`/`xmark` top-right (specs 002, 003) |
 | Theme (05) | Settings → Appearance: System / Light / Dark / Forest (spec 004) |

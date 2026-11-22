@@ -27,11 +27,13 @@ struct DesignSystemGalleryContent: View {
         logoSection
       }
 
-      // Forgot, Hard, touch-down, dead zone, Got it, Easy.
+      // Forgot, Hard, touch-down, Got it, Easy: scattered to ordered (the study size, scaled down).
       section("Rating dial") {
         HStack(spacing: Theme.Spacing.xs) {
-          ForEach([0, 0.3, 0.5, 0.58, 0.7, 1], id: \.self) { value in
-            RatingDial(value: value, radius: 22)
+          ForEach([0, 0.25, 0.5, 0.76, 1], id: \.self) { value in
+            RatingDial(value: value, radius: 108)
+              .scaleEffect(0.25)
+              .frame(width: 64, height: 64)
           }
         }
         .accessibilityIdentifier("gallery.ratingDial")

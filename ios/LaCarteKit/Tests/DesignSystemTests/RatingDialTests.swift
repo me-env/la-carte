@@ -4,76 +4,120 @@ import Testing
 @testable import DesignSystem
 
 struct RatingDialTests {
-  @Test func atTouchDownEveryDotIsTrack() {
-    let layout = RatingDialLayout(value: 0.5)
-    #expect(layout.dots.count == 24)
-    #expect(layout.stage == .none)
-    let allMatch = layout.dots.allSatisfy { $0.kind == .track && !$0.isRing }
-    #expect(allMatch)
+  /// Where dot `i` sits when fully ordered: its ring and spoke.
+  func latticePoint(_ i: Int, radius: CGFloat = 108) -> (x: CGFloat, y: CGFloat) {
+    let ring = i / RatingDialLayout.spokes, spoke = i % RatingDialLayout.spokes
+    let angle = (Double(spoke) + 0.5) * 2 * .pi / Double(RatingDialLayout.spokes)
+    let r = radius * RatingDialLayout.ringScale[ring]
+    return (r * sin(angle), -r * cos(angle))
   }
 
-  @Test func theFirstPositiveGradeArmsHalfTheRingAsDiscsClockwise() {
-    let layout = RatingDialLayout(value: 0.65)
-    #expect(layout.stage == .first)
-    let armed = layout.dots.filter { $0.kind == .armed }
-    #expect(armed.count == 12)
-    let allDiscs = armed.allSatisfy { !$0.isRing }
-    #expect(allDiscs)
-    let clockwise: [Double] = (0..<12).map { (Double($0) + 0.5) * 15 }
-    let angles = armed.map(\.angle)
-    #expect(angles == clockwise)
-    #expect(armed.first?.angle == 7.5)
+  func distanceFromLattice(_ layout: RatingDialLayout) -> CGFloat {
+    layout.dots.enumerated().map { i, dot in
+      let p = latticePoint(i)
+      return hypot(dot.x - p.x, dot.y - p.y)
+    }.max() ?? 0
   }
 
-  @Test func theFirstNegativeGradeArmsTheSameHalfAsRingsCounterClockwise() {
-    let layout = RatingDialLayout(value: 0.35)
-    #expect(layout.stage == .first)
-    let armed = layout.dots.filter { $0.kind == .armed }
-    #expect(armed.count == 12)
-    let allRings = armed.allSatisfy(\.isRing)
-    #expect(allRings)
-    let counterClockwise: [Double] = (0..<12).map { 360 - (Double($0) + 0.5) * 15 }
-    let angles = armed.map(\.angle)
-    #expect(angles == counterClockwise)
+  func sizeSpread(_ layout: RatingDialLayout) -> CGFloat {
+    let sizes = layout.dots.map(\.diameter)
+    return (sizes.max() ?? 0) - (sizes.min() ?? 0)
+  }
+
+  @Test func ninetySixDots() {
+    #expect(RatingDialLayout(value: 0.5).dots.count == 96)
   }
 
   @Test(arguments: [0.875, 1.0])
-  func theSecondPositiveGradeArmsEveryDotAsADisc(value: Double) {
+  func easyIsFullyOrderedOnThreeRingsOfThirtyTwoSpokesAllOneSize(value: Double) {
     let layout = RatingDialLayout(value: value)
     #expect(layout.stage == .second)
-    let allMatch = layout.dots.allSatisfy { $0.kind == .armed && !$0.isRing }
-    #expect(allMatch)
+    #expect(layout.disorder == 0)
+    #expect(distanceFromLattice(layout) < 1e-9)
+    #expect(sizeSpread(layout) == 0)
+    #expect(layout.dots[0].diameter == RatingDialLayout.diameter)
   }
 
   @Test(arguments: [0.125, 0.0])
-  func theSecondNegativeGradeArmsEveryDotAsARing(value: Double) {
+  func forgotIsFullyScatteredWithVariedSizes(value: Double) {
     let layout = RatingDialLayout(value: value)
     #expect(layout.stage == .second)
-    let allMatch = layout.dots.allSatisfy { $0.kind == .armed && $0.isRing }
-    #expect(allMatch)
+    #expect(layout.disorder == 1)
+    #expect(distanceFromLattice(layout) > 15)
+    #expect(sizeSpread(layout) > 3)
   }
 
-  @Test func halfwayThroughTheDeadZoneSixDotsArePendingAndNoneArmed() {
-    let layout = RatingDialLayout(value: 0.575)  // m = 0.15
-    #expect(layout.stage == .none)
-    let pendingCount = layout.dots.filter { $0.kind == .pending }.count
-    #expect(pendingCount == 6)
-    let anyArmed = layout.dots.contains { $0.kind == .armed }
-    #expect(!anyArmed)
+  @Test func eachGradeEdgeHasItsDisorder() {
+    let edges: [(Double, Double)] = [
+      (0.125, RatingDialLayout.forgot), (0.35, RatingDialLayout.hard), (0.5, RatingDialLayout.rest),
+      (0.65, RatingDialLayout.gotIt), (0.875, RatingDialLayout.easy),
+    ]
+    for (value, disorder) in edges {
+      #expect(abs(RatingDialLayout(value: value).disorder - disorder) < 1e-9, "value \(value)")
+    }
+    #expect(RatingDialLayout(value: 0.35).stage == .first)
+    #expect(RatingDialLayout(value: 0.65).stage == .first)
+    #expect(RatingDialLayout(value: 0.5).stage == .none)
   }
 
-  @Test func dotStatesHaveTheSpecSizesAndOpacities() {
-    let layout = RatingDialLayout(value: 0.50625)  // m = 0.0125: n = 0.5, dot 0 half filled, the others track
-    let pending = layout.dots[0]
-    #expect(pending.kind == .pending)
-    #expect(abs(pending.diameter - 5) < 1e-6)
-    #expect(abs(pending.opacity - 0.7) < 1e-6)
-    let track = layout.dots[1]
-    #expect(track.kind == .track)
-    #expect(track.diameter == 4)
-    #expect(track.opacity == 0.45)
-    let armed = RatingDialLayout(value: 1).dots[0]
-    #expect(armed.diameter == 6)
-    #expect(armed.opacity == 1)
+  @Test func disorderFallsSteadilyFromForgotToEasy() {
+    var previous = 2.0
+    for step in 0...200 {
+      let layout = RatingDialLayout(value: Double(step) / 200)
+      #expect(layout.disorder <= previous + 1e-12, "value \(Double(step) / 200)")
+      previous = layout.disorder
+    }
+  }
+
+  func smallestGap(_ dots: [RatingDialLayout.Dot]) -> CGFloat {
+    var smallest = CGFloat.infinity
+    for i in dots.indices {
+      for j in dots.indices where j > i {
+        let gap = hypot(dots[i].x - dots[j].x, dots[i].y - dots[j].y) - (dots[i].diameter + dots[j].diameter) / 2
+        smallest = min(smallest, gap)
+      }
+    }
+    return smallest
+  }
+
+  @Test func noTwoDotsEverTouch() {
+    for step in 0...20 {
+      let value = Double(step) / 20
+      #expect(smallestGap(RatingDialLayout(value: value).dots) >= RatingDialLayout.minGap - 0.05, "value \(value)")
+    }
+  }
+
+  @Test func theScatterIsEvenAndHasNoBigVoids() {
+    let dots = RatingDialLayout(value: 0).dots
+    #expect(smallestGap(dots) >= RatingDialLayout.scatterGap - 0.05)
+    // No empty sector wider than two spoke pitches.
+    let angles = dots.map { atan2($0.x, -$0.y) }.sorted()
+    let gaps = zip(angles.dropFirst(), angles).map { $0 - $1 } + [angles[0] + 2 * .pi - angles[angles.count - 1]]
+    #expect(gaps.max()! <= 2 * 2 * .pi / Double(RatingDialLayout.spokes))
+  }
+
+  @Test func theScatterStaysClearOfTheCardText() {
+    let nearest = RatingDialLayout(value: 0).dots.map { hypot($0.x, $0.y) }.min()!
+    #expect(nearest >= 108 * 0.66)
+  }
+
+  @Test func eachGradeHoldsItsLookDeepInItsBin() {
+    #expect(RatingDialLayout(value: 0.25).disorder == RatingDialLayout.hard)
+    #expect(RatingDialLayout(value: 0.8).disorder == RatingDialLayout.gotIt)
+    #expect(RatingDialLayout(value: 0.45).disorder == RatingDialLayout.rest)
+  }
+
+  @Test func theScatterIsDeterministic() {
+    #expect(RatingDialLayout(value: 0.2) == RatingDialLayout(value: 0.2))
+  }
+
+  @Test func theFrameHoldsEveryDotAndItsPulse() {
+    let radius: CGFloat = 108
+    let extent = RatingDialLayout.extent(radius: radius)
+    for value in [0.0, 0.25, 0.5] {
+      for dot in RatingDialLayout(value: value, radius: radius).dots {
+        #expect(hypot(dot.x, dot.y) + dot.diameter * 1.3 / 2 <= extent)
+      }
+    }
   }
 }
