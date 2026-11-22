@@ -26,6 +26,8 @@ public struct StudyFeature {
     var notice: Notice?
     /// Cards whose broken photo was reported this session: sent once, and never served again (spec 015 #13-15).
     var reportedBrokenPhotos: Set<Card.ID> = []
+    /// Picked in Settings (spec 016b).
+    @Shared(.appStorage(AIApp.storageKey)) var aiApp: AIApp = .vibe
 
     /// What releasing the drag now would send.
     var swipeRating: Rating? { swipeEase.flatMap(StudyFeature.rating(forEase:)) }
@@ -60,7 +62,7 @@ public struct StudyFeature {
     }
 
     enum Notice: Equatable {
-      case reported, failed, copied
+      case reported, failed, copied, copiedNotInstalled(String)
     }
 
     enum Phase: Equatable {
@@ -94,6 +96,7 @@ public struct StudyFeature {
     case editSaveResponse(Result<Card, any Error>, previous: Card)
     case cardDoubleTapped
     case askTapped
+    case askOpened(Bool)
     case reportReasonTapped(ReportReason)
     case reportCommentSubmitted
     case reportResponse(Result<Void, any Error>, cardID: Card.ID)
@@ -263,9 +266,19 @@ public struct StudyFeature {
 
       case .askTapped:
         guard state.canReport, let card = state.cards.first else { return .none }
-        state.notice = .copied
         let text = AskText.make(for: card)
-        return .merge(.run { [askAI] _ in askAI.copy(text) }, expireNotice())
+        guard let url = state.aiApp.link(for: text) else {
+          state.notice = .copied
+          return .merge(.run { [askAI] _ in askAI.copy(text) }, expireNotice())
+        }
+        return .run { [askAI] send in
+          askAI.copy(text)
+          await send(.askOpened(askAI.open(url)))
+        }
+
+      case let .askOpened(opened):
+        state.notice = opened ? .copied : .copiedNotInstalled(state.aiApp.title)
+        return expireNotice()
 
       case .reportReasonTapped(.other):
         state.reportComment = ""

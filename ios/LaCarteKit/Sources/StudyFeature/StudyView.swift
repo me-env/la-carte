@@ -102,6 +102,7 @@ public struct StudyView: View {
     case .reported: "Reported"
     case .failed: "Couldn't send the report"
     case .copied: "Copied"
+    case let .copiedNotInstalled(app): "Copied · \(app) isn't installed"
     }
   }
 

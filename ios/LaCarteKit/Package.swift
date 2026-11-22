@@ -66,11 +66,12 @@ let package = Package(
       name: "SettingsFeature",
       dependencies: [
         "APIClient",
+        "AskAIClient",
         "DesignSystem",
         .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
       ]
     ),
-    .testTarget(name: "SettingsFeatureTests", dependencies: ["SettingsFeature", "APIClient", "DesignSystem"]),
+    .testTarget(name: "SettingsFeatureTests", dependencies: ["SettingsFeature", "APIClient", "AskAIClient", "DesignSystem"]),
     .target(
       name: "StudyFeature",
       dependencies: [
@@ -98,6 +99,7 @@ let package = Package(
         .product(name: "DependenciesMacros", package: "swift-dependencies"),
       ]
     ),
+    .testTarget(name: "AskAIClientTests", dependencies: ["AskAIClient"]),
 
     // MARK: Widget (plain SwiftUI + WidgetKit, no TCA; spec 007)
     .target(name: "DeckWidget", dependencies: ["APIClient", "DesignSystem"]),

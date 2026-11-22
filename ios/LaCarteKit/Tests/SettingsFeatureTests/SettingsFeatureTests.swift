@@ -1,4 +1,5 @@
 @testable import APIClient
+import AskAIClient
 import ComposableArchitecture
 import DesignSystem
 import Foundation
@@ -184,6 +185,27 @@ struct SettingsFeatureTests {
     @Dependency(\.defaultAppStorage) var defaults
     defaults.set("forest", forKey: "theme")
     #expect(SettingsFeature.State().theme == .forest)
+  }
+
+  @Test func aiAppDefaultsToVibeAndAPickIsStoredForTheNextLaunch() async {
+    #expect(SettingsFeature.State().aiApp == .vibe)
+    let store = TestStore(initialState: SettingsFeature.State()) {
+      SettingsFeature()
+    }
+
+    await store.send(.aiAppPicked(.claude)) {
+      $0.$aiApp.withLock { $0 = .claude }
+    }
+    await store.send(.aiAppPicked(.copyOnly)) {
+      $0.$aiApp.withLock { $0 = .copyOnly }
+    }
+    @Dependency(\.defaultAppStorage) var defaults
+    #expect(defaults.string(forKey: "aiApp") == "copyOnly")
+    #expect(SettingsFeature.State().aiApp == .copyOnly)
+  }
+
+  @Test func thePickerListsTheSixChoicesInOrder() {
+    #expect(AIApp.allCases.map(\.title) == ["Vibe", "Claude", "ChatGPT", "Perplexity", "Grok", "Copy only"])
   }
 
   @Test func closeDismisses() async {

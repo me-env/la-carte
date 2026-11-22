@@ -6,7 +6,7 @@ import Testing
 
 @testable import StudyFeature
 
-/// Spec 015b (report a card, broken photos) and 016a (ask about this card: copy).
+/// Spec 015b (report a card, broken photos) and 016 (ask about this card: copy, open the picked app).
 @MainActor
 struct StudyReportTests {
   let cards = [Card].fixtures
@@ -200,10 +200,12 @@ struct StudyReportTests {
     await store.send(.scenePhaseChanged(.active))
   }
 
-  @Test func askCopiesTheCardAndSaysCopiedWithoutARequest() async {
+  @Test func askWithCopyOnlyCopiesTheCardAndSaysCopiedWithoutARequest() async {
     let copied = LockIsolated<[String]>([])
     let clock = TestClock()
-    let store = TestStore(initialState: revealed(cards)) {
+    var state = revealed(cards)
+    state.$aiApp.withLock { $0 = .copyOnly }
+    let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: {
       $0.continuousClock = clock
@@ -218,6 +220,60 @@ struct StudyReportTests {
     await store.receive(\.noticeExpired) {
       $0.notice = nil
     }
+  }
+
+  @Test(arguments: [(true, StudyFeature.State.Notice.copied), (false, .copiedNotInstalled("Claude"))])
+  func askCopiesThenOpensThePickedApp(opened: Bool, notice: StudyFeature.State.Notice) async {
+    let calls = LockIsolated<[String]>([])
+    let clock = TestClock()
+    var state = revealed(cards)
+    state.$aiApp.withLock { $0 = .claude }
+    let store = TestStore(initialState: state) {
+      StudyFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.askAI.copy = { text in calls.withValue { $0.append("copy \(text)") } }
+      $0.askAI.open = { url in
+        calls.withValue { $0.append("open \(url.absoluteString)") }
+        return opened
+      }
+    }
+
+    await store.send(.askTapped)
+    await store.receive(\.askOpened) {
+      $0.notice = notice
+    }
+    let text = AskText.make(for: cards[0])
+    #expect(calls.value == ["copy \(text)", "open \(AIApp.claude.link(for: text)!.absoluteString)"])
+    await clock.advance(by: .seconds(2))
+    await store.receive(\.noticeExpired) {
+      $0.notice = nil
+    }
+  }
+
+  @Test func theDefaultVibeNotInstalledSaysSo() async {
+    let store = TestStore(initialState: revealed(cards)) {
+      StudyFeature()
+    } withDependencies: {
+      $0.continuousClock = ImmediateClock()
+      $0.askAI.copy = { _ in }
+      $0.askAI.open = { url in
+        #expect(url == URL(string: "https://chat.mistral.ai/chat/"))
+        return false
+      }
+    }
+
+    await store.send(.askTapped)
+    await store.receive(\.askOpened) {
+      $0.notice = .copiedNotInstalled("Vibe")
+    }
+    await store.receive(\.noticeExpired) {
+      $0.notice = nil
+    }
+  }
+
+  @Test func theNotInstalledNoticeNamesTheApp() {
+    #expect(StudyView.text(.copiedNotInstalled("Vibe")) == "Copied · Vibe isn't installed")
   }
 
   @Test func aRatingAnEditOrAReportClearsCopied() async {

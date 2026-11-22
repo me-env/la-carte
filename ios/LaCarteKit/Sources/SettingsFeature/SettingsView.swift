@@ -1,3 +1,4 @@
+import AskAIClient
 import ComposableArchitecture
 import DesignSystem
 import SwiftUI
@@ -20,6 +21,7 @@ public struct SettingsView: View {
       Form {
         server
         appearance
+        askAI
       }
       .scrollContentBackground(.hidden)
       .background(Theme.background)
@@ -123,6 +125,24 @@ public struct SettingsView: View {
       }
       .pickerStyle(.segmented)
       .accessibilityIdentifier("settings.theme")
+    }
+    .listRowBackground(Rectangle().fill(Theme.surface))
+  }
+
+  private var askAI: some View {
+    Section {
+      Picker("App", selection: Binding(get: { store.aiApp }, set: { store.send(.aiAppPicked($0)) })) {
+        ForEach(AIApp.allCases, id: \.self) { app in
+          Text(app.title).tag(app)
+        }
+      }
+      .pickerStyle(.menu)
+      .accessibilityIdentifier("settings.aiApp")
+    } header: {
+      Text("Ask AI")
+    } footer: {
+      Text("Ask about this card copies the card and opens this app.")
+        .foregroundStyle(Theme.secondaryInk)
     }
     .listRowBackground(Rectangle().fill(Theme.surface))
   }

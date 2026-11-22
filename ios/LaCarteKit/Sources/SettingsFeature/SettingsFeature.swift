@@ -1,15 +1,18 @@
 import APIClient
+import AskAIClient
 import ComposableArchitecture
 import DesignSystem
 import Foundation
 
-/// Points the app at the user's API: URL, token, and a check that both work (spec 003); picks the theme (spec 004).
+/// Points the app at the user's API: URL, token, and a check that both work (spec 003); picks the theme (spec 004)
+/// and the AI app "Ask about this card" opens (spec 016b).
 @Reducer
 public struct SettingsFeature {
   @ObservableState
   public struct State: Equatable {
     @Shared(.appStorage(APIClient.urlDefaultsKey)) var apiURL = ""
     @Shared(.theme) var theme
+    @Shared(.appStorage(AIApp.storageKey)) var aiApp: AIApp = .vibe
     var token = ""
     var connection: Connection = .idle
 
@@ -37,6 +40,7 @@ public struct SettingsFeature {
     case onAppear
     case testButtonTapped
     case themeTapped(AppTheme)
+    case aiAppPicked(AIApp)
     case closeButtonTapped
     case statsResponse(Result<DeckStats, any Error>)
     case delegate(Delegate)
@@ -81,6 +85,10 @@ public struct SettingsFeature {
 
       case let .themeTapped(theme):
         state.$theme.withLock { $0 = theme }
+        return .none
+
+      case let .aiAppPicked(app):
+        state.$aiApp.withLock { $0 = app }
         return .none
 
       case .closeButtonTapped:
