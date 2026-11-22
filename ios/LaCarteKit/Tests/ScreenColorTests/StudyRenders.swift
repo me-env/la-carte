@@ -95,6 +95,17 @@ struct StudyRenders {
       }
     }
   }
+
+  /// Layout D under a wide 2-line question, revealed, light: a short answer, centred on the full column, and a long
+  /// one, leading in the question's width (`screen-study-d-wide-<short|long>.png`, amended 2026-11-22).
+  @Test func layoutDWideQuestion() throws {
+    let question = "Who composed The Magic Flute?"
+    for (name, answer) in [("short", "Wolfgang Amadeus Mozart"), ("long", CardLines.answers[2].1)] {
+      let state = Self.studying(CardLines.card(question, answer), revealed: true)
+      _ = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), Self.looks[0],
+                     name: "study-d-wide-\(name)")
+    }
+  }
 }
 
 /// Questions and answers of known rendered line counts on an iPhone 17 Pro at the default text size (spec 017).

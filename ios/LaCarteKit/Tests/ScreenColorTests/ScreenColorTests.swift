@@ -63,14 +63,15 @@ struct ScreenColorTests {
 
   /// Spec 017: the question depends only on itself, in every candidate layout. Revealing the answer doesn't change a
   /// pixel of it, and short, 2-line and 4-line answers leave it at the same horizontal place (the stack's vertical
-  /// centring may differ). In layout D, the answer under a wide question stays within its width.
+  /// centring may differ). In layout D, a leading answer under a wide question stays within its width.
   @Test(arguments: StudyView.TextLayout.allCases, CardLines.questions.map(\.1) + CardLines.singleLines.map(\.1))
   func questionStaysPut(_ layout: StudyView.TextLayout, _ question: String) throws {
     let defaultLayout = StudyView.textLayout
     StudyView.textLayout = layout
     defer { StudyView.textLayout = defaultLayout }
     var columns: [ClosedRange<CGFloat>] = []
-    for (_, answer) in CardLines.answers {
+    let questionLines = (CardLines.questions.first { $0.1 == question })?.0 ?? 1
+    for (answerLines, answer) in CardLines.answers {
       let card = CardLines.card(question, answer)
       func screen(revealed: Bool) throws -> Screen {
         var state = StudyFeature.State()
@@ -84,18 +85,41 @@ struct ScreenColorTests {
       let ink = try #require(front.inkBounds(in: front.band(0.14, 0.85)), "no question drawn")
       #expect(revealed.changedPixels(from: front, in: ink) == 0, "question moved on reveal (answer: \(answer))")
       columns.append(ink.minX...ink.maxX)
-      if layout == .questionWidth, CardLines.wide.contains(question) {
-        let bottom = revealed.band(0, 0.85).maxY
-        let below = CGRect(x: 0, y: ink.maxY + 1, width: revealed.size.width, height: bottom - ink.maxY - 1)
-        let answerInk = try #require(revealed.inkBounds(in: below), "no answer drawn")
+      guard layout == .questionWidth, CardLines.wide.contains(question) else { continue }
+      let bottom = revealed.band(0, 0.85).maxY
+      let below = CGRect(x: 0, y: ink.maxY + 1, width: revealed.size.width, height: bottom - ink.maxY - 1)
+      let answerInk = try #require(revealed.inkBounds(in: below), "no answer drawn")
+      if questionLines >= 3 || answerLines >= 3 {  // a leading answer
+
         // Ink, not frames: a glyph's ink starts a little inside its advance (side bearings differ by letter). Measured
         // with the space a wrapped line breaks at, the answer overhung a centred question by ~3.5 pt; laid out in the
         // full column, by 10+ pt.
         #expect(answerInk.minX >= ink.minX - 1 && answerInk.maxX <= ink.maxX + 1,
                 "answer wider than the question: \(answerInk) vs \(ink) (answer: \(answer))")
+      } else {
+        // A centred answer (amended 2026-11-22) keeps the full column: it shares the question's centre, and one that
+        // the question's width would wrap stays on its own lines.
+        #expect(abs(answerInk.midX - ink.midX) <= 3, "centred answer off the question's centre: \(answerInk) vs \(ink)")
       }
     }
     #expect(Set(columns.map { "\($0)" }).count == 1, "question's columns depend on the answer: \(columns)")
+  }
+
+  /// Spec 017 D, amended 2026-11-22 (user): a centred answer isn't constrained by a wide question's width. "Wolfgang
+  /// Amadeus Mozart" fits one line of the column but not the 2-line question's width, so it's wider than the question.
+  @Test func centredAnswerIgnoresTheQuestionWidth() throws {
+    var state = StudyFeature.State()
+    state.cards = [CardLines.card("Who composed The Magic Flute?", "Wolfgang Amadeus Mozart")]
+    state.phase = .studying
+    let front = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), Self.looks[0])
+    state.isRevealed = true
+    let revealed = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), Self.looks[0])
+    let ink = try #require(front.inkBounds(in: front.band(0.14, 0.85)), "no question drawn")
+    let below = CGRect(x: 0, y: ink.maxY + 1, width: revealed.size.width, height: revealed.band(0, 0.85).maxY - ink.maxY - 1)
+    let answerInk = try #require(revealed.inkBounds(in: below), "no answer drawn")
+    #expect(answerInk.width > ink.width, "answer kept inside the question: \(answerInk) vs \(ink)")
+    #expect(answerInk.height < 30, "answer wrapped: \(answerInk)")  // one 22 pt line
+    #expect(abs(answerInk.midX - ink.midX) <= 3, "answer off the question's centre: \(answerInk) vs \(ink)")
   }
 
   /// Native screens (spec 009a/b): system navigation title and glass buttons, so only our fills are checked.

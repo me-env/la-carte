@@ -222,7 +222,7 @@ public struct StudyView: View {
               prompt(card).placed(promptAlignment, asBlock: Self.textLayout != .column)
               answerSlot(card)
                 .placed(answerAlignment, asBlock: answerIsBlock, width: answerWidth)
-                // Layout D: the answer's column is the question's widest line as drawn, at that line's place.
+                // Layout D: a leading answer's column is the question's widest line as drawn, at that line's place.
                 .frame(
                   width: answerWidth == nil ? nil : frontMeasure.width,
                   alignment: Alignment(horizontal: promptAlignment.horizontal, vertical: .center)
@@ -233,7 +233,7 @@ public struct StudyView: View {
             .background(alignment: .top) {
               VStack {
                 probe(card.promptText, font: card.promptFont, into: $frontMeasure)
-                probe(card.answerText, font: card.answerFont, width: answerWidth, into: $backMeasure)
+                probe(card.answerText, font: card.answerFont, into: $backMeasure)
               }
             }
             .dynamicTypeSize(...DynamicTypeSize.accessibility2)
@@ -511,14 +511,17 @@ public struct StudyView: View {
 
   /// Layout D: the width the answer is laid out in, or nil for the column.
   private var answerWidth: CGFloat? {
-    Self.textLayout == .questionWidth ? Self.referenceWidth(question: frontMeasure) : nil
+    guard Self.textLayout == .questionWidth else { return nil }
+    return Self.referenceWidth(question: frontMeasure, answer: answerAlignment)
   }
 
   /// Layout D: a question that wraps, or fills at least 85 % of the column on one line, reads as a full-width block,
-  /// so its widest line as drawn becomes the answer's column: an answer wider than it would overhang it. Below 85 %
-  /// the question is short display text, its side margins are wide, and the answer keeps the full column.
-  static func referenceWidth(question: TextMeasure) -> CGFloat? {
-    guard question.width > 0, question.wraps || question.width >= 0.85 * question.column else { return nil }
+  /// so its widest line as drawn becomes a leading answer's column: a leading answer wider than it would overhang its
+  /// left edge. A centred answer (1-2 lines in the full column) isn't constrained (user, 2026-11-22), and below 85 %
+  /// the question is short display text with wide margins, so the answer keeps the full column too.
+  static func referenceWidth(question: TextMeasure, answer: TextAlignment) -> CGFloat? {
+    guard answer == .leading, question.width > 0, question.wraps || question.width >= 0.85 * question.column
+    else { return nil }
     return question.drawnWidth
   }
 
@@ -535,16 +538,16 @@ public struct StudyView: View {
     return (answer - question) / 2
   }
 
-  /// A hidden copy of a side's saved text in the column (or `width`), cut to one line, then to two, with the full
+  /// A hidden copy of a side's saved text in the column, cut to one line, then to two, with the full
   /// text over them: a full text taller than a cut one has more lines. Laid out with the card, so it follows the
   /// width and text size. One callback per side: two writes to the same state in one layout pass lost one of them.
   private func probe(
-    _ text: String, font cardFont: CardFont, width: CGFloat? = nil, into measure: Binding<TextMeasure>
+    _ text: String, font cardFont: CardFont, into measure: Binding<TextMeasure>
   ) -> some View {
     let font = cardFont.font
     let textSize = min(dynamicTypeSize, .accessibility2)  // the card text's `dynamicTypeSize` cap
     return Text(text).font(font).lineLimit(1)
-      .frame(maxWidth: width ?? .infinity)
+      .frame(maxWidth: .infinity)
       .overlay(alignment: .top) {
         Text(text).font(font).lineLimit(2).fixedSize(horizontal: false, vertical: true)
           .frame(maxWidth: .infinity)
@@ -576,8 +579,8 @@ public struct StudyView: View {
   nonisolated private static let oneLine = "study.oneLine"
   nonisolated private static let twoLines = "study.twoLines"
 
-  /// The width a side's edit field keeps (the shown block's): a leading block's in B, C and D, a D answer's column;
-  /// nil spans the column.
+  /// The width a side's edit field keeps (the shown block's): a leading block's in B, C and D, a leading D answer's
+  /// column; nil spans the column.
   private func editWidth(_ field: StudyFeature.State.Field) -> CGFloat? {
     if field == .back, Self.textLayout == .questionWidth { return answerWidth }
     let alignment = field == .front ? promptAlignment : answerAlignment

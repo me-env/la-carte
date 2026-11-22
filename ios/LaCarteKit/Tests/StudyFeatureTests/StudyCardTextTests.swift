@@ -58,11 +58,19 @@ struct StudyTextLayoutTests {
     #expect(StudyView.snap(answer: 360, toQuestion: 340, column: 370) == 0)  // would cross the right margin
   }
 
-  @Test func layoutDKeepsTheAnswerInsideAWrappingQuestion() {
+  @Test func layoutDKeepsALeadingAnswerInsideAWrappingQuestion() {
     let twoLines = StudyView.TextMeasure(width: 220, drawnWidth: 213, height: 68, oneLine: 34, twoLines: 68, column: 370)
-    #expect(StudyView.referenceWidth(question: twoLines) == 213)
+    #expect(StudyView.referenceWidth(question: twoLines, answer: .leading) == 213)
     let paragraph = StudyView.TextMeasure(width: 360, drawnWidth: 354, height: 112, oneLine: 28, twoLines: 56, column: 370)
-    #expect(StudyView.referenceWidth(question: paragraph) == 354)
+    #expect(StudyView.referenceWidth(question: paragraph, answer: .leading) == 354)
+  }
+
+  /// Amended 2026-11-22 (user): an answer that isn't leading isn't constrained by the question's width.
+  @Test func layoutDLeavesACentredAnswerTheColumn() {
+    let twoLines = StudyView.TextMeasure(width: 220, drawnWidth: 213, height: 68, oneLine: 34, twoLines: 68, column: 370)
+    #expect(StudyView.referenceWidth(question: twoLines, answer: .center) == nil)
+    let line = StudyView.TextMeasure(width: 360, drawnWidth: 360, height: 34, oneLine: 34, twoLines: 34, column: 400)
+    #expect(StudyView.referenceWidth(question: line, answer: .center) == nil)
   }
 
   /// SwiftUI measures "Who composed The " with its break space; the line is drawn without it. Laid out greedily,
@@ -75,13 +83,13 @@ struct StudyTextLayoutTests {
     #expect(abs(StudyView.drawnWidth(of: "la mer", font: font, in: 370) - width("la mer")) < 0.5)
   }
 
-  @Test func layoutDKeepsTheAnswerInsideANearlyFullSingleLine() {
+  @Test func layoutDKeepsALeadingAnswerInsideANearlyFullSingleLine() {
     func line(_ width: CGFloat) -> StudyView.TextMeasure {
       StudyView.TextMeasure(width: width, drawnWidth: width, height: 34, oneLine: 34, twoLines: 34, column: 400)
     }
-    #expect(StudyView.referenceWidth(question: line(340)) == 340)  // exactly 85 %
-    #expect(StudyView.referenceWidth(question: line(339)) == nil)  // short: the answer keeps the column
-    #expect(StudyView.referenceWidth(question: line(120)) == nil)
-    #expect(StudyView.referenceWidth(question: StudyView.TextMeasure()) == nil)  // not measured yet
+    #expect(StudyView.referenceWidth(question: line(340), answer: .leading) == 340)  // exactly 85 %
+    #expect(StudyView.referenceWidth(question: line(339), answer: .leading) == nil)  // short: the answer keeps the column
+    #expect(StudyView.referenceWidth(question: line(120), answer: .leading) == nil)
+    #expect(StudyView.referenceWidth(question: StudyView.TextMeasure(), answer: .leading) == nil)  // not measured yet
   }
 }
