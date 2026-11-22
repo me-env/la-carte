@@ -118,6 +118,7 @@ async def test_lists_the_prompts(engine):
             "quiz_me": "Quiz me",
             "make_cards": "Make cards from text",
             "add_people": "Add people",
+            "handle_reports": "Handle reports",
         }
         assert all(p.description for p in prompts.values())
         assert [(a.name, a.required) for a in prompts["make_cards"].arguments] == [
@@ -273,3 +274,11 @@ async def test_add_people_prompt(engine):
             assert expected in text
         told = await client.get_prompt("add_people", {"text": "Ada", "directions": "photo"})
         assert "Which directions I want: photo" in told.messages[0].content.text
+
+
+async def test_handle_reports_prompt(engine):
+    async with Client(build_mcp(engine)) as client:
+        assert "handle_reports" in client.instructions
+        text = (await client.get_prompt("handle_reports")).messages[0].content.text
+        for expected in ("`list_reports`", "`update_report`", "`waiting_user`", "wait"):
+            assert expected in text

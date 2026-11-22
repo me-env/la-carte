@@ -119,11 +119,13 @@ burying (until the reviewed sibling is due again, at most 6 hours; (re)learning 
 each report reason (doubt / rephrase: ask the user before changing anything).
 `allow_duplicates` is only for when the user explicitly asks.
 
-### MCP prompts (spec 005, 014)
+### MCP prompts (spec 005, 014, 015)
 `quiz_me(limit=10)` (uses `due_cards` + `review_card`; shows the `prompt` fields, then the `answer` fields),
 `make_cards(text, max_cards=20)` (checks `find_notes`, adds with one `add_notes` call of `basic` notes),
 `add_people(text, directions=None)` (person notes from e.g. a team page: name + description, photo only if a URL is
-given; asks which directions when `directions` is not given).
+given; asks which directions when `directions` is not given),
+`handle_reports()` (works through active `list_reports` per the server instructions, asks the user where they say to;
+also what a recurring report watcher runs).
 
 Connect an agent (Claude Code example):
 ```bash

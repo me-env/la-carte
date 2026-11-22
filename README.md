@@ -93,7 +93,7 @@ The server is at `/mcp` (streamable HTTP), next to the REST API the app uses.
 | `due_cards`, `review_card` | Study from the agent; reviews update the same schedule as the app |
 | `deck_stats` | Totals, due now, next due card, streak |
 
-Prompts: **Quiz me** (`quiz_me`) and **Make cards from text** (`make_cards`). The server also tells agents to keep
+Prompts: **Quiz me** (`quiz_me`), **Make cards from text** (`make_cards`), **Add people** (`add_people`) and **Handle reports** (`handle_reports`, also what a recurring report watcher runs). The server also tells agents to keep
 cards minimal: a word or short question on the front, the shortest answer on the back.
 
 ## Docs

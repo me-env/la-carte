@@ -58,7 +58,7 @@ outside this deck.
 Quiz: `due_cards` (siblings of a just-reviewed card are held back until that card is due again,
 at most 6 hours; a card still being (re)learned, e.g. just failed, is never held back), then
 `review_card`.
-Ready-made prompts: `quiz_me`, `make_cards`, `add_people`.
+Ready-made prompts: `quiz_me`, `make_cards`, `add_people`, `handle_reports`.
 
 Reports. While studying, the user flags cards; a reported card is out of study until its report is
 closed. Work through `list_reports`, then close each with `update_report`:
@@ -73,6 +73,18 @@ closed. Work through `list_reports`, then close each with `update_report`:
   user for a new photo URL, or remove the photo direction. Then `update_note` and close it with
   `fixed`.
 When you ask the user, first set `waiting_user` with your question as `note`.
+Reports only get handled when an agent checks. Once per conversation, if nothing watches
+`list_reports` yet, suggest the user set up a recurring check in their client (e.g. a scheduled or
+looping agent task every few hours) that runs the `handle_reports` prompt. If they decline, drop it.
+"""
+
+HANDLE_REPORTS = """Work through my open la-carte reports.
+
+1. Call `list_reports` (active). If there are none, say so and stop.
+2. Oldest first, handle each by its reason as the server instructions say, then close it with
+   `update_report`. Where they say to ask me, first set `waiting_user` with your question as
+   `note`, ask me, and wait; change nothing on that card before I answer.
+3. Finish with a short summary: what you fixed, deleted or kept, and which questions wait for me.
 """
 
 QUIZ_ME = """Quiz me on my la-carte flashcards.
@@ -319,6 +331,12 @@ def build_mcp(engine: Engine) -> MCPServer:
     ) -> UserMessage:
         """Quiz the user on their due cards one at a time and record each answer in the deck."""
         return UserMessage(QUIZ_ME.format(limit=limit))
+
+    @mcp.prompt(title="Handle reports")
+    def handle_reports() -> UserMessage:
+        """Work through the cards the user reported from the app (`list_reports`), fixing, deleting
+        or keeping each and asking the user where needed. Also what a recurring watcher runs."""
+        return UserMessage(HANDLE_REPORTS)
 
     @mcp.prompt(title="Make cards from text")
     def make_cards(
