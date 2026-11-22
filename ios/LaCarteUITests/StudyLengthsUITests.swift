@@ -36,9 +36,9 @@ final class StudyLengthsUITests: XCTestCase {
     snapshot("study-lengths-short-back", appearance: .light)
     rateGood(app, next: Self.long.0)
 
-    // AC 6 + 9: Westphalia.
+    // AC 6 + 9: Westphalia (3+ lines, layout D: a block as wide as its widest line, centred in the column).
     let lead = card.frame.minX
-    XCTAssertEqual(front.frame.minX, lead, accuracy: 1, "long front not at the card's leading edge: \(front.frame) in \(card.frame)")
+    XCTAssertEqual(front.frame.midX, card.frame.midX, accuracy: 1, "long front block not centred: \(front.frame) in \(card.frame)")
     XCTAssertGreaterThan(front.frame.width, card.frame.width * 0.8, "long front doesn't span the card: \(front.frame)")
     let before = front.frame
     snapshot("study-lengths-long-front", appearance: .light)
@@ -46,7 +46,9 @@ final class StudyLengthsUITests: XCTestCase {
     XCTAssertEqual(front.frame.minX, before.minX, accuracy: 0.5, "AC 9: front moved on reveal \(before) → \(front.frame)")
     XCTAssertEqual(front.frame.minY, before.minY, accuracy: 0.5, "AC 9: front moved on reveal \(before) → \(front.frame)")
     XCTAssertEqual(front.frame.size, before.size, "AC 9: front resized on reveal \(before) → \(front.frame)")
-    XCTAssertEqual(back.frame.minX, lead, accuracy: 1, "short answer under a long question not leading: \(back.frame) in \(card.frame)")
+    // Layout D: the short answer under a leading question starts at the question's left edge, inside its width.
+    XCTAssertEqual(back.frame.minX, front.frame.minX, accuracy: 1, "short answer not at the long question's left edge: \(back.frame) vs \(front.frame)")
+    XCTAssertLessThanOrEqual(back.frame.maxX, front.frame.maxX + 6, "answer wider than the question: \(back.frame) vs \(front.frame)")
     XCTAssertGreaterThanOrEqual(back.frame.minY, front.frame.maxY - 1, "back not below front")
     snapshot("study-lengths-long-back", appearance: .light)
     rateGood(app, next: Self.shortQ)
@@ -101,7 +103,8 @@ final class StudyLengthsUITests: XCTestCase {
       XCTAssertTrue(el(app, id).waitFor(timeout: 3), "\(id) missing on the very long card")
       assertSameFrame(el(app, id).frame, frame, id)
     }
-    XCTAssertEqual(front.frame.minX, card.frame.minX, accuracy: 1, "very long front not leading")
+    XCTAssertEqual(front.frame.midX, card.frame.midX, accuracy: 1, "very long front block not centred")
+    XCTAssertGreaterThan(front.frame.width, card.frame.width * 0.9, "very long front doesn't fill the column")
     snapshot("study-lengths-verylong-front", appearance: .light)
     reveal(app, nil)
     for (id, frame) in zip(rates, shortRates) { assertSameFrame(el(app, id).frame, frame, id) }
@@ -170,12 +173,13 @@ final class StudyLengthsUITests: XCTestCase {
     XCTAssertTrue(app.keyboards.firstMatch.waitFor(timeout: 5), "no keyboard")
     Thread.sleep(forTimeInterval: 0.6)
     XCTAssertEqual(field.frame.minX, text.minX, accuracy: 1, "frontField leading edge \(field.frame) vs text \(text)")
+    XCTAssertEqual(field.frame.width, text.width, accuracy: 1, "frontField width \(field.frame) vs the block \(text)")
     // Not an AC 10 item: the 5-line field measures ~0.5 pt per line taller than the text (noted in the QA report).
     XCTAssertEqual(field.frame.height, text.height, accuracy: 4, "frontField height \(field.frame) vs text \(text)")
     // Starting the edit must not move the answer relative to the question (the keyboard lifts the whole centred
     // stack; the field may be ~2 pt taller than the text, drawn over its slot, not over the answer).
     let offsetBefore = answer.minY - text.minY, offsetEditing = back.frame.minY - field.frame.minY
-    print("QA017 edit start: text \(text) answer \(answer) field \(field.frame) back \(back.frame)")
+    note("QA017 edit start: text \(text) answer \(answer) field \(field.frame) back \(back.frame)")
     XCTAssertEqual(offsetEditing, offsetBefore, accuracy: 0.5,
                    "answer moved relative to the question when the edit started: \(offsetBefore) → \(offsetEditing)")
     XCTAssertEqual(back.frame.height, answer.height, accuracy: 0.5, "study.back resized when the edit started")
@@ -201,6 +205,7 @@ final class StudyLengthsUITests: XCTestCase {
     assertAnswerClear(field, back, "medium draft")
     snapshot("study-lengths-long-editing-medium-draft", appearance: .light)
 
+    note("QA017 before long-word tap: field \(field.frame) text \(text) card \(el(app, "study.card").frame)")
     // A draft that can wrap differently in the field and in a Text (very long words, no break opportunity).
     let longWords = "Pneumonoultramicroscopicsilicovolcanoconiosis, Hippopotomonstrosesquippedaliophobia?"
     replaceText(field, with: longWords, caret: CGVector(dx: 0.99, dy: 0.95))
@@ -328,11 +333,213 @@ final class StudyLengthsUITests: XCTestCase {
     waitForLabel(front, "Second " + paragraph)
     Thread.sleep(forTimeInterval: 0.5)
     XCTAssertEqual(front.frame.minY, topBefore, accuracy: 0.5, "next card didn't open at the top: \(front.frame), first card top \(topBefore)")
-    XCTAssertEqual(front.frame.minX, card.frame.minX, accuracy: 1)
+    XCTAssertEqual(front.frame.midX, card.frame.midX, accuracy: 1, "next long front block not centred")
     snapshot("study-lengths-overflow-next", appearance: .light)
   }
 
+  // MARK: - Layout D (default): a wide question's width is the answer's column
+
+  static let longAnswer = "About 299,792 kilometres per second in a vacuum, the fastest that anything can travel, "
+    + "and the same for every observer whatever their speed."
+
+  /// AC 6, 7, 9, 10 under layout D. Each card: the question's frame is the same before and after reveal; under a
+  /// wide question (wraps, or one line ≥ 85 % of the column) the answer stays inside the question's width (a
+  /// leading answer starts at its left edge); under a short one-line question the answer uses the column (layout A).
+  /// Widths measured with SF Pro: "Speed of light (km/s)?" one line ≈ 89 %, "Photosynthesis" ≈ 63 %,
+  /// the two medium questions wrap to 2 lines.
+  @MainActor
+  func testStudyLengths_layoutD() throws {
+    continueAfterFailure = true
+    let cards: [(front: String, back: String, wide: Bool, leadingBack: Bool)] = [
+      ("Which river flows through Paris?", "The Seine", true, false),          // 2 lines + 1 line
+      ("Speed of light (km/s)?", Self.longAnswer, true, true),                  // ≥ 85 % one line + 3+ lines
+      ("Who composed The Magic Flute?", Self.longAnswer, true, true),           // 2 lines + 3+ lines
+      ("Speed of light (km/s)?", "299,792", true, false),                       // ≥ 85 % one line + 1 line
+      ("Photosynthesis", Self.longAnswer, false, true),                         // short + 3+ lines (layout A)
+    ]
+    let base = Date(timeIntervalSince1970: 1_767_225_600)
+    let stub = cards.enumerated().map { i, c in
+      StubDeck.Card(id: "EEEEEEE\(i)-0000-0000-0000-00000000000\(i)", front: c.front, back: c.back,
+                    due: base.addingTimeInterval(Double(i) * 60), createdAt: base.addingTimeInterval(Double(i) * 60))
+    }
+    let (server, _) = try startReviewStub(stub)
+    let app = launch(api: .live(server.url))
+    let card = el(app, "study.card"), front = el(app, "study.front"), back = el(app, "study.back")
+    let names = ["2line-short", "wide1line-long", "2line-long", "wide1line-short", "shortq-long"]
+    for (i, c) in cards.enumerated() {
+      waitForLabel(front, c.front)
+      Thread.sleep(forTimeInterval: 0.5)
+      let q = front.frame
+      note("QA017D \(names[i]) card \(card.frame) front \(q) ratio \(q.width / card.frame.width)")
+      XCTAssertEqual(q.midX, card.frame.midX, accuracy: 1, "\(names[i]): question not centred \(q)")
+      snapshot("study-layoutD-\(names[i])-front", appearance: .light)
+      reveal(app, c.back)
+      let a = back.frame
+      note("QA017D \(names[i]) back \(a)")
+      XCTAssertEqual(front.frame, q, "\(names[i]): question moved on reveal \(q) → \(front.frame)")
+      XCTAssertGreaterThanOrEqual(a.minY, q.maxY - 1, "\(names[i]): answer not below the question")
+      if c.wide {
+        XCTAssertGreaterThanOrEqual(a.minX, q.minX - 1, "\(names[i]): answer starts left of the question \(a) vs \(q)")
+        XCTAssertLessThanOrEqual(a.maxX, q.maxX + 6, "\(names[i]): answer wider than the question \(a) vs \(q)")
+        if c.leadingBack {
+          XCTAssertEqual(a.minX, q.minX, accuracy: 1, "\(names[i]): leading answer not at the question's left edge")
+          // Ink, not frames: the answer's first glyph column vs the question's (AC 13: at most 3 pt left of it).
+          let shot = ColorProbe(at3x: XCUIScreen.main.screenshot().image.cgImage!)
+          let qInk = inkMinX(shot, q), aInk = inkMinX(shot, a)
+          note("QA017D \(names[i]) ink left: question \(qInk) answer \(aInk)")
+          XCTAssertGreaterThanOrEqual(aInk, qInk - 3, "\(names[i]): answer ink starts \(qInk - aInk) pt left of the question's")
+        } else {
+          XCTAssertEqual(a.midX, q.midX, accuracy: 1, "\(names[i]): one-line answer not centred under the question")
+        }
+      } else {
+        XCTAssertEqual(a.minX, card.frame.minX, accuracy: 1, "\(names[i]): answer under a short question not at the column edge")
+        XCTAssertGreaterThan(a.width, q.width + 50, "\(names[i]): answer squeezed under a short question \(a) vs \(q)")
+      }
+      snapshot("study-layoutD-\(names[i])-back", appearance: .light)
+      if i == 2 {  // inline edit of the answer keeps the answer's column (the question's width)
+        back.doubleTap()
+        let field = el(app, "study.backField")
+        XCTAssertTrue(field.waitFor(timeout: 5), "backField missing")
+        Thread.sleep(forTimeInterval: 0.6)
+        note("QA017D edit back \(field.frame) vs \(a)")
+        XCTAssertEqual(field.frame.minX, a.minX, accuracy: 1, "backField left edge \(field.frame) vs answer \(a)")
+        // The field takes the answer's column (the question's widest line incl. its break space), so it may be a few
+        // points wider than the Text's own frame, never wider than the question (+ the ~7 pt break space).
+        XCTAssertGreaterThanOrEqual(field.frame.width, a.width - 1, "backField narrower than the answer \(field.frame) vs \(a)")
+        XCTAssertLessThanOrEqual(field.frame.maxX, q.maxX + 7, "backField wider than the question \(field.frame) vs \(q)")
+        XCTAssertEqual(field.frame.height, a.height, accuracy: 1, "backField rewraps the answer \(field.frame) vs \(a)")
+        snapshot("study-layoutD-2line-long-editing-back", appearance: .light)
+        field.typeText("\n")
+        waitForAbsence(field)
+        Thread.sleep(forTimeInterval: 0.4)
+      }
+      if i + 1 < cards.count { el(app, "study.rate.good").tap() }
+    }
+    server.stop()
+  }
+
+  // MARK: - Scroll indicator: flashes on reveal only
+
+  /// A short question whose hidden long answer overflows the card shows no scroll bar as it comes in: after an
+  /// Easy drag, after the Got it button, after rating a scrolled card. Revealing a long card still flashes it
+  /// (the control proving the detector sees the bar). Bar = changed pixels in the card's right 8 pt strip versus
+  /// a settled screenshot taken 3 s later.
+  @MainActor
+  func testStudyLengths_scrollBarOnRevealOnly() throws {
+    continueAfterFailure = true
+    let essay = String(repeating: "Chlorophyll absorbs red and blue light and reflects green, which is why leaves look green. ",
+                       count: 16).trimmingCharacters(in: .whitespaces)
+    let fronts = ["la mer", "Chlorophyll 1", "Chlorophyll 2", "Chlorophyll 3"]
+    let backs = ["the sea", essay, essay, essay]
+    let base = Date(timeIntervalSince1970: 1_767_225_600)
+    let stub = fronts.indices.map { i in
+      StubDeck.Card(id: "FFFFFFF\(i)-0000-0000-0000-00000000000\(i)", front: fronts[i], back: backs[i],
+                    due: base.addingTimeInterval(Double(i) * 60), createdAt: base.addingTimeInterval(Double(i) * 60))
+    }
+    let (server, _) = try startReviewStub(stub)
+    let app = launch(api: .live(server.url))
+    let front = el(app, "study.front")
+    waitForLabel(front, fronts[0])
+    Thread.sleep(forTimeInterval: 0.5)
+    let area = app.scrollViews.matching(identifier: "study.card").firstMatch.frame
+    let strip = CGRect(x: area.maxX - 8, y: area.minY + 4, width: 7.5, height: area.height - 8)
+    note("QA017S card \(area) strip \(strip)")
+
+    // 1. Easy drag on the revealed short card → Chlorophyll 1.
+    reveal(app, backs[0])
+    var bar = barPoints(app, strip, "easy-next") {
+      let card = el(app, "study.card"), w = card.frame.width
+      let start = card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+      start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0.22 * w, dy: 0)))
+    }
+    waitForLabel(front, fronts[1])
+    XCTAssertEqual(bar, 0, "scroll bar shown as the next card came in after an Easy drag")
+    snapshot("study-scrollbar-after-easy", appearance: .light)
+
+    // 2. Control: reveal the long answer → the bar flashes.
+    bar = barPoints(app, strip, "reveal") { el(app, "study.reveal").tap() }
+    XCTAssertGreaterThan(bar, 40, "no scroll bar flash on revealing a long card (detector blind?)")
+    Thread.sleep(forTimeInterval: 0.3)
+
+    // 3. Got it button (unscrolled) → Chlorophyll 2.
+    bar = barPoints(app, strip, "gotit-next") { el(app, "study.rate.good").tap() }
+    waitForLabel(front, fronts[2])
+    XCTAssertEqual(bar, 0, "scroll bar shown as the next card came in after Got it")
+    snapshot("study-scrollbar-after-gotit", appearance: .light)
+
+    // 4. Reveal, scroll down, Got it → Chlorophyll 3.
+    reveal(app, nil)
+    dragUp(app, on: front)
+    dragUp(app, on: el(app, "study.back"))
+    XCTAssertEqual(front.label, fronts[2], "a scroll drag rated the card")
+    Thread.sleep(forTimeInterval: 2.5)  // the scroll's own indicator fades before the next card
+    bar = barPoints(app, strip, "scrolled-next") { el(app, "study.rate.good").tap() }
+    waitForLabel(front, fronts[3])
+    XCTAssertEqual(bar, 0, "scroll bar shown as the next card came in after a scrolled card")
+    snapshot("study-scrollbar-after-scrolled", appearance: .light)
+    server.stop()
+  }
+
+  /// Most changed points in `strip` over frames taken after `action` returns, versus a screenshot 3 s later.
+  @MainActor
+  private func barPoints(_ app: XCUIApplication, _ strip: CGRect, _ name: String, _ action: () -> Void) -> Int {
+    var released: TimeInterval = 0
+    let start = Date()
+    let frames = captureFrames(during: 1.6) {
+      action()
+      released = Date().timeIntervalSince(start)
+    }
+    Thread.sleep(forTimeInterval: 3)
+    let settled = XCUIScreen.main.screenshot().pngRepresentation
+    let image = { (png: Data) -> CGImage? in
+      guard let p = CGDataProvider(data: png as CFData) else { return nil }
+      return CGImage(pngDataProviderSource: p, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+    let base = image(settled)
+    var worst = 0, worstFrame: (t: TimeInterval, png: Data)?
+    for f in frames where f.t > released {
+      let n = changedPoints(image(f.png), base, in: strip)
+      if n > worst { worst = n; worstFrame = f }
+    }
+    note("QA017S \(name): released +\(released) s, \(frames.count) frames, worst \(worst) points")
+    if let worstFrame { attach([worstFrame], "study-scrollbar-\(name)-worst") }
+    return worst
+  }
+
+  private func startReviewStub(_ cards: [StubDeck.Card]) throws -> (StubAPIServer, StubDeck) {
+    let deck = StubDeck(cards)
+    let server = StubAPIServer { request in
+      let route = StubDeck.route(request.path)
+      guard request.method == "POST", route.hasSuffix("/review") else { return deck.handle(request) }
+      let id = String(route.dropFirst("/cards/".count).dropLast("/review".count))
+      guard let card = deck.cards.first(where: { $0.id.lowercased() == id.lowercased() }) else {
+        return .init(status: 404, body: "{}")
+      }
+      deck.remove(id: id)
+      return .init(body: StubDeck.json(card))
+    }
+    try server.start()
+    return (server, deck)
+  }
+
   // MARK: - Helpers
+
+  /// Leftmost x (pt, 1/3 pt steps) in `rect` whose colour is far from the rect's top-left corner (the background).
+  private func inkMinX(_ probe: ColorProbe, _ rect: CGRect) -> CGFloat {
+    let bg = probe.color(at: CGPoint(x: rect.minX - 8, y: rect.minY))
+    for x in stride(from: rect.minX - 8, to: rect.maxX, by: 1.0 / 3) {
+      for y in stride(from: rect.minY, to: rect.maxY, by: 1.0 / 3) where probe.color(at: CGPoint(x: x, y: y)).distance(to: bg) > 60 {
+        return x
+      }
+    }
+    return .infinity
+  }
+
+  /// A line in the console and in the result bundle's activity log (merged split bundles keep no console log).
+  private func note(_ line: String) {
+    print(line)
+    XCTContext.runActivity(named: line) { _ in }
+  }
 
   @MainActor
   private func reveal(_ app: XCUIApplication, _ back: String?, file: StaticString = #filePath, line: UInt = #line) {
@@ -377,7 +584,7 @@ final class StudyLengthsUITests: XCTestCase {
   private func assertAnswerClear(_ field: XCUIElement, _ back: XCUIElement, _ what: String,
                                  file: StaticString = #filePath, line: UInt = #line) {
     let f = field.frame, b = back.frame
-    print("QA017 \(what): field \(f) back \(b) gap \(b.minY - f.maxY)")
+    note("QA017 \(what): field \(f) back \(b) gap \(b.minY - f.maxY)")
     XCTAssertTrue(back.exists, "study.back hidden while editing (\(what))", file: file, line: line)
     XCTAssertLessThanOrEqual(f.maxY, b.minY, "frontField \(f) overlaps study.back \(b) (\(what))", file: file, line: line)
   }

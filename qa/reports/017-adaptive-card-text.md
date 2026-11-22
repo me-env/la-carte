@@ -4,6 +4,72 @@ Verdict: PASS (re-validation of fix `30a7d0a`; the first run's FAIL on AC 11 is 
 Date: 2026-11-22 · Simulator: iPhone 17 Pro / iOS 27 · light mode (spec: one simulator, light)
 Build: `30a7d0a` (rebased on main incl. spec 018) on `worktree-agent-af2975cb0d52400eb`
 
+## Addendum: layout D + scroll-bar flash (branch `worktree-agent-aa790f7910fc56c74`, rebased on main `5f30a22`)
+Verdict: **FAIL** (1 bug: a leading answer overhangs a centred wrapped question by 3.3 pt). Scroll-bar fix: PASS.
+Date: 2026-11-22 · iPhone 17 Pro / iOS 27 · light · commits `f9daa19` (scroll flash), `bf0c591`/`97bc1ce` (alignment by lines, layout D default)
+
+Runs (all in `qa/screenshots/`):
+- `017D-mock/` StudyLengthsUITests + StudyUITests + StudyEditUITests, `--split 3 --wait`: **21 passed, 0 failed, 3 skipped**
+  (built before the ink check below was added)
+- `017D-mock-b/` layoutD (with ink check) + inline edit + scroll bar: layoutD **failed** on the ink check (bug A), others passed
+- `017D-lengths-mock/`, `-b/`, `-c/` iterations (`017D-lengths-mock-c/` has the full layout-D frame log)
+
+New tests: `testStudyLengths_layoutD` (stub deck, 5 cards), `testStudyLengths_scrollBarOnRevealOnly`. Updated for D:
+`alignmentByLength` (Westphalia block centred, answer at its left edge, inside its width), `veryLongCardChromeScrollAndFade` and
+`overflowingCardScrollsAndNextOpensAtTop` (long front block centred), `inlineEditLongFront` (field width = block width).
+
+### (1) Scroll bar flashes on reveal only: PASS
+Detector: changed pixels in the card scroll view's right 8 pt strip (378–385.5 × 126–760 pt) in every frame captured after
+the action returns (~10 fps, 1.6 s), versus a settled screenshot 3 s later. Card = "Chlorophyll N" (short question) with a
+~1,450-char hidden answer that overflows the card.
+| transition | worst frame | evidence |
+|---|---|---|
+| Easy drag (+0.22 w) on "la mer" → Chlorophyll 1 | 0 points | `017D-mock/study-scrollbar-after-easy-light.png` |
+| control: reveal Chlorophyll 1 | **5463 points** (bar flashes) | `017D-mock/study-scrollbar-reveal-worst-00-0976ms-light.png` |
+| Got it button → Chlorophyll 2 | 0 points | `017D-mock/study-scrollbar-after-gotit-light.png` |
+| reveal, scroll down, Got it → Chlorophyll 3 | 0 points | `017D-mock/study-scrollbar-after-scrolled-light.png` |
+Same numbers in `017D-mock-b` and `017D-lengths-mock`.
+
+### (2) Layout D on device
+Frames (pt, card column 16–386, 370 wide) from `017D-lengths-mock-c`; pixels with `screen-sample.py`:
+| card | question frame | answer frame | question pixels before/after reveal (`compare`, 0.34 pt) | result |
+|---|---|---|---|---|
+| "Which river flows through Paris?" (2 lines) / "The Seine" | 91.2–310.8, centred | 153.5–248.5, midX = question midX | 0 pt | PASS |
+| "Speed of light (km/s)?" (1 line, 89 %) / 5-line answer | 36.2–365.8 | 36.2–358.2; ink 36.8 vs question 37.5 | 0 pt | PASS |
+| "Who composed The Magic Flute?" (2 lines, centred) / 5-line answer | 73–329 | 73–322; **ink 73.3 vs question 76.7** | 0 pt | **FAIL (bug A)** |
+| "Speed of light (km/s)?" / "299,792" | 36.2–365.8 | centred on the question | 0 pt | PASS |
+| "Photosynthesis" (1 line, 63 %) / 5-line answer | 84.8–317.2 | 16–386 (column, layout A) | 0 pt | PASS (short question unaffected) |
+| Westphalia (4 lines, leading) / "The Peace of Westphalia" | ink 16.3–384.3 | ink starts 16.7 | 0 pt (`017D-mock/study-lengths-long-*`) | PASS (shared left edge) |
+| "la mer", "mitochondria", medium "capital of Australia" | centred, as before | as before | — | PASS |
+Every question frame is identical before and after reveal (XCUI frame equality + pixel compare).
+
+### (3) Inline edit keeps the block width: PASS
+- Westphalia front: `study.frontField` = 16, 370 wide, same as `study.front` (±1 pt).
+- Answer under the 2-line Magic Flute question: `study.backField` 73–329 (256 pt, the question's column incl. its break space)
+  vs `study.back` 73–322 (249 pt): same left edge, same height (128.3 pt, no rewrap), within the question
+  (`017D-lengths-mock-c/study-layoutD-2line-long-editing-back-light.png`, lines break as in `…-2line-long-back-light.png`).
+
+### Bugs
+A. **Leading answer overhangs a centred, wrapped question by 3.3 pt (layout D).** Stub card "Who composed The Magic Flute?" /
+   "About 299,792 kilometres per second in a vacuum, the fastest that anything can travel, and the same for every observer
+   whatever their speed." on iPhone 17 Pro, light, reveal. The question wraps to 2 centred lines; its column is measured
+   with the break space ("Who composed The ", 256 pt), so the frame is 73–329 but the centred line's ink is 76.7–324.7
+   (the trailing space is not drawn, so the line sits ~3.5 pt right of the frame's left edge). The leading answer starts at
+   the frame (ink 73.3), 3.3 pt left of the question's first glyph: visible as an overhang
+   (`017D-lengths-mock-c/study-layoutD-2line-long-back-light.png`, crop x 60–140 pt, y 330–470 pt), and past AC 13's 3 pt.
+   A leading (3+ line) question doesn't have this (Westphalia: 16.3 vs 16.7), nor a one-line wide question (37.5 vs 36.8).
+   Expected: the answer's left edge = the centred question's widest line's drawn left edge (measure the widest line without
+   its trailing break space, or align to the drawn line). Repro: `scripts/ios-ui-test.sh 017D-x
+   -only-testing:LaCarteUITests/StudyLengthsUITests/testStudyLengths_layoutD` (fails on "answer ink starts 3.33 pt left").
+
+### Notes
+- `testStudyLengths_inlineEditLongFront` failed 2 of 5 runs (passed in `017D-mock`, `-c`, `-b`): after the medium draft, the
+  tap at (0.99, 0.95) of the one-line `study.frontField` (16–386 × 259.7–292 pt) to place the caret ended the edit, so the
+  long-word draft step found no field. Frames are the same in passing and failing runs; recording
+  `017D-lengths-mock/recordings/testStudyLengths_inlineEditLongFront.mp4` ~18.5 s. Not tied to layout D as far as I can
+  tell (that field is full-column like before); worth a look if it shows up again.
+- Spec 017 UI checks for AC 6, 7, 10 and 13 updated to the rendered-line rule and layout D.
+
 ## Re-validation (fix `30a7d0a`)
 Runs:
 - `qa/screenshots/017b-mock/` very long card + fade (AC 8, 11): passed
