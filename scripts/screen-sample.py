@@ -14,6 +14,9 @@
     uv run scripts/screen-sample.py diff     <A> <B>          # A, B: hex | png@x,y | png@x0,y0,x1,y1
     uv run scripts/screen-sample.py contrast <png> x0,y0,x1,y1 [--min 4.5]   # exit 1 below --min
     uv run scripts/screen-sample.py gap      <png> x0,y0,x1,y1 --fg HEX --bg HEX [--tol 10]
+    uv run scripts/screen-sample.py bbox     <png> x0,y0,x1,y1 [--bg HEX] [--tol 24]
+    uv run scripts/screen-sample.py bands    <png> x0,y0,x1,y1 [--bg HEX] [--tol 24] [--axis y|x] [--min-gap PT]
+    uv run scripts/screen-sample.py compare  <A.png> <B.png> x0,y0,x1,y1 [bands options] [--max-offset PT]
     uv run scripts/screen-sample.py --selftest
 
 Coordinates are in points. The scale comes from the image width (1206 -> 3, 804 -> 2, 402 -> 1); other
@@ -29,6 +32,15 @@ All colour maths (ΔE2000, WCAG 2.1 contrast) is coloraide's.
 - gap: minimum distance (points) between pixels within ΔE2000 `tol` of fg and pixels within `tol` of bg.
   Anti-aliased edges blend through mid colours: when bg is a mid-grey near the fg's edge blend, use a small
   `--tol` (e.g. 0.5) or a gap of 1 px may just be fg's own edge pixel.
+- bbox: bounding box of the ink in the region. Ink = pixel whose largest per-channel |Δ| (0-255) from the
+  background exceeds `--tol` (default 24); background = `--bg`, else the region's commonest colour. Boxes are
+  in image points, end exclusive (x1 = last ink pixel + 1 px).
+- bands: runs of rows (`--axis y`, text lines) or columns (`--axis x`) that contain ink: start, end, size and
+  gap to the previous band, in points. Bands closer than `--min-gap` points (default 0) are merged, so
+  accents and descenders don't split a line (e.g. `--min-gap 4`).
+- compare: bbox and bands of the same region in A and B (each its own background unless `--bg`), and B - A:
+  bbox dx/dy/dw/dh, band counts, per-band dy (paired in order; flagged when the counts differ). Exit 1 only
+  with `--max-offset PT` when an offset exceeds it, the band counts differ, or ink is in only one image.
 
 `--json` (before or after the subcommand) prints one JSON object, e.g.:
     at       {"scale": 3, "points": [{"x": 70, "y": 370, "hex": "#1C1C1C"}]}
@@ -39,6 +51,13 @@ All colour maths (ΔE2000, WCAG 2.1 contrast) is coloraide's.
               "aa": true, "aaa": true, "min": 4.5, "pass": true}
     gap      {"scale": 3, "rect": [...], "fg": "#B8325A", "bg": "#1C1C1C", "tol": 10, "fg_pixels": 1200,
               "bg_pixels": 3400, "gap_pt": 4.33, "gap_px": 13.0}     # gap_pt null when a mask is empty
+    bbox     {"scale": 3, "rect": [...], "background": "#F9FAF5", "tol": 24, "ink_pixels": 5120,
+              "box": [24.0, 148.0, 378.0, 190.33], "width": 354.0, "height": 42.33}   # box null: no ink
+    bands    {"scale": 3, "rect": [...], "background": "#F9FAF5", "tol": 24, "axis": "y", "min_gap": 0,
+              "bands": [{"start": 148.0, "end": 166.33, "size": 18.33, "gap": null}, ...]}
+    compare  {"scale": 3, "rect": [...], "a": {bbox + bands}, "b": {...}, "bbox_delta": [dx, dy, dw, dh],
+              "band_counts": [2, 2], "band_dy": [1.33, 1.33], "counts_differ": false, "max_offset": 1.33,
+              "limit": null, "pass": true}
 """
 
 import argparse
@@ -105,13 +124,18 @@ def nums(s: str, n: int) -> list[float]:
     return [float(p) for p in parts]
 
 
-def crop(img: np.ndarray, rect: list[float], scale: float) -> np.ndarray:
+def px_rect(img: np.ndarray, rect: list[float], scale: float) -> tuple[int, int, int, int]:
     x0, y0, x1, y1 = (int(round(v * scale)) for v in rect)
     h, w = img.shape[:2]
     x0, x1 = sorted((max(0, min(w, x0)), max(0, min(w, x1))))
     y0, y1 = sorted((max(0, min(h, y0)), max(0, min(h, y1))))
     if x1 <= x0 or y1 <= y0:
         sys.exit(f"empty region {rect} (image is {w}x{h}px, scale {scale})")
+    return x0, y0, x1, y1
+
+
+def crop(img: np.ndarray, rect: list[float], scale: float) -> np.ndarray:
+    x0, y0, x1, y1 = px_rect(img, rect, scale)
     return img[y0:y1, x0:x1]
 
 
@@ -203,6 +227,82 @@ def min_gap(pixels: np.ndarray, fg, bg, tol: float) -> dict:
     return result
 
 
+def ink_mask(pixels: np.ndarray, bg, tol: float) -> tuple[np.ndarray, tuple]:
+    """Ink = largest per-channel |Δ| (0-255) from bg above tol; bg None = the commonest colour."""
+    if bg is None:
+        rgbs, n, _ = counts(pixels)
+        bg = tuple(int(c) for c in rgbs[np.argmax(n)])
+    return np.abs(pixels - np.array(bg)).max(axis=2) > tol, bg
+
+
+def pt(px: float, scale: float) -> float:
+    return round(float(px) / scale, 2)
+
+
+def ink_bbox(mask: np.ndarray, origin: tuple[int, int], scale: float) -> dict:
+    """origin = the region's top-left pixel in the image, so the box is in image points."""
+    result = {"ink_pixels": int(mask.sum()), "box": None, "width": None, "height": None}
+    if result["ink_pixels"]:
+        ys, xs = np.nonzero(mask.any(axis=1))[0], np.nonzero(mask.any(axis=0))[0]
+        x0, y0 = origin[0] + xs[0], origin[1] + ys[0]
+        x1, y1 = origin[0] + xs[-1] + 1, origin[1] + ys[-1] + 1
+        result |= {"box": [pt(v, scale) for v in (x0, y0, x1, y1)],
+                   "width": pt(x1 - x0, scale), "height": pt(y1 - y0, scale)}
+    return result
+
+
+def ink_bands(mask: np.ndarray, origin: tuple[int, int], scale: float, axis: str, min_gap: float) -> list[dict]:
+    lines = mask.any(axis=1 if axis == "y" else 0)
+    start = origin[1] if axis == "y" else origin[0]
+    edges = np.diff(np.concatenate([[0], lines.astype(np.int8), [0]]))
+    runs: list[list[int]] = []
+    for a, b in zip(np.nonzero(edges == 1)[0], np.nonzero(edges == -1)[0]):
+        if runs and a - runs[-1][1] < min_gap * scale:
+            runs[-1][1] = int(b)
+        else:
+            runs.append([int(a), int(b)])
+    bands, prev = [], None
+    for a, b in runs:
+        bands.append({"start": pt(start + a, scale), "end": pt(start + b, scale), "size": pt(b - a, scale),
+                      "gap": None if prev is None else pt(a - prev, scale)})
+        prev = b
+    return bands
+
+
+def measure(img: np.ndarray, rect: list[float], scale: float, args) -> dict:
+    x0, y0, x1, y1 = px_rect(img, rect, scale)
+    mask, bg = ink_mask(img[y0:y1, x0:x1], args.bg, args.tol)
+    return ({"background": hex_of(bg), "tol": args.tol} | ink_bbox(mask, (x0, y0), scale) |
+            {"axis": args.axis, "min_gap": args.min_gap,
+             "bands": ink_bands(mask, (x0, y0), scale, args.axis, args.min_gap)})
+
+
+def offsets(a: dict, b: dict, limit: float | None) -> dict:
+    """B - A for two `measure` results."""
+    delta = None
+    if a["box"] and b["box"]:
+        delta = [round(b["box"][0] - a["box"][0], 2), round(b["box"][1] - a["box"][1], 2),
+                 round(b["width"] - a["width"], 2), round(b["height"] - a["height"], 2)]
+    band_dy = [round(y["start"] - x["start"], 2) for x, y in zip(a["bands"], b["bands"])]
+    differ = len(a["bands"]) != len(b["bands"])
+    worst = max(map(abs, (delta or []) + band_dy), default=0.0)
+    ok = limit is None or (worst <= limit and not differ and (a["box"] is None) == (b["box"] is None))
+    return {"bbox_delta": delta, "band_counts": [len(a["bands"]), len(b["bands"])], "band_dy": band_dy,
+            "counts_differ": differ, "max_offset": worst, "limit": limit, "pass": ok}
+
+
+def bbox_line(r: dict) -> str:
+    if r["box"] is None:
+        return f"no ink (bg {r['background']}, tol {r['tol']:g})"
+    return (f"ink box {', '.join(f'{v:g}' for v in r['box'])}  ({r['width']:g} x {r['height']:g} pt, "
+            f"{r['ink_pixels']} ink px; bg {r['background']}, tol {r['tol']:g})")
+
+
+def band_lines(r: dict) -> list[str]:
+    return [f"  {r['axis']} {b['start']:g}-{b['end']:g}  size {b['size']:g}" +
+            ("" if b["gap"] is None else f"  gap {b['gap']:g}") for b in r["bands"]]
+
+
 # --- CLI ---------------------------------------------------------------------------------------------
 
 def colour_spec(spec: str, args) -> tuple:
@@ -221,6 +321,25 @@ def show(result: dict, as_json: bool, lines: list[str]) -> None:
 
 
 def run(args) -> int:
+    if args.cmd == "compare":
+        img_a, img_b = load(args.a), load(args.png)
+        scale = scale_for(img_a, args)
+        if img_a.shape != img_b.shape:
+            sys.exit(f"A is {img_a.shape[1]}x{img_a.shape[0]}px, B {img_b.shape[1]}x{img_b.shape[0]}px: "
+                     "compare needs the same size")
+        rect = nums(args.rect, 4)
+        a, b = measure(img_a, rect, scale, args), measure(img_b, rect, scale, args)
+        r = offsets(a, b, args.max_offset)
+        dy = ", ".join(f"{v:+g}" for v in r["band_dy"]) or "-"
+        show({"scale": scale, "rect": rect, "a": a, "b": b} | r, args.json, [
+            f"A {bbox_line(a)}", f"B {bbox_line(b)}",
+            "bbox B - A: " + ("n/a (no ink in one image)" if r["bbox_delta"] is None else
+                              "dx {:+g} dy {:+g} dw {:+g} dh {:+g} pt".format(*r["bbox_delta"])),
+            f"bands A {r['band_counts'][0]}, B {r['band_counts'][1]}"
+            + (" (COUNTS DIFFER: dy paired in order)" if r["counts_differ"] else "") + f"; band dy {dy} pt",
+            f"max offset {r['max_offset']:g} pt" + ("" if r["limit"] is None else
+                                                      f" (limit {r['limit']:g}: {'pass' if r['pass'] else 'FAIL'})")])
+        return 0 if r["pass"] else 1
     if args.cmd == "diff":
         r = compare(colour_spec(args.a, args), colour_spec(args.b, args))
         show(r, args.json, [(f"{r['a']} vs {r['b']}: ΔE2000 {r['delta_e']}, contrast {r['contrast']}:1, "
@@ -240,6 +359,16 @@ def run(args) -> int:
         show(head | r, args.json, [
             f"mean {r['mean']}  stdev {r['stdev']}  max ΔE2000 {r['max_delta_e']}  ({r['pixels']} px)",
             "top " + ", ".join(f"{t['hex']} {t['share']:.1%}" for t in r["top"])])
+        return 0
+    if args.cmd in ("bbox", "bands"):
+        r = measure(img, rect, scale, args)
+        if args.cmd == "bbox":
+            r = {k: r[k] for k in ("background", "tol", "ink_pixels", "box", "width", "height")}
+            show(head | r, args.json, [bbox_line(r)])
+        else:
+            r = {k: r[k] for k in ("background", "tol", "axis", "min_gap", "bands")}
+            title = f"{len(r['bands'])} bands (bg {r['background']}, tol {r['tol']:g}, min gap {r['min_gap']:g} pt)"
+            show(head | r, args.json, [title, *band_lines(r)])
         return 0
     if args.cmd == "contrast":
         r = text_contrast(pixels, args.min)
@@ -281,6 +410,39 @@ def selftest() -> int:
     g = min_gap(img, accent, ink, 10)
     checks.append(("gap 11 px between centres", g["gap_px"] == 11.0))
     checks.append(("gap empty mask", min_gap(img, (0, 255, 0), ink, 10)["gap_px"] is None))
+    # bbox / bands / compare: two "lines" of text, B shifted down 2 px (and the second line 1 px wider)
+    page = np.empty((80, 60, 3), dtype=np.int64)
+    page[:] = bg
+    page[10:16, 5:40] = ink
+    page[17:18, 8:9] = ink            # "descender" 1 px below line 1
+    page[30:36, 5:50] = ink
+    page[20:22, 52:54] = (0xEE, 0xEF, 0xEA)  # faint smudge: Δ 11 < tol 24, not ink
+    shifted = np.empty_like(page)
+    shifted[:] = bg
+    shifted[12:38] = page[10:36]
+    shifted[32:38, 50] = ink
+    opts = argparse.Namespace(bg=None, tol=24.0, axis="y", min_gap=0.0)
+    ma, mb = measure(page, [0, 0, 60, 80], 1, opts), measure(shifted, [0, 0, 60, 80], 1, opts)
+    checks += [("bbox box and size", ma["box"] == [5, 10, 50, 36] and (ma["width"], ma["height"]) == (45, 26)),
+               ("bbox background commonest", ma["background"] == "#F9FAF5"),
+               ("bbox ink pixel count", ma["ink_pixels"] == 6 * 35 + 1 + 6 * 45),
+               ("bbox scaled to points", measure(page, [0, 0, 30, 40], 2, opts)["box"] == [2.5, 5, 25, 18]),
+               ("bbox no ink", measure(page, [0, 50, 60, 80], 1, opts)["box"] is None),
+               ("bands split by descender gap",
+                [(b["start"], b["end"]) for b in ma["bands"]] == [(10, 16), (17, 18), (30, 36)]),
+               ("bands gap to previous", [b["gap"] for b in ma["bands"]] == [None, 1, 12])]
+    merged = measure(page, [0, 0, 60, 80], 1, argparse.Namespace(bg=None, tol=24.0, axis="y", min_gap=2.0))
+    checks.append(("bands --min-gap merges", [(b["start"], b["end"], b["gap"]) for b in merged["bands"]]
+                   == [(10, 18, None), (30, 36, 12)]))
+    cols = measure(page, [0, 0, 60, 80], 1, argparse.Namespace(bg=bg, tol=24.0, axis="x", min_gap=0.0))
+    checks.append(("bands --axis x", [(b["start"], b["end"]) for b in cols["bands"]] == [(5, 50)]))
+    o = offsets(ma, mb, 1)
+    checks += [("compare bbox delta", o["bbox_delta"] == [0, 2, 1, 0]),
+               ("compare band dy", o["band_dy"] == [2, 2, 2] and not o["counts_differ"]),
+               ("compare limit 1 fails, 2 passes", not o["pass"] and offsets(ma, mb, 2)["pass"]),
+               ("compare same passes at 0", offsets(ma, ma, 0)["pass"] and offsets(ma, ma, 0)["max_offset"] == 0),
+               ("compare counts differ fails", offsets(ma, merged, 100)["counts_differ"]
+                and not offsets(ma, merged, 100)["pass"] and offsets(ma, merged, None)["pass"])]
     for name, ok in checks:
         print(f"{'ok  ' if ok else 'FAIL'} {name}")
     return 0 if all(ok for _, ok in checks) else 1
@@ -302,15 +464,28 @@ def main() -> int:
     p = sub.add_parser("gap", parents=[common]); p.add_argument("png"); p.add_argument("rect")
     p.add_argument("--fg", required=True); p.add_argument("--bg", required=True)
     p.add_argument("--tol", type=float, default=10)
+    ink = argparse.ArgumentParser(add_help=False)
+    ink.add_argument("--bg", help="background hex (default: the region's commonest colour)")
+    ink.add_argument("--tol", type=float, default=24, help="ink if max per-channel |Δ| (0-255) from bg > tol")
+    ink.add_argument("--axis", choices=("y", "x"), default="y", help="bands of rows (y) or columns (x)")
+    ink.add_argument("--min-gap", type=float, default=0, help="merge bands closer than this (points)")
+    for name in ("bbox", "bands"):
+        p = sub.add_parser(name, parents=[common, ink]); p.add_argument("png"); p.add_argument("rect")
+    p = sub.add_parser("compare", parents=[common, ink]); p.add_argument("a"); p.add_argument("png", metavar="b")
+    p.add_argument("rect"); p.add_argument("--max-offset", type=float, help="exit 1 if any offset exceeds (pt)")
     args = parser.parse_args()
+    if args.cmd in ("bbox", "bands", "compare") and args.bg is not None:
+        args.bg = parse_hex(args.bg)
     for name, default in (("json", False), ("scale", None), ("px", False)):
         setattr(args, name, getattr(args, name, default))
     if args.selftest:
         return selftest()
     if not args.cmd:
         parser.error("give a subcommand or --selftest")
-    if args.cmd != "diff" and not Path(args.png).is_file():
-        sys.exit(f"no such file: {args.png}")
+    paths = [] if args.cmd == "diff" else [args.png] + ([args.a] if args.cmd == "compare" else [])
+    for path in paths:
+        if not Path(path).is_file():
+            sys.exit(f"no such file: {path}")
     return run(args)
 
 

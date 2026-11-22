@@ -90,6 +90,12 @@ qa/screenshots/<run>/recordings/<test>.mp4   # when Xcode records the run
 `qa/screenshots/` is gitignored; the QA report references the run, and the manager shows the user the key images.
 Colour, contrast and spacing criteria are measured, not eyeballed: QA cites `uv run scripts/screen-sample.py`
 output (`at`, `region`, `diff`, `contrast`, `gap`; coordinates in points) per criterion in `qa/reports/`.
+Layout (ink = max per-channel |Δ| from the region's commonest colour > `--tol 24`):
+```bash
+uv run scripts/screen-sample.py bbox  <png> x0,y0,x1,y1                     # ink bounding box + size (pt)
+uv run scripts/screen-sample.py bands <png> x0,y0,x1,y1 [--min-gap 4]       # text lines: start/end/gap (--axis x: columns)
+uv run scripts/screen-sample.py compare <A> <B> x0,y0,x1,y1 --max-offset 0.34   # B - A offsets; exit 1 if something moved
+```
 Image and video ops (`uv run scripts/image-ops.py --selftest`; same point/scale rules, outputs in `$TMPDIR/image-ops/`):
 ```bash
 uv run scripts/image-ops.py crop <png> x0,y0,x1,y1 --zoom 8                  # pixel-level inspection
