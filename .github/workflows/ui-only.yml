@@ -1,6 +1,6 @@
 name: UI tests (selected)
 # Manual: run only the given UI tests on the CI runner, with recordings and logs (docs/ci-cd.md → Run one test class
-# on CI). Same build (ci/build-ui-tests.sh), boot and warm-up as ci.yml; no deploy.
+# on CI). Same build (ci/build-ui-tests.sh) and boot as ci.yml; no deploy.
 #   gh workflow run ui-only.yml -f tests="LaCarteUITests/DeckUITests" [--ref <branch>]
 
 on:
@@ -50,8 +50,6 @@ jobs:
         run: ci/build-ui-tests.sh "$RUNNER_TEMP/LaCarte.xctestproducts"
       - name: Wait for the simulator
         run: ci/boot-simulator.sh --wait
-      - name: Warm up the app (cold first launch)
-        run: ci/boot-simulator.sh --warm-app "$RUNNER_TEMP/LaCarte.xctestproducts"
       - name: UI tests (selected)
         timeout-minutes: 40
         env:

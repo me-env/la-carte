@@ -40,9 +40,10 @@ Speed settings (measured 2026-11-22, run 45032373007):
   It prints how long each phase took. It also marks the keyboard's "slide to type" intro as shown (in
   `com.apple.keyboard.preferences`, which iOS 26+ reads, and `com.apple.Preferences`): that screen covered the
   first keyboard on CI and swallowed typing.
-- `ci/boot-simulator.sh --warm-app <products>` (step *Warm up the app*, after the boot): installs, launches
-  (mock deck), terminates and uninstalls the built app once, so the first test doesn't pay the cold first launch
-  ("Timed out while launching application via Xcode", after which xcodebuild hung for 49 min).
+- XCTest's cold-launch timeout ("Timed out while launching application via Xcode") is retried once by the
+  UI test helpers (`launch` in `ios/LaCarteUITests/Support.swift`). A pre-test warm-up launch (`--warm-app`,
+  removed) did not prevent it (run 45052223117: `LogoUITests/testLogo_gallery` still timed out) and cost
+  0.6–1.4 min per job.
 - A runner refused by the simulator ("Application failed preflight checks … Busy") is retried once inside
   `scripts/ios-ui-test.sh` (`scripts/_ui-retry.sh`, `CI infra` warning); refused twice prints
   `TESTS: infra failure (…)` and fails. `ci/ui-test.sh` wraps every UI run and only covers prebuilt products
@@ -59,8 +60,8 @@ gh run watch -R me-env/la-carte "$(gh run list -R me-env/la-carte -w ui-only.yml
 gh run download -R me-env/la-carte <run id> -n screenshots-selected -D /tmp/ci-selected
 ```
 `tests` is space-separated `-only-testing` targets (`LaCarteUITests/<Class>` or `LaCarteUITests/<Class>/<test>`).
-One macOS job (`.github/workflows/ui-only.yml`): the same build (`ci/build-ui-tests.sh`), background boot and
-warm-up as `ci.yml`, then only those tests. With `record` (default on) the artifact `screenshots-selected` keeps
+One macOS job (`.github/workflows/ui-only.yml`): the same build (`ci/build-ui-tests.sh`), background boot as
+`ci.yml`, then only those tests. With `record` (default on) the artifact `screenshots-selected` keeps
 every test's recording (`recordings/`) and the runner output (`logs/`). No deploy, no other jobs.
 
 ## Gates

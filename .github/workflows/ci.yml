@@ -102,8 +102,6 @@ jobs:
         run: ci/build-ui-tests.sh "$RUNNER_TEMP/LaCarte.xctestproducts"
       - name: Wait for the simulator
         run: ci/boot-simulator.sh --wait
-      - name: Warm up the app (cold first launch)
-        run: ci/boot-simulator.sh --warm-app "$RUNNER_TEMP/LaCarte.xctestproducts"
       # The smoke set: core flows, light only. Owner of the list: qa-validator (docs/ci-cd.md).
       - name: UI smoke tests (mock deck)
         timeout-minutes: 20  # a hung test must not hold the runner (and main's queue) for 6 h
@@ -203,8 +201,6 @@ jobs:
         run: tar -xf "$RUNNER_TEMP/ui-products.tar" -C "$RUNNER_TEMP"
       - name: Wait for the simulator
         run: ci/boot-simulator.sh --wait
-      - name: Warm up the app (cold first launch)
-        run: ci/boot-simulator.sh --warm-app "$RUNNER_TEMP/LaCarte.xctestproducts"
       - name: UI tests (mock deck, light + dark)
         timeout-minutes: 40  # ≈ 2× a shard; a hung test held run 45037833157 for > 50 min
         env:
@@ -238,8 +234,6 @@ jobs:
         run: tar -xf "$RUNNER_TEMP/ui-products.tar" -C "$RUNNER_TEMP"
       - name: Wait for the simulator
         run: ci/boot-simulator.sh --wait
-      - name: Warm up the app (cold first launch)
-        run: ci/boot-simulator.sh --warm-app "$RUNNER_TEMP/LaCarte.xctestproducts"
       - name: E2E (fresh API + seeded deck)
         timeout-minutes: 30
         env:
