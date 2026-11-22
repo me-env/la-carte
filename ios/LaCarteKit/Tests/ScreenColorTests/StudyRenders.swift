@@ -102,6 +102,7 @@ enum CardLines {
   static let questions = [
     (1, "la mer"),
     (2, "What is the largest planet in the Solar System?"),
+    (2, "Who composed The Magic Flute?"),
     (3, "Which treaty, signed in 1648 in Osnabrück and Münster, ended the Thirty Years' War in Europe?"),
     (5, "Which treaty, signed in 1648 in the cities of Osnabrück and Münster, ended the Thirty Years' War and is "
       + "often cited as the origin of the modern state system?"),

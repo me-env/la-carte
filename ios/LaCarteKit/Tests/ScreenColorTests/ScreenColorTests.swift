@@ -88,10 +88,10 @@ struct ScreenColorTests {
         let bottom = revealed.band(0, 0.85).maxY
         let below = CGRect(x: 0, y: ink.maxY + 1, width: revealed.size.width, height: bottom - ink.maxY - 1)
         let answerInk = try #require(revealed.inkBounds(in: below), "no answer drawn")
-        // Ink, not frames: a glyph's ink starts a little inside its advance, and a wrapped line's measured width keeps
-        // the space it breaks at (measured: up to ~5 pt at 22 pt). Laid out in the full column instead, the answer
-        // would overhang by 10+ pt.
-        #expect(answerInk.minX >= ink.minX - 3 && answerInk.maxX <= ink.maxX + 6,
+        // Ink, not frames: a glyph's ink starts a little inside its advance (side bearings differ by letter). Measured
+        // with the space a wrapped line breaks at, the answer overhung a centred question by ~3.5 pt; laid out in the
+        // full column, by 10+ pt.
+        #expect(answerInk.minX >= ink.minX - 1 && answerInk.maxX <= ink.maxX + 1,
                 "answer wider than the question: \(answerInk) vs \(ink) (answer: \(answer))")
       }
     }

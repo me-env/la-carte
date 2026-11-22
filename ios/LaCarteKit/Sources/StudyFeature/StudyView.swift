@@ -7,6 +7,7 @@ public struct StudyView: View {
   @Bindable var store: StoreOf<StudyFeature>
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @FocusState private var focusedField: StudyFeature.State.Field?
   /// Where the rating drag came down, in the card's coordinates: the dial's center. Visual only.
   @State private var touchDown: CGPoint?
@@ -20,6 +21,10 @@ public struct StudyView: View {
   @State private var revealCount = 0
   /// The edit field's global frame: a touch that starts inside it moves the caret instead of ending the edit.
   @State private var fieldFrame = CGRect.zero
+  /// Where the current touch started and whether that was in the field, read as it starts: tapping the field can
+  /// bring the keyboard back, which moves the field before the touch ends. Keyed by the start point, so a cancelled
+  /// touch (which never ends) can't leave its answer to the next one.
+  @State private var touchStart: (location: CGPoint, inField: Bool)?
   @State private var reportMenuHeight: CGFloat = 360
   /// Each side's saved text as laid out in the card's column (spec 017): its line count picks the alignment.
   @State private var frontMeasure = TextMeasure()
@@ -223,6 +228,11 @@ public struct StudyView: View {
               prompt(card).placed(promptAlignment, asBlock: Self.textLayout != .column)
               answerSlot(card)
                 .placed(answerAlignment, asBlock: answerIsBlock, width: answerWidth)
+                // Layout D: the answer's column is the question's widest line as drawn, at that line's place.
+                .frame(
+                  width: answerWidth == nil ? nil : frontMeasure.width,
+                  alignment: Alignment(horizontal: promptAlignment.horizontal, vertical: .center)
+                )
                 .offset(x: answerSnap)
             }
             .frame(maxWidth: .infinity)
@@ -330,8 +340,14 @@ public struct StudyView: View {
     // While editing, a tap or a downward swipe that starts outside the field drops focus, which ends the edit.
     // Simultaneous, so the scroll view and the field keep their own touches.
     .simultaneousGesture(
-      DragGesture(minimumDistance: 0, coordinateSpace: .global).onEnded { drag in
-        guard !fieldFrame.contains(drag.startLocation) else { return }
+      DragGesture(minimumDistance: 0, coordinateSpace: .global).onChanged { drag in
+        if touchStart?.location != drag.startLocation {
+          touchStart = (drag.startLocation, fieldFrame.contains(drag.startLocation))
+        }
+      }
+      .onEnded { drag in
+        defer { touchStart = nil }
+        guard touchStart?.inField == false else { return }
         let isTap = abs(drag.translation.width) < 10 && abs(drag.translation.height) < 10
         if isTap || drag.translation.height > 30 { focusedField = nil }
       },
@@ -447,13 +463,13 @@ public struct StudyView: View {
   /// The prompt fields (spec 014d): a photo replaces the centered word; the first text field is the card face.
   @ViewBuilder private func prompt(_ card: Card) -> some View {
     if store.canEditInline {
-      side(.front, text: card.text(.front), font: card.promptFont, color: Theme.ink)
+      side(.front, text: card.text(.front), font: card.promptFont.font, color: Theme.ink)
     } else {
       let firstText = card.firstPromptText
       VStack(alignment: promptAlignment.horizontal, spacing: Theme.Spacing.s) {
         ForEach(card.shown(card.prompt), id: \.self) { name in
           field(
-            name, of: card, side: .front, font: name == firstText ? card.promptFont : .body,
+            name, of: card, side: .front, font: name == firstText ? card.promptFont.font : .body,
             color: name == firstText ? Theme.ink : Theme.secondaryInk
           )
         }
@@ -483,11 +499,11 @@ public struct StudyView: View {
 
   @ViewBuilder private func answer(_ card: Card) -> some View {
     if store.canEditInline {
-      side(.back, text: card.text(.back), font: card.answerFont, color: Theme.secondaryInk)
+      side(.back, text: card.text(.back), font: card.answerFont.font, color: Theme.secondaryInk)
     } else {
       VStack(alignment: answerAlignment.horizontal, spacing: Theme.Spacing.xs) {
         ForEach(card.shown(card.answer), id: \.self) { name in
-          field(name, of: card, side: .back, font: card.answerFont, color: Theme.secondaryInk)
+          field(name, of: card, side: .back, font: card.answerFont.font, color: Theme.secondaryInk)
         }
       }
       .accessibilityElement(children: .contain)
@@ -520,11 +536,11 @@ public struct StudyView: View {
   }
 
   /// Layout D: a question that wraps, or fills at least 85 % of the column on one line, reads as a full-width block,
-  /// so its widest line becomes the answer's column: an answer wider than it would overhang it. Below 85 % the
-  /// question is short display text, its side margins are wide, and the answer keeps the full column.
+  /// so its widest line as drawn becomes the answer's column: an answer wider than it would overhang it. Below 85 %
+  /// the question is short display text, its side margins are wide, and the answer keeps the full column.
   static func referenceWidth(question: TextMeasure) -> CGFloat? {
     guard question.width > 0, question.wraps || question.width >= 0.85 * question.column else { return nil }
-    return question.width
+    return question.drawnWidth
   }
 
   private var answerSnap: CGFloat {
@@ -544,9 +560,11 @@ public struct StudyView: View {
   /// text over them: a full text taller than a cut one has more lines. Laid out with the card, so it follows the
   /// width and text size. One callback per side: two writes to the same state in one layout pass lost one of them.
   private func probe(
-    _ text: String, font: Font, width: CGFloat? = nil, into measure: Binding<TextMeasure>
+    _ text: String, font cardFont: CardFont, width: CGFloat? = nil, into measure: Binding<TextMeasure>
   ) -> some View {
-    Text(text).font(font).lineLimit(1)
+    let font = cardFont.font
+    let textSize = min(dynamicTypeSize, .accessibility2)  // the card text's `dynamicTypeSize` cap
+    return Text(text).font(font).lineLimit(1)
       .frame(maxWidth: width ?? .infinity)
       .overlay(alignment: .top) {
         Text(text).font(font).lineLimit(2).fixedSize(horizontal: false, vertical: true)
@@ -561,7 +579,12 @@ public struct StudyView: View {
                   twoLines: proxy.bounds(of: .named(Self.twoLines))?.height ?? proxy.size.height,
                   column: oneLine?.width ?? proxy.size.width
                 )
-              } action: { measure.wrappedValue = $0 }
+              } action: { measured in
+                var measured = measured
+                let drawn = Self.drawnWidth(of: text, font: cardFont.uiFont(textSize), in: measured.column)
+                measured.drawnWidth = min(drawn, measured.width)
+                measure.wrappedValue = measured
+              }
           }
           // After the overlay, which doesn't change the size: the space is the cut text's, the full text inside it.
           .coordinateSpace(.named(Self.twoLines))
@@ -584,7 +607,10 @@ public struct StudyView: View {
   }
 
   struct TextMeasure: Equatable {
+    /// The widest line's width as SwiftUI measures it: with the space a wrapped line breaks at.
     var width: CGFloat = 0
+    /// The widest line's width as drawn, without that space.
+    var drawnWidth: CGFloat = 0
     var height: CGFloat = 0
     /// The text's height cut to one line, and to two.
     var oneLine: CGFloat = 0
@@ -818,8 +844,8 @@ extension Card {
       .joined(separator: " ")
   }
 
-  var promptFont: Font { CardText.promptFont(promptText) }
-  var answerFont: Font { CardText.answerFont(answerText, prompt: promptText) }
+  var promptFont: CardFont { CardText.promptFont(promptText) }
+  var answerFont: CardFont { CardText.answerFont(answerText, prompt: promptText) }
 }
 
 extension TextAlignment {

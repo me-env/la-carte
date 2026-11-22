@@ -135,17 +135,56 @@ private struct WindowStyle: UIViewRepresentable {
 /// Text styles, not fixed sizes, so every style scales with Dynamic Type (sizes below are the defaults).
 extension Font {
   /// The single word / phrase in the middle of the screen. 34pt.
-  public static let cardFace = Font.system(.largeTitle, weight: .medium)
+  public static let cardFace = CardFont.cardFace.font
   /// A card question of 25–60 characters. 28pt.
-  public static let cardFaceMedium = Font.system(.title, weight: .medium)
+  public static let cardFaceMedium = CardFont.cardFaceMedium.font
   /// A long card question (> 60 characters or a line break), the smallest a question gets. 22pt.
-  public static let cardFaceSmall = Font.system(.title2, weight: .medium)
+  public static let cardFaceSmall = CardFont.cardFaceSmall.font
   /// A short answer under a question that isn't long, the largest an answer gets. 22pt.
-  public static let cardAnswer = Font.system(.title2)
+  public static let cardAnswer = CardFont.cardAnswer.font
   /// 28pt.
   public static let screenTitle = Font.system(.title, weight: .bold)
   /// 13pt.
   public static let meta = Font.footnote
+}
+
+/// A card text size as a text style and weight, which UIKit resolves too: Study lays a side's lines out in TextKit to
+/// measure what SwiftUI draws (spec 017).
+public struct CardFont: Hashable, Sendable {
+  public static let cardFace = CardFont(style: .largeTitle, weight: .medium)
+  public static let cardFaceMedium = CardFont(style: .title, weight: .medium)
+  public static let cardFaceSmall = CardFont(style: .title2, weight: .medium)
+  public static let cardAnswer = CardFont(style: .title2, weight: .regular)
+  public static let body = CardFont(style: .body, weight: .regular)
+
+  let style: Font.TextStyle
+  let weight: Font.Weight
+
+  public var font: Font { .system(style, weight: weight) }
+
+  /// The same font at a given text size. Card text is regular or medium only.
+  public func uiFont(_ size: DynamicTypeSize) -> UIFont {
+    let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(size))
+    let pointSize = UIFont.preferredFont(forTextStyle: uiStyle, compatibleWith: traits).pointSize
+    return .systemFont(ofSize: pointSize, weight: weight == .medium ? .medium : .regular)
+  }
+
+  private var uiStyle: UIFont.TextStyle {
+    switch style {
+    case .largeTitle: .largeTitle
+    case .title: .title1
+    case .title2: .title2
+    case .title3: .title3
+    case .headline: .headline
+    case .subheadline: .subheadline
+    case .body: .body
+    case .callout: .callout
+    case .footnote: .footnote
+    case .caption: .caption1
+    case .caption2: .caption2
+    @unknown default: .body
+    }
+  }
 }
 
 /// Size of a card's text from its length (spec 017): a word stays big, a paragraph is smaller. Character counts,
@@ -161,13 +200,13 @@ public enum CardText {
   }
 
   /// The question depends only on itself: it's shown before the answer, so it must not hint at it.
-  public static func promptFont(_ prompt: String) -> Font {
+  public static func promptFont(_ prompt: String) -> CardFont {
     if isLong(prompt) { return .cardFaceSmall }
     return isShort(prompt) ? .cardFace : .cardFaceMedium
   }
 
   /// Always a tier below the question: `.body` once the question is at its smallest.
-  public static func answerFont(_ answer: String, prompt: String) -> Font {
+  public static func answerFont(_ answer: String, prompt: String) -> CardFont {
     isShort(answer) && !isLong(prompt) ? .cardAnswer : .body
   }
 

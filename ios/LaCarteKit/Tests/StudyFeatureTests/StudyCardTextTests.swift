@@ -59,15 +59,25 @@ struct StudyTextLayoutTests {
   }
 
   @Test func layoutDKeepsTheAnswerInsideAWrappingQuestion() {
-    let twoLines = StudyView.TextMeasure(width: 220, height: 68, oneLine: 34, twoLines: 68, column: 370)
-    #expect(StudyView.referenceWidth(question: twoLines) == 220)
-    let paragraph = StudyView.TextMeasure(width: 360, height: 112, oneLine: 28, twoLines: 56, column: 370)
-    #expect(StudyView.referenceWidth(question: paragraph) == 360)
+    let twoLines = StudyView.TextMeasure(width: 220, drawnWidth: 213, height: 68, oneLine: 34, twoLines: 68, column: 370)
+    #expect(StudyView.referenceWidth(question: twoLines) == 213)
+    let paragraph = StudyView.TextMeasure(width: 360, drawnWidth: 354, height: 112, oneLine: 28, twoLines: 56, column: 370)
+    #expect(StudyView.referenceWidth(question: paragraph) == 354)
+  }
+
+  /// SwiftUI measures "Who composed The " with its break space; the line is drawn without it. Laid out greedily,
+  /// "Magic" would fit on the first line: the standard strategy pushes it down, as SwiftUI does.
+  @Test func drawnWidthIsTheWidestLineWithoutItsBreakSpace() {
+    let font = CardFont.cardFaceMedium.uiFont(.large)
+    func width(_ text: String) -> CGFloat { (text as NSString).size(withAttributes: [.font: font]).width }
+    let drawn = StudyView.drawnWidth(of: "Who composed The Magic Flute?", font: font, in: 370)
+    #expect(abs(drawn - width("Who composed The")) < 0.5, "\(drawn) vs \(width("Who composed The"))")
+    #expect(abs(StudyView.drawnWidth(of: "la mer", font: font, in: 370) - width("la mer")) < 0.5)
   }
 
   @Test func layoutDKeepsTheAnswerInsideANearlyFullSingleLine() {
     func line(_ width: CGFloat) -> StudyView.TextMeasure {
-      StudyView.TextMeasure(width: width, height: 34, oneLine: 34, twoLines: 34, column: 400)
+      StudyView.TextMeasure(width: width, drawnWidth: width, height: 34, oneLine: 34, twoLines: 34, column: 400)
     }
     #expect(StudyView.referenceWidth(question: line(340)) == 340)  // exactly 85 %
     #expect(StudyView.referenceWidth(question: line(339)) == nil)  // short: the answer keeps the column
