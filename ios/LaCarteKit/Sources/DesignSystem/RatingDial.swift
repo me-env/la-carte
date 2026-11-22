@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The dial around the finger during a rating drag (spec 019): 96 dots whose order is the grade. Toward "Got it" /
-/// "Easy" they settle into three even rings on 32 spokes, all one size (fully ordered at Easy); toward "Hard" /
+/// "Easy" they settle into three rings, evenly spaced along each ring, all one size (fully ordered at Easy); toward "Hard" /
 /// "Forgot" they scatter, with varied sizes (fully scattered at Forgot). The scatter is seeded per dot, so it never
 /// flickers, and follows `value` continuously with no animation of its own. Once a grade is reached the dots turn
 /// ink and pulse once. Ink tokens only, so it reads in grayscale. Drawn in a `Canvas` (96 dots redrawn per frame).
@@ -49,15 +49,16 @@ public struct RatingDial: View {
 /// The dial's dots as a pure function of the ease (tested in `RatingDialTests`), so the order, the sizes and the
 /// grade stages can be checked without drawing.
 struct RatingDialLayout: Equatable {
-  static let rings = 3
-  static let spokes = 32
-  static var count: Int { rings * spokes }
+  /// Dots per ring, inner to outer: proportional to the ring's radius, so the spacing along every ring is the
+  /// same (~19.3 pt at 108 pt) and the ordered dial reads as smooth rings, not radial spokes.
+  static let ringCounts = [29, 32, 35]
+  static var count: Int { ringCounts.reduce(0, +) }
   /// Ring radii as fractions of `radius`: inner, middle, outer.
   static let ringScale: [CGFloat] = [0.82, 0.91, 1]
   /// The ordered dot, and the scattered sizes' range as multiples of it.
   static let diameter: CGFloat = 4.5
   static let sizeRange: ClosedRange<CGFloat> = 0.6...1.8
-  /// How far a scattered dot may drift from its spoke, in spokes, and from its ring, as a fraction of `radius`.
+  /// How far a scattered dot may drift along its ring, in dot pitches, and off it, as a fraction of `radius`.
   static let angleDrift = 1.0
   static let radialDrift: CGFloat = 0.15
   /// The smallest space between two dots' edges, in points: `minGap` when ordered, growing with the disorder to
@@ -95,22 +96,38 @@ struct RatingDialLayout: Equatable {
     radius * (1 + radialDrift) + diameter * sizeRange.upperBound * 1.3 / 2 + 1
   }
 
-  /// Dot `i` fully ordered: on ring `i / spokes`, spoke `i % spokes`, at `referenceRadius`.
+  /// Dot `i`'s ring, and its place `j` among that ring's `n` dots (inner ring first).
+  static func slot(_ i: Int) -> (ring: Int, j: Int, n: Int) {
+    var j = i
+    for (ring, n) in ringCounts.enumerated() {
+      if j < n { return (ring, j, n) }
+      j -= n
+    }
+    preconditionFailure("dot \(i) out of range")
+  }
+
+  /// The middle ring is offset by half a pitch, so the top is staggered (no spoke at 12 o'clock) and every ring is
+  /// mirror-symmetric about the vertical axis.
+  static func phase(_ ring: Int) -> Double { ring == 1 ? 0.5 : 0 }
+
+  /// Dot `i` fully ordered: evenly spaced on its ring, at `referenceRadius`.
   static func latticePoint(_ i: Int) -> Dot {
-    let angle = (Double(i % spokes) + 0.5) * 2 * .pi / Double(spokes)
-    let r = referenceRadius * ringScale[i / spokes]
+    let (ring, j, n) = slot(i)
+    let angle = (Double(j) + phase(ring)) * 2 * .pi / Double(n)
+    let r = referenceRadius * ringScale[ring]
     return Dot(x: r * sin(angle), y: -r * cos(angle), diameter: diameter)
   }
 
   /// Every dot fully scattered (Forgot), at `referenceRadius`: a seeded drift and size per dot, then spaced to
   /// `scatterGap`. Computed once.
   static let scatter: [Dot] = {
-    let step = 2 * Double.pi / Double(spokes)
     let dots = (0..<count).map { i in
+      let (ring, j, n) = slot(i)
+      let step = 2 * Double.pi / Double(n)
       var seed = SplitMix(seed: UInt64(i))
       let (u1, u2, u3) = (seed.unit(), seed.unit(), seed.unit())
-      let angle = (Double(i % spokes) + 0.5 + (2 * u1 - 1) * angleDrift) * step
-      let r = referenceRadius * (ringScale[i / spokes] + (2 * u2 - 1) * radialDrift)
+      let angle = (Double(j) + phase(ring) + (2 * u1 - 1) * angleDrift) * step
+      let r = referenceRadius * (ringScale[ring] + (2 * u2 - 1) * radialDrift)
       // Squared, so most scattered dots are small and a few are large.
       let scale = sizeRange.lowerBound + (sizeRange.upperBound - sizeRange.lowerBound) * u3 * u3
       return Dot(x: r * sin(angle), y: -r * cos(angle), diameter: diameter * scale)

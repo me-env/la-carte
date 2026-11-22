@@ -4,12 +4,30 @@ import Testing
 @testable import DesignSystem
 
 struct RatingDialTests {
-  /// Where dot `i` sits when fully ordered: its ring and spoke.
+  /// Where dot `i` sits when fully ordered: evenly spaced on its ring.
   func latticePoint(_ i: Int, radius: CGFloat = 108) -> (x: CGFloat, y: CGFloat) {
-    let ring = i / RatingDialLayout.spokes, spoke = i % RatingDialLayout.spokes
-    let angle = (Double(spoke) + 0.5) * 2 * .pi / Double(RatingDialLayout.spokes)
+    let (ring, j, n) = RatingDialLayout.slot(i)
+    let angle = (Double(j) + (ring == 1 ? 0.5 : 0)) * 2 * .pi / Double(n)
     let r = radius * RatingDialLayout.ringScale[ring]
     return (r * sin(angle), -r * cos(angle))
+  }
+
+  @Test func easyIsMirrorSymmetric() {
+    let dots = RatingDialLayout(value: 1).dots
+    for dot in dots {
+      let hasMirror = dots.contains { abs($0.x + dot.x) < 1e-6 && abs($0.y - dot.y) < 1e-6 }
+      #expect(hasMirror)
+    }
+  }
+
+  @Test func orderedRingsHaveTheSameSpacingAlongEveryRing() {
+    #expect(RatingDialLayout.ringCounts == [29, 32, 35])
+    let pitches = zip(RatingDialLayout.ringCounts, RatingDialLayout.ringScale).map { n, scale in
+      2 * .pi * 108 * scale / CGFloat(n)
+    }
+    #expect(pitches.max()! - pitches.min()! < 0.3)
+    let dots = RatingDialLayout(value: 1).dots
+    #expect(abs(hypot(dots[1].x - dots[0].x, dots[1].y - dots[0].y) - pitches[0]) < 0.1)
   }
 
   func distanceFromLattice(_ layout: RatingDialLayout) -> CGFloat {
@@ -29,7 +47,7 @@ struct RatingDialTests {
   }
 
   @Test(arguments: [0.875, 1.0])
-  func easyIsFullyOrderedOnThreeRingsOfThirtyTwoSpokesAllOneSize(value: Double) {
+  func easyIsFullyOrderedOnThreeEvenRingsAllOneSize(value: Double) {
     let layout = RatingDialLayout(value: value)
     #expect(layout.stage == .second)
     #expect(layout.disorder == 0)
@@ -90,10 +108,10 @@ struct RatingDialTests {
   @Test func theScatterIsEvenAndHasNoBigVoids() {
     let dots = RatingDialLayout(value: 0).dots
     #expect(smallestGap(dots) >= RatingDialLayout.scatterGap - 0.05)
-    // No empty sector wider than two spoke pitches.
+    // No empty sector wider than two dot pitches.
     let angles = dots.map { atan2($0.x, -$0.y) }.sorted()
     let gaps = zip(angles.dropFirst(), angles).map { $0 - $1 } + [angles[0] + 2 * .pi - angles[angles.count - 1]]
-    #expect(gaps.max()! <= 2 * 2 * .pi / Double(RatingDialLayout.spokes))
+    #expect(gaps.max()! <= 2 * 2 * .pi / 32)  // two pitches of the middle ring
   }
 
   @Test func theScatterStaysClearOfTheCardText() {

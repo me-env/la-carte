@@ -29,16 +29,19 @@ The held drag must say, at a glance, **which grade a release gives and when a th
    language. Revised 2026-11-22 after user feedback on the first dial ("the Forgot side being just empty circles is
    not super clear; many more points, disorganized or organized, different sizes when disorganized, the same size
    when organized"): **the dots' order is the grade**, not a fill count and not rings vs discs.
-   - **96 dots**: 3 rings at **0.82 / 0.91 / 1.0 × radius** (radius = R + 16 pt around the touch-down point) on
-     **32 aligned spokes**, spoke `j` at `(j + 0.5) × 11.25°` from 12 o'clock; ordered dot **4.5 pt**.
+   - **96 dots**: 3 rings at **0.82 / 0.91 / 1.0 × radius** (radius = R + 16 pt around the touch-down point)
+     holding **29 / 32 / 35 dots**, proportional to the ring's radius, so the spacing along every ring is the same
+     (~19.3 pt): smooth rings, not radial spokes (user feedback 2026-11-22: "the bigger circles should have more
+     dots"). Dot `j` of a ring of `n` sits at `(j + φ) × 360° / n` from 12 o'clock, `φ` = 0 / ½ / 0 (inner / middle /
+     outer): the top is staggered, not a spoke, and the ordered dial is mirror-symmetric; ordered dot **4.5 pt**.
    - **Disorder** `c` (0 = ordered, 1 = scattered), one look per grade: **Forgot 1 · Hard 0.45 · rest 0.3 ·
      Got it 0.2 · Easy 0**. Each stretch (dead zone `m < 0.3`; first grade `0.3 ≤ m < 0.75`) **holds its own value
      for the first 70 % of its travel**, then ramps linearly to the next grade's value at the bin edge, so a grade
      reads as itself, not a blend; clamped beyond `m = 0.75`. The fully scattered layout (Forgot) is computed once
-     and is **deterministic** (SplitMix64 seeded by dot index, so it never flickers): angle drift `±1` spoke,
+     and is **deterministic** (SplitMix64 seeded by dot index, so it never flickers): angle drift `±1` pitch of its ring,
      radial drift `±15 %` of radius, size `0.6…1.8 ×` (squared, so most scattered dots are small, a few large),
      then pushed apart (80 passes) until **no two dots' edges are closer than 8 pt** and kept in the band, so the
-     scatter is even, not clumped (no empty sector over 2 spoke pitches, nothing inside 0.66 R where the card text
+     scatter is even, not clumped (no empty sector over 2 pitches, nothing inside 0.66 R where the card text
      is). Position and size interpolate linearly by `c` from the lattice to that scatter, and every frame's blend is
      spaced the same way to a gap of `1.5 + 6.5 × c` pt (so dots never touch mid-drag; Easy's lattice is untouched). So the
      negative side **scatters with varied sizes** (fully at Forgot) and the positive side **settles into the even
@@ -72,7 +75,7 @@ The held drag must say, at a glance, **which grade a release gives and when a th
 | 1 | `StudyFeature.swipeFraction(translation:cardWidth:)` returns `clamp(dx − dy, −d, d) / width`: for width 370, (+46, 0), (0, −46), (+32.5, −32.5) → +0.124…+0.125; (−46, 0), (0, +46), (−32.5, +32.5) → −0.124…−0.125; (−40, −40) and (+40, +40) → 0; (+200, 0) → 0.54 (ease clamps); width 0 → 0 | unit |
 | 2 | Through `ease(forSwipe:)` + `rating(forEase:)`, a drag of 0.13 card width up, right or up-right gives `good`, 0.22 gives `easy`; down, left or down-left gives `hard` / `again`; up-left / down-right at any length give `nil` | unit |
 | 3 | `RatingPan` begin rule (pure function `shouldBegin(velocity:isScrollable:)`): not scrollable → true for every non-zero velocity; scrollable → false for (0, ±100) and (±50, ±100) (within 30° of vertical), true for (±100, 0), (±70, −70), (±60, ±100)… i.e. `|dx| ≥ 0.58·|dy|` | unit |
-| 4 | `RatingDial` layout (pure, `RatingDialLayout(value:radius:)`): 96 dots; at 0.875 and 1.0 disorder 0, every dot exactly on its lattice point (3 rings × 32 spokes) and all 4.5 pt; at 0.125 and 0 disorder 1, some dot > 15 pt off the lattice, sizes spread > 3 pt, no two dots' edges closer than 8 pt (and never closer than 1.5 pt at any value, checked every 0.05), no empty sector over 2 spoke pitches, no dot inside 0.66 R; disorder is 1 / 0.45 / 0.3 / 0.2 / 0 at values 0.125 / 0.35 / 0.5 / 0.65 / 0.875, the same at 0.25 / 0.45 / 0.8 (held), and never rises from value 0 to 1; the same value gives the same layout; every dot (pulsed) fits the frame; the stage changes exactly where `rating(forEase:)` changes, checked at every 0.005 of value | unit (DesignSystemTests + one StudyFeatureTests consistency test) |
+| 4 | `RatingDial` layout (pure, `RatingDialLayout(value:radius:)`): 96 dots; at 0.875 and 1.0 disorder 0, every dot exactly on its lattice point (rings of 29 / 32 / 35, equal pitch) and all 4.5 pt; at 0.125 and 0 disorder 1, some dot > 15 pt off the lattice, sizes spread > 3 pt, no two dots' edges closer than 8 pt (and never closer than 1.5 pt at any value, checked every 0.05), no empty sector over 2 pitches, no dot inside 0.66 R; disorder is 1 / 0.45 / 0.3 / 0.2 / 0 at values 0.125 / 0.35 / 0.5 / 0.65 / 0.875, the same at 0.25 / 0.45 / 0.8 (held), and never rises from value 0 to 1; the same value gives the same layout; every dot (pulsed) fits the frame; the stage changes exactly where `rating(forEase:)` changes, checked at every 0.005 of value | unit (DesignSystemTests + one StudyFeatureTests consistency test) |
 | 5 | Held drag (`-studySwipePreview <f>` holds the translation `(f·w, 0)` as today; new `-studySwipePreviewUp <f>` holds `(0, −f·w)`): `study.swipeRing` exists, its accessibility value is the grade ("Got it" +0.13, "Easy" +0.22, "Hard" −0.13, "Forgot" −0.22, "None" +0.04; "Easy" for Up 0.22) | UI (held, screenshots `study-drag-<grade>` light + dark: the scattered and the 60 % dead-zone dots must read on dark) |
 | 6 | Held drag: `study.rate.good`'s label reads "Easy" at +0.22 and "Got it" at +0.13; `study.rate.again`'s label reads "Forgot" at −0.22 and "Hard" at −0.13; at +0.04 the right label reads "Got it"; ids unchanged | UI |
 | 7 | A real drag up (0.22 card width) on a revealed short card sends `easy`; a real drag down (0.22) sends `again`; a drag up-left sends nothing and the card stays revealed | UI (stub body) |
