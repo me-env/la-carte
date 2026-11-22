@@ -26,10 +26,10 @@ public struct StudyView: View {
   @State private var backMeasure = TextMeasure()
 
   /// Spec 017's candidate layouts for text of 3+ lines, until the user picks one: the leading full-width column (A),
-  /// a leading block as wide as its widest line, centred (B), or B with an answer of nearly the question's width
-  /// moved to the question's left edge (C).
-  enum TextLayout: CaseIterable { case column, blocks, snappedBlocks }
-  static var textLayout = TextLayout.column
+  /// a leading block as wide as its widest line, centred (B), B with an answer of nearly the question's width
+  /// moved to the question's left edge (C), or B with the answer kept inside a wide question's width (D).
+  enum TextLayout: CaseIterable { case column, blocks, snappedBlocks, questionWidth }
+  static var textLayout = TextLayout.questionWidth
 
   public init(store: StoreOf<StudyFeature>) {
     self.store = store
@@ -220,14 +220,16 @@ public struct StudyView: View {
           // transition, so the next card popped in.
           ZStack {
             VStack(spacing: Theme.Spacing.m) {
-              prompt(card).placed(promptAlignment)
-              answerSlot(card).placed(answerAlignment).offset(x: answerSnap)
+              prompt(card).placed(promptAlignment, asBlock: Self.textLayout != .column)
+              answerSlot(card)
+                .placed(answerAlignment, asBlock: answerIsBlock, width: answerWidth)
+                .offset(x: answerSnap)
             }
             .frame(maxWidth: .infinity)
             .background(alignment: .top) {
               VStack {
                 probe(card.promptText, font: card.promptFont, into: $frontMeasure)
-                probe(card.answerText, font: card.answerFont, into: $backMeasure)
+                probe(card.answerText, font: card.answerFont, width: answerWidth, into: $backMeasure)
               }
             }
             .dynamicTypeSize(...DynamicTypeSize.accessibility2)
@@ -504,6 +506,27 @@ public struct StudyView: View {
     promptAlignment == .leading || backMeasure.isMultiline ? .leading : .center
   }
 
+  private var answerIsBlock: Bool {
+    switch Self.textLayout {
+    case .column: false
+    case .blocks, .snappedBlocks: true
+    case .questionWidth: answerWidth != nil
+    }
+  }
+
+  /// Layout D: the width the answer is laid out in, or nil for the column.
+  private var answerWidth: CGFloat? {
+    Self.textLayout == .questionWidth ? Self.referenceWidth(question: frontMeasure) : nil
+  }
+
+  /// Layout D: a question that wraps, or fills at least 85 % of the column on one line, reads as a full-width block,
+  /// so its widest line becomes the answer's column: an answer wider than it would overhang it. Below 85 % the
+  /// question is short display text, its side margins are wide, and the answer keeps the full column.
+  static func referenceWidth(question: TextMeasure) -> CGFloat? {
+    guard question.width > 0, question.wraps || question.width >= 0.85 * question.column else { return nil }
+    return question.width
+  }
+
   private var answerSnap: CGFloat {
     guard Self.textLayout == .snappedBlocks, promptAlignment == .leading else { return 0 }
     return Self.snap(answer: backMeasure.width, toQuestion: frontMeasure.width, column: cardSize.width)
@@ -517,31 +540,44 @@ public struct StudyView: View {
     return (answer - question) / 2
   }
 
-  /// A hidden copy of a side's saved text in the column, cut to two lines, with the full text over it: a full text
-  /// taller than the cut one has 3+ lines. Laid out with the card, so it follows the width and text size. One
-  /// callback per side: two writes to the same state in one layout pass lost one of them.
-  private func probe(_ text: String, font: Font, into measure: Binding<TextMeasure>) -> some View {
-    Text(text).font(font).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-      .frame(maxWidth: .infinity)
+  /// A hidden copy of a side's saved text in the column (or `width`), cut to one line, then to two, with the full
+  /// text over them: a full text taller than a cut one has more lines. Laid out with the card, so it follows the
+  /// width and text size. One callback per side: two writes to the same state in one layout pass lost one of them.
+  private func probe(
+    _ text: String, font: Font, width: CGFloat? = nil, into measure: Binding<TextMeasure>
+  ) -> some View {
+    Text(text).font(font).lineLimit(1)
+      .frame(maxWidth: width ?? .infinity)
       .overlay(alignment: .top) {
-        Text(text).font(font).fixedSize(horizontal: false, vertical: true)
-          .onGeometryChange(for: TextMeasure.self) { proxy in
-            TextMeasure(
-              width: proxy.size.width, height: proxy.size.height,
-              twoLines: proxy.bounds(of: .named(Self.twoLines))?.height ?? proxy.size.height
-            )
-          } action: { measure.wrappedValue = $0 }
+        Text(text).font(font).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity)
+          .overlay(alignment: .top) {
+            Text(text).font(font).fixedSize(horizontal: false, vertical: true)
+              .onGeometryChange(for: TextMeasure.self) { proxy in
+                let oneLine = proxy.bounds(of: .named(Self.oneLine))
+                return TextMeasure(
+                  width: proxy.size.width, height: proxy.size.height,
+                  oneLine: oneLine?.height ?? proxy.size.height,
+                  twoLines: proxy.bounds(of: .named(Self.twoLines))?.height ?? proxy.size.height,
+                  column: oneLine?.width ?? proxy.size.width
+                )
+              } action: { measure.wrappedValue = $0 }
+          }
+          // After the overlay, which doesn't change the size: the space is the cut text's, the full text inside it.
+          .coordinateSpace(.named(Self.twoLines))
       }
-      // After the overlay, which doesn't change the size: the space is the cut text's, and the full text is inside it.
-      .coordinateSpace(.named(Self.twoLines))
+      .coordinateSpace(.named(Self.oneLine))
       .hidden()
       .accessibilityHidden(true)
   }
 
+  nonisolated private static let oneLine = "study.oneLine"
   nonisolated private static let twoLines = "study.twoLines"
 
-  /// Layouts B and C: the width a leading side's edit field keeps; nil spans the column.
+  /// The width a side's edit field keeps (the shown block's): a leading block's in B, C and D, a D answer's column;
+  /// nil spans the column.
   private func editWidth(_ field: StudyFeature.State.Field) -> CGFloat? {
+    if field == .back, Self.textLayout == .questionWidth { return answerWidth }
     let alignment = field == .front ? promptAlignment : answerAlignment
     guard alignment == .leading, Self.textLayout != .column else { return nil }
     return (field == .front ? frontMeasure : backMeasure).width
@@ -550,9 +586,14 @@ public struct StudyView: View {
   struct TextMeasure: Equatable {
     var width: CGFloat = 0
     var height: CGFloat = 0
-    /// The text's height cut to two lines.
+    /// The text's height cut to one line, and to two.
+    var oneLine: CGFloat = 0
     var twoLines: CGFloat = 0
+    /// The width the text was laid out in.
+    var column: CGFloat = 0
 
+    var wraps: Bool { height > oneLine + 1 }
+    /// 3+ lines: the side is leading-aligned.
     var isMultiline: Bool { height > twoLines + 1 }
   }
 
@@ -792,12 +833,14 @@ extension TextAlignment {
 }
 
 extension View {
-  /// Centred text fills the column; leading text fills it too in layout A, and is a block centred on its widest
-  /// line in B and C.
-  @MainActor fileprivate func placed(_ alignment: TextAlignment) -> some View {
-    let isBlock = alignment == .leading && StudyView.textLayout != .column
+  /// Centred text fills the column; leading text fills it too, or is a block centred on its widest line. A given
+  /// `width` is the side's own column (layout D's answer), centred.
+  fileprivate func placed(_ alignment: TextAlignment, asBlock: Bool, width: CGFloat? = nil) -> some View {
+    let isBlock = alignment == .leading && asBlock
+    let frameAlignment = Alignment(horizontal: alignment.horizontal, vertical: .center)
     return multilineTextAlignment(alignment)
-      .frame(maxWidth: isBlock ? nil : .infinity, alignment: Alignment(horizontal: alignment.horizontal, vertical: .center))
+      .frame(width: width, alignment: frameAlignment)
+      .frame(maxWidth: isBlock ? nil : .infinity, alignment: frameAlignment)
   }
 }
 

@@ -63,11 +63,12 @@ struct ScreenColorTests {
 
   /// Spec 017: the question depends only on itself, in every candidate layout. Revealing the answer doesn't change a
   /// pixel of it, and short, 2-line and 4-line answers leave it at the same horizontal place (the stack's vertical
-  /// centring may differ).
-  @Test(arguments: StudyView.TextLayout.allCases, CardLines.questions.map(\.1))
+  /// centring may differ). In layout D, the answer under a wide question stays within its width.
+  @Test(arguments: StudyView.TextLayout.allCases, CardLines.questions.map(\.1) + CardLines.singleLines.map(\.1))
   func questionStaysPut(_ layout: StudyView.TextLayout, _ question: String) throws {
+    let defaultLayout = StudyView.textLayout
     StudyView.textLayout = layout
-    defer { StudyView.textLayout = .column }
+    defer { StudyView.textLayout = defaultLayout }
     var columns: [ClosedRange<CGFloat>] = []
     for (_, answer) in CardLines.answers {
       let card = CardLines.card(question, answer)
@@ -83,6 +84,16 @@ struct ScreenColorTests {
       let ink = try #require(front.inkBounds(in: front.band(0.14, 0.85)), "no question drawn")
       #expect(revealed.changedPixels(from: front, in: ink) == 0, "question moved on reveal (answer: \(answer))")
       columns.append(ink.minX...ink.maxX)
+      if layout == .questionWidth, CardLines.wide.contains(question) {
+        let bottom = revealed.band(0, 0.85).maxY
+        let below = CGRect(x: 0, y: ink.maxY + 1, width: revealed.size.width, height: bottom - ink.maxY - 1)
+        let answerInk = try #require(revealed.inkBounds(in: below), "no answer drawn")
+        // Ink, not frames: a glyph's ink starts a little inside its advance, and a wrapped line's measured width keeps
+        // the space it breaks at (measured: up to ~5 pt at 22 pt). Laid out in the full column instead, the answer
+        // would overhang by 10+ pt.
+        #expect(answerInk.minX >= ink.minX - 3 && answerInk.maxX <= ink.maxX + 6,
+                "answer wider than the question: \(answerInk) vs \(ink) (answer: \(answer))")
+      }
     }
     #expect(Set(columns.map { "\($0)" }).count == 1, "question's columns depend on the answer: \(columns)")
   }

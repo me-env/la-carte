@@ -77,14 +77,17 @@ struct StudyRenders {
     print("StudyRenders: Liquid Glass hidden in these renders; judge glass on UI-test screenshots")
   }
 
-  /// Spec 017's candidate layouts side by side, revealed, light: `screen-study-layout-<A|B|C>-q<lines>-a<lines>.png`.
-  /// Only cards with a side of 3+ lines: with both sides at 1-2 lines (centred), A, B and C are identical.
+  /// Spec 017's candidate layouts side by side, revealed, light: `screen-study-layout-<A-D>-q<question>-a<lines>.png`
+  /// (question: its line count, or `w<percent>` for a single line filling that share of the column). Only cards
+  /// where the layouts differ: a side of 3+ lines, or a 2+ line answer under a question D lays it inside.
   @Test func layouts() throws {
-    defer { StudyView.textLayout = .column }
-    for (layout, letter) in zip(StudyView.TextLayout.allCases, ["A", "B", "C"]) {
+    let defaultLayout = StudyView.textLayout
+    defer { StudyView.textLayout = defaultLayout }
+    let questions = CardLines.questions.map { ("\($0.0)", $0.1, $0.0) } + CardLines.singleLines.map { ("w\($0.0)", $0.1, 1) }
+    for (layout, letter) in zip(StudyView.TextLayout.allCases, ["A", "B", "C", "D"]) {
       StudyView.textLayout = layout
-      for (q, question) in CardLines.questions {
-        for (a, answer) in CardLines.answers where q >= 3 || a >= 3 {
+      for (q, question, lines) in questions {
+        for (a, answer) in CardLines.answers where lines >= 3 || a >= 3 || (a >= 2 && CardLines.wide.contains(question)) {
           let state = Self.studying(CardLines.card(question, answer), revealed: true)
           _ = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), Self.looks[0],
                          name: "study-layout-\(letter)-q\(q)-a\(a)")
@@ -103,6 +106,15 @@ enum CardLines {
     (5, "Which treaty, signed in 1648 in the cities of Osnabrück and Münster, ended the Thirty Years' War and is "
       + "often cited as the origin of the modern state system?"),
   ]
+  /// Single-line questions and the share of the column they fill (percent): layout D's 85 % threshold edges.
+  static let singleLines = [
+    (74, "the Mediterranean"),
+    (89, "Who discovered penicillin?"),
+    (92, "the Mediterranean Sea"),
+    (98, "What does ephemeral mean?"),
+  ]
+  /// The questions layout D lays the answer inside: 2+ lines, or one line of at least 85 % of the column.
+  static let wide = questions.filter { $0.0 >= 2 }.map(\.1) + singleLines.filter { $0.0 >= 85 }.map(\.1)
   static let answers = [
     (1, "the sea"),
     (2, "Jupiter, a gas giant mostly made of hydrogen and helium"),

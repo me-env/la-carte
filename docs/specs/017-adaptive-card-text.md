@@ -44,16 +44,27 @@ never follows a draft while editing. A new card's first layout pass uses the pre
 pass corrects it, under the card's 0.25 s fade-in from 0, so nothing visibly jumps. Notes cards (014d) are
 measured like the sizes: the question on its first text field, the answer on its text fields joined by a space.
 
-Leading text has three candidate placements, behind one switch (`StudyView.textLayout`) until the user picks one
-from the A/B/C render sheet (`StudyRenders/layouts`):
-- **A (default)**: the full-width column, lines starting at the 16 pt side padding (`Theme.Spacing.m`); a leading
+Leading text has four candidate placements, behind one switch (`StudyView.textLayout`) until the user picks one
+from the A/B/C/D render sheet (`StudyRenders/layouts`):
+- **A**: the full-width column, lines starting at the 16 pt side padding (`Theme.Spacing.m`); a leading
   question and its answer share that left edge.
 - **B**: each side is a block as wide as its widest line, centred in the column; lines left-aligned in the block.
 - **C**: B, but when the question and a leading answer differ in width by less than 15 % (an "almost aligned"
   pair reads as a mistake) and the answer still fits, the answer's block moves to the question's left edge.
   Clearly different widths stay centred on their own, which reads as intended.
-In all three the question's frame never depends on the answer, and the inline edit field keeps the shown text's
-width (B, C) or the column (A).
+- **D (default, user's pick of 2026-11-22)**: the question is placed as in B. When it is **wide** (it wraps, or one
+  line fills at least 85 % of the column), its widest line becomes the answer's column, centred: the answer wraps
+  inside it and is never wider than the question. Its alignment comes from its lines measured at that width (1-2
+  centred, 3+ leading, leading under a leading question), and a leading answer starts at the question's left edge.
+  A short question (one line under 85 %) leaves the answer as in A. Why 85 %: a line that fills that much reads as
+  a full-width block, and an answer wider than it would overhang it by under ~28 pt a side (half of 15 % of a
+  370 pt column), which looks like a misalignment; under 85 % the question is short display text with wide
+  margins, and squeezing the answer under it would wrap it for no reason. The question is measured with a second
+  cut (one line) in the same probe. The whole answer slot takes that width, so a person card's hint and an answer
+  photo stay inside it too. A wrapped line's measured width keeps the space it breaks at, so the answer's ink can
+  pass the question's by up to ~5 pt on the right.
+In all four the question's frame never depends on the answer, and the inline edit field keeps the shown text's
+width (B, C, D's leading question, D's answer column) or the column (A).
 
 Rules and why:
 1. **The question depends only on itself.** Its size and alignment never depend on the answer. The answer
@@ -125,7 +136,7 @@ and one long sample to `DesignSystemGalleryContent`.
 | 10 | Inline edit on a long-question card (double-tap the revealed front): `study.frontField` has the same leading edge as `study.front` had, and typing past the threshold doesn't change its line height. | UI |
 | 11 | After rating, the next card's text fades in over about 0.25 s, with no slide. The previous answer never shows over the new question. | screenshot sequence in QA report (visual) |
 | 12 | Accessibility identifiers unchanged. VoiceOver reads the same labels as before. | UI |
-| 13 | In layouts A, B and C, for 1-, 2-, 3- and 5-line questions with 1-, 2- and 4-line answers, revealing doesn't change a pixel of the question, and the question's columns are the same whatever the answer (`ScreenColorTests.questionStaysPut`). | render |
+| 13 | In layouts A to D, for 1-, 2-, 3- and 5-line questions and single lines filling 74, 89, 92 and 98 % of the column, with 1-, 2- and 4-line answers, revealing doesn't change a pixel of the question, and the question's columns are the same whatever the answer. In D, under a wide question the answer's ink stays within the question's (3 pt left, 6 pt right for the break space) (`ScreenColorTests.questionStaysPut`). | render |
 
 Mock data: add `LA_CARTE_API=mock-lengths` (`InMemoryAPIClient`, English sample cards). It is the existing
 deck with these four cards first, in this order:
