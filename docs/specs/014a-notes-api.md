@@ -50,9 +50,11 @@ Messages are written for an LLM reader and name the offending field or direction
   is A's current due (the one set by that latest review). A card is **buried** while any sibling's hold is in the
   future. So a card rated `again` frees its siblings as soon as it is due again; a card with an interval longer than
   6 h holds them 6 h. The reviewed card itself is not buried by its own review (a relearning step due in 10 min is
-  still served).
+  still served). A card in `learning` / `relearning` state is **never buried** (user decision 2026-11-22): a card
+  the user failed comes back at its own due even if a sibling was answered since.
 - The servable queue is: due cards (`due <= now`), not buried, most overdue first, **at most one card per note**
-  (the most overdue wins). So the app's local queue never holds two siblings.
+  (a `learning` / `relearning` card wins, then the most overdue). So the app's local queue never holds two
+  siblings.
 - `stats.due` = the size of that queue (the widget and Study's counter agree with what can be studied now).
   `stats.next_due` = the earliest time after now at which a card not servable now becomes servable: its `due` if in
   the future, or the latest of its siblings' holds if it is due but buried; `null` if none. `total` and `new` keep
@@ -176,7 +178,7 @@ Ready-made prompts: `quiz_me`, `make_cards`.
 | 6 | `PATCH /notes/{id}` with `directions` = {kept A, new C}, dropping B: A keeps its id and `due`; C is new and due now; B returns 404; B's `ReviewLog` rows still exist | pytest |
 | 7 | `DELETE /notes/{id}` → 204; its cards are gone from `/cards` and `/cards/due`; `streak`/`reviewed_today` unchanged | pytest |
 | 8 | Burying: note with cards A, B both due. `GET /cards/due` returns only A (most overdue, one per note). Review A (`easy`, interval > 6 h): B is not returned for 6 h (test at now+5h59 → absent, now+6h01 → present) | pytest (deck, injected `now`) |
-| 9 | *Amended 2026-11-22 (user).* A card A rated `again` (due again in < 6 h) holds its sibling B only until A's due: B is absent just before it and servable at it (B wins over A, most overdue, one per note); a card whose latest review gives an interval > 6 h holds its siblings 6 h | pytest |
+| 9 | *Amended 2026-11-22 (user).* A card A rated `again` (due again in < 6 h) holds its sibling B only until A's due: B is absent just before it; at it A is served (a (re)learning card wins within its note), even if B was answered (`good`, interval > 6 h) after A failed; a card whose latest review gives an interval > 6 h holds its siblings 6 h | pytest |
 | 10 | Unrelated notes are never affected by burying; a note with one card behaves exactly as before | pytest |
 | 11 | `GET /stats`: `due` equals the length of `/cards/due?limit=500`; with only a buried card left, `due` is 0 and `next_due` = the end of its sibling's hold (`min(review + 6 h, sibling's due)`) | pytest |
 | 12 | Legacy: `POST /cards`, `GET /cards?query=`, `PATCH /cards/{id}`, `DELETE /cards/{id}`, review and stats keep their old behavior on `basic` `front → back` notes (existing REST tests pass unchanged apart from added keys) | pytest |

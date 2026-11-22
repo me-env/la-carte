@@ -37,7 +37,9 @@ the link instead of loose, unrelated cards.
 - **Sibling burying** (6 h cap, shortened to the reviewed card's own next due; user decision 2026-11-22). After a
   card of a note is reviewed at `t`, its siblings are not served until `min(t + SIBLING_BURY, that card's due)`, with
   `SIBLING_BURY = 6 h`: a weak note (a card rated `again`) frees its siblings as soon as that card comes back, a
-  well-known note keeps the 6 h hold. The due queue never holds two cards of the same note at once. Details: 014a.
+  well-known note keeps the 6 h hold. A card in learning/relearning (e.g. just failed) is never held: it comes back
+  at its own due, and wins over its siblings when several are servable. The due queue never holds two cards of the
+  same note at once. Details: 014a.
 - **Photos: no storage** (user decision). `photo` is a public http(s) URL saved as text; the app shows it with
   `AsyncImage` (system URL cache); agents and the app both set it. **Privacy:** these are photos of real people.
   The URL lives only on the user's own server, behind the token. Never log photo URLs (API logs, test output),
@@ -69,4 +71,4 @@ and `total` keeps counting cards. Lock Screen widgets (#14) are unaffected.
 - Uploading or storing images; image cropping; contacts import.
 - Changing a note's type after creation.
 - Card-level tags, decks, or suspending a single card (remove the direction instead).
-- Burying by any other rule than "until the reviewed sibling is due again, at most 6 h".
+- Burying by any other rule than "until the reviewed sibling is due again, at most 6 h; (re)learning cards never".

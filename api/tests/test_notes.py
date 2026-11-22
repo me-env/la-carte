@@ -268,7 +268,7 @@ def test_due_queue_serves_one_card_per_note_and_buries_siblings_for_6_hours(sess
     assert due_at(timedelta(hours=6, minutes=1)) == [b.id]
 
 
-def test_a_card_rated_again_frees_its_sibling_when_it_is_due_again(session):
+def test_a_card_rated_again_frees_its_sibling_and_wins_at_its_due(session):
     now = utcnow()
     a, b = _person(session, now - timedelta(minutes=1)).cards
     again = deck.review_card(session, a.id, Rating.again, now=now).due
@@ -278,10 +278,26 @@ def test_a_card_rated_again_frees_its_sibling_when_it_is_due_again(session):
         return [c.id for c in deck.due_cards(session, now=t)]
 
     assert due_at(again - timedelta(seconds=1)) == []  # B held until A is due again
-    assert due_at(again) == [b.id]  # both due now, one per note: B is the most overdue
-    b_again = deck.review_card(session, b.id, Rating.again, now=again).due
-    assert due_at(again) == []  # now A is held until B is due again: never back to back
-    assert due_at(b_again) == [a.id]  # both due, A is the most overdue
+    assert due_at(again) == [a.id]  # both due, one per note: the (re)learning card wins
+    deck.review_card(session, a.id, Rating.easy, now=again)
+    assert due_at(again) == []  # B held again: siblings never back to back
+    assert due_at(again + deck.SIBLING_BURY) == [b.id]
+
+
+def test_a_failed_card_comes_back_at_its_due_even_after_a_sibling_was_answered(session):
+    now = utcnow()
+    a, b = _person(session, now - timedelta(minutes=1)).cards
+    step = deck.review_card(session, b.id, Rating.good, now=now).due
+    assert deck.review_card(session, b.id, Rating.good, now=step).state == "review"
+
+    failed = step + timedelta(minutes=1)
+    again = deck.review_card(session, a.id, Rating.again, now=failed).due
+    answered = deck.review_card(session, b.id, Rating.good, now=failed + timedelta(seconds=30))
+    assert answered.state == "review" and answered.due > again + deck.SIBLING_BURY
+
+    assert [c.id for c in deck.due_cards(session, now=again)] == [a.id]  # B's 6 h hold skips A
+    stats = deck.stats(session, now=again - timedelta(seconds=1))
+    assert (stats.due, stats.next_due) == (0, again)
 
 
 def _three_ways(session, now):
@@ -305,10 +321,10 @@ def test_a_hold_follows_the_reviewed_cards_latest_review_and_every_sibling_holds
     assert due_at(later + deck.SIBLING_BURY - timedelta(seconds=1)) == []
     assert due_at(later + deck.SIBLING_BURY) == [b.id]
 
-    relearn = deck.review_card(session, b.id, Rating.again, now=later).due  # B frees A, C early
+    relearn = deck.review_card(session, b.id, Rating.again, now=later).due
     assert relearn < later + deck.SIBLING_BURY
-    assert due_at(relearn) == []  # C is still held by A (6 h), A isn't due
-    assert due_at(later + deck.SIBLING_BURY) == [c.id]  # C most overdue (B was reviewed)
+    assert due_at(relearn) == [b.id]  # B learning: never held; C still held by A (6 h)
+    assert due_at(later + deck.SIBLING_BURY) == [b.id]  # C free too, but B (learning) wins
 
 
 def test_a_card_rated_good_with_a_long_interval_holds_its_sibling_6_hours(session):

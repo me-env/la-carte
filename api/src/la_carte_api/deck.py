@@ -24,6 +24,7 @@ from la_carte_api.models import (
     Card,
     CardCreate,
     CardRead,
+    CardState,
     CardUpdate,
     DeckStats,
     Direction,
@@ -49,6 +50,7 @@ _DAY = timedelta(days=1)
 # After a card of a note is reviewed, its siblings are held for at most this long, and never past
 # that card's own next due (user decision 2026-11-22: a weak note comes back sooner).
 SIBLING_BURY = timedelta(hours=6)
+LEARNING = (CardState.learning, CardState.relearning)  # never buried; wins within its note
 
 Side = tuple[str, ...]  # field names, in the type's field order
 Way = tuple[Side, Side]  # (prompt, answer): a direction, normalized
@@ -506,8 +508,9 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
 
     A sibling's latest review at `t` buries a card until `min(t + SIBLING_BURY, sibling.due)`:
     never longer than until that sibling is due again (its own reviews don't bury it). The
-    sibling's current `due` is the one set by that latest review. Servable = due, not buried,
-    most overdue first, at most one card per note (so siblings never come back to back).
+    sibling's current `due` is the one set by that latest review. A (re)learning card is never
+    buried: a card the user failed comes back at its own due. Servable = due, not buried, at most
+    one card per note (a (re)learning card wins, then the most overdue), most overdue first.
     Held cards (an active report, spec 015) are left out entirely: they don't bury siblings."""
     held = set(
         session.exec(select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))).all()
@@ -533,16 +536,24 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
             until = min(recent[card.id] + SIBLING_BURY, card.due)
             holds.setdefault(card.note_id, []).append((card.id, until))
 
+    def ready_at(card: Card) -> datetime:
+        if card.state in LEARNING:
+            return card.due
+        return max([card.due, *(t for cid, t in holds.get(card.note_id, []) if cid != card.id)])
+
     servable: list[tuple[Card, Note]] = []
     served_notes: set[UUID] = set()
     later: list[datetime] = []
-    for card, note in sorted(rows, key=lambda row: (row[0].due, *_card_order(*row))):
-        ready_at = max([card.due, *(t for cid, t in holds.get(card.note_id, []) if cid != card.id)])
-        if ready_at > now:
-            later.append(ready_at)
+    for card, note in sorted(
+        rows, key=lambda row: (row[0].state not in LEARNING, row[0].due, *_card_order(*row))
+    ):
+        ready = ready_at(card)
+        if ready > now:
+            later.append(ready)
         elif card.note_id not in served_notes:
             served_notes.add(card.note_id)
             servable.append((card, note))
+    servable.sort(key=lambda row: (row[0].due, *_card_order(*row)))
     return servable, min(later, default=None)
 
 
