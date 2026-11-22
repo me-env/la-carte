@@ -325,9 +325,11 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         Read-only.
 
         `due_new`: the never-reviewed cards among `due`. `new_today`: new cards first studied
-        today; `milestone`: the size of the app's daily steps of new cards.
+        today in `tz` (calendar day; `new_cards.introduced` is the last 24 h). `milestone`: the
+        app's daily step size of new cards (`new_cards.per_day`, or 15 when that is 0);
+        `new_today // milestone` steps reached.
 
-        `streak`: days in a row with at least one review, ending today or yesterday, in `tz`;
+        `streak`: days in the current run (studied or frozen), ending today or yesterday, in `tz`;
         it forgives one missed day per 7 (a frozen day; two missed days in a row end it).
         `streak_start`: its first day (null when 0). `history`: one letter per local day from
         `history_start` (the first review day) to today:

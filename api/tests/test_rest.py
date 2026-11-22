@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
@@ -21,7 +23,7 @@ def test_card_lifecycle(client):
     assert updated["back"] == "a cat"
 
     stats = client.get("/stats").json()
-    today = stats["history_start"]
+    today = datetime.now(UTC).date().isoformat()
     assert stats == {
         "total": 1, "due": 0, "new": 0, "reviewed_today": 1, "next_due": reviewed["due"],
         "new_today": 1, "milestone": 15, "streak": 1, "streak_start": today,
