@@ -314,3 +314,21 @@ Round 3 palettes (near-black kept for only one slot, because dot motifs on black
 - 7.1: A 3x3 grid of large equal dots with one slot empty at the top-right; the missing dot sits 1.5 grid steps away on a 45-degree path, with one smaller trailing dot.
 - 7.2: Exactly three steps on one 45-degree line: a horizontal rounded-rectangle card, wider than tall (3:2), blank flat face like an index card, then a dot 40% of the card's height, then a dot 0.6 times that, gaps following the same 0.6 ratio.
 - 7.3: The reverse: two small dots growing into a horizontal rounded-rectangle card, wider than tall (3:2), blank flat face like an index card, along one 45-degree diagonal, dots gather into a card.
+
+## Forgetting-curve attempt (user request, drawn in code)
+
+The user asked for the spaced-repetition forgetting curve (retention resets to 100 % at each review, each decay
+shallower) simplified into basic shapes and cut like R1-12.1 (circle and card, overlap cut out). Drawn with
+`forgetcurve.py`, not image generation: a decay is a rectangle minus an ellipse or circle, combined with a card
+(rounded rectangle) and/or a disc by intersection or XOR. SVGs: `forgetcurve/curve-NN-ink.svg` (20 variants;
+1-12 first pass, 13-20 after the critic: equal peaks, two decays and a plateau, 12.1 compositions, a card stack).
+
+```bash
+uv run docs/design/brand/explorations/ideation-gen/forgetcurve.py <out-dir> [--sheet] [--only 13,16,18] [--mode circle] [--soften 14]
+```
+
+Critic verdict: ITERATE, not yet good enough to show next to the dot-card direction. Top 3: 13 (two equal resets
+and a plateau, the cleanest build), 18 (one decay cut into the card's top edge, the calmest), 16 (the best 12.1
+disc-and-card cut). Main issue: the sawtooth reads as the standard factory icon, and the 12.1 compositions read as
+a letter "d" (20 as an "e"). If this direction continues, start from 18 and show the repeated reviews inside the
+card rather than as a skyline above it.
