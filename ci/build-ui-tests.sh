@@ -5,11 +5,13 @@ set -euo pipefail
 source "$(dirname "$0")/../scripts/_ios-env.sh"
 PRODUCTS="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 rm -rf "$PRODUCTS"
-echo "build-for-testing: $(sysctl -n hw.ncpu) CPUs, $BUILD_JOBS_FLAGS, $DESTINATION"
+# By UDID: on a cold runner, xcodebuild's own lookup of "name=…,OS=latest" timed out ("Unable to find a device").
+UDID="$("$ROOT/ci/boot-simulator.sh" --udid)"
+echo "build-for-testing: $(sysctl -n hw.ncpu) CPUs, $BUILD_JOBS_FLAGS, $SIMULATOR ($OS) = $UDID"
 cd "$ROOT/ios"
 set +e
 NSUnbufferedIO=YES xcodebuild build-for-testing $BUILD_JOBS_FLAGS -project LaCarte.xcodeproj -scheme LaCarte \
-  -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 \
+  -destination "id=$UDID" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 \
   | grep --line-buffered -E "error:|\.swift:[0-9]+:[0-9]+: note:|BUILD (SUCCEEDED|FAILED)"
 STATUS=${PIPESTATUS[0]}
 set -e

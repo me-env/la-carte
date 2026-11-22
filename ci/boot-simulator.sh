@@ -7,6 +7,7 @@
 #
 #   ci/boot-simulator.sh            boot now (foreground)
 #   ci/boot-simulator.sh --start    boot in the background (log + exit code in $RUNNER_TEMP), e.g. while building
+#   ci/boot-simulator.sh --udid     only print the device's UDID (starts CoreSimulator, does not boot)
 #   ci/boot-simulator.sh --wait     wait for that background boot (max 15 min), print its log, exit with its code
 set -euo pipefail
 STATE="${RUNNER_TEMP:-/tmp}/boot-simulator"
@@ -24,7 +25,7 @@ esac
 SECONDS=0
 step() { echo "[$(printf '%3d' "$SECONDS") s] $*"; }
 source "$(dirname "$0")/../scripts/_ios-env.sh"
-step "start (CoreSimulator service)"
+[ "${1:-}" = --udid ] || step "start (CoreSimulator service)"
 
 UDID=$(xcrun simctl list devices available -j | python3 -I -c '
 import json, sys
@@ -42,6 +43,7 @@ for rt in ios:
 sys.exit(f"no available simulator named {name!r} for iOS {os_}")
 ' "$SIMULATOR" "$OS")
 
+if [ "${1:-}" = --udid ]; then echo "$UDID"; exit 0; fi
 step "booting $SIMULATOR ($OS): $UDID"
 xcrun simctl boot "$UDID" 2>/dev/null || true  # already booted is fine
 xcrun simctl bootstatus "$UDID" -b >/dev/null
