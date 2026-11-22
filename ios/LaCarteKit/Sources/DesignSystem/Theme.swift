@@ -45,7 +45,16 @@ public enum Theme {
     /// Fades, reveals, row changes.
     public static let standard = Animation.easeInOut(duration: 0.25)
     /// The logo drawing itself in (launch, empty screens).
-    public static let logoDrawIn = Animation.easeInOut(duration: 0.9)
+    public static let logoDrawIn = Animation.timingCurve(logoDrawInCurve.curve, duration: logoDrawInCurve.duration)
+    /// The launch mark's card laying itself flat from its 3D tilt, alongside `logoDrawIn`: a gentle start, a long
+    /// ease-out landing, no overshoot.
+    public static let logoTilt = Animation.timingCurve(logoTiltCurve.curve, duration: logoTiltCurve.duration)
+    /// The curves behind `logoDrawIn` and `logoTilt`, so renders can draw any frame of the launch mark.
+    static let logoDrawInCurve = (curve: UnitCurve.easeInOut, duration: 0.9)
+    static let logoTiltCurve = (
+      curve: UnitCurve.bezier(startControlPoint: UnitPoint(x: 0.4, y: 0), endControlPoint: UnitPoint(x: 0.2, y: 1)),
+      duration: 1.0
+    )
     /// One half of the loading mark's loop (write, then erase).
     public static let loadingPulse = Animation.easeInOut(duration: 0.8)
   }

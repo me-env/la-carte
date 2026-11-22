@@ -71,7 +71,8 @@ single lines.
 | Motion | Spec | Reduce Motion |
 |---|---|---|
 | Standard (fades, reveals) | ease-in-out 0.25 s (`Theme.Motion.standard`) | Same fade, or none |
-| Logo draw-in | ease-in-out 0.9 s (`logoDrawIn`): the card fades and settles from 94% (0–30%), then the curve is drawn from its first peak: decay 1 in pink, the reset bar rises from its foot, decay 2 is cut into the card (30–100%) | Static: 0.25 s fade-in of the finished mark |
+| Logo draw-in | ease-in-out 0.9 s (`logoDrawIn`): the card fades and settles from 94% (0–5%, about 135 ms), then the curve is drawn from its first peak: decay 1 in pink, the reset bar rises from its foot, decay 2 is cut into the card (30–100%) | Static: 0.25 s fade-in of the finished mark |
+| Launch mark tilt | with the draw-in, the whole mark (card and line, one plane) arrives turned 40° in 3D about its bottom-left → top-right diagonal (perspective 0.6) and lays itself flat over 1.0 s (`logoTilt`, bezier 0.4, 0, 0.2, 1: gentle start, long ease-out, no overshoot); the curve starts drawing while it's still turning. Launch mark only, the loading mark stays flat | No tilt (the static fade-in above) |
 | Loading | the curve draws and erases over the card, ease-in-out 0.8 s each way (`loadingPulse`) | Opacity pulse 100% ↔ 40% |
 | Transitions | Logo as the shared element (`matchedGeometryEffect`), e.g. launch mark → home | Crossfade |
 

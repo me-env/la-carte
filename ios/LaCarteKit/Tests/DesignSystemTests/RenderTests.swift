@@ -38,6 +38,23 @@ struct RenderTests {
     }
   }
 
+  /// The launch mark's draw-in at 60 fps (`launch-<theme>-<ms>.png`, 0–1100 ms), on its live curves: card tilt and
+  /// line draw, frame by frame. 120 pt at scale 3, with room for the tilted card.
+  @Test func launchMark() throws {
+    for (name, theme, scheme) in Self.themes where name != "forest" {
+      for frame in 0...66 {
+        let ms = frame * 1000 / 60
+        let view = LaCarteLaunchMark.frame(at: Double(ms) / 1000)
+          .frame(width: 120, height: 120)
+          .padding(30)
+          .background(Theme.background)
+          .environment(\.appTheme, theme)
+          .environment(\.colorScheme, scheme)
+        try write(view, scale: 3, to: String(format: "launch-%@-%04d.png", name, ms), expectedPixels: nil)
+      }
+    }
+  }
+
   /// 390 pt wide (iPhone 17 Pro) at scale 3; the height is the content's.
   @Test func gallery() throws {
     for (name, theme, scheme) in Self.themes {
