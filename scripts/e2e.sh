@@ -33,11 +33,10 @@ for pair in "greeting|hello" "gratitude|thank you"; do
 done
 
 # Spec 003 #9 launches with no API env, types this API's URL + token in Settings and only reads (GET /stats,
-# study), so it leaves the deck as seeded. One worker runs classes serially, alphabetically: Deck, Refresh, Settings,
+# study), so it leaves the deck as seeded. One worker runs classes serially, alphabetically: Deck, Settings,
 # Study, Theme.
 # Spec 004 forest live check only reads (study + deck), so it can run last.
 # Spec 002 #13 adds "feline"/"cat" from study and deletes it again (net zero), so it can run before 001's flow.
-# Spec 006 #12 POSTs "canine"/"dog", pulls deck + study, then DELETEs it (net zero): also before 001's flow.
 # Spec 014c #17 adds a person from the deck and deletes it; 014d #11 posts a person to the EMPTY API, studies it and
 # deletes it (both net zero; Notes runs after Deck, before Study).
 # Spec 015b #12 posts a card to the EMPTY API, reports it (drop) and deletes it (net zero for the empty-deck check).
@@ -46,7 +45,6 @@ UI_WORKERS=1 "$ROOT/scripts/ios-ui-test.sh" "$RUN" \
   "-only-testing:LaCarteUITests/DeckUITests/testDeck_addFromStudyThenDelete_liveAPI" \
   "-only-testing:LaCarteUITests/NotesUITests/testNoteEditor_personCreateDelete_liveAPI" \
   "-only-testing:LaCarteUITests/NotesUITests/testNotesStudy_unreachablePhoto_liveAPI" \
-  "-only-testing:LaCarteUITests/RefreshUITests/testStudy_pullToRefresh_liveAPI" \
   "-only-testing:LaCarteUITests/ReportUITests/testReport_dropCard_liveAPI" \
   "-only-testing:LaCarteUITests/SettingsUITests/testSettings_setupOnDevice_liveAPI" \
   "-only-testing:LaCarteUITests/StudyEditUITests/testStudyEdit_appendToBack_liveAPI" \

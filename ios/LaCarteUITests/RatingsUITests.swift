@@ -183,10 +183,10 @@ final class RatingsUITests: XCTestCase {
     server.stop()
   }
 
-  // MARK: - #10 long card: vertical scroll and pull-to-refresh untouched
+  // MARK: - #10 long card: vertical scroll untouched (pull half dropped by spec 018)
 
   @MainActor
-  func testRatings_longCardScrollAndPull() throws {
+  func testRatings_longCardScroll() throws {
     XCUIDevice.shared.appearance = .light
     let back = "a long answer written on purpose to need scrolling at large text sizes: it goes on about the "
       + "menu and the map, the card and the deck, the word and its meaning, the front and the back, the question "
@@ -205,19 +205,7 @@ final class RatingsUITests: XCTestCase {
     XCTAssertLessThanOrEqual(after.maxY, cardArea(app).frame.maxY + 1, "end of the back not scrolled into view: \(after)")
     XCTAssertFalse(ring(app).exists, "ring after a vertical scroll")
     snapshot("study-long-scrolled", appearance: .light)
-    el(app, "study.card").swipeDown()
-    let gets = server.requests.filter { $0.path.hasPrefix("/cards/due") }.count
-    pullToRefresh(app, from: el(app, "study.front"))
-    let deadline = Date().addingTimeInterval(5)
-    while server.requests.filter({ $0.path.hasPrefix("/cards/due") }).count <= gets, Date() < deadline {
-      Thread.sleep(forTimeInterval: 0.2)
-    }
-    XCTAssertGreaterThan(server.requests.filter { $0.path.hasPrefix("/cards/due") }.count, gets, "pull did not refresh")
-    waitForLabel(el(app, "study.back"), back)
-    XCTAssertFalse(el(app, "study.reveal").exists, "pull-to-refresh un-revealed the card")
-    XCTAssertFalse(ring(app).exists, "ring after pull-to-refresh")
-    XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, 0, "scroll or pull sent a review")
-    snapshot("study-long-after-pull", appearance: .light)
+    XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, 0, "scroll sent a review")
     server.stop()
   }
 

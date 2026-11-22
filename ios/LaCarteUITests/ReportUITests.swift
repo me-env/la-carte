@@ -243,7 +243,7 @@ final class ReportUITests: XCTestCase {
 
   // MARK: - Held on refresh (015b #10)
 
-  /// 015b #10 (mock): a reported card doesn't come back on pull-to-refresh.
+  /// 015b #10 (mock): a reported card doesn't come back on a reload (spec 018: background → foreground, no pull).
   @MainActor
   func testReport_heldAfterRefresh() {
     XCUIDevice.shared.appearance = .light
@@ -253,7 +253,7 @@ final class ReportUITests: XCTestCase {
     menuButton(app, "drop", "I don't want this card").tap()
     waitForLabel(el(app, "study.front"), "la carte")
     waitForLabel(el(app, "study.remaining"), "2 to review", timeout: 4)
-    pullToRefresh(app, from: el(app, "study.card"))
+    backgroundAndReactivate(app)
     Thread.sleep(forTimeInterval: 2)
     waitForLabel(el(app, "study.front"), "la carte")
     waitForLabel(el(app, "study.remaining"), "2 to review")

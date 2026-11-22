@@ -24,7 +24,7 @@ SMOKE=(
   DeckUITests/testDeck_addFromDeck
   SetupUITests/testSetup_connectFromStudy
   ThemeUITests/testTheme_forcedSchemesAndBackToSystem
-  RefreshUITests/testStudy_pullToRefreshWhileStudying
+  RefreshUITests/testStudy_foregroundReload
   LaCarteUITests/testDesignSystem_tapEachButton
 )
 ARGS=()

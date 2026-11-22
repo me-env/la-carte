@@ -145,11 +145,11 @@ final class SettingsUITests: SettingsTestCase {
                     "default isn't Vibe: \(picker.label) / \(String(describing: picker.value))")
       picker.tap()
       for title in ["Vibe", "Claude", "ChatGPT", "Perplexity", "Grok", "Copy only"] {
-        XCTAssertTrue(app.buttons[title].waitFor(timeout: 5), "no \(title) in the picker")
+        XCTAssertTrue(menuOption(app, title).waitFor(timeout: 5), "no \(title) in the picker")
       }
       Thread.sleep(forTimeInterval: 0.5)
       snapshot("settings-ai-app", appearance: appearance)
-      app.buttons["Grok"].tap()
+      menuOption(app, "Grok").tap()
       XCTAssertTrue(poll(timeout: 3) { (el(app, "settings.aiApp").value as? String) == "Grok" || el(app, "settings.aiApp").label.contains("Grok") })
       app.terminate()
       app = launch(api: .mock, theme: nil)
@@ -159,10 +159,18 @@ final class SettingsUITests: SettingsTestCase {
       let after = el(app, "settings.aiApp")
       XCTAssertTrue((after.value as? String) == "Grok" || after.label.contains("Grok"), "Grok not kept after relaunch")
       after.tap()
-      app.buttons["Vibe"].tap()  // back to the default
+      let vibe = menuOption(app, "Vibe")
+      XCTAssertTrue(vibe.waitFor(timeout: 5), "no Vibe in the reopened picker")
+      vibe.tap()  // back to the default
       XCTAssertTrue(poll(timeout: 3) { (el(app, "settings.aiApp").value as? String) == "Vibe" || el(app, "settings.aiApp").label.contains("Vibe") })
       app.terminate()
     }
+  }
+
+  /// An option of an open menu Picker, matched by label or identifier (iOS 26 and 27 expose the titles differently).
+  @MainActor
+  private func menuOption(_ app: XCUIApplication, _ title: String) -> XCUIElement {
+    app.buttons.matching(NSPredicate(format: "label == %@ OR identifier == %@", title, title)).firstMatch
   }
 
   // MARK: - #9 live API (scripts/e2e.sh)

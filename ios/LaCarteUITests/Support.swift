@@ -156,9 +156,10 @@ extension XCTestCase {
     start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
   }
 
-  /// Spec 006: pull-to-refresh starting on `element` (press, then drag ~40% of the window lower, then release).
+  /// A downward drag starting on `element` (press, then drag ~40% of the window lower, then release). Spec 018: with
+  /// no pull-to-refresh this must do nothing unless the content is long enough to scroll.
   @MainActor
-  func pullToRefresh(_ app: XCUIApplication, from element: XCUIElement) {
+  func dragDown(_ app: XCUIApplication, from element: XCUIElement) {
     let window = app.windows.firstMatch.frame
     let startY = element.frame.midY
     let endY = min(startY + window.height * 0.4, window.height * 0.92)
@@ -175,25 +176,30 @@ extension XCTestCase {
     app.activate()
   }
 
-  /// Spec 006: pull-to-refresh, plus a screenshot taken `after` seconds into the gesture from a background thread.
-  /// XCUITest only returns from the drag once the app is idle again, i.e. after the refresh finished, so the
-  /// in-flight state (spinner, content kept on screen) can only be captured concurrently. Attached as
-  /// `<name>-<light|dark>`; returns the image for pixel checks.
+  /// Spec 018 #2/#3: a slow downward drag of `distance` points from `element`, held at the end, with a screenshot taken
+  /// from a background thread while the finger is still down (XCUITest only returns once the gesture is over, so a
+  /// bounce or rubber-band offset can only be seen concurrently). Attached as `<name>-<light|dark>`; returns the image.
   @MainActor
   @discardableResult
-  func pullToRefreshCapturing(_ app: XCUIApplication, from element: XCUIElement, after: TimeInterval = 2,
+  func dragDownHoldingCapture(_ app: XCUIApplication, from element: XCUIElement, distance: CGFloat = 250,
                               name: String, appearance: XCUIDevice.Appearance) -> CGImage? {
+    let window = app.windows.firstMatch
+    let h = window.frame.height
+    let startY = element.frame.midY, endY = min(element.frame.midY + distance, h * 0.92)
+    let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY / h))
+    let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY / h))
     let box = PNGBox()
     let thread = Thread {
-      Thread.sleep(forTimeInterval: after)
+      Thread.sleep(forTimeInterval: 1.8)  // press 0.05 s + drag ≤ 0.6 s at 400 pt/s, then held for 3 s
       box.set(screenshotPNGOffMain())
     }
     thread.start()
-    pullToRefresh(app, from: element)
-    let deadline = Date().addingTimeInterval(after + 5)
+    start.press(forDuration: 0.05, thenDragTo: end, withVelocity: XCUIGestureVelocity(rawValue: 400),
+                thenHoldForDuration: 3)
+    let deadline = Date().addingTimeInterval(5)
     while box.get() == nil, Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
     guard let png = box.get() else {
-      XCTFail("\(name): no in-flight screenshot captured")
+      XCTFail("\(name): no mid-drag screenshot captured")
       return nil
     }
     let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
@@ -202,6 +208,14 @@ extension XCTestCase {
     add(attachment)
     guard let provider = CGDataProvider(data: png as CFData) else { return nil }
     return CGImage(pngDataProviderSource: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+  }
+
+  /// Number of sample points (every 0.5 pt) in `rect` whose colour differs noticeably between two @3x screenshots:
+  /// 0 when nothing inside `rect` moved.
+  func changedPoints(_ a: CGImage?, _ b: CGImage?, in rect: CGRect) -> Int {
+    guard let a, let b else { return .max }
+    let pa = ColorProbe(at3x: a), pb = ColorProbe(at3x: b)
+    return zip(pa.colors(in: rect, step: 0.5), pb.colors(in: rect, step: 0.5)).filter { $0.distance(to: $1) > 60 }.count
   }
 }
 
@@ -306,7 +320,7 @@ struct ColorProbe {
     self.init(XCUIScreen.main.screenshot().image.cgImage!, pointWidth: app.windows.firstMatch.frame.width)
   }
 
-  /// An @3x screenshot (iPhone 17 Pro) taken without the app, e.g. by `pullToRefreshCapturing`.
+  /// An @3x screenshot (iPhone 17 Pro) taken without the app, e.g. by `dragDownHoldingCapture`.
   init(at3x cg: CGImage) {
     self.init(cg, pointWidth: CGFloat(cg.width) / 3)
   }
