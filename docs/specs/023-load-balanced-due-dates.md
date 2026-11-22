@@ -1,6 +1,6 @@
 # 023 — Spread due dates (load balancing)
 
-Status: ready
+Status: in-review (QA: validation is the pytest suite `api/tests/test_balance.py`, no screenshots)
 Owners: api-engineer (no iOS change)
 Depends on: nothing new (touches `deck.review_card` only). Runs in parallel with 021 (API part) and 022, which
 change the queue (`deck._queue`), not scheduling. Backlog #47.

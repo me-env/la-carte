@@ -10,12 +10,14 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from itertools import islice
 from math import ceil
+from random import Random
 from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import fsrs
+from fsrs.scheduler import FUZZ_RANGES
 from sqlmodel import Session, col, delete, func, select
 
 from la_carte_api.models import (
@@ -48,7 +50,9 @@ from la_carte_api.models import (
     utcnow,
 )
 
-_scheduler = fsrs.Scheduler()
+# Fuzz is ours: `review_card` spreads review dues toward lighter days (spec 023).
+_scheduler = fsrs.Scheduler(enable_fuzzing=False)
+_rng = Random()
 _DAY = timedelta(days=1)
 
 # After a card of a note is reviewed, its siblings are held for at most this long, and never past
@@ -606,16 +610,61 @@ def review_card(
     rating: Rating,
     now: datetime | None = None,
     confidence: float | None = None,
+    rng: Random | None = None,
 ) -> CardRead:
     """Reschedules the card from `rating` alone; `confidence` (0-1, optional) is only stored.
+    A review interval of 3+ days moves to a lighter nearby day (`_balanced_due`, spec 023).
     Its siblings are then buried until its new due, at most `SIBLING_BURY` (see `_queue`)."""
     now = now or utcnow()
     card = _card(session, card_id)
     scheduled, _ = _scheduler.review_card(card.to_fsrs(), rating.to_fsrs(), review_datetime=now)
+    if scheduled.state == fsrs.State.Review:
+        scheduled.due = _balanced_due(session, card.id, scheduled.due, now, rng or _rng)
     card.apply_fsrs(scheduled)
     session.add(ReviewLog(card_id=card.id, rating=rating, reviewed_at=now, confidence=confidence))
     session.commit()
     return get_card(session, card_id)
+
+
+def _balance_window(interval: int) -> tuple[int, int]:
+    """Days the due may move to around an FSRS `interval` (days): the library's fuzz window."""
+    delta = 1.0 + sum(
+        r["factor"] * max(min(float(interval), r["end"]) - r["start"], 0.0) for r in FUZZ_RANGES
+    )
+    hi = min(round(interval + delta), _scheduler.maximum_interval)
+    return min(max(2, round(interval - delta)), hi), hi
+
+
+def _day_weight(count: int, day: int) -> float:
+    """Anki 24.11 load-balancer weight of moving to `day`, which has `count` other cards due."""
+    return 1.0 if count == 0 else (1 / count) ** 2.15 * (1 / day) ** 3
+
+
+def _day_loads(session: Session, card_id: UUID, now: datetime, lo: int, hi: int) -> dict[int, int]:
+    """Other cards due on each day `k` in `lo..hi`, day `k` being `(now + (k-1) d, now + k d]`."""
+    dues = session.exec(
+        select(Card.due).where(
+            col(Card.due) > now + (lo - 1) * _DAY,
+            col(Card.due) <= now + hi * _DAY,
+            col(Card.id) != card_id,
+        )
+    )
+    loads = dict.fromkeys(range(lo, hi + 1), 0)
+    for due in dues:
+        loads[-((now - due) // _DAY)] += 1  # ceil((due - now) / 1 day)
+    return loads
+
+
+def _balanced_due(
+    session: Session, card_id: UUID, due: datetime, now: datetime, rng: Random
+) -> datetime:
+    """FSRS's `due` moved within `_balance_window`, weighted toward days with fewer cards due."""
+    interval = (due - now).days
+    if interval < 3:
+        return due
+    loads = _day_loads(session, card_id, now, *_balance_window(interval))
+    weights = [_day_weight(count, day) for day, count in loads.items()]
+    return now + rng.choices(list(loads), weights)[0] * _DAY
 
 
 def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> DeckStats:
