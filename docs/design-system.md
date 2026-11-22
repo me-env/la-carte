@@ -63,7 +63,7 @@ Spacing `Theme.Spacing.xs/s/m/l/xl` = 4/8/16/24/40 (`xs` only for a caption tigh
 ## Components
 - `CircleIconButton(systemImage, accessibilityLabel:)` — 44pt Liquid Glass circle, like the system toolbar buttons on
   Deck, Settings and the editor. SF Symbols at regular weight: `list.bullet`, `plus`, `xmark`, `checkmark`, `gearshape`,
-  `arrow.uturn.backward`, `arrow.clockwise`. The icon is a fixed 17pt (the toolbar glyph size) so the 44pt circle never grows with Dynamic Type; instead the
+  `arrow.uturn.backward`. Chrome only (Study top bar), never inside content (spec 020). The icon is a fixed 17pt (the toolbar glyph size) so the 44pt circle never grows with Dynamic Type; instead the
   button supports the large content viewer (long-press shows the icon and its label large), the system
   fallback for fixed-size chrome.
 - List row (deck, spec 002): surface fill, radius 12, meta line on top (due left, state right), front and back
@@ -73,6 +73,21 @@ Spacing `Theme.Spacing.xs/s/m/l/xl` = 4/8/16/24/40 (`xs` only for a caption tigh
 - `CardPhoto(url:style:)` (spec 014) — a person's photo from a URL (`AsyncImage`) in a fixed frame: `.thumbnail`/`.preview` circles (deck row, editor), `.card` 4:5 rounded rect (Study). Loading = `hairline` fill, failure/none = `person.fill` in `secondaryInk`, 1 pt `hairline` stroke, label "Photo". Never logs the URL.
 - Multi-select rows (note directions, spec 014c): checkmark rows (ink `checkmark`, `.isSelected` trait), not `Toggle` switches, so no green or low-contrast track.
 - Settings rows (spec 003): text field on a `surface` row, radius 12, 44pt min height, like the deck search field.
+
+## Liquid Glass (iOS 26; audit `docs/design/glass-audit-2026-11-22.md`)
+Uniform by **layer**, not by material: glass where Apple's own apps put it, nowhere else.
+- **Controls layer = glass**, from the system: toolbars and `ToolbarItem` buttons, `.searchable`, `Menu`,
+  `.pickerStyle(.menu)`, `.contextMenu`, `.alert`, `.confirmationDialog`, sheets at a *partial* detent. Never
+  `.presentationBackground(...)` on a partial-detent sheet, and no opaque row fills on it (rows sit on the glass,
+  `.listRowBackground(Color.clear)`). Custom glass only where there is no system bar: `CircleIconButton`
+  (`.glassEffect(.regular.interactive(), in: .circle)`), Study's top bar only.
+- **Content layer = opaque tokens**: the card face, "Show answer" and the rating row (quiet text, not glass),
+  messages and their actions ("Open Settings", "Try again": quiet text), deck rows, form rows (`Theme.surface`), full-height sheets (`Theme.background`; the system makes large
+  detents opaque anyway). Never `.glassEffect` or materials on content.
+- Widget: keep the removable `containerBackground(for: .widget)` so the system can apply its own glass on
+  clear/tinted Home Screens.
+- Reduce Transparency / Increase Contrast: system glass handles them; custom glass (only `CircleIconButton`) uses
+  `.glassEffect`, which does too. Don't add your own fallback.
 
 ## Motion (`Theme.Motion`)
 `standard` ease-in-out 0.25 s (fades, reveals) · `logoDrawIn` 0.9 s · `loadingPulse` 0.8 s. Every animation has a
