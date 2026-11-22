@@ -109,7 +109,7 @@ def test_balance_window_is_the_library_fuzz_window():
         (345, 385),
     ]
     maximum = deck._scheduler.maximum_interval
-    assert deck._balance_window(maximum) == (deck._balance_window(maximum)[0], maximum)
+    assert deck._balance_window(maximum)[1] == maximum
     assert all(deck._balance_window(i)[1] <= maximum for i in range(3, maximum + 1, 97))
 
 
@@ -140,6 +140,8 @@ def loaded(session):
 def test_prefers_the_light_day(session, loaded):
     card, others = loaded
     _load_days(session, others[80:100], {400: 20})  # day 21's cards, out of the window
+    # One fixture is as good as a fresh one per seed: only the reviewed card changes, and it
+    # never counts itself.
     picks = [_day(session, card, 20, seed) for seed in range(100)]
     assert picks.count(21) >= 90
 
@@ -189,14 +191,11 @@ def test_the_reviewed_card_does_not_count_itself(session):
 def test_no_drift(session):
     [card] = _add(session, 1)
     last_review = NOW - 20 * DAY
-    _set_review(card, stability=20.0, last_review=last_review)
-    card.due = last_review + 23 * DAY  # the last interval (20 d) was shifted by +3 days
-    reference = (_reference(card).due - NOW).days
-    lo, hi = deck._balance_window(reference)
     for seed in range(20):
-        card.fsrs_state, card.stability, card.difficulty = fsrs.State.Review.value, 20.0, 5.0
-        card.last_review, card.due = last_review, last_review + 23 * DAY
+        _set_review(card, stability=20.0, last_review=last_review)
+        card.due = last_review + 23 * DAY  # the last interval (20 d) was shifted by +3 days
         session.commit()
+        lo, hi = deck._balance_window((_reference(card).due - NOW).days)
         due = deck.review_card(session, card.id, Rating.good, now=NOW, rng=Random(seed)).due
         assert lo <= (due - NOW) // DAY <= hi
     assert sorted(Card.__table__.columns.keys()) == [
