@@ -153,10 +153,10 @@ final class StudyUITests: XCTestCase {
     snapshot("study-live-front", appearance: .light)
     el(app, "study.card").tap()
     assertRevealed(app, front: "greeting", back: "hello")
-    // Spec 011 #20: the first card is rated by a drag (f = +0.13 → good).
+    // Spec 011 #20 / 019: the first card is rated by an upward drag (0.13 card width up → good).
     let card = el(app, "study.card")
-    card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-      .press(forDuration: 0.05, thenDragTo: card.coordinate(withNormalizedOffset: CGVector(dx: 0.63, dy: 0.5)))
+    let start = card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+    start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -0.13 * card.frame.width)))
     assertFront(app, "gratitude", remaining: "1 to review")
     el(app, "study.reveal").tap()
     assertRevealed(app, front: "gratitude", back: "thank you")

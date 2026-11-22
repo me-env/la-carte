@@ -120,9 +120,12 @@ final class StudyLengthsUITests: XCTestCase {
     for (id, frame) in zip(rates + ["study.deck", "study.add"], shortRates + shortChrome.prefix(2)) {
       assertSameFrame(el(app, id).frame, frame, "\(id) after scrolling")
     }
-    // Scroll further down if there's room, so a kept offset would show on the next card.
-    dragUp(app, on: back)
-    XCTAssertTrue(front.label.hasPrefix(Self.veryLongPrefix), "a scroll drag changed the card (rated it?)")
+    // Scroll further down if there's room, so a kept offset would show on the next card. Only when the card
+    // scrolls: on a card that fits, a vertical drag is a rating drag (spec 019 #2).
+    if drags > 0 {
+      dragUp(app, on: back)
+      XCTAssertTrue(front.label.hasPrefix(Self.veryLongPrefix), "a scroll drag changed the card (rated it?)")
+    }
     snapshot("study-lengths-verylong-scrolled", appearance: .light)
 
     // AC 11: rate and capture the transition.

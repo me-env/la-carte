@@ -9,10 +9,14 @@ final class RatingsUITests: XCTestCase {
   static let variants: [(name: String, appearance: XCUIDevice.Appearance, theme: String)] = [
     ("light", .light, "system"), ("dark", .dark, "system"), ("forest-dark", .light, "forest"),
   ]
-  /// Held drag states: (screenshot state, f, ring accessibility value).
-  static let held: [(state: String, f: Double, grade: String)] = [
-    ("again", -0.22, "Forgot"), ("hard", -0.13, "Hard"), ("neutral", 0.04, "None"),
-    ("good", 0.13, "Got it"), ("easy", 0.22, "Easy"),
+  /// Held drag states (spec 019 #5, #6): (screenshot state, launch argument, f, ring value, left label, right label).
+  static let held: [(state: String, arg: String, f: Double, grade: String, left: String, right: String)] = [
+    ("again", "-studySwipePreview", -0.22, "Forgot", "Forgot", "Got it"),
+    ("hard", "-studySwipePreview", -0.13, "Hard", "Hard", "Got it"),
+    ("neutral", "-studySwipePreview", 0.04, "None", "Forgot", "Got it"),
+    ("good", "-studySwipePreview", 0.13, "Got it", "Forgot", "Got it"),
+    ("easy", "-studySwipePreview", 0.22, "Easy", "Forgot", "Easy"),
+    ("easy-up", "-studySwipePreviewUp", 0.22, "Easy", "Forgot", "Easy"),
   ]
   static let mockFront = "serendipity", mockBack = "finding something good without looking for it"
 
@@ -40,52 +44,54 @@ final class RatingsUITests: XCTestCase {
     }
   }
 
-  // MARK: - #5, #18 held drag (dots), light + dark + forest
+  // MARK: - 019 #5, #6 held drag (24-dot dial + row echo), light + dark + forest
 
-  /// Held drags via `-studySwipePreview " <f>"` (leading space so a negative value isn't read as a flag).
-  /// Spec issues are collected and asserted at the end so every screenshot is still taken.
+  /// Held drags via `-studySwipePreview " <f>"` / `-studySwipePreviewUp " <f>"` (leading space so a negative value
+  /// isn't read as a flag). Spec issues are collected and asserted at the end so every screenshot is still taken.
   @MainActor
   func testRatings_swipeHeldPreview() {
     var issues: [String] = []
     for v in Self.variants {
       XCUIDevice.shared.appearance = v.appearance
       for h in Self.held {
-        let app = launch(api: .mock, arguments: ["-studySwipePreview", " \(h.f)"], theme: v.theme)
+        let ctx = "\(v.name), \(h.state)"
+        let app = launch(api: .mock, arguments: [h.arg, " \(h.f)"], theme: v.theme)
         waitForLabel(el(app, "study.front"), Self.mockFront)
-        // canRate is false before reveal: the preview must not show a ring yet (#8).
+        // canRate is false before reveal: the preview must not show a ring yet (011 #8).
         Thread.sleep(forTimeInterval: 0.5)
-        XCTAssertFalse(ring(app).exists, "ring shown before reveal (\(v.name), f=\(h.f))")
+        XCTAssertFalse(ring(app).exists, "ring shown before reveal (\(ctx))")
         el(app, "study.reveal").tap()
         waitForLabel(el(app, "study.back"), Self.mockBack)
         let r = ring(app)
-        XCTAssertTrue(r.waitFor(timeout: 5), "no ring element while held (\(v.name), f=\(h.f))")
+        XCTAssertTrue(r.waitFor(timeout: 5), "no ring element while held (\(ctx))")
         if r.identifier != "study.swipeRing" {
-          issues.append("ring element identifier is '\(r.identifier)', not 'study.swipeRing' (\(v.name), f=\(h.f))")
+          issues.append("ring element identifier is '\(r.identifier)', not 'study.swipeRing' (\(ctx))")
         }
-        XCTAssertEqual(r.label, "Rating", "ring label (\(v.name), f=\(h.f))")
-        XCTAssertEqual(r.value as? String, h.grade, "ring value (\(v.name), f=\(h.f))")
-        // Centered on the touch-down point (the preview presses at the card's center). Only the regular ring
-        // (easy) has a bounding box centered on its center; scattered dots shift the box.
-        let card = cardArea(app).frame
-        if h.state == "easy", abs(r.frame.midX - card.midX) > 3 || abs(r.frame.midY - card.midY) > 3 {
-          issues.append(String(format: "ring center off the card center by (%.1f, %.1f) pt (%@, f=%.2f)",
-                               r.frame.midX - card.midX, r.frame.midY - card.midY, v.name, h.f))
+        XCTAssertEqual(r.label, "Rating", "ring label (\(ctx))")
+        XCTAssertEqual(r.value as? String, h.grade, "ring value (\(ctx))")
+        // Dots around the touch-down point (the card's centre) at radius R + 16 (R = 0.25 w); the ordered lattice
+        // (Easy) is a full circle, scattered layouts drift up to 15 % radially (spec 019 #3).
+        let card = cardArea(app).frame, radius = card.width * 0.25 + 16
+        // The threshold pulse (1 → 1.3 → 1, 0.2 s) can be caught right after the dial appears: let it settle.
+        _ = poll(timeout: 2) { r.frame.width <= 2 * radius * 1.15 + 20 }
+        if abs(r.frame.midX - card.midX) > 12 || abs(r.frame.midY - card.midY) > 12 {
+          issues.append(String(format: "dial centre off the card centre by (%.1f, %.1f) pt (%@)",
+                               r.frame.midX - card.midX, r.frame.midY - card.midY, ctx))
         }
-        // Ring diameter ~ 2R = 0.5 x card width (dots may sit slightly off the circle).
-        XCTAssertEqual(r.frame.width, card.width * 0.5, accuracy: card.width * 0.2,
-                       "ring size \(r.frame.width) far from 0.5 x card width \(card.width)")
-        for id in ["study.rate.again", "study.rate.good"] {
-          XCTAssertTrue(el(app, id).exists, "\(id) gone while dragging (\(v.name), f=\(h.f))")
+        if r.frame.width < 2 * radius * 0.95 || r.frame.width > 2 * radius * 1.15 + 20 {
+          issues.append(String(format: "dial frame %.0f wide, expected ~%.0f (%@)", r.frame.width, 2 * radius, ctx))
         }
-        let texts = app.staticTexts.allElementsBoundByIndex.filter { $0.exists }.map(\.label)
-        for word in ["Hard", "Easy", "None", "Rating"] {
-          XCTAssertFalse(texts.contains(word), "text '\(word)' on screen during the drag: \(texts)")
-        }
-        shot("study-swipe-\(h.state)", v.name)
+        // #6: the row echoes the target; ids and positions unchanged.
+        let again = el(app, "study.rate.again"), good = el(app, "study.rate.good")
+        XCTAssertTrue(again.exists && good.exists, "rating buttons gone while dragging (\(ctx))")
+        waitForLabel(again, h.left)
+        waitForLabel(good, h.right)
+        XCTAssertLessThan(again.frame.maxX, good.frame.minX, "buttons swapped (\(ctx))")
+        shot("study-drag-\(h.state)", v.name)
         app.terminate()
       }
     }
-    XCTAssertTrue(issues.isEmpty, "spec 011 #5:\n" + Set(issues).sorted().joined(separator: "\n"))
+    XCTAssertTrue(issues.isEmpty, "spec 019 #3/#5:\n" + Set(issues).sorted().joined(separator: "\n"))
   }
 
   // MARK: - #2, #6 buttons and drags send the right grade (stub records bodies)
@@ -187,6 +193,7 @@ final class RatingsUITests: XCTestCase {
 
   @MainActor
   func testRatings_longCardScroll() throws {
+    continueAfterFailure = true  // report every long-card gesture, not only the first failing one
     XCUIDevice.shared.appearance = .light
     let back = "a long answer written on purpose to need scrolling at large text sizes: it goes on about the "
       + "menu and the map, the card and the deck, the word and its meaning, the front and the back, the question "
@@ -206,6 +213,67 @@ final class RatingsUITests: XCTestCase {
     XCTAssertFalse(ring(app).exists, "ring after a vertical scroll")
     snapshot("study-long-scrolled", appearance: .light)
     XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, 0, "scroll sent a review")
+    // 019 #2: at the end of the scroll, a vertical drag up is still the scroll view's (bounce), not a rating.
+    let start = el(app, "study.card").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+    start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -250)), withVelocity: .slow,
+                thenHoldForDuration: 0.1)
+    Thread.sleep(forTimeInterval: 1)
+    XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, 0,
+                   "vertical drag up at the end of a long card sent a review: \(server.requests.last?.body ?? "")")
+    // 019 #8: a near-vertical drag (dx = 0.3 |dy|, within 30°) still scrolls (back down) and doesn't rate.
+    let mid = el(app, "study.back").frame
+    drag(app, dx: 0.09, dy: 0.3)
+    Thread.sleep(forTimeInterval: 0.8)
+    XCTAssertGreaterThan(el(app, "study.back").frame.minY, mid.minY + 5, "near-vertical drag did not scroll")
+    XCTAssertFalse(ring(app).exists, "ring after a near-vertical drag")
+    XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, 0, "near-vertical drag sent a review")
+    // A 45° up-right drag rates (projection 0.2 w · √2 ≈ 0.28 w → easy) without scrolling first.
+    drag(app, dx: 0.2, dy: -0.2, hold: 0.4)
+    let post = try waitForPost(server, count: 1)
+    let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(post.body.utf8)) as? [String: Any])
+    XCTAssertEqual(body["rating"] as? String, "easy", "45° drag on the long card sent \(post.body)")
+    server.stop()
+  }
+
+  // MARK: - 019 #7 real drags on a fitting card: up, down, up-left
+
+  /// Fitting card: a vertical drag starts the rating pan (no scroll view in the way). Up 0.22 w → easy,
+  /// down 0.22 w → again, up-left (projection ~0) → nothing, card stays revealed and the row returns to rest.
+  @MainActor
+  func testRatings_realDragsAnyDirection() throws {
+    XCUIDevice.shared.appearance = .light
+    let plan: [(name: String, dx: Double, dy: Double, rating: String?)] = [
+      ("up", 0, -0.22, "easy"), ("down", 0, 0.22, "again"), ("upleft", -0.2, -0.2, nil),
+      ("upright", 0.1, -0.1, "good"), ("left", -0.22, 0, "again"),
+    ]
+    let cards = plan.indices.map { i in
+      StubDeck.Card(id: "EEEEEEE\(i)-1111-1111-1111-111111111111", front: "front \(i)", back: "back \(i)",
+                    due: Date(timeIntervalSince1970: 1_767_225_600 + Double(i) * 60))
+    }
+    let (server, _) = try startReviewStub(cards)
+    let app = launch(api: .live(server.url))
+    var posts = 0, i = 0
+    for step in plan {
+      waitForLabel(el(app, "study.front"), "front \(i)")
+      if el(app, "study.reveal").exists { el(app, "study.card").tap() }
+      waitForLabel(el(app, "study.back"), "back \(i)")
+      drag(app, dx: step.dx, dy: step.dy)
+      if let rating = step.rating {
+        posts += 1
+        let post = try waitForPost(server, count: posts)
+        XCTAssertEqual(post.path, "/cards/\(cards[i].id)/review", "drag \(step.name)")
+        let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(post.body.utf8)) as? [String: Any])
+        XCTAssertEqual(body["rating"] as? String, rating, "drag \(step.name) sent \(post.body)")
+        i += 1
+      } else {
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, posts, "drag \(step.name) sent a review")
+        XCTAssertEqual(el(app, "study.back").label, "back \(i)", "card not revealed after drag \(step.name)")
+        waitForAbsence(ring(app), "dial still shown after drag \(step.name)")
+        assertTwoButtons(app, context: "after drag \(step.name)")
+        snapshot("study-drag-cancelled-\(step.name)", appearance: .light)
+      }
+    }
     server.stop()
   }
 
@@ -282,6 +350,15 @@ final class RatingsUITests: XCTestCase {
     let card = el(app, "study.card")
     card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
       .press(forDuration: 0.05, thenDragTo: card.coordinate(withNormalizedOffset: CGVector(dx: 0.5 + f, dy: 0.5)))
+  }
+
+  /// Real drag from the card's centre by `(dx, dy)` card widths (y down), then release.
+  @MainActor
+  private func drag(_ app: XCUIApplication, dx: Double, dy: Double, hold: TimeInterval = 0) {
+    let card = el(app, "study.card"), w = card.frame.width
+    let start = card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+    let end = start.withOffset(CGVector(dx: dx * w, dy: dy * w))
+    start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .default, thenHoldForDuration: hold)
   }
 
   @MainActor
