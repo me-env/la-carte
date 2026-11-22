@@ -17,6 +17,8 @@
     uv run scripts/screen-sample.py bbox     <png> x0,y0,x1,y1 [--bg HEX] [--tol 24]
     uv run scripts/screen-sample.py bands    <png> x0,y0,x1,y1 [--bg HEX] [--tol 24] [--axis y|x] [--min-gap PT]
     uv run scripts/screen-sample.py compare  <A.png> <B.png> x0,y0,x1,y1 [bands options] [--max-offset PT]
+    uv run scripts/screen-sample.py dots     <png> [<png> ...] x0,y0,x1,y1 [--bg HEX] [--tol 24] [--ring | --axis x|y]
+                                             [--sym x|y|both] [--min-d PT] [--min-area PX2] [--dots-list]
     uv run scripts/screen-sample.py --selftest
 
 Coordinates are in points. The scale comes from the image width (1206 -> 3, 804 -> 2, 402 -> 1); other
@@ -41,6 +43,18 @@ All colour maths (ΔE2000, WCAG 2.1 contrast) is coloraide's.
 - compare: bbox and bands of the same region in A and B (each its own background unless `--bg`), and B - A:
   bbox dx/dy/dw/dh, band counts, per-band dy (paired in order; flagged when the counts differ). Exit 1 only
   with `--max-offset PT` when an offset exceeds it, the band counts differ, or ink is in only one image.
+- dots: dots = 8-connected ink components (ink as in bbox). Components under `--min-area` px² (default 4) or
+  `--min-d` pt equivalent diameter (default 0.15 x the median) are dropped as noise and counted. Per dot: centre,
+  equivalent diameter d (from area) and bbox w x h, filled | ring (bbox holds background not connected to its
+  outside), Δ = max per-channel |Δ| of its mean colour from bg, merged? (aspect > 1.3 or area > 1.6 x median).
+  Per region: count, d min/median/max/spread, filled/ring, merged, Δ min-max (+ ink/track split when the largest
+  jump in sorted Δ is > half the range and >= 16), smallest and largest gap between consecutive dots (edge gap =
+  centre distance - both radii, so it can go negative for merged/odd shapes; order = clockwise angle from 12
+  o'clock around the dots' centroid with `--ring`, else along `--axis`, default x; dots are numbered #i in that
+  order), symmetry about the region's vertical centre line (`--sym x`), horizontal (y) or both: each centre
+  mirrored, distance to the nearest dot (max, mean), unmatched = none within half its diameter. Several PNGs =
+  a frame sequence: one line per frame, then count min/max, max |Δcount|, min gap, max gap, worst symmetry, each
+  with its frame (0-based). `--dots-list` prints every dot.
 
 `--json` (before or after the subcommand) prints one JSON object, e.g.:
     at       {"scale": 3, "points": [{"x": 70, "y": 370, "hex": "#1C1C1C"}]}
@@ -58,6 +72,12 @@ All colour maths (ΔE2000, WCAG 2.1 contrast) is coloraide's.
     compare  {"scale": 3, "rect": [...], "a": {bbox + bands}, "b": {...}, "bbox_delta": [dx, dy, dw, dh],
               "band_counts": [2, 2], "band_dy": [1.33, 1.33], "counts_differ": false, "max_offset": 1.33,
               "limit": null, "pass": true}
+    dots     {"rect": [...], "png": ..., "scale": 3, "background": "#F9FAF5", "count": 12, "dropped": 0,
+              "d_median": 4.3, "rings": 0, "merged": 0, "classes": null, "min_gap": {"gap": 1.2, "dots": [3, 4]},
+              "max_gap": {...},
+              "symmetry": {"x": {"line": 201.0, "max": 0.3, "mean": 0.1, "unmatched": 0}}, "dots": [...], ...}
+              # several PNGs: {"rect": [...], "frames": [<one per PNG>], "summary": {"count_change": {"value": 1,
+              #                "frame": 3}, "min_gap": {...}, "max_gap": {...}, "worst_symmetry": {...}, ...}}
 """
 
 import argparse
@@ -303,6 +323,161 @@ def band_lines(r: dict) -> list[str]:
             ("" if b["gap"] is None else f"  gap {b['gap']:g}") for b in r["bands"]]
 
 
+def components(mask: np.ndarray, eight: bool = True) -> tuple[np.ndarray, int]:
+    """Connected components (8- or 4-neighbour) of a boolean mask: labels 1..n, 0 off the mask.
+    Each pixel takes the smallest pixel index among its neighbours, plus pointer jumping, until stable."""
+    h, w = mask.shape
+    off = h * w
+    lab = np.where(mask, np.arange(off).reshape(h, w), off)
+    steps = [(dy, dx) for dy in (-1, 0, 1) for dx in (-1, 0, 1) if (dy or dx) and (eight or not (dy and dx))]
+    while True:
+        p = np.pad(lab, 1, constant_values=off)
+        new = lab
+        for dy, dx in steps:
+            new = np.minimum(new, p[1 + dy:1 + dy + h, 1 + dx:1 + dx + w])
+        flat = np.append(np.where(mask, new, off).ravel(), off)
+        while not np.array_equal(jumped := flat[flat], flat):
+            flat = jumped
+        new = flat[:-1].reshape(h, w)
+        if np.array_equal(new, lab):
+            break
+        lab = new
+    ids = np.unique(lab[mask])
+    labels = np.zeros((h, w), dtype=np.int64)
+    labels[mask] = np.searchsorted(ids, lab[mask]) + 1
+    return labels, len(ids)
+
+
+def has_hole(ys: np.ndarray, xs: np.ndarray) -> bool:
+    """True if the component's bbox has non-component pixels not 4-connected to its outside (a ring)."""
+    comp = np.zeros((ys.max() - ys.min() + 3, xs.max() - xs.min() + 3), dtype=bool)
+    comp[ys - ys.min() + 1, xs - xs.min() + 1] = True
+    outside, _ = components(~comp, eight=False)
+    return bool((~comp & (outside != outside[0, 0])).any())
+
+
+def find_dots(pixels: np.ndarray, origin: tuple[int, int], scale: float, args) -> dict:
+    """Dots = 8-connected ink components, minus noise (area < --min-area px², diameter < --min-d pt)."""
+    mask, bg = ink_mask(pixels, args.bg, args.tol)
+    labels, n = components(mask)
+    ys, xs = np.nonzero(labels)
+    lab = labels[ys, xs]
+    order = np.argsort(lab, kind="stable")
+    raw = [i for i in np.split(order, np.cumsum(np.bincount(lab, minlength=n + 1)[1:])[:-1]) if len(i)]
+    raw = [i for i in raw if len(i) >= args.min_area]
+
+    def diam(i):  # equivalent diameter (pt) of a component given by its pixel indices
+        return 2 * (len(i) / np.pi) ** 0.5 / scale
+
+    median_d = float(np.median([diam(i) for i in raw])) if raw else 0.0
+    min_d = 0.15 * median_d if args.min_d is None else args.min_d
+    kept = [i for i in raw if diam(i) >= min_d]
+    dots = []
+    for i in kept:
+        y, x = ys[i], xs[i]
+        w, h = x.max() - x.min() + 1, y.max() - y.min() + 1
+        mean = pixels[y, x].mean(axis=0)
+        dots.append({"x": pt(origin[0] + x.mean() + 0.5, scale), "y": pt(origin[1] + y.mean() + 0.5, scale),
+                     "d": round(diam(i), 2), "w": pt(w, scale), "h": pt(h, scale), "area_px": len(i),
+                     "aspect": round(float(max(w, h) / min(w, h)), 2), "kind": "ring" if has_hole(y, x) else "filled",
+                     "delta": int(round(np.abs(mean - np.array(bg)).max()))})
+    median_area = float(np.median([d["area_px"] for d in dots])) if dots else 0.0
+    for d in dots:
+        d["merged"] = bool(d["aspect"] > 1.3 or d["area_px"] > 1.6 * median_area)
+    return {"background": hex_of(bg), "tol": args.tol, "min_area": args.min_area, "min_d": round(min_d, 2),
+            "dropped": n - len(kept), "dots": dots}
+
+
+def dot_stats(r: dict, centre: tuple[float, float], args) -> dict:
+    """Region summary of `find_dots`. Gaps are edge to edge: centre distance minus both equivalent radii."""
+    dots = r["dots"]
+    if args.ring and dots:
+        cx, cy = np.mean([d["x"] for d in dots]), np.mean([d["y"] for d in dots])
+        dots.sort(key=lambda d: np.arctan2(d["x"] - cx, cy - d["y"]) % (2 * np.pi))  # clockwise from 12 o'clock
+    else:
+        dots.sort(key=lambda d: (d[args.axis], d["y" if args.axis == "x" else "x"]))
+    for k, d in enumerate(dots):
+        d["i"] = k
+
+    def gap(a, b):
+        return round(float(np.hypot(a["x"] - b["x"], a["y"] - b["y"])) - (a["d"] + b["d"]) / 2, 2)
+
+    ds, deltas = [d["d"] for d in dots], sorted(d["delta"] for d in dots)
+    s = {"count": len(dots), "order": "angle" if args.ring else f"axis {args.axis}",
+         "gap_kind": "edge (centre distance - radii)",
+         "d_min": min(ds, default=None), "d_median": round(float(np.median(ds)), 2) if ds else None,
+         "d_max": max(ds, default=None), "d_spread": round(max(ds) - min(ds), 2) if ds else None,
+         "filled": sum(d["kind"] == "filled" for d in dots), "rings": sum(d["kind"] == "ring" for d in dots),
+         "merged": sum(d["merged"] for d in dots),
+         "delta_min": deltas[0] if deltas else None, "delta_max": deltas[-1] if deltas else None,
+         "classes": None, "min_gap": None, "max_gap": None, "symmetry": {}}
+    if len(deltas) > 1:
+        jumps = np.diff(deltas)
+        k = int(np.argmax(jumps))
+        if jumps[k] > (deltas[-1] - deltas[0]) / 2 and jumps[k] >= 16:  # two clearly separated groups
+            cut = (deltas[k] + deltas[k + 1]) / 2
+            for d in dots:
+                d["class"] = "ink" if d["delta"] > cut else "track"
+            s["classes"] = {"ink": sum(d["delta"] > cut for d in dots), "track": sum(d["delta"] < cut for d in dots),
+                            "cut": cut}
+    if len(dots) > 1:
+        a, b = min(((a, b) for a in dots for b in dots if a["i"] < b["i"]), key=lambda p: gap(*p))
+        s["min_gap"] = {"gap": gap(a, b), "dots": [a["i"], b["i"]]}
+        pairs = list(zip(dots, dots[1:] + dots[:1])) if args.ring else list(zip(dots, dots[1:]))
+        a, b = max(pairs, key=lambda p: gap(*p))
+        s["max_gap"] = {"gap": gap(a, b), "dots": [a["i"], b["i"]]}
+    for axis in ("x", "y") if args.sym == "both" else (args.sym,):
+        if not dots:
+            continue
+        line = centre[0] if axis == "x" else centre[1]
+        far = []
+        for d in dots:
+            mx, my = (2 * line - d["x"], d["y"]) if axis == "x" else (d["x"], 2 * line - d["y"])
+            far.append((min(np.hypot(o["x"] - mx, o["y"] - my) for o in dots), d["d"]))
+        s["symmetry"][axis] = {"line": round(line, 2), "max": round(float(max(f for f, _ in far)), 2),
+                               "mean": round(float(np.mean([f for f, _ in far])), 2),
+                               "unmatched": int(sum(f > dd / 2 for f, dd in far))}
+    return s
+
+
+def dots_line(r: dict) -> str:
+    if not r["count"]:
+        return f"0 dots ({r['dropped']} dropped as noise; bg {r['background']}, tol {r['tol']:g})"
+    parts = [f"{r['count']} dots ({r['dropped']} dropped)",
+             f"d {r['d_min']:g}/{r['d_median']:g}/{r['d_max']:g} pt (spread {r['d_spread']:g})",
+             f"{r['filled']} filled {r['rings']} ring", f"{r['merged']} merged",
+             f"Δ {r['delta_min']}-{r['delta_max']}" + ("" if r["classes"] is None else
+                                                      f" ({r['classes']['ink']} ink / {r['classes']['track']} track)")]
+    if r["min_gap"]:
+        parts.append("gap min {:g} #{}-#{}, max {:g} #{}-#{} pt (edge, {})".format(
+            r["min_gap"]["gap"], *r["min_gap"]["dots"], r["max_gap"]["gap"], *r["max_gap"]["dots"], r["order"]))
+    parts += [f"sym {k} max {v['max']:g} mean {v['mean']:g} pt, {v['unmatched']} unmatched"
+              for k, v in r["symmetry"].items()]
+    return " · ".join(parts)
+
+
+def dot_lines(r: dict) -> list[str]:
+    return [f"  #{d['i']} {d['x']:g},{d['y']:g}  d {d['d']:g} ({d['w']:g}x{d['h']:g}) {d['kind']}  Δ {d['delta']}"
+            + (f" {d['class']}" if "class" in d else "") + ("  MERGED?" if d["merged"] else "") for d in r["dots"]]
+
+
+def frames_summary(frames: list[dict]) -> dict:
+    """Worst values over a frame sequence, each with its frame index (0-based)."""
+    c = [f["count"] for f in frames]
+    steps = [abs(b - a) for a, b in zip(c, c[1:])]
+
+    def pick(key, worst, value):
+        ks = [k for k, f in enumerate(frames) if f[key]]
+        k = worst(ks, key=lambda k: value(frames[k])) if ks else None
+        return None if k is None else {"value": value(frames[k]), "frame": k}
+
+    return {"count_min": min(c), "count_max": max(c),
+            "count_change": None if not steps else {"value": max(steps), "frame": int(np.argmax(steps)) + 1},
+            "min_gap": pick("min_gap", min, lambda f: f["min_gap"]["gap"]),
+            "max_gap": pick("max_gap", max, lambda f: f["max_gap"]["gap"]),
+            "worst_symmetry": pick("symmetry", max, lambda f: max(v["max"] for v in f["symmetry"].values()))}
+
+
 # --- CLI ---------------------------------------------------------------------------------------------
 
 def colour_spec(spec: str, args) -> tuple:
@@ -320,7 +495,35 @@ def show(result: dict, as_json: bool, lines: list[str]) -> None:
     print(json.dumps(result) if as_json else "\n".join(lines))
 
 
+def dots_frame(path: str, rect: list[float], args) -> dict:
+    img = load(path)
+    scale = scale_for(img, args)
+    x0, y0, x1, y1 = px_rect(img, rect, scale)
+    r = find_dots(img[y0:y1, x0:x1], (x0, y0), scale, args)
+    return {"png": path, "scale": scale} | r | dot_stats(r, (pt((x0 + x1) / 2, scale), pt((y0 + y1) / 2, scale)), args)
+
+
 def run(args) -> int:
+    if args.cmd == "dots":
+        rect = nums(args.rect, 4)
+        frames = [dots_frame(p, rect, args) for p in args.pngs]
+        lines = []
+        for k, f in enumerate(frames):
+            lines.append((f"frame {k} {Path(f['png']).name}: " if len(frames) > 1 else "") + dots_line(f))
+            lines += dot_lines(f) if args.dots_list else []
+        if len(frames) == 1:
+            show({"rect": rect} | frames[0], args.json, lines)
+            return 0
+        s = frames_summary(frames)
+
+        def at(v):
+            return "n/a" if v is None else f"{v['value']:g} (frame {v['frame']})"
+
+        lines.append(f"{len(frames)} frames: count {s['count_min']}-{s['count_max']}, max |Δcount| "
+                     f"{at(s['count_change'])}, min gap {at(s['min_gap'])}, max gap {at(s['max_gap'])}, "
+                     f"worst symmetry {at(s['worst_symmetry'])} pt")
+        show({"rect": rect, "frames": frames, "summary": s}, args.json, lines)
+        return 0
     if args.cmd == "compare":
         img_a, img_b = load(args.a), load(args.png)
         scale = scale_for(img_a, args)
@@ -387,6 +590,86 @@ def run(args) -> int:
     return 0
 
 
+def dots_selftest(bg, ink) -> list[tuple[str, bool]]:
+    def canvas(w, h):
+        img = np.empty((h, w, 3), dtype=np.int64)
+        img[:] = bg
+        return img
+
+    def disk(img, cx, cy, r, rgb, inner=0.0, aa=False):
+        """Pixel (centre i+0.5) inked if within r of (cx, cy) and not within inner; aa: 1 px linear edge."""
+        yy, xx = np.mgrid[0:img.shape[0], 0:img.shape[1]] + 0.5
+        dist = np.hypot(xx - cx, yy - cy)
+        cover = np.clip(r + 0.5 - dist, 0, 1) if aa else (dist <= r) & (dist >= inner)
+        img[:] = np.rint(img * (1 - cover[..., None]) + np.array(rgb) * cover[..., None]).astype(np.int64)
+
+    def dots_of(img, scale=1, **kw):
+        opts = argparse.Namespace(bg=None, tol=24.0, min_area=4, min_d=None, ring=False, axis="x", sym="x")
+        for k, v in kw.items():
+            setattr(opts, k, v)
+        h, w = img.shape[:2]
+        r = find_dots(img, (0, 0), scale, opts)
+        return r | dot_stats(r, (w / 2 / scale, h / 2 / scale), opts)
+
+    checks = []
+    two = np.zeros((4, 4), dtype=bool)
+    two[0, 0] = two[1, 1] = True
+    checks.append(("components 8- vs 4-neighbour", components(two)[1] == 1 and components(two, eight=False)[1] == 2))
+    # a regular ring of 12 dots (r 4 px) on a circle of radius 40 px, centred in the region
+    ring = canvas(120, 120)
+    for k in range(12):
+        a = k * np.pi / 6
+        disk(ring, 60 + 40 * np.sin(a), 60 - 40 * np.cos(a), 4, ink)
+    r = dots_of(ring, ring=True, sym="both")
+    chord = 2 * 40 * np.sin(np.pi / 12) - r["d_median"]
+    checks += [("dots ring count 12, all filled, none merged", (r["count"], r["filled"], r["merged"]) == (12, 12, 0)),
+               ("dots ring gaps equal (edge)", abs(r["min_gap"]["gap"] - chord) < 0.6
+                and abs(r["max_gap"]["gap"] - chord) < 0.6),
+               ("dots ring order clockwise from top", r["dots"][0]["y"] < 25 and r["dots"][3]["x"] > 95),
+               ("dots ring symmetric x and y", all(v["max"] < 0.2 and v["unmatched"] == 0
+                                                   for v in r["symmetry"].values()) and len(r["symmetry"]) == 2),
+               ("dots scale to points", dots_of(ring, scale=2)["d_median"] == round(r["d_median"] / 2, 2))]
+    # a row: 4 dots and a merged (overlapping) pair; ordered along x
+    row = canvas(110, 20)
+    for x in (10, 30, 50, 70, 90, 97):
+        disk(row, x, 10, 4, ink)
+    r = dots_of(row)
+    checks += [("dots merged pair: one component, flagged", r["count"] == 5 and r["merged"] == 1
+                and r["dots"][-1]["merged"] and r["dots"][-1]["aspect"] > 1.3),
+               ("dots largest gap along x", r["max_gap"]["dots"] == [0, 1] or r["max_gap"]["dots"] == [3, 4])]
+    # an anti-aliased dot: equivalent diameter close to the true 12 px, filled
+    soft = canvas(30, 30)
+    disk(soft, 15, 15, 6, ink, aa=True)
+    r = dots_of(soft)
+    checks.append(("dots anti-aliased dot", r["count"] == 1 and r["filled"] == 1 and abs(r["d_median"] - 12) < 1.5))
+    # a hollow ring dot touching the region edge, a filled dot, a 2 px speck (noise), a faint track dot
+    mix = canvas(60, 20)
+    disk(mix, 6, 10, 6, ink, inner=3)
+    disk(mix, 30, 10, 6, ink)
+    mix[2, 50:52] = ink
+    disk(mix, 50, 12, 6, (0xC0, 0xC0, 0xC0))
+    r = dots_of(mix)
+    checks += [("dots ring touching edge is a ring", r["dots"][0]["kind"] == "ring" and r["rings"] == 1
+                and r["filled"] == 2),
+               ("dots noise dropped", r["count"] == 3 and r["dropped"] == 1),
+               ("dots ink/track classes", r["classes"] is not None and
+                (r["classes"]["ink"], r["classes"]["track"]) == (2, 1) and r["dots"][2]["class"] == "track"),
+               ("dots no classes when deltas close", dots_of(row)["classes"] is None),
+               ("dots result is JSON-serialisable", bool(json.dumps(r)))]
+    # a two-frame sequence: the second frame loses a dot
+    less = canvas(120, 120)
+    for k in range(11):
+        a = k * np.pi / 6
+        disk(less, 60 + 40 * np.sin(a), 60 - 40 * np.cos(a), 4, ink)
+    f = [dots_of(ring, ring=True), dots_of(less, ring=True)]
+    s = frames_summary(f)
+    checks += [("dots frames count change", (s["count_min"], s["count_max"]) == (11, 12)
+                and s["count_change"] == {"value": 1, "frame": 1}),
+               ("dots frames worst gap and symmetry in frame 1", s["max_gap"]["frame"] == 1
+                and s["worst_symmetry"]["frame"] == 1 and f[1]["symmetry"]["x"]["unmatched"] >= 1)]
+    return checks
+
+
 def selftest() -> int:
     bg, ink, accent = (0xF9, 0xFA, 0xF5), (0x1C, 0x1C, 0x1C), (0xB8, 0x32, 0x5A)
     img = np.empty((60, 90, 3), dtype=np.int64)
@@ -443,6 +726,7 @@ def selftest() -> int:
                ("compare same passes at 0", offsets(ma, ma, 0)["pass"] and offsets(ma, ma, 0)["max_offset"] == 0),
                ("compare counts differ fails", offsets(ma, merged, 100)["counts_differ"]
                 and not offsets(ma, merged, 100)["pass"] and offsets(ma, merged, None)["pass"])]
+    checks += dots_selftest(bg, ink)
     for name, ok in checks:
         print(f"{'ok  ' if ok else 'FAIL'} {name}")
     return 0 if all(ok for _, ok in checks) else 1
@@ -464,9 +748,19 @@ def main() -> int:
     p = sub.add_parser("gap", parents=[common]); p.add_argument("png"); p.add_argument("rect")
     p.add_argument("--fg", required=True); p.add_argument("--bg", required=True)
     p.add_argument("--tol", type=float, default=10)
-    ink = argparse.ArgumentParser(add_help=False)
-    ink.add_argument("--bg", help="background hex (default: the region's commonest colour)")
-    ink.add_argument("--tol", type=float, default=24, help="ink if max per-channel |Δ| (0-255) from bg > tol")
+    inkbg = argparse.ArgumentParser(add_help=False)
+    inkbg.add_argument("--bg", help="background hex (default: the region's commonest colour)")
+    inkbg.add_argument("--tol", type=float, default=24, help="ink if max per-channel |Δ| (0-255) from bg > tol")
+    p = sub.add_parser("dots", parents=[common, inkbg])
+    p.add_argument("pngs", nargs="+", metavar="png"); p.add_argument("rect")
+    order = p.add_mutually_exclusive_group()
+    order.add_argument("--ring", action="store_true", help="order dots by angle around their centroid")
+    order.add_argument("--axis", choices=("x", "y"), default="x", help="order dots along this axis")
+    p.add_argument("--sym", choices=("x", "y", "both"), default="x", help="mirror line: vertical (x), horizontal (y)")
+    p.add_argument("--min-d", type=float, help="drop dots under this diameter (pt; default 0.15 x median)")
+    p.add_argument("--min-area", type=float, default=4, help="drop components under this many px²")
+    p.add_argument("--dots-list", action="store_true", help="print every dot")
+    ink = argparse.ArgumentParser(add_help=False, parents=[inkbg])
     ink.add_argument("--axis", choices=("y", "x"), default="y", help="bands of rows (y) or columns (x)")
     ink.add_argument("--min-gap", type=float, default=0, help="merge bands closer than this (points)")
     for name in ("bbox", "bands"):
@@ -474,7 +768,7 @@ def main() -> int:
     p = sub.add_parser("compare", parents=[common, ink]); p.add_argument("a"); p.add_argument("png", metavar="b")
     p.add_argument("rect"); p.add_argument("--max-offset", type=float, help="exit 1 if any offset exceeds (pt)")
     args = parser.parse_args()
-    if args.cmd in ("bbox", "bands", "compare") and args.bg is not None:
+    if args.cmd in ("bbox", "bands", "compare", "dots") and args.bg is not None:
         args.bg = parse_hex(args.bg)
     for name, default in (("json", False), ("scale", None), ("px", False)):
         setattr(args, name, getattr(args, name, default))
@@ -482,7 +776,8 @@ def main() -> int:
         return selftest()
     if not args.cmd:
         parser.error("give a subcommand or --selftest")
-    paths = [] if args.cmd == "diff" else [args.png] + ([args.a] if args.cmd == "compare" else [])
+    paths = ([] if args.cmd == "diff" else args.pngs if args.cmd == "dots" else
+             [args.png] + ([args.a] if args.cmd == "compare" else []))
     for path in paths:
         if not Path(path).is_file():
             sys.exit(f"no such file: {path}")

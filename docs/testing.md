@@ -98,6 +98,9 @@ Layout (ink = max per-channel |Δ| from the region's commonest colour > `--tol 2
 uv run scripts/screen-sample.py bbox  <png> x0,y0,x1,y1                     # ink bounding box + size (pt)
 uv run scripts/screen-sample.py bands <png> x0,y0,x1,y1 [--min-gap 4]       # text lines: start/end/gap (--axis x: columns)
 uv run scripts/screen-sample.py compare <A> <B> x0,y0,x1,y1 --max-offset 0.34   # B - A offsets; exit 1 if something moved
+uv run scripts/screen-sample.py dots <png> x0,y0,x1,y1 [--ring] [--sym x|y|both] [--dots-list]
+#   dots (ink components): count, diameters, filled/ring, merged, ink/track Δ, min/max edge gap, mirror symmetry
+uv run scripts/screen-sample.py dots f0.png f1.png … x0,y0,x1,y1 --ring   # frame sequence: per frame + worst frame
 ```
 Image and video ops (`uv run scripts/image-ops.py --selftest`; same point/scale rules, outputs in `$TMPDIR/image-ops/`):
 ```bash
