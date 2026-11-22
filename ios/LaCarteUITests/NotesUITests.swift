@@ -282,9 +282,9 @@ final class NotesUITests: XCTestCase {
     XCTAssertTrue(poll(timeout: 5) { self.liveStatus(url + "/notes/\(id)") == 404 }, "GET /notes/\(id) is not 404")
   }
 
-  /// 014d #3 + #11 on the empty API: a person posted via `POST /notes` with an unreachable photo URL and 2
-  /// directions; the app shows the placeholder ("Photo, not loaded"), reveals and rates; then the sibling is not in
-  /// `GET /cards/due` (burying). The note is deleted again, so Study's empty-deck live check still holds.
+  /// 014d #3 + #11 on the empty API, as amended by 015b #13/#14: a person posted via `POST /notes` with an
+  /// unreachable photo URL and 2 directions; the photo-prompt card is skipped (auto-reported), the description card
+  /// shows the placeholder ("Photo, not loaded") in its answer and is rated; then nothing is due. The note is deleted again, so Study's empty-deck live check still holds.
   @MainActor
   func testNotesStudy_unreachablePhoto_liveAPI() throws {
     let url = try liveURL("LA_CARTE_EMPTY_API_URL")
@@ -292,25 +292,22 @@ final class NotesUITests: XCTestCase {
       + #""description":"e2e test person"},"directions":[{"prompt":["photo"]},{"prompt":["description"]}]}"#
     let created = try XCTUnwrap(liveJSON(url + "/notes", method: "POST", body: body) as? [String: Any])
     let id = try XCTUnwrap(created["id"] as? String, "POST /notes: \(created)")
-    defer { _ = liveStatus(url + "/notes/\(id)", method: "DELETE") }
+    // A teardown block, not `defer`: a failed assertion (continueAfterFailure = false) skips `defer`, and the
+    // leftover note would break the next tests on the empty API.
+    addTeardownBlock { _ = self.liveStatus(url + "/notes/\(id)", method: "DELETE") }
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .live(url))
+    // Spec 015b #13/#14 (amended): the photo → name card can't be asked, so it's skipped and reported
+    // (broken_photo, held); the description card shows the placeholder in its answer, and is reported too.
     XCTAssertTrue(el(app, "study.reveal").waitFor(timeout: 10), "no card")
-    if el(app, "study.photo").exists {
-      waitForLabel(el(app, "study.photo"), "Photo, not loaded", timeout: 15)
-      snapshot("study-photo-failed", appearance: .light)
-      el(app, "study.reveal").tap()
-      assertTexts(app, in: "study.back", ["Robin Vale", "e2e test person"])
-    } else {
-      assertTexts(app, in: "study.front", ["e2e test person"])
-      el(app, "study.reveal").tap()
-      waitForLabel(el(app, "study.photo"), "Photo, not loaded", timeout: 15)
-      snapshot("study-photo-failed", appearance: .light)
-    }
+    assertTexts(app, in: "study.front", ["e2e test person"])
+    el(app, "study.reveal").tap()
+    waitForLabel(el(app, "study.photo"), "Photo, not loaded", timeout: 15)
+    snapshot("study-photo-failed", appearance: .light)
     el(app, "study.rate.good").tap()
     _ = el(app, "study.message").waitFor(timeout: 10)
     let due = try liveJSON(url + "/cards/due") as? [Any] ?? []
-    XCTAssertTrue(due.isEmpty, "sibling still due after rating: \(due)")
+    XCTAssertTrue(due.isEmpty, "a broken-photo card still due: \(due)")
     snapshot("study-person-live-done", appearance: .light)
   }
 
