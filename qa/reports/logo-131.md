@@ -1,7 +1,7 @@
 # QA: Logo 131 (card crossed by the forgetting curve) + app icon
 
-Verdict: FAIL
-Date: 2026-11-22 · Simulator: iPhone 17 Pro / iOS 27 · Commit under test: 41f0661 (branch worktree-agent-a51b387ca1abce991)
+Verdict: PASS (re-validated after fix 72a6a5e; the first round's FAIL is kept below as history)
+Date: 2026-11-22 · Simulator: iPhone 17 Pro / iOS 27 · Commits under test: 41f0661 (round 1, FAIL), 72a6a5e (round 2, PASS) (branch worktree-agent-a51b387ca1abce991)
 Runs: `qa/screenshots/logo-131-mock/` (scoped regression run), `qa/screenshots/logo-131-logo/` (new `LogoUITests`, final)
 Commands:
 - `scripts/ios-ui-test.sh --split logo-131-mock -only-testing:LogoUITests -only-testing:LaunchUITests -only-testing:LaCarteUITests -only-testing:ThemeUITests/testDesignSystem_forest`: 10 passed, 1 failed (`testLogo_launchAndLoadingMarks`, bug 1)
@@ -11,7 +11,21 @@ Commands:
 New tests: `ios/LaCarteUITests/LogoUITests.swift` (`testLogo_gallery` light+dark, `testLogo_galleryForest`,
 `testLogo_launchAndLoadingMarks` light+dark).
 
-## Checks
+## Round 2 (fix 72a6a5e): PASS
+- `scripts/ios-ui-test.sh --split logo-131-fix -only-testing:LaCarteUITests/LogoUITests -only-testing:LaCarteUITests/LaunchUITests`:
+  7 passed, 0 failed (`qa/screenshots/logo-131-fix/`). `testLogo_launchAndLoadingMarks` now samples the loading mark
+  for 8 s (≈5 loops) per appearance, one screenshot every ≈57 ms, and asserts every frame: <10 pink samples in the lower
+  card and the ink card present, light and dark (dark frames verified dark: loading card #F2F2F0 on #1A1A1A at t≈7.9 s).
+- Recording scan (frame-by-frame, all frames): a run of the same test with a temporary trailing `XCTFail` to keep Xcode's
+  recording (`qa/screenshots/logo-131-fix-rec/recordings/testLogo_launchAndLoadingMarks.mp4`, not committed),
+  `image-ops.py frames` → 1348 frames over 25.8 s (≈52 fps, ≈13 loading loops on screen): **0** accent-pink pixels in the
+  loading card's lower area (x 420-475, y 1930-1995 px) in every frame. Same detector on the round-1 recording
+  (`logo-131-logo/recordings/…`, 5.2-7.1 s) flags t=6.843 s with 3575/3575 pink pixels, so it does see the old flash.
+  Note: in that recording run the dark iteration stayed light (appearance switch didn't take); dark is covered by the
+  split run's in-test assertions above.
+- Check 5 → PASS; bug 1 fixed. Other checks unchanged (no other code changed in 72a6a5e).
+
+## Checks (round 1, commit 41f0661)
 | # | Check | Result | Evidence |
 |---|---|---|---|
 | 1 | Gallery logo tiles light/dark/forest at 29/44/64, tokens exact | PASS | `logo-131-logo/logo-gallery-{light,dark}.png`, `logo-gallery-forest-light.png`; `screen-sample at`: light tile line #B8325A, card #1C1C1C; dark tile line #ED6E8C, card #F2F2F0; forest tile line #ED6E8C, card #EEF2EC (identical in all three runs: tiles pin their own theme) |
@@ -35,10 +49,10 @@ appear after the app is on screen to be seen drawing).
 - [x] Background edge to edge, light, dark and forest
 - [x] Pink only on the logo's line outside the card (plus the colour swatch); no default blue tint
 - [x] Mark crisp at 29 pt: card, cut-out line and pink hook all distinguishable
-- [ ] Loading mark: card flashes solid pink once per loop (bug 1)
+- [x] Loading mark: card never pink (round 2; round 1 flashed pink once per loop, bug 1)
 
-## Bugs
-1. **Loading mark flashes a solid pink card once per loop.**
+## Bugs (round 1)
+1. **[FIXED in 72a6a5e, verified round 2] Loading mark flashes a solid pink card once per loop.**
    Steps: launch with `LA_CARTE_SCREEN=design-system` (any theme), watch the "loading" mark at the bottom of the Logo
    section, or run `LogoUITests/testLogo_launchAndLoadingMarks`.
    Expected: the card stays ink-coloured while the curve is erased and redrawn.

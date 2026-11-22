@@ -65,7 +65,7 @@ final class LogoUITests: XCTestCase {
       // Early frames (whatever part of the draw-in is still running when the element is found).
       let start = Date()
       var frames: [(ms: Int, image: CGImage)] = []
-      while Date().timeIntervalSince(start) < 4 {
+      while Date().timeIntervalSince(start) < 8 {  // ≈5 loading loops (1.6 s each)
         let shot = XCUIScreen.main.screenshot()
         let ms = Int(Date().timeIntervalSince(start) * 1000)
         frames.append((ms, shot.image.cgImage!))
@@ -73,7 +73,7 @@ final class LogoUITests: XCTestCase {
       }
       XCTAssertGreaterThanOrEqual(frames.count, 5, "too few frames sampled")
 
-      // Launch mark: still from 4 s on (draws in once, no loop).
+      // Launch mark: still from 8 s on (draws in once, no loop).
       settle(1)
       let settledA = XCUIScreen.main.screenshot().image.cgImage!
       settle(2)
