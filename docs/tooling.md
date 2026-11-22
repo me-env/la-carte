@@ -268,6 +268,7 @@ XCUITest keeps navigation, E2E and one appearance-switch smoke test.
 
 - **Owner:** design-lead. **Status:** **done 2026-11-21** (uncommitted). `scripts/brandkit.py` (~290 lines);
   `--selftest` ~3 s, its synthetic card PASSES design-review on 12 of 12 seeds; a minimal round script is 25 lines.
+  `brandkit.CLOSE_START` (0.65) is where the web starts: keep it >= design-review's `TOUCH_OK_COVERAGE`.
   Deviations: marks are design-review's dot → rounded-hexagon morph, not the AM inversion (a flip fails `seam:
   polarity mix`); `match` minimises squared distance (Euclidean cost let lerped dots touch on 10 of 12 seeds).
 - **Evidence:** 12 render scripts, 1,788 lines. Across the 9 `render.py`: `mulberry32` defined 8×, `svg`,

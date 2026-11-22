@@ -151,20 +151,29 @@ def mark_area(k, rho):
 
 
 WALL = 2.2                                       # px: paper walls never get thinner than this (design-review hairlines)
+CLOSE_START = 0.65     # coverage where the web (marks merging into solid) starts; >= design-review's TOUCH_OK_COVERAGE.
+                       # Below it the wall-limited hexagon would end sooner on small pitches: walls then narrow to fit.
+
+
+def closing_wall(pitch):
+    """Paper wall width at the end of the hexagon stage: WALL, narrower on small pitches so the web starts at
+    coverage >= CLOSE_START (a sharp hexagon of apothem sqrt(CLOSE_START) * pitch / 2)."""
+    return min(WALL, pitch * (1 - math.sqrt(CLOSE_START)))
 
 
 def _closing(pitch):
     """Tables for one pitch: rounded-hexagon extent/rounding up to C2 (walls = WALL), then the paper web's
     retreat length L into the cell corners (coverage C2 -> 1). Same method as design-review's synthetic_ramp."""
-    e1, e2 = float(dot_radius(C1, pitch)), (pitch - WALL) / 2
+    wall = closing_wall(pitch)
+    e1, e2 = float(dot_radius(C1, pitch)), (pitch - wall) / 2
     es = np.linspace(e1, e2, 600)                             # extent k + rho
     rhos = e1 * (e2 - es) / (e2 - e1)
     covs = mark_area(es - rhos, rhos) / cell_area(pitch)       # rises C1 -> C2
     Rc = pitch / SQ3                                           # cell circumradius
     g = (np.mgrid[0:300, 0:300].reshape(2, -1).T + 0.5) / 300 * [Rc, pitch / 2]   # one quarter cell
     g = g[_hexnorm(g) <= pitch / 2]
-    band = pitch / 2 - _hexnorm(g) < WALL / 2
-    Ls = np.linspace(0, math.hypot(Rc / 2, WALL / 2) + 0.01, 300)
+    band = pitch / 2 - _hexnorm(g) < wall / 2
+    Ls = np.linspace(0, math.hypot(Rc / 2, wall / 2) + 0.01, 300)
     covL = np.array([1 - (band & (_corner_d(g, pitch) < L)).mean() for L in Ls])   # falls 1 -> C2 as L grows
     keep = np.concatenate([[True], np.diff(covL) < 0])        # strictly decreasing for interp
     return es, rhos, covs, float(covs[-1]), Ls[keep], covL[keep]
@@ -225,7 +234,7 @@ def raster(path, lattice, pos, k, rho, L, pitch, inside, bg, fg, size=1024, ss=4
     hx, hy = hx - np.clip(hx, -0.577350269 * kk, 0.577350269 * kk), hy - kk
     in_mark = (np.hypot(hx, hy) * np.sign(hy) - rho[cm] <= 0) & (k[cm] + rho[cm] > 0)
     ql = np.abs(p - lattice[cl])
-    web = (pitch / 2 - _hexnorm(ql) < WALL / 2) & (_corner_d(ql, pitch) < L[cl])
+    web = (pitch / 2 - _hexnorm(ql) < closing_wall(pitch) / 2) & (_corner_d(ql, pitch) < L[cl])
     ink = np.zeros(xs.shape, dtype=bool)
     ink[mask] = np.where(late, ~web, in_mark)
     cov = ink.reshape(size, ss, size, ss).mean(axis=(1, 3))[..., None]
