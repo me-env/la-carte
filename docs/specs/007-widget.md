@@ -1,6 +1,6 @@
 # 007 — Home Screen widget: cards to review + study streak
 
-Status: ready
+Status: ready (layout, streak rule and AC 2, 16–19 superseded by [024](024-streak-widget.md), pending the user's approval)
 Owners: api-engineer (streak, step 1) → ios-engineer (contract, shared storage, widget, step 2) →
 release-engineer (signing / CI for the second bundle ID, step 3)
 Depends on: 001 (study, caught-up copy), 003 (server settings, `TokenStore`), 004 (themes)
