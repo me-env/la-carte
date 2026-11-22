@@ -97,6 +97,8 @@ Rules and why:
 8. **Unchanged:** the stack stays vertically centred when it fits. The answer slot is always laid out, so the
    question never moves on reveal. The halo, the swipe ring, the photo and the answer hint (spec 014d) work
    as before.
+   *Exception (per user 2026-11-22):* a person card with a text prompt moves its question on reveal so the
+   photo, name and description end centred as one group (spec 014d, "Text prompt: the question moves on reveal").
 
 Notes cards (014d): the tier and alignment apply to the **first text field** of the prompt (the card face).
 Other prompt text fields stay `.body` `secondaryInk` and follow its alignment. A photo always stays centred.
