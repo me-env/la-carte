@@ -16,6 +16,8 @@ public struct StudyView: View {
   @State private var cardSize = CGSize.zero
   /// A long card scrolls, so a vertical first movement is left to the scroll view (spec 019).
   @State private var isCardScrollable = false
+  /// Flashes the scroll indicators on each reveal, never as a card leaves.
+  @State private var revealCount = 0
   /// The edit field's global frame: a touch that starts inside it moves the caret instead of ending the edit.
   @State private var fieldFrame = CGRect.zero
   @State private var reportMenuHeight: CGFloat = 360
@@ -230,7 +232,12 @@ public struct StudyView: View {
           isCardScrollable = $1
         }
         .defaultScrollAnchor(.center, for: .alignment)
-        .scrollIndicatorsFlash(trigger: store.isRevealed)
+        // On reveal only: flashing on `isRevealed` also fired as the next card came in, where the hidden answer laid
+        // out below a short question often overflows, so a card that visibly fits showed a scroll bar.
+        .scrollIndicatorsFlash(trigger: revealCount)
+        .onChange(of: store.isRevealed) { _, revealed in
+          if revealed { revealCount += 1 }
+        }
         // Not `.interactively`: on a card that fits, the keyboard never followed the drag and stayed up.
         .scrollDismissesKeyboard(.immediately)
         // Focus is the one source of truth for ending an edit: Done, a tap outside, a keyboard swipe, leaving
