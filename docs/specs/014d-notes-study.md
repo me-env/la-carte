@@ -69,6 +69,69 @@ No accent anywhere on the card; the only pink stays `study.remaining` (rule 4).
 - **Dark/forest:** same view, no extra treatment; the hairline stroke keeps dark-edged photos off the paper.
 - Inline edit off (#9): double-tap on a photo or multi-field card does nothing, no haptic.
 
+### Person card text: centred caption, the name first (design 2026-11-22 per user)
+User, on device (photo → name + description): the hint sat bottom left and vanished on reveal; "centre it below
+the image"; "centre the person's name below the image, and make it stand out a bit more than the description".
+Cause today: the answer's alignment is measured on all answer text joined ("Ada Example runs the bakery…"), so a
+3+-line description makes the whole slot leading, hint and name included, and the hint is centred vertically in
+a slot sized by the answer, so it floats mid-slot. Name and description share one style, `secondaryInk`.
+Mock (tokens only, rendered next to today's `StudyView`): scratch `person-light-before-after.png` /
+`person-dark-before-after.png` (design-lead's report). Applies to `type == .person` only; basic cards unchanged.
+
+The **photo is the axis**: on a person card, the photo, the name and the hint are always centred on the column,
+whatever the other fields' alignment. Like a Contacts poster or a Photos caption, the caption sits under the
+picture: name, then description.
+
+| Element | Font | Colour | Alignment | Spacing |
+|---|---|---|---|---|
+| Hint (before reveal) | `.subheadline` (was `.meta`: the user looks for it, and it is the only text on a photo prompt) | `secondaryInk` | centred | top of the answer slot, `Theme.Spacing.m` under the prompt (the stack's existing gap) |
+| Name, in the answer | `.cardFaceSmall` (title2 medium) | `ink` | always centred (`multilineTextAlignment(.center)`), wraps, never truncated, never measured | `Theme.Spacing.m` under a photo; first in the slot otherwise |
+| Description, in the answer | `.body` (`CardFont.body`) | `secondaryInk` | in the caption block (below): 1-2 lines centred, 3+ leading | `Theme.Spacing.xs` under the name; `Theme.Spacing.m` under a photo |
+| Photo, in the answer | `CardPhoto(.card)` | — | centred | first in the slot |
+| Name or description as the **prompt** | spec 017 tier (`CardText.promptFont`), unchanged | `ink` | spec 017, unchanged | — |
+
+- **Hint: cross-fades into the answer in the same place.** The slot is a `ZStack(alignment: .top)` (was
+  `.center`) with the hint centred horizontally (its own `frame(maxWidth: .infinity)`), so the hint sits where the
+  answer's first element starts: the name's line on a photo prompt, the photo's top edge on a text prompt. On reveal
+  the hint fades out as the answer fades in (`Theme.Motion.standard`; Reduce Motion: instant swap), as today; it
+  does not stay after reveal (the answer replaces the question it asked). The slot stays laid out at the answer's
+  size, so the prompt never moves (spec 017 rule 8 and #13 hold: nothing above the slot depends on it).
+- **Name stands out:** `.cardFaceSmall` ink is one tier under the card face, so on `description → photo + name`
+  a short description prompt (34 pt, `.cardFace`) still leads; under a long one (`.cardFaceSmall`) the two share a
+  size and the photo between them separates them. The question still leads (017 rule 2); the name leads the
+  answer. A deliberate exception to rule 2's "answer in `secondaryInk`": a person card's answer has a headword.
+  No new token.
+- **Description:** `.body` `secondaryInk` always (not 017's `.cardAnswer` tier: a caption under a 22 pt name must
+  read as secondary even when short). Contrast: `secondaryInk` light is 2.6:1, a known global issue (017 out of
+  scope) shared by every answer. Not patched here: the name now carries the fact in `ink`, and a one-off stronger
+  grey would make two answer greys. The token fix is a separate design-lead follow-up (backlog).
+- **Answer container:** the answer `VStack(alignment: .center)` takes `frame(maxWidth: .infinity)` (centred in the
+  full column), so the slot never shrinks to its content; on a person card the slot ignores 017's
+  `answerAlignment`/`answerWidth`/snap (they stay for basic cards).
+- **Long description, the caption block (spec 017 rule 3 applied to the description alone):** the description is
+  laid out in a block of width `min(column, photoWidth + 2 × Theme.Spacing.l)`, centred, where `photoWidth` is the
+  `CardPhoto(.card)` width in use (`Theme.Photo.card` = 240 → 288 pt; `Theme.Photo.cardCompact` at AX sizes). The
+  answer probe measures **the description field alone** in that same width, font `.body` at the current Dynamic
+  Type size (capped at `.accessibility2` like all card text), not name + description joined and not 017's
+  `.cardAnswer`. 1-2 rendered lines: centred, line by line. 3+: leading inside the block
+  (`frame(maxWidth: .infinity, alignment: .leading)` within the block's width), so the paragraph reads as one
+  centred caption under the photo and the name, not a full-width paragraph under a centred headword. The name and
+  the photo stay centred either way. A description *prompt* is unchanged (017: full column).
+- **Directions, same hierarchy everywhere:**
+  - `photo → name + description`: photo · hint ("Name and description?") → name (`.cardFaceSmall` ink) ·
+    description (`.body` secondary). No description: photo · hint "Name?" → name alone.
+  - `name → photo + description`: name (017 prompt tier, ink, the largest text) · hint → photo · description.
+  - `description → photo + name`: description (017 prompt tier, ink; 3+ lines leading per 017) · hint → photo ·
+    name (`.cardFaceSmall` ink, centred even under a leading description: the photo between them is the axis).
+  The name is always ink and medium weight; the description is `secondaryInk` regular unless it is the question.
+- **Unchanged:** wording of the hint, photo sizes (AX: `cardCompact`), ids (`study.answerHint`, `study.back`,
+  `study.photo`), the VoiceOver order (prompt, then answer fields in order), dark and forest (same tokens).
+- **Acceptance (QA):** before reveal, `study.answerHint`'s midX equals `study.card`'s midX (± 1 pt) for every
+  direction, short and long descriptions; after reveal on a short-description card, `study.back`'s midX equals `study.photo`'s and
+  `study.card`'s midX (± 1 pt); `study.front`'s frame is identical before and after reveal; after reveal the hint is gone (not hittable, hidden from VoiceOver) and `study.back`'s
+  top equals the hint's former top (± 1 pt); a 3+-line answer description's lines start at one x, inside a block
+  centred on `study.photo` (block midX = photo midX ± 1 pt, width ≤ photo width + 48 pt). Screenshots: the existing `study-person-*` set, light + dark, plus a long-description card.
+
 ## API / MCP changes
 None.
 
