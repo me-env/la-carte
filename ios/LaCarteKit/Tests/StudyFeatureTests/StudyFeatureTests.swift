@@ -994,9 +994,11 @@ struct StudyFeatureTests {
     await store.send(.swipeEnded(fraction: fraction)) {
       $0.swipeEase = nil
       $0.isReviewing = true
+      $0.releasedRating = rating
     }
     await store.receive(\.reviewResponse.success) {
       $0.isReviewing = false
+      $0.releasedRating = nil
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
@@ -1066,9 +1068,11 @@ struct StudyFeatureTests {
     await store.send(.swipeEnded(fraction: 0.13)) {
       $0.swipeEase = nil
       $0.isReviewing = true
+      $0.releasedRating = .good
     }
     await store.receive(\.reviewResponse.failure) {
       $0.isReviewing = false
+      $0.releasedRating = nil
       $0.phase = .offline
     }
     await store.send(.retryButtonTapped) {

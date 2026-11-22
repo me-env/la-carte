@@ -31,10 +31,10 @@ struct StudyRenders {
     }
     shots.append(("revealed-short", studying(Fixture.short, revealed: true), false))
     shots.append(("revealed-long", studying(Fixture.longAnswer, revealed: true), false))
-    // A held rating drag: the ring is centred, since the touch point is view state. Spec 019 (the 24-dot dial, any
-    // direction) keeps the touch point in the view too; its "up" drag is held by the UI test's
-    // `-studySwipePreviewUp`, and would only go here if 019 put the drag direction in the store.
-    for ease in [0.0, 0.25, 0.5, 0.76, 1.0] {
+    // A held rating drag (spec 019): the dial is centred, since the touch point is view state. The store holds the
+    // projected value only, so an "up" drag renders as the "right" one of the same length (UI tests hold it with
+    // `-studySwipePreviewUp`). Forgot, Hard, dead zone left, touch-down, dead zone right, Got it, Easy.
+    for ease in [0.0, 0.25, 0.42, 0.5, 0.58, 0.76, 1.0] {
       var state = studying(Fixture.short, revealed: true)
       state.swipeEase = ease
       shots.append(("drag-\(String(format: "%03d", Int((ease * 100).rounded())))", state, false))

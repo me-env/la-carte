@@ -8,9 +8,11 @@ public struct StudyView: View {
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @FocusState private var focusedField: StudyFeature.State.Field?
-  /// Where the rating drag came down, in the card's coordinates: the ring's center. Visual only.
+  /// Where the rating drag came down, in the card's coordinates: the dial's center. Visual only.
   @State private var touchDown: CGPoint?
   @State private var cardSize = CGSize.zero
+  /// A long card scrolls, so a vertical first movement is left to the scroll view (spec 019).
+  @State private var isCardScrollable = false
   /// The edit field's global frame: a touch that starts inside it moves the caret instead of ending the edit.
   @State private var fieldFrame = CGRect.zero
   @State private var reportMenuHeight: CGFloat = 360
@@ -204,11 +206,14 @@ public struct StudyView: View {
           // transition, so the next card popped in.
           ZStack {
             VStack(spacing: Theme.Spacing.m) {
-              prompt(card).background { textHalo }.aligned(card.promptAlignment)
-              answerSlot(card).background { textHalo }.aligned(card.answerAlignment)
+              prompt(card).aligned(card.promptAlignment)
+              answerSlot(card).aligned(card.answerAlignment)
             }
             .frame(maxWidth: .infinity)
             .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            // Fades under the dial while a drag is held; animated only as the drag starts and ends.
+            .opacity(store.cardTextOpacity)
+            .animation(Theme.Motion.standard, value: store.swipeEase == nil)
             // The next card fades in from the top; the outgoing one leaves at once so its answer never lingers.
             // The animation rides on the transition alone, so the scroll view's size and offset don't glide.
             .id(card.id)
@@ -218,6 +223,9 @@ public struct StudyView: View {
           }
         }
         .onChange(of: card.id) { _, id in proxy.scrollTo(id, anchor: .top) }
+        .onScrollGeometryChange(for: Bool.self, of: { $0.contentSize.height > $0.containerSize.height }) {
+          isCardScrollable = $1
+        }
         .defaultScrollAnchor(.center, for: .alignment)
         .scrollIndicatorsFlash(trigger: store.isRevealed)
         // Not `.interactively`: on a card that fits, the keyboard never followed the drag and stayed up.
@@ -246,7 +254,7 @@ public struct StudyView: View {
       )
       // Off unless `canRate` (so never while editing); a pan needs movement, so taps pass through.
       .gesture(
-        HorizontalPan(isEnabled: store.canRate) { start, translation in
+        RatingPan(isEnabled: store.canRate, isScrollable: isCardScrollable) { start, translation in
           touchDown = start
           store.send(.swipeChanged(fraction: swipeFraction(translation)))
         } onEnd: { translation in
@@ -260,13 +268,14 @@ public struct StudyView: View {
         }
       }
       .accessibilityIdentifier("study.card")
-      // Behind the card text, so the dots never cross it; after the card's identifier, so the ring keeps its own.
-      .background { swipeRing }
+      // Above the faded card text; after the card's identifier, so the dial keeps its own.
+      .overlay { swipeRing }
       #if DEBUG
         .onChange(of: store.canRate, initial: true) { _, canRate in
-          guard canRate, let fraction = Self.swipePreview else { return }
+          guard canRate, let translation = Self.swipePreview else { return }
           touchDown = nil
-          store.send(.swipeChanged(fraction: fraction))
+          // The preview's translation is already in card widths.
+          store.send(.swipeChanged(fraction: StudyFeature.swipeFraction(translation: translation, cardWidth: 1)))
         }
       #endif
 
@@ -483,14 +492,42 @@ public struct StudyView: View {
     }
   }
 
+  /// A tap still sends `again` / `good`; only the label follows the drag (spec 019).
   private func ratingButton(_ rating: Rating) -> some View {
     Button { store.send(.ratingTapped(rating)) } label: { ratingLabel(rating) }
       .buttonStyle(.plain)
+      .accessibilityLabel(Self.title(shownRating(rating)))
       .accessibilityIdentifier("study.rate.\(rating.rawValue)")
   }
 
+  /// The button on the drag's side echoes its grade (semibold once armed); the other side turns secondary.
+  /// Every title a side can show is laid out hidden, so the buttons never move as the label changes.
   private func ratingLabel(_ rating: Rating) -> some View {
-    textButtonLabel(Self.title(rating))
+    let echo = store.rowEcho
+    let isEchoed = echo.map { Self.isLeft($0.rating) == Self.isLeft(rating) } ?? false
+    return ZStack {
+      ForEach(Self.isLeft(rating) ? [Rating.again, .hard] : [.good, .easy], id: \.self) { title in
+        Text(Self.title(title)).font(.body).fontWeight(.semibold).hidden()
+      }
+      Text(Self.title(shownRating(rating)))
+        .font(.body)
+        .fontWeight(isEchoed && echo?.isArmed == true ? .semibold : .regular)
+        .foregroundStyle(echo == nil || isEchoed ? Theme.ink : Theme.secondaryInk)
+        .contentTransition(.opacity)
+    }
+    .frame(minHeight: 44)
+    .contentShape(.rect)
+    .animation(Theme.Motion.standard, value: echo)
+  }
+
+  /// What the `again` or `good` button reads now: the echoed grade on the drag's side, else its own title.
+  private func shownRating(_ rating: Rating) -> Rating {
+    guard let echo = store.rowEcho, Self.isLeft(echo.rating) == Self.isLeft(rating) else { return rating }
+    return echo.rating
+  }
+
+  private static func isLeft(_ rating: Rating) -> Bool {
+    rating == .again || rating == .hard
   }
 
   static func title(_ rating: Rating) -> String {
@@ -502,56 +539,52 @@ public struct StudyView: View {
     }
   }
 
-  /// The dots around the touch-down point while a drag is held. With Reduce Motion they jump between the five
-  /// bin drawings instead of morphing. Appears and fades out by opacity only; the card never moves.
+  /// The dial around the touch-down point while a drag is held, 16 pt outside the drag's full length so the finger
+  /// stays inside it. Released in a grade it grows to 1.12 as it fades; cancelled it shrinks to 0.6 toward the
+  /// touch point. The transition is the one set while held, so it follows the last grade. Reduce Motion: fades.
   private var swipeRing: some View {
-    ZStack {
+    let center = touchDown ?? CGPoint(x: cardSize.width / 2, y: cardSize.height / 2)
+    let anchor = UnitPoint(
+      x: cardSize.width > 0 ? center.x / cardSize.width : 0.5,
+      y: cardSize.height > 0 ? center.y / cardSize.height : 0.5
+    )
+    return ZStack {
       if let ease = store.swipeEase {
-        ConfidenceDots(
-          order: reduceMotion ? Self.binOrder(store.swipeRating) : ease,
-          radius: StudyFeature.ringRadius * cardSize.width
-        )
-        .position(touchDown ?? CGPoint(x: cardSize.width / 2, y: cardSize.height / 2))
-        .accessibilityElement()
-        .accessibilityLabel("Rating")
-        .accessibilityValue(store.swipeRating.map(Self.title) ?? "None")
-        .accessibilityIdentifier("study.swipeRing")
-        .transition(.opacity)
+        RatingDial(value: ease, radius: StudyFeature.ringRadius * cardSize.width + 16)
+          .position(center)
+          .accessibilityElement()
+          .accessibilityLabel("Rating")
+          .accessibilityValue(store.swipeRating.map(Self.title) ?? "None")
+          .accessibilityIdentifier("study.swipeRing")
+          .transition(
+            reduceMotion
+              ? .opacity
+              : .opacity.combined(with: .scale(scale: store.swipeRating == nil ? 0.6 : 1.12, anchor: anchor))
+          )
       }
     }
     .allowsHitTesting(false)
     .animation(Theme.Motion.standard, value: store.swipeEase == nil)
   }
 
-  /// A soft patch of background behind each side's text: the swipe ring's dots fade out under it, never touch a glyph.
-  private var textHalo: some View {
-    Rectangle()
-      .fill(Theme.background)
-      .padding(-Theme.Spacing.s)
-      .blur(radius: Theme.Spacing.s / 2)
-      .allowsHitTesting(false)
-  }
-
-  private static func binOrder(_ rating: Rating?) -> Double {
-    switch rating {
-    case .again: 0
-    case .hard: 0.25
-    case nil: 0.5
-    case .good: 0.75
-    case .easy: 1
-    }
-  }
-
-  private func swipeFraction(_ translation: CGFloat) -> Double {
-    cardSize.width > 0 ? translation / cardSize.width : 0
+  private func swipeFraction(_ translation: CGSize) -> Double {
+    StudyFeature.swipeFraction(translation: translation, cardWidth: cardSize.width)
   }
 
   #if DEBUG
-    /// `-studySwipePreview <f>` holds a drag at `f` card widths so QA can screenshot the dots (spec 011).
-    /// A negative value must be written `"<real>-0.13</real>"` (or `" -0.13"`): a bare `-0.13` reads as a flag.
-    static let swipePreview: Double? =
-      UserDefaults.standard.object(forKey: "studySwipePreview") != nil
-      ? UserDefaults.standard.double(forKey: "studySwipePreview") : nil
+    /// `-studySwipePreview <f>` holds a drag of `(f, 0)` card widths, `-studySwipePreviewUp <f>` one of `(0, −f)`,
+    /// so QA can screenshot the dial (specs 011, 019). A negative value must be written `"<real>-0.13</real>"`
+    /// (or `" -0.13"`): a bare `-0.13` reads as a flag.
+    static let swipePreview: CGSize? = {
+      let defaults = UserDefaults.standard
+      if defaults.object(forKey: "studySwipePreviewUp") != nil {
+        return CGSize(width: 0, height: -defaults.double(forKey: "studySwipePreviewUp"))
+      }
+      if defaults.object(forKey: "studySwipePreview") != nil {
+        return CGSize(width: defaults.double(forKey: "studySwipePreview"), height: 0)
+      }
+      return nil
+    }()
   #endif
 
   /// A plain button only hit-tests what it draws: the 44pt band must be in the label's shape, not outside the button.

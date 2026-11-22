@@ -17,8 +17,10 @@ public struct StudyFeature {
     var draft = ""
     var isSavingEdit = false
     var editFailed = false
-    /// The continuous ease value 0...1 while a rating drag is held; nil = no ring (spec 011).
+    /// The continuous ease value 0...1 while a rating drag is held; nil = no dial (spec 011).
     var swipeEase: Double?
+    /// The grade a drag released: the rating row keeps echoing it until the next card (spec 019).
+    var releasedRating: Rating?
     var isReportMenuShown = false
     var isReportCommentShown = false
     var reportComment = ""
@@ -31,6 +33,21 @@ public struct StudyFeature {
 
     /// What releasing the drag now would send.
     var swipeRating: Rating? { swipeEase.flatMap(StudyFeature.rating(forEase:)) }
+
+    /// What the rating row shows on the drag's side (spec 019): the grade a release would give, or the side's
+    /// first grade (not armed) in the dead zone. Nil = at rest, including at the touch-down point.
+    var rowEcho: RowEcho? {
+      if let releasedRating { return RowEcho(rating: releasedRating, isArmed: true) }
+      // ≈ 2 pt of drag: below it, touch-down jitter keeps the row at rest.
+      guard let ease = swipeEase, abs(ease - 0.5) >= 0.01 else { return nil }
+      return RowEcho(rating: swipeRating ?? (ease > 0.5 ? .good : .hard), isArmed: swipeRating != nil)
+    }
+
+    /// The card text fades to 0.3 across the dead zone, so a nudge keeps the answer readable (spec 019).
+    var cardTextOpacity: Double {
+      guard let ease = swipeEase else { return 1 }
+      return 1 - 0.7 * min(abs(ease - 0.5) * 2 / 0.3, 1)
+    }
 
     /// The buttons can be tapped, a drag can rate, and VoiceOver offers the ratings.
     var canRate: Bool {
@@ -59,6 +76,12 @@ public struct StudyFeature {
     /// The side of the revealed card being edited in place (spec 010).
     public enum Field: Hashable, Sendable {
       case front, back
+    }
+
+    struct RowEcho: Equatable {
+      var rating: Rating
+      /// Releasing now sends `rating`; false in the dead zone.
+      var isArmed: Bool
     }
 
     enum Notice: Equatable {
@@ -128,7 +151,16 @@ public struct StudyFeature {
   /// The drag's scale: the ring's radius as a fraction of the card's width.
   static let ringRadius = 0.25
 
-  /// The ease value for a horizontal drag of `fraction` card widths: 0.5 at touch-down, 0 or 1 on the ring.
+  /// The drag projected on the up-right diagonal, in card widths (spec 019): `clamp(dx − dy, −d, d)`, so right,
+  /// up and up-right count the full distance as positive, left, down and down-left as negative, and the
+  /// up-left / down-right diagonals cancel. `translation` is in screen points (y down).
+  static func swipeFraction(translation: CGSize, cardWidth: CGFloat) -> Double {
+    guard cardWidth > 0 else { return 0 }
+    let distance = hypot(translation.width, translation.height)
+    return min(max(translation.width - translation.height, -distance), distance) / cardWidth
+  }
+
+  /// The ease value for a drag of `fraction` card widths: 0.5 at touch-down, 0 or 1 on the ring.
   static func ease(forSwipe fraction: Double) -> Double {
     min(max(0.5 + fraction / (2 * ringRadius), 0), 1)
   }
@@ -230,6 +262,7 @@ public struct StudyFeature {
         // A drag can outlive `canRate` (a refresh fails mid-drag): the release always clears the ring.
         state.swipeEase = nil
         guard state.canRate, let rating = Self.rating(forEase: Self.ease(forSwipe: fraction)) else { return .none }
+        state.releasedRating = rating
         return review(rating, state: &state)
 
       case .deckButtonTapped:
@@ -265,6 +298,7 @@ public struct StudyFeature {
 
       case let .reviewResponse(.success(card)):
         state.isReviewing = false
+        state.releasedRating = nil
         state.isRevealed = false
         state.cards.remove(id: card.id)
         return state.cards.isEmpty ? fetchDueCards(&state) : .none
@@ -274,6 +308,7 @@ public struct StudyFeature {
         state.isReviewing = false
         // The card and its pan leave the screen, so a held drag may never send its release.
         state.swipeEase = nil
+        state.releasedRating = nil
         state.phase = (error as? APIError)?.isUnauthorized == true ? .unauthorized : .offline
         return armAutoRefresh(state)
 

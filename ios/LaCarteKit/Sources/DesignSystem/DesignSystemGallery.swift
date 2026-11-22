@@ -27,13 +27,14 @@ struct DesignSystemGalleryContent: View {
         logoSection
       }
 
-      section("Confidence dots") {
-        HStack(spacing: Theme.Spacing.s) {
-          ForEach([0, 0.25, 0.5, 0.75, 1], id: \.self) { order in
-            ConfidenceDots(order: order, radius: 16)
+      // Forgot, Hard, touch-down, dead zone, Got it, Easy.
+      section("Rating dial") {
+        HStack(spacing: Theme.Spacing.xs) {
+          ForEach([0, 0.3, 0.5, 0.58, 0.7, 1], id: \.self) { value in
+            RatingDial(value: value, radius: 22)
           }
         }
-        .accessibilityIdentifier("gallery.confidenceDots")
+        .accessibilityIdentifier("gallery.ratingDial")
       }
 
       section("Colors") {
