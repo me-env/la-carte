@@ -148,6 +148,15 @@ public struct StudyFeature {
 
   public init() {}
 
+  /// How long a notice stays: 2 s; `-noticeSeconds <s>` (debug builds) lengthens it so slow UI-test runners see it.
+  static let noticeDuration: Duration = {
+    #if DEBUG
+      let seconds = UserDefaults.standard.double(forKey: "noticeSeconds")
+      if seconds > 0 { return .seconds(seconds) }
+    #endif
+    return .seconds(2)
+  }()
+
   /// The drag's scale: the ring's radius as a fraction of the card's width.
   static let ringRadius = 0.25
 
@@ -455,7 +464,7 @@ public struct StudyFeature {
 
   private func expireNotice() -> Effect<Action> {
     .run { [clock] send in
-      try await clock.sleep(for: .seconds(2))
+      try await clock.sleep(for: Self.noticeDuration)
       await send(.noticeExpired)
     }
     .cancellable(id: CancelID.notice, cancelInFlight: true)

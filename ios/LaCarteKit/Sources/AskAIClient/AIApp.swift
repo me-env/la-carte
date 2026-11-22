@@ -17,10 +17,10 @@ public enum AIApp: String, CaseIterable, Sendable {
     }
   }
 
-  /// The universal link that opens the app; Vibe, Claude and ChatGPT get the text prefilled. Nil for "Copy only".
+  /// The universal link that opens the app; Claude and ChatGPT get the text prefilled. Nil for "Copy only".
   public func link(for text: String) -> URL? {
     switch self {
-    case .vibe: URL(string: "https://chat.mistral.ai/chat/?q=\(Self.encoded(text))")
+    case .vibe: URL(string: "https://chat.mistral.ai/chat/")
     case .claude: URL(string: "https://claude.ai/new?q=\(Self.encoded(text))")
     case .chatgpt: URL(string: "https://chatgpt.com/?q=\(Self.encoded(text))")
     case .perplexity: URL(string: "https://www.perplexity.ai/search")
