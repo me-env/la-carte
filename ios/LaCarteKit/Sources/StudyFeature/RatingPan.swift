@@ -2,7 +2,8 @@ import SwiftUI
 import UIKit
 
 /// The rating drag's pan (spec 019). On a card that fits it begins in any direction; on a card that scrolls, a
-/// first movement within 30° of vertical is left to the scroll view. Once begun, it reports the full translation.
+/// first movement within 30° of vertical is left to the scroll view (which waits for this pan to decide). Once
+/// begun, it reports the full translation.
 struct RatingPan: UIGestureRecognizerRepresentable {
   var isEnabled: Bool
   var isScrollable: Bool
@@ -53,6 +54,16 @@ struct RatingPan: UIGestureRecognizerRepresentable {
     func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
       guard let pan = recognizer as? UIPanGestureRecognizer else { return false }
       return RatingPan.shouldBegin(velocity: pan.velocity(in: pan.view), isScrollable: isScrollable)
+    }
+
+    /// The card's scroll view waits for the rating pan to decide by angle; otherwise the scroll view's pan, which
+    /// begins on any mostly vertical movement, wins the 30°–45° drags the spec gives to the rating.
+    func gestureRecognizer(
+      _ recognizer: UIGestureRecognizer,
+      shouldBeRequiredToFailBy other: UIGestureRecognizer
+    ) -> Bool {
+      guard let scrollView = other.view as? UIScrollView, let view = recognizer.view else { return false }
+      return other === scrollView.panGestureRecognizer && scrollView.isDescendant(of: view)
     }
   }
 }

@@ -2,6 +2,7 @@
 import ComposableArchitecture
 import Foundation
 import Testing
+import UIKit
 
 @testable import DesignSystem
 @testable import StudyFeature
@@ -65,6 +66,20 @@ struct StudyDragTests {
     for velocity in begins {
       #expect(RatingPan.shouldBegin(velocity: velocity, isScrollable: true), "\(velocity)")
     }
+  }
+
+  @Test func theCardsScrollViewWaitsForTheRatingPanToDecide() {
+    let card = UIView()
+    let scrollView = UIScrollView()
+    card.addSubview(scrollView)
+    let pan = UIPanGestureRecognizer()
+    card.addGestureRecognizer(pan)
+    let coordinator = RatingPan.Coordinator()
+    #expect(coordinator.gestureRecognizer(pan, shouldBeRequiredToFailBy: scrollView.panGestureRecognizer))
+    let tap = UITapGestureRecognizer()
+    scrollView.addGestureRecognizer(tap)
+    #expect(!coordinator.gestureRecognizer(pan, shouldBeRequiredToFailBy: tap))
+    #expect(!coordinator.gestureRecognizer(pan, shouldBeRequiredToFailBy: UIScrollView().panGestureRecognizer))
   }
 
   @Test func theDialStageChangesExactlyWhereTheGradeDoes() {
