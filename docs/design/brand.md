@@ -28,8 +28,10 @@ Never a bitmap.
   card's left edge. Exact numbers: the generated `LaCarteLogoGeometry.swift`. The source of truth is
   `explorations/ideation-gen/accent131.py` (`parts_131`); `render.py` freezes it and fails if they drift.
 - **App icon:** the same mark, 800 px tall on the 1024 tile, shifted half-way from bbox-centred to centroid-centred
-  (the card weighs the right side). Grounds: light `#F4F1EA` (paper), dark `#1C1C1E`. Tinted: white card and grey
-  `#8E8E8E` line on black, iOS tints it by luminance.
+  (the card weighs the right side). Ground `#F4F1EA` (paper). Tinted: white card and grey `#8E8E8E` line on black,
+  iOS tints it by luminance.
+- **The icon is white-background in all appearances, per the user (2026-11-22):** the dark variant is rendered
+  identical to the light one (not omitted: without it iOS generates its own darkened icon).
 - **Clear space:** at least the card's corner radius × 2 (20% of the mark's height) on every side.
 - **Minimum size:** 20 pt / 40 px tall. It's designed to read at 29 pt (the icon's smallest size).
 - **Wordmark:** "la carte", always lowercase, SF Pro Text/Display medium, `ink`. It goes right of the mark,

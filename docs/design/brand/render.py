@@ -36,10 +36,12 @@ STROKE = accent131.STROKE  # 84 px at 1024
 # Tokens (Theme.swift): ink and accent per scheme. The pink outside the card is `accent` (#B8325A on light,
 # #ED6E8C on dark); the card is `ink`.
 LOGO = {"light": ("#1C1C1C", "#B8325A"), "dark": ("#F2F2F0", "#ED6E8C"), "tinted": ("#FFFFFF", "#8E8E8E")}
-# The app icon grounds the user approved in round 11 (paper / charcoal), mark colours as above (rounded to the
-# tokens), tinted = the grayscale source iOS tints by luminance.
-ICON = {"light": ("#F4F1EA", "#1C1C1C", "#B8325A"), "dark": ("#1C1C1E", "#F2F2F0", "#ED6E8C"),
-        "tinted": ("#000000", "#FFFFFF", "#8E8E8E")}
+# The app icon: the paper ground the user approved in round 11, mark colours as above (rounded to the tokens),
+# tinted = the grayscale source iOS tints by luminance. The dark variant is the light artwork on purpose: the user
+# wants the white-background icon in every appearance (2026-11-22). It is rendered, not omitted, because without a
+# dark image iOS 18+ generates its own darkened icon in dark mode.
+ICON_LIGHT = ("#F4F1EA", "#1C1C1C", "#B8325A")
+ICON = {"light": ICON_LIGHT, "dark": ICON_LIGHT, "tinted": ("#000000", "#FFFFFF", "#8E8E8E")}
 
 
 def frozen():
