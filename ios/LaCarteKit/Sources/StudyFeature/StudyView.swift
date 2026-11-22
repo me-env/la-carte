@@ -567,12 +567,20 @@ public struct StudyView: View {
         RatingDial(
           value: ease, radius: StudyFeature.ringRadius * cardSize.width + 16, release: rewarding ? reward?.release : nil
         )
+        .accessibilityHidden(true)
+        // A separate element, inserted only while held: toggling `accessibilityHidden` on a live element left the
+        // reward in the tree.
+        .overlay {
+          if !rewarding {
+            Color.clear
+              .accessibilityElement()
+              .accessibilityLabel("Rating")
+              .accessibilityValue(store.swipeRating.map(Self.title) ?? "None")
+              .accessibilityIdentifier("study.swipeRing")
+              .transition(.identity)
+          }
+        }
         .position(center)
-        .accessibilityElement()
-        .accessibilityLabel("Rating")
-        .accessibilityValue(store.swipeRating.map(Self.title) ?? "None")
-        .accessibilityIdentifier("study.swipeRing")
-        .accessibilityHidden(rewarding)
         .transition(
           rewarding
             ? .identity
