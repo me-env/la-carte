@@ -104,7 +104,7 @@ jobs:
             -only-testing:LaCarteUITests/DeckUITests/testDeck_swipeToDelete \
             -only-testing:LaCarteUITests/SettingsUITests/testSettings_testConnectionMock \
             -only-testing:LaCarteUITests/SettingsUITests/testSetup_connectFromStudy \
-            -only-testing:LaCarteUITests/RefreshUITests/testStudy_pullToRefreshWhenCaughtUp
+            -only-testing:LaCarteUITests/RefreshUITests/testStudy_foregroundReload
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
