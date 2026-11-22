@@ -61,6 +61,10 @@ extension XCTestCase {
     if let screen {
       app.launchEnvironment["LA_CARTE_SCREEN"] = screen
     }
+    // English-only language list, suite-wide: iOS raises the line height (~47 pt vs ~40 pt pitch) when the preferred
+    // languages include tall scripts (th, vi, ar, he…), which a local simulator's default list does and CI's doesn't,
+    // so line-count fixtures (fit / overflow / scroll) behaved differently locally and on CI.
+    app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
     app.launchArguments += arguments
     if let theme { app.launchArguments += ["-theme", theme] }
     launchRetryingTimeout(app)

@@ -18,12 +18,9 @@ final class RatingsUITests: XCTestCase {
     ("easy", "-studySwipePreview", 0.22, "Easy", "Forgot", "Easy"),
     ("easy-up", "-studySwipePreviewUp", 0.22, "Easy", "Forgot", "Easy"),
   ]
-  /// AX-XL text and a pinned English-only language list: iOS raises the line height when the preferred languages
-  /// include tall scripts (th, vi, ar…), which a simulator's default list does and CI's doesn't, so the long card
-  /// overflowed locally and fitted on CI.
-  static let longCardArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL",
-                                  "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-  /// Overflows the card by ~5 lines at AX-XL with the pinned English line height (`longCardArguments`).
+  /// AX-XL text (the language list is pinned to English suite-wide in `launch()`).
+  static let longCardArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"]
+  /// Overflows the card by ~5 lines at AX-XL with the pinned English line height.
   static let longBack = "a long answer written on purpose to need scrolling at large text sizes: it goes on about the "
     + "menu and the map, the card and the deck, the word and its meaning, the front and the back, the question "
     + "and the answer, the day and the night, the sea and the shore, the road and the town, the rain and the sun, "

@@ -348,9 +348,8 @@ final class StudyEditUITests: XCTestCase {
     let back = String(repeating: "Spaced repetition schedules each review just before you would forget. ", count: 20)
       .trimmingCharacters(in: .whitespaces)
     let (server, deck) = try startStub(front: front, back: back)
-    // English-only language list: a simulator's default list (th, vi, ar…) raises the line height, CI's doesn't
-    // (RatingsUITests.longCardArguments), so the card must overflow at the shorter CI line height.
-    let app = launch(api: .live(server.url), arguments: ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"])
+    // The card must overflow at the English line height `launch()` pins (CI's, shorter than a default simulator's).
+    let app = launch(api: .live(server.url))
     reveal(app, front: front, back: back)
     let rateTop = el(app, "study.rate.good").frame.minY
     XCTAssertGreaterThan(el(app, "study.back").frame.maxY, rateTop, "card does not overflow: \(el(app, "study.back").frame)")
@@ -380,7 +379,10 @@ final class StudyEditUITests: XCTestCase {
       _ = startEditing(app, .front)
     }
 
-    let startY2 = min(max(field.frame.maxY + 20, el(app, "study.back").frame.minY + 10), app.keyboards.firstMatch.frame.minY - 20)
+    // The upward drag can scroll the field up under the top buttons: start below them, still on the answer.
+    let chromeBottom = el(app, "study.deck").frame.maxY + 20
+    let startY2 = min(max(field.frame.maxY + 20, el(app, "study.back").frame.minY + 10, chromeBottom),
+                      app.keyboards.firstMatch.frame.minY - 20)
     origin.withOffset(CGVector(dx: 201, dy: startY2))
       .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 201, dy: startY2 + 200)))
     waitForAbsence(field, timeout: 3, "a downward swipe on the scrolling card's answer did not end the edit")
