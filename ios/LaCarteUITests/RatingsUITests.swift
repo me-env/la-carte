@@ -18,6 +18,16 @@ final class RatingsUITests: XCTestCase {
     ("easy", "-studySwipePreview", 0.22, "Easy", "Forgot", "Easy"),
     ("easy-up", "-studySwipePreviewUp", 0.22, "Easy", "Forgot", "Easy"),
   ]
+  /// AX-XL text and a pinned English-only language list: iOS raises the line height when the preferred languages
+  /// include tall scripts (th, vi, ar…), which a simulator's default list does and CI's doesn't, so the long card
+  /// overflowed locally and fitted on CI.
+  static let longCardArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL",
+                                  "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+  /// Overflows the card by ~5 lines at AX-XL with the pinned English line height (`longCardArguments`).
+  static let longBack = "a long answer written on purpose to need scrolling at large text sizes: it goes on about the "
+    + "menu and the map, the card and the deck, the word and its meaning, the front and the back, the question "
+    + "and the answer, the day and the night, the sea and the shore, the road and the town, the rain and the sun, "
+    + "until at last, after all of that, it finally ends here: the end"
   static let mockFront = "serendipity", mockBack = "finding something good without looking for it"
 
   override func setUp() {
@@ -197,11 +207,9 @@ final class RatingsUITests: XCTestCase {
   func testRatings_longCardScroll() throws {
     continueAfterFailure = true  // report every long-card gesture, not only the first failing one
     XCUIDevice.shared.appearance = .light
-    let back = "a long answer written on purpose to need scrolling at large text sizes: it goes on about the "
-      + "menu and the map, the card and the deck, the word and its meaning, the front and the back, the question "
-      + "and the answer, the day and the night, until at last, after all of that, it finally ends here: the end"
+    let back = Self.longBack
     let (server, _) = try startReviewStub([.init(id: "CCCCCCCC-1111-1111-1111-111111111111", front: "long", back: back)])
-    let app = launch(api: .live(server.url), arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"])  // long enough to scroll
+    let app = launch(api: .live(server.url), arguments: Self.longCardArguments)
     waitForLabel(el(app, "study.front"), "long")
     el(app, "study.card").tap()
     waitForLabel(el(app, "study.back"), back)
@@ -245,9 +253,7 @@ final class RatingsUITests: XCTestCase {
   func testRatings_longCardAngleSweep() throws {
     continueAfterFailure = true  // report every angle, not only the first failing one
     XCUIDevice.shared.appearance = .light
-    let back = "a long answer written on purpose to need scrolling at large text sizes: it goes on about the "
-      + "menu and the map, the card and the deck, the word and its meaning, the front and the back, the question "
-      + "and the answer, the day and the night, until at last, after all of that, it finally ends here: the end"
+    let back = Self.longBack
     let plan: [(name: String, dx: Double, dy: Double, rating: String?)] = [
       ("near-vertical-up", 0.09, -0.3, nil),     // 17° from vertical: scrolls
       ("near-vertical-down", -0.09, 0.3, nil),   // 17° from vertical: scrolls back
@@ -264,7 +270,7 @@ final class RatingsUITests: XCTestCase {
                     due: Date(timeIntervalSince1970: 1_767_225_600 + Double(i) * 60))
     }
     let (server, _) = try startReviewStub(cards)
-    let app = launch(api: .live(server.url), arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"])
+    let app = launch(api: .live(server.url), arguments: Self.longCardArguments)
     var posts = 0, i = 0
     var results: [String] = []
     for step in plan {
