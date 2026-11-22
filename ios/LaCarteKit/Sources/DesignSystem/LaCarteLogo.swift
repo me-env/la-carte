@@ -93,7 +93,8 @@ struct LogoGeometry: Equatable {
   var line: Path {
     guard lineTrim > 0 else { return Path() }
     let reset = Self.resetRange
-    var line = Self.stroked(Self.centreline.trimmedPath(from: 0, to: min(lineTrim, reset.lowerBound)))
+    let start = Self.centreline.trimmedPath(from: 0, to: min(lineTrim, reset.lowerBound))
+    var line = Self.stroked(start, width: Self.startWidth(lineTrim))
     let rise = Self.linearStep(lineTrim, reset)
     if rise > 0 {
       line = line.union(Self.rising(Self.bar, radius: Self.barRadius, rise: rise))
@@ -110,12 +111,22 @@ struct LogoGeometry: Equatable {
 
   /// The stroked centreline, or an empty path when the trim is too short to stroke: a degenerate path isn't `isEmpty`,
   /// and boolean ops with it misbehave (`degenerate.subtracting(card)` returns the whole card).
-  static func stroked(_ path: Path) -> Path {
-    let stroke = path.strokedPath(StrokeStyle(lineWidth: strokeWidth, lineCap: .round, lineJoin: .round))
+  static func stroked(_ path: Path, width: CGFloat = strokeWidth) -> Path {
+    let stroke = path.strokedPath(StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
     return stroke.boundingRect.isEmpty ? Path() : stroke
   }
 
+  /// The line's width at its start: it grows from 0 to the full stroke over its first stroke-width of length. A round
+  /// cap makes even a zero-length stroke a full dot, so at full width the line's first frame (and the loading mark's
+  /// last erased one) would pop a dot in or out.
+  static func startWidth(_ trim: Double) -> CGFloat {
+    strokeWidth * min(1, CGFloat(trim) * centrelineLength / strokeWidth)
+  }
+
   static let centreline: Path = Path { $0.addLines(curve) }
+
+  static let centrelineLength: CGFloat = zip(curve, curve.dropFirst()).map { hypot($1.x - $0.x, $1.y - $0.y) }
+    .reduce(0, +)
 
   /// The share of the centreline's length where the reset runs (from decay 1's low point up to the peak).
   static let resetRange: ClosedRange<Double> = {

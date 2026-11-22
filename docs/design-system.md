@@ -98,7 +98,8 @@ Built from shapes in tokens (`ink` card, `accent` line; the cut-out shows what's
 generated into `LaCarteLogoGeometry.swift` by `docs/design/brand/render.py` (don't edit by hand).
 `LaCarteLogo(progress:)` is animatable (0 → 1: the card settles, then the curve is drawn) and can be used with
 `matchedGeometryEffect`. `LaCarteLaunchMark()` draws in once; `LaCarteLoadingMark()` draws and erases the curve.
-Both honor Reduce Motion (static mark / opacity pulse).
+Both honor Reduce Motion (static mark / opacity pulse). The line's first stroke-width grows from zero width, so
+nothing pops in or out at the start of a draw or the end of an erase (a round cap alone is a full dot).
 Sources, SVG/PNG exports and the app icon: `docs/design/brand/` (regenerate with `uv run docs/design/brand/render.py`). Usage rules for
 everyone, marketing included: `docs/design/brand.md`. Native-feel audit: `docs/design/native-audit.md`.
 

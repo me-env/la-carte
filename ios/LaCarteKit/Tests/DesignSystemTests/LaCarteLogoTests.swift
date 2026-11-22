@@ -103,6 +103,25 @@ struct LaCarteLogoTests {
     }
   }
 
+  /// The line grows out of nothing: no dot pops in on its first frame or out on the loading mark's last erased one
+  /// (user, 2026-11-22: "the first piece of the line disappears and reappears within a few frames").
+  @Test func theLineStartsFromNothing() {
+    let line = LogoGeometry.linePhase
+    var previous: CGFloat = 0
+    for step in 1...40 {
+      // The first 1.5 stroke-widths of the curve, in 40 steps.
+      let trim = Double(step) / 40 * 1.5 * LogoGeometry.strokeWidth / LogoGeometry.centrelineLength
+      let progress = line.lowerBound + trim * (line.upperBound - line.lowerBound)
+      let size = LogoGeometry(progress: progress).lineOutside.boundingRect.size
+      let extent = max(size.width, size.height)
+      let drawn = CGFloat(trim) * LogoGeometry.centrelineLength
+      #expect(extent <= 2 * drawn + 0.01, "step \(step): \(extent) for \(drawn) drawn")
+      #expect(extent >= previous - 0.01, "step \(step)")
+      previous = extent
+    }
+    #expect(LogoGeometry.startWidth(1) == LogoGeometry.strokeWidth)
+  }
+
   /// The lower card is never part of the line, so pink there means the card itself was painted.
   private static func coversTheCard(_ path: Path) -> Bool {
     let card = LogoGeometry.card
