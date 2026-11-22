@@ -342,9 +342,11 @@ final class StudyLengthsUITests: XCTestCase {
   static let longAnswer = "About 299,792 kilometres per second in a vacuum, the fastest that anything can travel, "
     + "and the same for every observer whatever their speed."
 
-  /// AC 6, 7, 9, 10 under layout D. Each card: the question's frame is the same before and after reveal; under a
-  /// wide question (wraps, or one line ≥ 85 % of the column) the answer stays inside the question's width (a
-  /// leading answer starts at its left edge); under a short one-line question the answer uses the column (layout A).
+  /// AC 6, 7, 9, 10 under layout D (amended 2026-11-22). Each card: the question's frame is the same before and after
+  /// reveal; under a wide question (wraps, or one line ≥ 85 % of the column) a leading answer (3+ lines) stays inside
+  /// the question's width, starting at its left edge; a centred answer (1–2 lines) is centred in the full column and
+  /// shares the question's centre, even when wider than the question ("Wolfgang Amadeus Mozart" under the 2-line
+  /// "Who composed The Magic Flute?"); under a short one-line question the answer uses the column (layout A).
   /// Widths measured with SF Pro: "Speed of light (km/s)?" one line ≈ 89 %, "Photosynthesis" ≈ 63 %,
   /// the two medium questions wrap to 2 lines.
   @MainActor
@@ -356,6 +358,7 @@ final class StudyLengthsUITests: XCTestCase {
       ("Who composed The Magic Flute?", Self.longAnswer, true, true),           // 2 lines + 3+ lines
       ("Speed of light (km/s)?", "299,792", true, false),                       // ≥ 85 % one line + 1 line
       ("Photosynthesis", Self.longAnswer, false, true),                         // short + 3+ lines (layout A)
+      ("Who composed The Magic Flute?", "Wolfgang Amadeus Mozart", true, false), // 2 lines + 1 line wider than it
     ]
     let base = Date(timeIntervalSince1970: 1_767_225_600)
     let stub = cards.enumerated().map { i, c in
@@ -365,7 +368,8 @@ final class StudyLengthsUITests: XCTestCase {
     let (server, _) = try startReviewStub(stub)
     let app = launch(api: .live(server.url))
     let card = el(app, "study.card"), front = el(app, "study.front"), back = el(app, "study.back")
-    let names = ["2line-short", "wide1line-long", "2line-long", "wide1line-short", "shortq-long"]
+    let names = ["2line-short", "wide1line-long", "2line-long", "wide1line-short", "shortq-long", "2line-widerAnswer"]
+    var oneLineHeight: CGFloat = 0
     for (i, c) in cards.enumerated() {
       waitForLabel(front, c.front)
       Thread.sleep(forTimeInterval: 0.5)
@@ -379,9 +383,10 @@ final class StudyLengthsUITests: XCTestCase {
       XCTAssertEqual(front.frame, q, "\(names[i]): question moved on reveal \(q) → \(front.frame)")
       XCTAssertGreaterThanOrEqual(a.minY, q.maxY - 1, "\(names[i]): answer not below the question")
       if c.wide {
-        XCTAssertGreaterThanOrEqual(a.minX, q.minX - 1, "\(names[i]): answer starts left of the question \(a) vs \(q)")
-        XCTAssertLessThanOrEqual(a.maxX, q.maxX + 6, "\(names[i]): answer wider than the question \(a) vs \(q)")
         if c.leadingBack {
+          // Only a leading answer takes the wide question's column.
+          XCTAssertGreaterThanOrEqual(a.minX, q.minX - 1, "\(names[i]): answer starts left of the question \(a) vs \(q)")
+          XCTAssertLessThanOrEqual(a.maxX, q.maxX + 6, "\(names[i]): answer wider than the question \(a) vs \(q)")
           // A centred question's widest line is drawn centred in its frame: the leading answer starts at that line's
           // drawn left edge, q.minX + (q.width - drawnWidth) / 2 (= q.minX when the line fills the frame).
           let shot = ColorProbe(at3x: XCUIScreen.main.screenshot().image.cgImage!)
@@ -394,7 +399,16 @@ final class StudyLengthsUITests: XCTestCase {
           XCTAssertEqual(aInk, qInk, accuracy: 1.1, "\(names[i]): answer ink starts at \(aInk), question ink at \(qInk)")
           XCTAssertLessThanOrEqual(inkMaxX(shot, a), qInkMax + 1, "\(names[i]): answer ink overhangs the question's right edge")
         } else {
-          XCTAssertEqual(a.midX, q.midX, accuracy: 1, "\(names[i]): one-line answer not centred under the question")
+          // A centred answer is measured in the full column, centred there: same centre as the question.
+          XCTAssertEqual(a.midX, q.midX, accuracy: 1, "\(names[i]): centred answer \(a) not on the question's centre \(q)")
+          XCTAssertEqual(a.midX, card.frame.midX, accuracy: 1, "\(names[i]): centred answer not centred in the column")
+          XCTAssertGreaterThanOrEqual(a.minX, card.frame.minX - 1, "\(names[i]): centred answer leaves the column")
+          XCTAssertLessThanOrEqual(a.maxX, card.frame.maxX + 1, "\(names[i]): centred answer leaves the column")
+          if i == 0 { oneLineHeight = a.height }
+          if names[i] == "2line-widerAnswer" {
+            XCTAssertGreaterThan(a.width, q.width + 1, "\(names[i]): answer held to the question's width \(a) vs \(q)")
+            XCTAssertEqual(a.height, oneLineHeight, accuracy: 1, "\(names[i]): answer not one line \(a) (one line = \(oneLineHeight))")
+          }
         }
       } else {
         XCTAssertEqual(a.minX, card.frame.minX, accuracy: 1, "\(names[i]): answer under a short question not at the column edge")
@@ -414,6 +428,22 @@ final class StudyLengthsUITests: XCTestCase {
         XCTAssertLessThanOrEqual(field.frame.maxX, q.maxX + 1, "backField wider than the question \(field.frame) vs \(q)")
         XCTAssertEqual(field.frame.height, a.height, accuracy: 1, "backField rewraps the answer \(field.frame) vs \(a)")
         snapshot("study-layoutD-2line-long-editing-back", appearance: .light)
+        field.typeText("\n")
+        waitForAbsence(field)
+        Thread.sleep(forTimeInterval: 0.4)
+      }
+      if names[i] == "2line-widerAnswer" {  // AC 10: a centred answer's field spans the column
+        back.doubleTap()
+        let field = el(app, "study.backField")
+        XCTAssertTrue(field.waitFor(timeout: 5), "backField missing")
+        Thread.sleep(forTimeInterval: 0.6)
+        note("QA017D edit centred back \(field.frame) vs \(a) card \(card.frame)")
+        XCTAssertEqual(field.frame.minX, card.frame.minX, accuracy: 1, "centred backField not at the column edge \(field.frame)")
+        XCTAssertEqual(field.frame.width, card.frame.width, accuracy: 1, "centred backField doesn't span the column \(field.frame)")
+        // The keyboard shrinks the card, so the stack may move up; the question keeps its width and left edge.
+        XCTAssertEqual(front.frame.minX, q.minX, accuracy: 0.5, "\(names[i]): question moved sideways while editing")
+        XCTAssertEqual(front.frame.width, q.width, accuracy: 0.5, "\(names[i]): question resized while editing")
+        snapshot("study-layoutD-2line-widerAnswer-editing-back", appearance: .light)
         field.typeText("\n")
         waitForAbsence(field)
         Thread.sleep(forTimeInterval: 0.4)

@@ -1,8 +1,40 @@
 # QA: 017 Adaptive card text
 
-Verdict: PASS (re-validation of fix `30a7d0a`; the first run's FAIL on AC 11 is kept below for history)
+Verdict: PASS (latest: re-validation 3, amendment `4df0a43`; earlier: fix `30a7d0a`; the first run's FAIL on AC 11 is kept below for history)
 Date: 2026-11-22 · Simulator: iPhone 17 Pro / iOS 27 · light mode (spec: one simulator, light)
 Build: `30a7d0a` (rebased on main incl. spec 018) on `worktree-agent-af2975cb0d52400eb`
+
+
+## Re-validation 3: amendment "a centred answer keeps the full column" (`4df0a43`)
+Verdict: **PASS** (AC 6, 7, 10, 13 as amended 2026-11-22).
+Date: 2026-11-22 · iPhone 17 Pro / iOS 27 · light · branch `worktree-agent-a8767e97dde3a39f8`
+
+Runs (`qa/screenshots/`, logs in `<run>/logs/`):
+- `017D-mock/` StudyLengthsUITests + StudyUITests, `--split 2 --wait`: 12 passed, 1 failed, 2 skipped. The one failure was
+  an over-strict assertion I had just added (question frame equal while the keyboard is up: the keyboard shrinks the card,
+  so the stack moves up, as it already does for the existing leading-answer edit). Every criterion assertion in that run passed.
+- `017D-mock-b/` `testStudyLengths_layoutD` alone with that assertion corrected (minX + width only): **passed**.
+- Side by side: `017D-mock-b/layoutD-wide-sidebyside.png`.
+- Scope per the manager: these two classes only; no full suite, no e2e (no API change).
+
+Test change (`testStudyLengths_layoutD`): the bound "answer inside the question's width" now applies only to a leading answer.
+A centred answer under a wide question must share the question's centre and the column's (±1 pt) and stay in the column.
+New card: "Who composed The Magic Flute?" (2 lines) / "Wolfgang Amadeus Mozart": wider than the question, one line (same
+height as "The Seine"), and its edit field spans the column.
+
+| case | question frame (pt) | answer frame (pt) | result |
+|---|---|---|---|
+| "Which river flows through Paris?" (2 lines) / "The Seine" | 91.2–310.8, midX 201 | 153.5–248.5, midX 201 | PASS centred |
+| "Who composed The Magic Flute?" (2 lines) / "Wolfgang Amadeus Mozart" | 73–329 (256 wide), midX 201 | 72–330 (258 wide), midX 201, h 32.3 = one line | PASS: wider than the question, one centred line |
+| same, editing the answer | unchanged x/width | `study.backField` 16–386 = the column (card 16–386) | PASS AC 10 |
+| "Speed of light (km/s)?" (1 line, 89 %) / "299,792" | 36.2–365.8 | midX 201 | PASS centred |
+| "Who composed The Magic Flute?" / 5-line answer (leading) | ink 76.67–324.33 | frame 76.2, ink 76.50 (0.17 pt from the question's) | PASS bug A holds |
+| "Speed of light (km/s)?" / 5-line answer (leading) | ink 37.50–364.17 | frame 36.2, ink 36.87 (0.63 pt, glyph side bearing "A" vs "S", same as the earlier PASS) | PASS |
+| "Photosynthesis" (short) / 5-line answer | centred | 16–386 (column edge) | PASS layout A |
+| question frame before vs after reveal | all six cards identical | | PASS AC 9/13 (UI half) |
+
+Visual: in the side-by-side the Mozart line sits centred under the two-line question and slightly wider than it, which reads
+as intended; no answer pokes out past a leading question; nothing else changed. No bugs.
 
 ## Re-validation 2: layout D fix `0fe916f` (was `f745d04`, rebased on main)
 Verdict: **FAIL** (bug A fixed; bug B: a tap inside the inline edit field still ends the edit, 1 run in 6).
