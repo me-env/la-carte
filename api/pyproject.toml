@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 license = "MIT"
 authors = [
-    { name = "Cyprien Ricque", email = "cyprien.ricque@epitech.eu" }
+    { name = "Cyprien Ricque", email = "ricque.cyprien@gmail.com" }
 ]
 requires-python = ">=3.13"
 dependencies = [
