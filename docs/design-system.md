@@ -19,8 +19,7 @@ Reference: **Vyst** (App Store id 6760647645). Screenshots in `docs/design/refer
 | `Theme.ink` | `#1C1C1C` | `#F2F2F0` | `#EEF2EC` | primary text, icons |
 | `Theme.secondaryInk` | `#9D9D9B` | `#8A8A88` | `#83938A` | metadata, hints |
 | `Theme.hairline` | black 8% | white 8% | white 8% | dark/forest button border |
-| `Theme.accent` | `#B8325A` | `#ED6E8C` | `#ED6E8C` | pink, very small amounts only (rule below) |
-| `Theme.accentOnInk` | `#ED6E8C` | `#B8325A` | `#B8325A` | the logo's word on the ink card |
+| `Theme.accent` | `#B8325A` | `#ED6E8C` | `#ED6E8C` | pink: the logo's line, then very small amounts only (rule below) |
 
 Themes (spec 004): System, Light, Dark, Forest. Forest forces the dark color scheme. Tokens are
 `ThemeColor` `ShapeStyle`s that resolve from the environment (`\.appTheme` + `colorScheme`); the root
@@ -31,15 +30,15 @@ and picked in Settings → Appearance. QA can force a theme with the `-theme for
 Always use tokens, never literal colors.
 
 **Accent: pink, in very small amounts**. `Theme.accent` = `#B8325A` light /
-`#ED6E8C` dark and forest (text on `background`: 5.50 / 5.98 / 6.18:1, AA). `Theme.accentOnInk` = the reverse pair
-(`#ED6E8C` light / `#B8325A` dark and forest), only for the logo's word on the ink card (5.85 / 5.14 / 5.09:1).
+`#ED6E8C` dark and forest (text on `background`: 5.50 / 5.98 / 6.18:1, AA).
 It may appear **only** in these places:
-1. The logo's word line (`LaCarteLogo`, launch/loading marks, app icon, brand files).
+1. The logo's line outside the card (`LaCarteLogo`, launch/loading marks, app icon, brand files): the one larger
+   pink use, by the user's choice of logo.
 2. The text cursor and selection in text fields (`.tint(Theme.accent)` on the field itself, not the screen): editor, Settings, deck search (spec 009), Study inline edit (spec 010). While a field is focused on Study, the counter (rule 4) is hidden, so only one pink element shows.
 3. The widget's streak number when the streak is ≥ 1 (spec 007).
 4. Study's "N to review" count in the counter text (`study.remaining`), just the number (spec 009).
 
-Never: backgrounds, fills bigger than the logo's word, card text, body text, buttons/icons/toolbars, the rating row,
+Never: backgrounds, fills bigger than the logo's line, card text, body text, buttons/icons/toolbars, the rating row,
 error or empty states. Swipe-delete stays the **system red** (hue 3°, vs the pink's 346°), so the pink never means
 "destructive". At most one accent element visible at a time on a screen.
 
@@ -94,10 +93,13 @@ Uniform by **layer**, not by material: glass where Apple's own apps put it, nowh
 Reduce Motion variant (a fade or nothing). Full motion principles: `docs/design/brand.md`.
 
 ## Logo (`DesignSystem/LaCarteLogo.swift`)
-Two portrait cards fanned like playing cards; the front one has a word (pink line) and its answer (grey line).
-Built from shapes in tokens (`ink` front, `secondaryInk` next card and answer, `accentOnInk` word). `LaCarteLogo(progress:)` is animatable (0 → 1 draw-in) and can be used with
-`matchedGeometryEffect`. `LaCarteLaunchMark()` draws in once; `LaCarteLoadingMark()` loops. Both honor Reduce Motion.
-Sources, SVG/PNG exports and the app icon: `docs/design/brand/` (regenerate with `render.sh`). Usage rules for
+A portrait card crossed by the forgetting curve as one thick line: cut out of the card inside it, pink outside it.
+Built from shapes in tokens (`ink` card, `accent` line; the cut-out shows what's behind). Geometry constants are
+generated into `LaCarteLogoGeometry.swift` by `docs/design/brand/render.py` (don't edit by hand).
+`LaCarteLogo(progress:)` is animatable (0 → 1: the card settles, then the curve is drawn) and can be used with
+`matchedGeometryEffect`. `LaCarteLaunchMark()` draws in once; `LaCarteLoadingMark()` draws and erases the curve.
+Both honor Reduce Motion (static mark / opacity pulse).
+Sources, SVG/PNG exports and the app icon: `docs/design/brand/` (regenerate with `uv run docs/design/brand/render.py`). Usage rules for
 everyone, marketing included: `docs/design/brand.md`. Native-feel audit: `docs/design/native-audit.md`.
 
 ## Widget (`DeckWidget`, spec 007)

@@ -6,19 +6,21 @@ import Testing
 struct LaCarteLogoTests {
   @Test func fullProgressIsTheFinalMark() {
     let geometry = LogoGeometry(progress: 1)
-    #expect(geometry.opacity == 1)
-    #expect(geometry.frontScale == 1)
-    #expect(geometry.backAngle == LogoGeometry.backAngle)
-    #expect(geometry.wordWidth == LogoGeometry.word.width)
-    #expect(geometry.answerWidth == LogoGeometry.answer.width)
+    #expect(geometry.cardOpacity == 1)
+    #expect(geometry.cardScale == 1)
+    #expect(geometry.lineTrim == 1)
   }
 
   @Test func zeroProgressShowsNothing() {
     let geometry = LogoGeometry(progress: 0)
-    #expect(geometry.opacity == 0)
-    #expect(geometry.wordLine.isEmpty && geometry.answerLine.isEmpty)
-    // The next card starts exactly behind the front card.
-    #expect(geometry.backAngle == LogoGeometry.frontAngle)
+    #expect(geometry.cardOpacity == 0)
+    #expect(geometry.cardBody.isEmpty && geometry.lineOutside.isEmpty)
+  }
+
+  @Test func theCardSettlesBeforeTheCurveIsDrawn() {
+    let card = LogoGeometry(progress: LogoGeometry.linePhase.lowerBound)
+    #expect(card.cardOpacity == 1 && card.cardScale == 1)
+    #expect(card.line.isEmpty)
   }
 
   @Test func progressIsClamped() {
@@ -30,34 +32,48 @@ struct LaCarteLogoTests {
     var previous = LogoGeometry(progress: 0)
     for step in 1...20 {
       let geometry = LogoGeometry(progress: Double(step) / 20)
-      #expect(geometry.opacity >= previous.opacity)
-      #expect(geometry.backAngle >= previous.backAngle)
-      #expect(geometry.wordWidth >= previous.wordWidth)
-      #expect(geometry.answerWidth >= previous.answerWidth)
+      #expect(geometry.cardOpacity >= previous.cardOpacity)
+      #expect(geometry.cardScale >= previous.cardScale)
+      #expect(geometry.lineTrim >= previous.lineTrim)
       previous = geometry
     }
   }
 
-  @Test func linesAreOnTheFrontCardAndNeverOverlapTheNextOne() {
+  /// The chosen mark: decay 1 falls outside the card (pink), the reset sits on the card's left edge, and decay 2 runs
+  /// inside the card (cut out) and ends before its right edge.
+  @Test func theLineCrossesTheCard() {
+    let card = LogoGeometry.card
+    let curve = LogoGeometry.curve
+    let resetTop = curve[LogoGeometry.resetTop]
+    #expect(curve.first!.x < card.minX && card.contains(curve.last!))
+    #expect(abs(resetTop.x - card.minX) < 0.01)
+    #expect(abs(LogoGeometry.bar.midX - card.minX) < 0.01)
+
     let geometry = LogoGeometry(progress: 1)
-    let front = geometry.frontCard
-    for line in [geometry.wordLine, geometry.answerLine] {
-      #expect(front.boundingRect.contains(line.boundingRect))
-      // Sample points rather than `intersection`: on iOS 26 it returns the whole line although no point overlaps.
-      let bounds = line.boundingRect
-      let steps = (0...100).map { CGFloat($0) / 100 }
-      let points = steps.flatMap { u in
-        steps.map { v in CGPoint(x: bounds.minX + bounds.width * u, y: bounds.minY + bounds.height * v) }
-      }
-      #expect(!points.contains { line.contains($0) && geometry.backCard.contains($0) })
-    }
+    let first = curve.first!
+    let inside = curve[LogoGeometry.resetTop + 2]
+    #expect(card.contains(inside))
+    #expect(geometry.lineOutside.contains(first))  // pink outside the card
+    #expect(!geometry.cardBody.contains(inside))  // cut out inside it
+    #expect(geometry.cardBody.contains(CGPoint(x: card.midX, y: card.maxY - 10)))  // the card below the curve
   }
 
-  @Test func markIsInsideItsBoxAndCentered() {
+  @Test func theResetBarRisesWhileTheTrimRunsUpTheReset() {
+    let range = LogoGeometry.resetRange
+    #expect(range.lowerBound > 0 && range.upperBound < 1)
+    let foot = CGPoint(x: LogoGeometry.bar.midX, y: LogoGeometry.bar.maxY - 2)
+    let head = CGPoint(x: LogoGeometry.bar.minX + 2, y: LogoGeometry.bar.minY + 4)
+    let before = LogoGeometry.rising(LogoGeometry.bar, radius: LogoGeometry.barRadius, rise: 0.1)
+    #expect(before.contains(foot) && !before.contains(head))
+    let after = LogoGeometry.rising(LogoGeometry.bar, radius: LogoGeometry.barRadius, rise: 1)
+    #expect(after.boundingRect == LogoGeometry.bar)
+  }
+
+  @Test func markFillsItsBoxAndIsCentered() {
     let geometry = LogoGeometry(progress: 1)
-    let bounds = geometry.frontCard.boundingRect.union(geometry.backCard.boundingRect)
-    #expect(bounds.minX > 0 && bounds.minY > 0 && bounds.maxX < 100 && bounds.maxY < 100)
-    #expect(abs(bounds.midX - 50) <= 2)
-    #expect(abs(bounds.midY - 50) <= 2)
+    let bounds = geometry.cardBody.boundingRect.union(geometry.lineOutside.boundingRect)
+    #expect(bounds.minX >= -0.01 && bounds.minY >= -0.01 && bounds.maxX <= 100.01 && bounds.maxY <= 100.01)
+    #expect(abs(bounds.midX - 50) <= 0.5)
+    #expect(abs(bounds.midY - 50) <= 0.5)
   }
 }

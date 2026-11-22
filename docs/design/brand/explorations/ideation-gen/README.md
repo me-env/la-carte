@@ -424,3 +424,8 @@ The treatments:
 6 and 7 are large-size only (0.7 px at 29 px). 2 fades at 29 px (pink on ink), and so does 5's pink end
 (`design-review.py --mode flat` FAIL). The critic's ranking: 1, 4, 5, 9 (0 as the control). 10 was added for the
 two-tone seam in 4. 2, 3, 6, 7 and 8 were dropped. Shortlist: 0, 1, 4, 10, 5, 9.
+
+### Chosen (2026-11-22)
+
+The user picked **option 1** (the line outside the card in pink). It ships through `docs/design/brand/render.py`
+(logo, app icon, `LaCarteLogoGeometry.swift`); see `docs/design/brand/logo-decision.md`.

@@ -95,7 +95,7 @@ struct DesignSystemGalleryContent: View {
         VStack(spacing: Theme.Spacing.s) { logoThemes }
       }
       HStack(spacing: Theme.Spacing.m) {
-        ForEach([0.25, 0.5, 0.75, 1], id: \.self) { progress in
+        ForEach([0.4, 0.6, 0.8, 1], id: \.self) { progress in
           VStack(spacing: Theme.Spacing.xs) {
             LaCarteLogo(progress: progress).frame(width: 56, height: 56)
             Text(progress.formatted(.percent)).font(.meta).foregroundStyle(Theme.secondaryInk)

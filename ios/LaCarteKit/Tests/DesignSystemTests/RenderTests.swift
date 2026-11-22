@@ -25,7 +25,7 @@ struct RenderTests {
   }
 
   /// 1024 × 1024 px: a 256 pt view at scale 4.
-  @Test(arguments: [0.0, 0.25, 0.5, 0.75, 1.0])
+  @Test(arguments: [0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0])
   func logo(progress: Double) throws {
     for (name, theme, scheme) in Self.themes {
       let view = LaCarteLogo(progress: progress)

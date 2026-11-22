@@ -11,12 +11,10 @@ public enum Theme {
   public static let hairline = ThemeColor(
     light: .black.opacity(0.08), dark: .white.opacity(0.08), forest: .white.opacity(0.08)
   )
-  /// Accent pink (#ED6E8C), in **very small amounts** only: the logo's word, the text
+  /// Accent pink (#ED6E8C), in **small amounts** only: the logo's line outside the card, the text
   /// cursor/selection, the widget's streak number. Never backgrounds, large fills, body text or buttons.
   /// Light uses the darker #B8325A so it stays legible on paper (5.5:1 on background, AA for text).
   public static let accent = ThemeColor(light: 0xB8325A, dark: 0xED6E8C, forest: 0xED6E8C)
-  /// The accent on an `ink` fill (the logo's front card): the opposite pair, so it keeps ≥ 5:1 on the card.
-  public static let accentOnInk = ThemeColor(light: 0xED6E8C, dark: 0xB8325A, forest: 0xB8325A)
 
   public enum Spacing {
     /// A caption tight under its sample (gallery swatches, logo sizes).

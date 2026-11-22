@@ -4,33 +4,39 @@ Owner: design-lead. **Marketing uses these files as they are: don't redraw, reco
 Questions the kit doesn't answer go to design-lead.
 
 ## Logo
-**Two portrait cards fanned like playing cards; the front one carries a word (pink) and its answer (grey).**
-That's the app: one card on screen, and the next one comes back. (Chosen by the user from `brand/explorations/`.)
+**A portrait card crossed by the forgetting curve, drawn as one thick line.** The curve falls (you forget), jumps
+back up at a review, and falls again more slowly. The reset sits on the card's left edge, half in, half out. Inside
+the card the line is cut out of it; outside the card it's pink. (Chosen by the user on 2026-11-22: round 11, accent
+option 1 on mark 131; history in `brand/explorations/ideation-gen/README.md`.)
 
 | File | Use |
 |---|---|
-| `brand/logo-light.svg` · `-dark` · `-forest` | Full-color mark on the matching background (see palette) |
-| `brand/logo-mono.svg` | One color (`currentColor`, next card at 45%, lines cut out) for watermarks and embossing |
-| `brand/png/logo-<theme>-{64,256,1024}.png` | Transparent PNG exports |
-| `brand/app-icon/app-icon-{light,dark,tinted}.{svg,png}` | 1024 app icon sources (also installed in `AppIcon.appiconset`), plus `-58.png` (29 pt @2x) to check legibility |
-| `brand/explorations/` | History: the three concepts shown to the user (`c-fan` was picked). **Not for use** |
-| `scripts/brandkit.py` | New logo rounds (round 8 on): each `explorations/roundN/render.py` imports it (blue noise, hex lattice, matching, marks, SVG/PNG, contact sheet; usage in its docstring) instead of copying an older `render.py` |
-| `brand/render.sh` | Regenerates every file above (`rsvg-convert`). The geometry lives in the script and in `LaCarteLogo.swift` |
+| `brand/logo-light.svg` | Default: `ink` card, `#B8325A` line, on light grounds |
+| `brand/logo-dark.svg` | On dark grounds: light card, `#ED6E8C` line |
+| `brand/logo-mono.svg` | One colour (`currentColor`, the line is the same colour outside the card): watermarks, embossing, one-colour print |
+| `brand/logo-tinted.svg` | White card, grey line: the tinted icon's mark, for system-tinted contexts only |
+| `brand/png/logo-{light,dark}-{64,256,1024}.png`, `png/logo-mono-1024.png` | Transparent PNG exports |
+| `brand/app-icon/app-icon-{light,dark,tinted}.{svg,png}` | 1024 app icon masters (installed in `AppIcon.appiconset`), plus `-58.png` / `-29.png` to check small sizes |
+| `brand/render.py` | Regenerates every file above **and** `LaCarteLogoGeometry.swift`: `uv run docs/design/brand/render.py` (needs `rsvg-convert`) |
+| `brand/explorations/` | History of every round. **Not for use** |
 
 In the app, use `LaCarteLogo(progress:)`, `LaCarteLaunchMark()` or `LaCarteLoadingMark()` from `DesignSystem`.
-Never use a bitmap.
+Never a bitmap.
 
-- **Geometry** (100×100 box): two cards 46×64 at (24, 17), radius 8, turned about (47, 81): the next card +12°,
-  the front card −6°, with a transparent 2-unit gap around the front card. On the front card (in its own frame):
-  the word, a 26×6 capsule at (32, 39) in `accentOnInk`, and the answer, a 16×6 capsule at (32, 51) in
-  `secondaryInk`. Both lines are cut out in the mono and tinted versions.
-- **Clear space:** at least 16% of the mark's box on every side (the card's corner radius × 2).
-- **Minimum size:** 20 pt / 40 px box (the word must stay visible). It's designed to read at 29 pt.
+- **Geometry** (100×100 box, the mark fills it, centred on its bounding box): the card is 66.7×100 with radius 10,
+  its left edge at x 32.6. The line is 10.5 wide with round caps. The reset is a bar 1.9 lines wide centred on the
+  card's left edge. Exact numbers: the generated `LaCarteLogoGeometry.swift`. The source of truth is
+  `explorations/ideation-gen/accent131.py` (`parts_131`); `render.py` freezes it and fails if they drift.
+- **App icon:** the same mark, 800 px tall on the 1024 tile, shifted half-way from bbox-centred to centroid-centred
+  (the card weighs the right side). Grounds: light `#F4F1EA` (paper), dark `#1C1C1E`. Tinted: white card and grey
+  `#8E8E8E` line on black, iOS tints it by luminance.
+- **Clear space:** at least the card's corner radius × 2 (20% of the mark's height) on every side.
+- **Minimum size:** 20 pt / 40 px tall. It's designed to read at 29 pt (the icon's smallest size).
 - **Wordmark:** "la carte", always lowercase, SF Pro Text/Display medium, `ink`. It goes right of the mark,
-  cap height ≈ 30% of the mark box. There is no custom wordmark font.
-- **Don't:** recolor outside the palette · add outlines, shadows, gradients or glass · rotate or skew the
-  cards or change the fan angle · make the word any color but the accent pair · add pink anywhere else in the mark · put the light mark on a dark background (use `logo-dark`) · animate it
-  any other way than below.
+  cap height ≈ 30% of the mark's height. There is no custom wordmark font.
+- **Don't:** recolour outside the palette · put pink inside the card · add a second accent, outlines, shadows,
+  gradients or glass · rotate, skew or mirror it · change the line's weight · put the light logo on a dark ground
+  (use `logo-dark`) · animate it any other way than below.
 
 ## Palette (tokens from `Theme.swift`)
 | Token | Light | Dark | Forest | Role |
@@ -39,17 +45,17 @@ Never use a bitmap.
 | surface | `#FFFFFF` | `#252525` | `#16241B` | Raised elements only |
 | ink | `#1C1C1C` | `#F2F2F0` | `#EEF2EC` | Text, the front card |
 | secondaryInk | `#9D9D9B` | `#8A8A88` | `#83938A` | Captions' secondary line, the next card |
-| accent | `#B8325A` | `#ED6E8C` | `#ED6E8C` | Pink, very small amounts (below) |
-| accentOnInk | `#ED6E8C` | `#B8325A` | `#B8325A` | The logo's word only |
+| accent | `#B8325A` | `#ED6E8C` | `#ED6E8C` | Pink: the logo's line, then very small amounts (below) |
 
 **Brand colour rule (user, 2026-11-22):** la-carte's standout colour is the pink accent, nothing else. The default
 icon and every hero/marketing visual is ink + pink on light; the dark variant is light ink + pink on dark. Forest is
 an app theme only: it may have its own themed render (the icon's forest variant, a forest screenshot), but it is
 never the hero, the default, or a brand colour next to the pink.
 
-The accent pink is `#ED6E8C`; its darker text
-shade `#B8325A`. **Very small amounts:** in the app it's limited to the logo's word, the text cursor/selection, the
-widget's streak number and Study's count (`docs/design-system.md`). In marketing: the logo's word, and at most one
+The accent pink is `#ED6E8C`; its darker shade `#B8325A` (on light grounds). **The logo's line is the one larger
+pink use** (the user chose this treatment, 2026-11-22): the part of the line outside the card, in the logo, the app
+icon and the launch/loading marks. Everywhere else, **very small amounts:** in the app the text cursor/selection,
+the widget's streak number and Study's count (`docs/design-system.md`). In marketing: the logo, and at most one
 highlighted word per caption or headline (`#B8325A` on light, `#ED6E8C` on dark). Never as a background, a fill,
 a button, a full sentence or a device-frame color. Use no other colors. The system destructive red only appears
 inside the app's own UI and is never replaced by the pink.
@@ -63,8 +69,8 @@ single lines.
 | Motion | Spec | Reduce Motion |
 |---|---|---|
 | Standard (fades, reveals) | ease-in-out 0.25 s (`Theme.Motion.standard`) | Same fade, or none |
-| Logo draw-in | ease-in-out 0.9 s (`logoDrawIn`): the front card fades and settles (0–35%), the next card fans out from behind it (30–70%), the word then the answer are written left to right (60–100%) | 0.25 s fade-in of the finished mark |
-| Loading | word and answer write/erase, ease-in-out 0.8 s each way (`loadingPulse`) | Opacity pulse 100% ↔ 40% |
+| Logo draw-in | ease-in-out 0.9 s (`logoDrawIn`): the card fades and settles from 94% (0–30%), then the curve is drawn from its first peak: decay 1 in pink, the reset bar rises from its foot, decay 2 is cut into the card (30–100%) | Static: 0.25 s fade-in of the finished mark |
+| Loading | the curve draws and erases over the card, ease-in-out 0.8 s each way (`loadingPulse`) | Opacity pulse 100% ↔ 40% |
 | Transitions | Logo as the shared element (`matchedGeometryEffect`), e.g. launch mark → home | Crossfade |
 
 Nothing bounces, springs or overshoots. No parallax, no zoom-punches.
