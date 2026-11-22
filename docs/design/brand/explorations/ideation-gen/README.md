@@ -25,7 +25,8 @@ Existing images are skipped, so a re-run only pays for missing ones. Each round 
 | 1 | 12 broad directions x 5 | 60 | $2.66 |
 | 2 | Knowledge graph in a card (user priority, 10 + 5) and critic refinements of R1 8.1, 8.3, 7.1, 9.4, 4.2/4.5 | 32 | $1.43 |
 | 3 | The user's seeds R1-8.3 and R1-12.1, graph in a card (from R2-2.3), and their combinations | 36 | $1.61 |
-| | **Total** | **128** | **$5.70** |
+| 4 | User's pick: R1-8.3 shaped as a card (dots trace a card outline, settled dot placed 5 ways), 25 + 6 dark retries | 31 | $1.39 |
+| | **Total** | **159** | **$7.09** |
 
 The user's seeds from round 1:
 - **R1-8.3**, direction 8 "Dots gathering / settling", variation 3: "A ring of 24 small dots like a dial, with one larger
@@ -42,6 +43,52 @@ draws a landscape photo (round 3 says "horizontal rounded-rectangle card, wider 
 3. R1-8.3: a ring of 24 dots, one settled. 4. R1-12.1: a circle and card overlapping, the overlap cut out. 5. R3-1.8: a bold six-node graph in a
 card. 6. R3-4.2: an arc of dots curving into a graph card. 7. R2-2.1: a square graph in a card, with dots beside it. 8. R3-6.1: a dot ring on a card.
 9. R3-4.1: a dial ring around a graph card (a combination, shown for reference).
+
+## Round 4: the user's pick, "8.3 shaped as a card"
+
+The user dropped the graph idea and chose R1-8.3, reshaped as a card. Round 4 (`round-4/`) has 5 directions: the
+settled dot on the bottom edge, in a corner, inside the card, falling into it, and tilted/stacked/accent variants.
+Three palettes: forest, paper and ink, and dark. "Near-black" made every dark image glow like light bulbs, even with
+the flat reminder; "matte dark graphite (#232325) ... printed like ink on dark card stock" fixed 4 of 6 (the glowing
+ones are in `round-4/glow-rejects/`, and 1.6 and 4.3 still glow).
+
+The critic's shortlist is in `round-4/shortlist.png` and `shortlist-small.png`:
+1. R4-1.1, forest, 24 dots
+2. R4-5.3, the same mark in dark
+3. R4-5.4, the settled dot in amber instead of larger
+4. R4-1.5, light
+5. R4-2.1, the settled dot in a corner
+6. R4-5.2, a dotted card on a solid card behind it
+
+The critic rejected the landscape cards (they read as a marquee, ticket or tag) and the big dot inside the card (it
+reads as a phone's home button).
+
+### Clean redraw of #1 (`dotcard.py`, `dotcard-{forest,light,dark}.svg`)
+
+`uv run dotcard.py out.svg --edges 4,6 --dot 0.62 --settled 1.5 --height 0.7103 --drop -0.0078` builds the
+construction from the pitch p:
+- Shape: a rounded rectangle whose perimeter is exactly 24p. The straight top and bottom edges are 4p, the straight
+  sides are 6p, and the corner radius is 2p/pi, so each corner arc is exactly 1p long.
+- Dots: 24 equal dots placed every p of arc length, starting at the bottom centre. That gives 5 dots on top, 7 on
+  each side and 5 on the bottom, with no dot on the corner arcs, so the spacing is perfectly even.
+- Dot size: diameter 0.62p.
+- The settled dot: the bottom-centre dot, 1.5x the diameter, at the same pitch.
+- Icon placement: p = 100 px in the 1024 icon, card 527 x 727 (about 5:7), side margins 217 px.
+
+`--edges 2,4` builds a 16-dot master for small sizes, in case 29 px needs it.
+
+It maps 1:1 to a SwiftUI `Shape`:
+- In `path(in:)`, take p = rect.height / (6 + 4/pi). Walk a `RoundedRectangle(cornerRadius: 2p/pi)` path by arc
+  length (the same segment walk as `perimeter_point`), and add an ellipse per dot.
+- The dot diameter and the settled scale come from the shared dot tokens. `DotRing` in `ConfidenceDots.swift` is
+  already meant to share its dots with the logo.
+- Animating `order` (as in `DotRing`) or moving the settled dot along the path gives the "dots settle into a card"
+  motion for launch and transitions.
+
+On the clean render, `scripts/design-review.py --home` passes optical centre (0.004), margins (217/217 and 109/110)
+and touching (no merged dots). It fails the coverage-ramp, front and "overhang past the card" metrics. Those metrics
+belong to the previous halftone-in-a-card logo and do not apply to a dotted outline. The home-screen preview reads as
+a dotted card at icon size.
 
 ## Prompts
 

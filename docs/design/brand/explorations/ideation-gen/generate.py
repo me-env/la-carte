@@ -266,6 +266,58 @@ ROUND_PALETTES: dict[int, list[str]] = {3: [
 ROUNDS: dict[int, list[tuple[str, list[str]]]] = {1: DIRECTIONS, 2: ROUND2, 3: ROUND3}
 ROUND_STYLE[3] = STYLE + NO_GLOW
 
+# Round 4: the user's pick, R1-8.3 (ring of 24 dots + one larger settled dot), reshaped as a card: the dots
+# trace a rounded-rectangle outline. Dots evenly spaced along the outline, corners drawn as arcs of dots.
+DOTCARD = ("evenly spaced equal round dots tracing the outline of a rounded-rectangle card (a dotted card border, "
+           "no solid line), the corners drawn as smooth quarter arcs of dots, the gap between dots about one dot "
+           "diameter, dots large enough to read at 29 pixels")
+PORTRAIT, LANDSCAPE = "portrait card, taller than wide (2:3), like a playing card", "horizontal card, wider than tall (3:2), like an index card"
+ROUND4 = [
+    ("Dot card, settled dot on the bottom edge", [
+        f"{DOTCARD}; {PORTRAIT}; 20 dots. The middle dot of the bottom edge is replaced by one larger dot (about 2x the diameter), the settled one.",
+        f"{DOTCARD}; {LANDSCAPE}; 20 dots. The middle dot of the bottom edge is one larger dot (about 2x), the settled one.",
+        f"{DOTCARD}; {PORTRAIT}; 16 dots, fewer and bigger. The bottom-edge centre dot is larger (about 1.8x).",
+        f"{DOTCARD}; {LANDSCAPE}; 24 dots. The bottom-edge centre dot is larger (about 2x) and sits slightly below the line of the edge, as if it settled with weight.",
+        f"{DOTCARD}; {PORTRAIT}; 24 dots, slightly smaller dots. The bottom-edge centre dot is larger (2x).",
+        f"{DOTCARD}; nearly square card (5:4); 16 dots. The bottom-edge centre dot is larger (2x).",
+    ]),
+    ("Dot card, settled dot in a corner", [
+        f"{DOTCARD}; {PORTRAIT}; 20 dots. The dot at the bottom-right corner is larger (about 2x), the settled one.",
+        f"{DOTCARD}; {LANDSCAPE}; 20 dots. The dot at the bottom-right corner is larger (2x).",
+        f"{DOTCARD}; {PORTRAIT}; 16 dots. The top-left corner dot is larger (2x), like the first mark on a card.",
+        f"{DOTCARD}; {LANDSCAPE}; 18 dots. The bottom-left corner dot is larger (2x).",
+        f"{DOTCARD}; {PORTRAIT}; 20 dots, the dots growing very slightly in size clockwise from the top-left until the large settled dot at the bottom-right corner.",
+    ]),
+    ("Dot card, settled dot inside", [
+        f"{DOTCARD}; {PORTRAIT}; 20 dots. One large solid dot (about 3x) sits inside the card, centred horizontally, resting near the bottom edge.",
+        f"{DOTCARD}; {LANDSCAPE}; 20 dots. One large solid dot (about 3x) sits exactly at the card's centre.",
+        f"{DOTCARD}; {PORTRAIT}; 16 dots. One large solid dot (about 3x) inside the card, in its lower-right area, resting against the inner corner.",
+        f"{DOTCARD}; {LANDSCAPE}; 18 dots. One larger dot (about 2.5x) inside, centred horizontally and resting just above the bottom row of dots.",
+        f"{DOTCARD}; {PORTRAIT}; 20 dots, with one dot missing from the middle of the top edge (a gap); that dot is now larger and sits inside the card at its centre.",
+    ]),
+    ("Dot card, dot falling into it", [
+        f"{DOTCARD}; {PORTRAIT}; 20 dots, with a gap in the middle of the top edge. One larger dot (2x) is just above the gap, about to drop in.",
+        f"{DOTCARD}; {LANDSCAPE}; 18 dots with a gap in the bottom edge centre; one larger dot (2x) is settling into that gap from above, half inside.",
+        f"{DOTCARD}; {PORTRAIT}; 16 dots with the top-right corner dot missing; the missing dot, larger (2x), sits just outside that corner on a 45-degree line, falling in.",
+        f"{DOTCARD}; {PORTRAIT}; 20 dots. Inside the card a vertical line of 3 dots of growing size descends from the top toward the bottom, the last one large (2.5x) and settled near the bottom edge.",
+        f"{DOTCARD}; {LANDSCAPE}; 20 dots. Above the card, centred, one larger dot (2x) on its way down; the bottom edge centre has an empty slot waiting.",
+    ]),
+    ("Dot card, tilted / stacked (card feel)", [
+        f"{DOTCARD}; {PORTRAIT}; 20 dots, the card tilted about 8 degrees clockwise. The bottom-edge centre dot is larger (2x).",
+        f"Two cards: behind, a solid flat card shape offset up-right in a subtle tone; in front, {DOTCARD}; {PORTRAIT}; 20 dots, its bottom-edge centre dot larger (2x).",
+        f"{DOTCARD}; {PORTRAIT}; 20 dots. The larger settled dot (2x) is in the bottom edge centre, and the card's interior is a very subtle flat tint of the dot color (low contrast fill).",
+        f"{DOTCARD}; {PORTRAIT}; 24 dots. Exactly one dot, the bottom-edge centre one, is the larger settled dot and in muted amber (#E3A64A); all others cream.",
+    ]),
+]
+ROUND_PALETTES[4] = [
+    "Deep forest green background (#1F3A2E), cream dots (#EFE9DC).",
+    "Warm off-white paper background (#F4F1EA), near-black ink dots (#1C1C1E).",
+    # "Near-black" made the model draw glowing light bulbs in every image; matte graphite + print wording fixes it.
+    "Matte dark graphite background (#232325), flat warm paper-white dots (#F2EFE8), printed like ink on dark card stock, dots with hard crisp edges.",
+]
+ROUNDS[4] = ROUND4
+ROUND_STYLE[4] = STYLE + NO_GLOW
+
 
 def read_key() -> str:
     path = Path.home() / ".config/la-carte/openai_api_key"
