@@ -332,3 +332,14 @@ and a plateau, the cleanest build), 18 (one decay cut into the card's top edge, 
 disc-and-card cut). Main issue: the sawtooth reads as the standard factory icon, and the 12.1 compositions read as
 a letter "d" (20 as an "e"). If this direction continues, start from 18 and show the repeated reviews inside the
 card rather than as a skyline above it.
+
+### Line versions (user: "not filled at the bottom, an independent line")
+
+Variants 21-38 draw the curve as a single stroke: circle-arc decays and vertical resets, with round caps and
+joins. Each one is the line alone, or the line crossing a card or disc with the 12.1 XOR cut. Variants 33-38
+follow the critic's notes: two decays at most, a 104 px stroke at 1024, a flat tail, no end dots, and the card's
+left edge on the reset. Dark and forest SVGs exist for 34-36. Critic's top 3: 36 (compact card, left edge on the
+reset, a clean cut that holds at 29 px; lead with it), 34 (the line alone, but at small sizes it reads as a
+lightning bolt or a "4"), and 35 (the tail's end cap nearly touches the card edge). Remaining issue: without a
+caption, the stroke doesn't say "forgetting curve". The decay should read as a drop-off, and the reset as a visible
+jump of its own.

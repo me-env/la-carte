@@ -233,7 +233,153 @@ def v20():  # landscape card, two decays, the disc XOR on the left (A10 idea on 
     return c.symmetric_difference(ellipse(330, 560, 180, 180))  # disc low: clear of the first decay tip
 
 
-VARIANTS = [v01, v02, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20]
+# ---- round 3 (user: "not filled at the bottom, an independent line"): the curve as one stroke, round caps and
+# joins; decays are circle arcs (finite slope at the peak, so no hairpin spike), resets are vertical. Strokes are
+# 80-96 px at 1024 (about 2.3-2.7 px at 29 px). Cards and discs meet the stroke with the 12.1 XOR cut.
+
+def curve_pts(x0: float, peak: float, h: float, segs, jump_last: bool = False):
+    """Points of the curve: for each (width, retention kept) a decay from `peak`, then a vertical reset to `peak`
+    (none after the last decay unless jump_last). A decay is a circle arc when wider than deep, else a quarter ellipse."""
+    import math
+
+    pts, x = [(x0, peak)], x0
+    for i, (w, keep) in enumerate(segs):
+        d = (1 - keep) * h
+        for k in range(1, 97):
+            t = k / 96
+            if w >= d:
+                r = (w * w + d * d) / (2 * d)
+                xx = x + w * t
+                y = peak + d - r + math.sqrt(max(r * r - (x + w - xx) ** 2, 0))
+            else:
+                a = t * math.pi / 2
+                xx, y = x + w - w * math.cos(a), peak + d * math.sin(a)
+            pts.append((xx, y))
+        x += w
+        if i < len(segs) - 1 or jump_last:
+            pts.append((x, peak))
+    return pts
+
+
+def stroke(pts, width: float):
+    return LineString(pts).buffer(width / 2, cap_style="round", join_style="round", quad_segs=32)
+
+
+def dot(p, r: float):
+    return ellipse(p[0], p[1], r, r)
+
+
+S3 = [(190, 0.45), (230, 0.68), (260, 0.84)]  # three reviews, widening, shallower; every decay wider than deep
+
+
+def v21():  # the line alone, three decays
+    return stroke(curve_pts(172, 420, 240, S3), 84)
+
+
+def v22():  # the line alone, two decays and a long flat tail
+    return stroke(curve_pts(182, 400, 260, [(250, 0.42), (420, 0.82)]), 92)
+
+
+def v23():  # the line ending in a dot (the card that stays): dot = 1.9 x the stroke
+    pts = curve_pts(150, 420, 240, [(190, 0.45), (220, 0.68), (230, 0.85)])
+    return stroke(pts, 80).union(dot(pts[-1], 76))
+
+
+def v24():  # the line knocked out of a disc, running across it
+    pts = curve_pts(150, 430, 230, S3)
+    return ellipse(512, 512, 360, 360).difference(stroke(pts, 66))
+
+
+def v25():  # the line inside a portrait card, knocked out
+    c = card(262, 172, 762, 852, 96)
+    return c.difference(stroke(curve_pts(322, 400, 200, [(120, 0.45), (140, 0.68), (120, 0.85)]), 60))
+
+
+def v26():  # the line crossing a card, overlap inverted (12.1 XOR on a stroke)
+    c = card(340, 250, 740, 800, 84)
+    return c.symmetric_difference(stroke(curve_pts(150, 440, 260, [(230, 0.42), (250, 0.68), (250, 0.86)]), 84))
+
+
+def v27():  # as 26, two decays, a landscape card below the peaks: the line dips into the card, inverted there
+    c = card(170, 470, 854, 820, 80)
+    return c.symmetric_difference(stroke(curve_pts(200, 330, 300, [(260, 0.40), (370, 0.80)]), 88))
+
+
+def v28():  # 12.1 with a disc: the line crossing a disc, overlap inverted, ending in a dot
+    pts = curve_pts(140, 420, 240, [(200, 0.45), (250, 0.70), (250, 0.86)])
+    return ellipse(500, 560, 250, 250).symmetric_difference(stroke(pts, 76)).union(dot(pts[-1], 72))
+
+
+def v29():  # four decays, lighter line, in a landscape card, knocked out
+    c = card(150, 250, 874, 774, 96)
+    segs = [(130, 0.50), (150, 0.66), (170, 0.78), (150, 0.88)]
+    return c.difference(stroke(curve_pts(222, 430, 200, segs), 58))
+
+
+def v30():  # the line rising out of a card: lower half of the line inside the card (inverted), upper half outside
+    c = card(190, 520, 834, 860, 80)
+    return c.symmetric_difference(stroke(curve_pts(180, 360, 300, S3), 84))
+
+
+def v31():  # the line runs into a card and ends in a dot inside it (inverted): learning lands on the card
+    c = card(560, 250, 860, 780, 72)
+    pts = curve_pts(150, 440, 240, [(190, 0.45), (230, 0.68), (180, 0.86)])
+    return c.symmetric_difference(stroke(pts, 76).union(dot(pts[-1], 70)))
+
+
+def v32():  # the line alone, three decays, the start a dot and the end a dot (first sight, kept)
+    pts = curve_pts(170, 420, 240, [(190, 0.45), (230, 0.68), (250, 0.86)])
+    return stroke(pts, 76).union(dot(pts[0], 66)).union(dot(pts[-1], 66))
+
+
+# ---- round 4 (critic on round 3): two decays at most, stroke 104 px, decay 1 = 240 wide x 0.55 of the reset,
+# decay 2 = 1.5x wider x 0.30, a flat tail, no end dots; the card's left edge sits on the reset (straight meets curve).
+
+def line2(x0: float, peak: float, k: float = 1.0, h: float = 220, tail: float = 120):
+    """Two decays and a flat tail, scaled by k."""
+    pts = curve_pts(x0, peak, h * k, [(240 * k, 0.45), (360 * k, 0.70)])
+    return pts + [(pts[-1][0] + tail * k, pts[-1][1])]
+
+
+def v33():  # the line alone, full size (mark about 820 px wide)
+    return stroke(line2(150, 420), 104)
+
+
+def v34():  # the line alone at 0.72 scale (mark about 620 px wide, critic's margin)
+    return stroke(line2(200, 420, 0.72), 104)
+
+
+def v35():  # line + card, card's left edge on the reset, the second decay and the tail inside the card
+    k, x0, peak = 0.72, 150, 380
+    pts = line2(x0, peak, k)
+    xr = x0 + 240 * k
+    c = card(xr, peak - 150, pts[-1][0] + 60, peak + 330, 64)
+    return c.symmetric_difference(stroke(pts, 104))
+
+
+def v36():  # line + 300 x 400 card (critic's size), the second decay shortened to fit inside it
+    x0, peak = 170, 400
+    pts = curve_pts(x0, peak, 200, [(230, 0.45), (190, 0.70)])
+    pts = pts + [(pts[-1][0] + 30, pts[-1][1])]
+    c = card(x0 + 230, peak - 160, x0 + 530, peak + 240, 64)
+    return c.symmetric_difference(stroke(pts, 104))
+
+
+def v37():  # line + card, the card below the peaks: only the decays dip into it, the resets stay outside
+    k, x0, peak = 0.72, 190, 360
+    pts = line2(x0, peak, k)
+    c = card(x0 + 240 * k, peak + 60, pts[-1][0] + 60, peak + 460, 64)
+    return c.symmetric_difference(stroke(pts, 104))
+
+
+def v38():  # line across a disc, overlap inverted, the reset on the disc's vertical diameter
+    k, x0, peak = 0.8, 130, 420
+    pts = line2(x0, peak, k)
+    xr = x0 + 240 * k
+    return ellipse(xr + 40, 520, 250, 250).symmetric_difference(stroke(pts, 104))
+
+
+VARIANTS = [v01, v02, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38]
 
 
 # ---------------------------------------------------------------- output
@@ -282,7 +428,7 @@ def sheets(files: list[Path], out: Path) -> None:
     for i, f in enumerate(files):
         x, y = pad + (i % cols) * (cell + pad), pad + (i // cols) * (cell + pad + 36)
         sheet.paste(png(f, cell), (x, y + 36))
-        d.text((x, y), f"{i + 1}  {f.stem}", fill="black", font=font)
+        d.text((x, y), f.stem.split("-")[1], fill="black", font=font)  # the variant number
     sheet.save(out / "sheet.png")
 
     # small sizes: each mark at 58 and 29 px, on its tile, in a squircle-ish rounded mask
@@ -295,7 +441,7 @@ def sheets(files: list[Path], out: Path) -> None:
             m = Image.new("L", (size, size), 0)
             ImageDraw.Draw(m).rounded_rectangle((0, 0, size - 1, size - 1), radius=size * 0.225, fill=255)
             small.paste(im, (x, y), m)
-        d.text((x, 6), str(i + 1), fill="black", font=font)
+        d.text((x, 6), f.stem.split("-")[1], fill="black", font=font)
     small.save(out / "small.png")
 
     # home-screen preview: 4 x 6 grid on a soft wallpaper; the candidates mixed with plain grey "other apps"
