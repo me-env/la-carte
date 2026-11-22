@@ -23,6 +23,8 @@ public struct StudyView: View {
   /// Each side's saved text as laid out in the card's column (spec 017): its line count picks the alignment.
   @State private var frontMeasure = TextMeasure()
   @State private var backMeasure = TextMeasure()
+  /// A person card's description in its caption block (spec 014d).
+  @State private var captionMeasure = TextMeasure()
 
   /// Spec 017's candidate layouts for text of 3+ lines, until the user picks one: the leading full-width column (A),
   /// a leading block as wide as its widest line, centred (B), B with an answer of nearly the question's width
@@ -209,7 +211,8 @@ public struct StudyView: View {
     }
   }
 
-  /// The back and a hidden copy of the rating row are always laid out, so the front never moves on reveal.
+  /// The back and a hidden copy of the rating row are always laid out, so the front never moves on reveal (except a
+  /// person card's text prompt, spec 014d).
   /// The rating row shares the card text's `.accessibility2` cap so it never outgrows the card.
   private func studying(_ card: Card) -> some View {
     VStack(spacing: Theme.Spacing.m) {
@@ -218,22 +221,34 @@ public struct StudyView: View {
           // Without a container, the card's id change as the scroll view's direct content never runs its
           // transition, so the next card popped in.
           ZStack {
-            VStack(spacing: Theme.Spacing.m) {
-              prompt(card).placed(promptAlignment, asBlock: Self.textLayout != .column)
-              answerSlot(card)
-                .placed(answerAlignment, asBlock: answerIsBlock, width: answerWidth)
-                // Layout D: a leading answer's column is the question's widest line as drawn, at that line's place.
-                .frame(
-                  width: answerWidth == nil ? nil : frontMeasure.width,
-                  alignment: Alignment(horizontal: promptAlignment.horizontal, vertical: .center)
-                )
-                .offset(x: answerSnap)
+            Group {
+              if card.type == .person {
+                person(card)
+              } else {
+                VStack(spacing: Theme.Spacing.m) {
+                  prompt(card).placed(promptAlignment, asBlock: Self.textLayout != .column)
+                  answer(card)
+                    .opacity(store.isRevealed ? 1 : 0)
+                    .accessibilityHidden(!store.isRevealed)
+                    .placed(answerAlignment, asBlock: answerIsBlock, width: answerWidth)
+                    // Layout D: a leading answer's column is the question's widest line as drawn, at that line's place.
+                    .frame(
+                      width: answerWidth == nil ? nil : frontMeasure.width,
+                      alignment: Alignment(horizontal: promptAlignment.horizontal, vertical: .center)
+                    )
+                    .offset(x: answerSnap)
+                }
+              }
             }
             .frame(maxWidth: .infinity)
             .background(alignment: .top) {
               VStack {
                 probe(card.promptText, font: card.promptFont, into: $frontMeasure)
                 probe(card.answerText, font: card.answerFont, into: $backMeasure)
+                if card.type == .person {
+                  probe(card.fields[Card.descriptionField] ?? "", font: .body, into: $captionMeasure)
+                    .frame(maxWidth: captionWidth)
+                }
               }
             }
             .dynamicTypeSize(...DynamicTypeSize.accessibility2)
@@ -249,6 +264,11 @@ public struct StudyView: View {
           }
         }
         .onChange(of: card.id) { _, id in proxy.scrollTo(id, anchor: .top) }
+        // Every path that reveals a person card's text prompt moves it in one transaction, scroll anchoring included.
+        .transaction(value: store.isRevealed) { transaction in
+          guard store.isRevealed, card.isPersonWithTextPrompt else { return }
+          transaction.animation = reduceMotion ? Theme.Motion.standard : Theme.Motion.reveal
+        }
         .onScrollGeometryChange(for: Bool.self, of: { $0.contentSize.height > $0.containerSize.height }) {
           isCardScrollable = $1
         }
@@ -439,56 +459,13 @@ public struct StudyView: View {
     }
   }
 
-  /// The prompt fields (spec 014d): a photo replaces the centered word; the first text field is the card face.
-  @ViewBuilder private func prompt(_ card: Card) -> some View {
-    if store.canEditInline {
-      side(.front, text: card.text(.front), font: card.promptFont.font, color: Theme.ink)
-    } else {
-      let firstText = card.firstPromptText
-      VStack(alignment: promptAlignment.horizontal, spacing: Theme.Spacing.s) {
-        ForEach(card.shown(card.prompt), id: \.self) { name in
-          field(
-            name, of: card, side: .front, font: name == firstText ? card.promptFont.font : .body,
-            color: name == firstText ? Theme.ink : Theme.secondaryInk
-          )
-        }
-      }
-      .accessibilityElement(children: .contain)
-      .accessibilityActions { ratingActions }
-      .accessibilityIdentifier("study.front")
-    }
+  /// A basic card's sides: one text field each, editable in place (spec 010).
+  private func prompt(_ card: Card) -> some View {
+    side(.front, text: card.text(.front), font: card.promptFont.font, color: Theme.ink)
   }
 
-  /// The answer and, before reveal, a person card's hint share one slot, so the prompt never moves.
-  private func answerSlot(_ card: Card) -> some View {
-    ZStack(alignment: Alignment(horizontal: answerAlignment.horizontal, vertical: .center)) {
-      if let hint = store.answerHint {
-        Text(hint)
-          .font(.meta)
-          .foregroundStyle(Theme.secondaryInk)
-          .opacity(store.isRevealed ? 0 : 1)
-          .accessibilityHidden(store.isRevealed)
-          .accessibilityIdentifier("study.answerHint")
-      }
-      answer(card)
-        .opacity(store.isRevealed ? 1 : 0)
-        .accessibilityHidden(!store.isRevealed)
-    }
-  }
-
-  @ViewBuilder private func answer(_ card: Card) -> some View {
-    if store.canEditInline {
-      side(.back, text: card.text(.back), font: card.answerFont.font, color: Theme.secondaryInk)
-    } else {
-      VStack(alignment: answerAlignment.horizontal, spacing: Theme.Spacing.xs) {
-        ForEach(card.shown(card.answer), id: \.self) { name in
-          field(name, of: card, side: .back, font: card.answerFont.font, color: Theme.secondaryInk)
-        }
-      }
-      .accessibilityElement(children: .contain)
-      .accessibilityActions { ratingActions }
-      .accessibilityIdentifier("study.back")
-    }
+  private func answer(_ card: Card) -> some View {
+    side(.back, text: card.text(.back), font: card.answerFont.font, color: Theme.secondaryInk)
   }
 
   /// The question depends only on itself, so it never moves on reveal.
@@ -596,24 +573,131 @@ public struct StudyView: View {
     var isMultiline: Bool { height > twoLines + 1 }
   }
 
-  /// A photo field shows the image at its public URL, never the URL text.
-  @ViewBuilder
-  private func field(
-    _ name: String, of card: Card, side: StudyFeature.State.Field, font: Font, color: ThemeColor
-  ) -> some View {
-    if name == Card.photoField {
-      let url = card.fields[name] ?? ""
-      CardPhoto(url: URL(string: url), style: .card) {
-        store.send(.photoLoadFailed(cardID: card.id, url: url, side: side))
+  /// A person card (spec 014d): photo, name and description end centred as one composition under the photo.
+  /// A photo prompt keeps its photo still and cross-fades the hint into the caption below it; a text prompt is
+  /// centred with its hint, then moves into its row as the other rows open around it.
+  @ViewBuilder private func person(_ card: Card) -> some View {
+    let rows = card.personRows
+    if card.prompt.contains(Card.photoField) {
+      VStack(spacing: Theme.Spacing.m) {
+        photo(of: card, side: .front)
+          .accessibilityElement(children: .contain)
+          .accessibilityActions { ratingActions }
+          .accessibilityIdentifier("study.front")
+        ZStack(alignment: .top) {
+          if let hint = store.answerHint {
+            answerHint(hint)
+              .opacity(store.isRevealed ? 0 : 1)
+              .accessibilityHidden(store.isRevealed)
+          }
+          VStack(spacing: 0) {
+            let captionRows = rows.filter { $0 != Card.photoField }
+            ForEach(captionRows, id: \.self) { name in
+              personText(name, of: card, revealed: true)
+                .padding(.top, Self.gap(before: name, in: captionRows))
+            }
+          }
+          .frame(maxWidth: .infinity)
+          .accessibilityElement(children: .contain)
+          .accessibilityActions { ratingActions }
+          .accessibilityIdentifier("study.back")
+          .opacity(store.isRevealed ? 1 : 0)
+          .accessibilityHidden(!store.isRevealed)
+        }
       }
-      // A photo stays centred even among leading text.
-      .frame(maxWidth: (side == .front ? promptAlignment : answerAlignment) == .leading ? .infinity : nil)
-      .accessibilityIdentifier("study.photo")
+    } else if reduceMotion {
+      // No move, no morph: the question fades out and the composition fades in, in its final place.
+      if store.isRevealed {
+        personQuestion(card, rows: rows, revealed: true).transition(.opacity)
+      } else {
+        personQuestion(card, rows: rows, revealed: false).transition(.opacity)
+      }
     } else {
-      Text(card.fields[name] ?? "")
-        .font(font)
-        .foregroundStyle(color)
+      personQuestion(card, rows: rows, revealed: store.isRevealed)
     }
+  }
+
+  /// A text prompt and its hint before reveal; after it, the prompt in its row among the inserted ones. One `ForEach`
+  /// keyed by field name, so the prompt keeps its identity and moves.
+  private func personQuestion(_ card: Card, rows: [String], revealed: Bool) -> some View {
+    let shown = revealed ? rows : rows.filter(card.prompt.contains)
+    return VStack(spacing: 0) {
+      ForEach(shown, id: \.self) { name in
+        let isPrompt = card.prompt.contains(name)
+        Group {
+          if name == Card.photoField {
+            photo(of: card, side: .back)
+          } else {
+            personText(name, of: card, revealed: revealed)
+              .accessibilityActions { ratingActions }
+              .accessibilityIdentifier(isPrompt ? "study.front" : "study.back")
+          }
+        }
+        .padding(.top, Self.gap(before: name, in: shown))
+        .transition(isPrompt ? .identity : .opacity.animation(.easeOut(duration: 0.25).delay(0.1)))
+      }
+      if !revealed, let hint = store.answerHint {
+        answerHint(hint)
+          .padding(.top, Theme.Spacing.m)
+          .transition(.opacity.animation(.easeIn(duration: 0.15)))
+      }
+    }
+  }
+
+  /// One text row, the same view as question and answer: a prompt changes font, colour and frame on reveal. The name
+  /// morphs (one line); a description cross-fades its style while it re-wraps into the caption block.
+  private func personText(_ name: String, of card: Card, revealed: Bool) -> some View {
+    let isQuestion = !revealed && card.prompt.contains(name)
+    let isName = name == Card.nameField
+    let alignment: TextAlignment = isQuestion ? promptAlignment : isName ? .center : captionAlignment
+    let fills = !isQuestion || promptAlignment == .center || Self.textLayout == .column
+    return Text(card.fields[name] ?? "")
+      .font(isQuestion ? card.promptFont.font : isName ? .cardFaceSmall : .body)
+      .foregroundStyle(isQuestion || isName ? Theme.ink : Theme.secondaryInk)
+      .contentTransition(isName ? .interpolate : .opacity)
+      .multilineTextAlignment(alignment)
+      .frame(maxWidth: fills ? .infinity : nil, alignment: Alignment(horizontal: alignment.horizontal, vertical: .center))
+      .frame(maxWidth: isQuestion || isName ? nil : captionWidth)
+  }
+
+  /// What a person card asks to recall, centred under the prompt.
+  private func answerHint(_ hint: String) -> some View {
+    Text(hint)
+      .font(.subheadline)
+      .foregroundStyle(Theme.secondaryInk)
+      .multilineTextAlignment(.center)
+      .frame(maxWidth: .infinity)
+      .accessibilityIdentifier("study.answerHint")
+  }
+
+  /// A row's space above it in a person card: none first, `m` under the photo, `xs` between name and description.
+  static func gap(before name: String, in rows: [String]) -> CGFloat {
+    guard let index = rows.firstIndex(of: name), index > 0 else { return 0 }
+    return rows[index - 1] == Card.photoField ? Theme.Spacing.m : Theme.Spacing.xs
+  }
+
+  /// A long description reads as one caption under the photo, not a full-width paragraph.
+  private var captionWidth: CGFloat {
+    Self.captionWidth(isAccessibilitySize: dynamicTypeSize.isAccessibilitySize)
+  }
+
+  /// The photo's width plus `l` on each side; the frame keeps it within the column.
+  static func captionWidth(isAccessibilitySize: Bool) -> CGFloat {
+    (isAccessibilitySize ? Theme.Photo.cardCompact : Theme.Photo.card) + 2 * Theme.Spacing.l
+  }
+
+  /// 1-2 lines centred, 3+ leading inside the caption block.
+  private var captionAlignment: TextAlignment {
+    captionMeasure.isMultiline ? .leading : .center
+  }
+
+  /// The photo at its public URL, centred; a failed load is reported for its side (spec 014d).
+  private func photo(of card: Card, side: StudyFeature.State.Field) -> some View {
+    let url = card.fields[Card.photoField] ?? ""
+    return CardPhoto(url: URL(string: url), style: .card) {
+      store.send(.photoLoadFailed(cardID: card.id, url: url, side: side))
+    }
+    .accessibilityIdentifier("study.photo")
   }
 
   /// Forgot and Got it; Hard and Easy are reached by dragging (spec 011).
@@ -815,6 +899,16 @@ extension Card {
     shown(answer).filter { $0 != Card.photoField }
       .compactMap { fields[$0]?.trimmingCharacters(in: .whitespacesAndNewlines) }
       .joined(separator: " ")
+  }
+
+  /// A person card's fields as revealed (spec 014d): photo, name, description, the empty ones left out.
+  var personRows: [String] {
+    shown(type.fields).filter { prompt.contains($0) || answer.contains($0) }
+  }
+
+  /// The person cards whose question moves on reveal (spec 014d); a photo prompt stays put.
+  var isPersonWithTextPrompt: Bool {
+    type == .person && !prompt.contains(Card.photoField)
   }
 
   var promptFont: CardFont { CardText.promptFont(promptText) }

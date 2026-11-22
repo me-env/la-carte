@@ -515,6 +515,8 @@ public struct StudyFeature {
 
 extension Card {
   static let photoField = "photo"
+  static let nameField = "name"
+  static let descriptionField = "description"
 
   /// The fields of `names` that have a value: an empty field isn't on the card.
   func shown(_ names: [String]) -> [String] {

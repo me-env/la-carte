@@ -107,6 +107,38 @@ struct StudyRenders {
                      name: "study-d-wrapped-\(name)")
     }
   }
+
+  /// Person cards (spec 014d), light and dark: every direction with a short, a long and no description, before and
+  /// after reveal (`screen-study-person-<photo|name|desc>-<short|long|none>-<q|rev>-<theme>-<scheme>.png`). The photo
+  /// URL never loads, so the placeholder stands in for it.
+  @Test func personCards() throws {
+    let dir = try #require(ProcessInfo.processInfo.environment["LA_CARTE_RENDER_DIR"])
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let date = Date(timeIntervalSince1970: 1_767_225_600)
+    let descriptions = [
+      ("short", "runs the bakery"),
+      ("long", "runs the bakery on the corner of Elm Street and sings in the choir every Sunday morning with her two sisters"),
+      ("none", ""),
+    ]
+    let directions = [
+      ("photo", ["photo"], ["name", "description"]),
+      ("name", ["name"], ["photo", "description"]),
+      ("desc", ["description"], ["photo", "name"]),
+    ]
+    for (length, description) in descriptions {
+      for (direction, prompt, answer) in directions where !(description.isEmpty && direction == "desc") {
+        let fields = ["photo": "https://invalid.example/p.jpg", "name": "Ada Example", "description": description]
+        let card = Card(id: UUID(), type: .person, prompt: prompt, answer: answer, fields: fields,
+                        front: "", back: "", due: date, createdAt: date, updatedAt: date)
+        for revealed in [false, true] {
+          for look in Self.looks.prefix(2) {
+            _ = try Screen(StudyView(store: Store(initialState: Self.studying(card, revealed: revealed)) { EmptyReducer() }),
+                           look, name: "study-person-\(direction)-\(length)-\(revealed ? "rev" : "q")")
+          }
+        }
+      }
+    }
+  }
 }
 
 /// Questions and answers of known rendered line counts on an iPhone 17 Pro at the default text size (spec 017).
