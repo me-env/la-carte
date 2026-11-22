@@ -1,7 +1,7 @@
 name: CI
 # Pipeline map, gates and timings: docs/ci-cd.md.
 #   pull_request            API + API image + iOS unit + UI smoke (≈10 min)
-#   push to main            API + API image → Deploy API; iOS unit + full UI suite (4 shards) + E2E
+#   push to main            API + API image → Deploy API; iOS unit; UI build once → full UI suite (4 shards) + E2E
 #   nightly, manual run     same as push to main (manual run on main also re-tries the deploy)
 
 on:
@@ -24,6 +24,9 @@ concurrency:
 env:
   SIMULATOR: ${{ vars.CI_SIMULATOR || 'iPhone 17' }}
   OS: ${{ vars.CI_IOS_VERSION || 'latest' }}
+  # One build at a time per runner, so xcodebuild gets -jobs <all CPUs> (scripts/_ios-env.sh; the default 2 slots
+  # left the 3-CPU runner at -jobs 1).
+  BUILD_SLOTS: 1
 
 jobs:
   api:
@@ -92,10 +95,18 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90  # v1.7.0
         with:
           xcode-version: latest-stable
+      - name: Boot simulator (background, during the build)
+        run: ci/boot-simulator.sh --start
+      - name: Build app + UI tests
+        run: ci/build-ui-tests.sh "$RUNNER_TEMP/LaCarte.xctestproducts"
+      - name: Wait for the simulator
+        run: ci/boot-simulator.sh --wait
       # The smoke set: core flows, light only. Owner of the list: qa-validator (docs/ci-cd.md).
       - name: UI smoke tests (mock deck)
+        env:
+          UI_TEST_PRODUCTS: ${{ runner.temp }}/LaCarte.xctestproducts
         run: |
-          scripts/ios-ui-test.sh ci-smoke \
+          ci/ui-test.sh scripts/ios-ui-test.sh ci-smoke \
             -only-testing:LaCarteUITests/StudyUITests/testStudy_frontRevealRateNext \
             -only-testing:LaCarteUITests/StudyUITests/testStudy_rateAllToCaughtUp \
             -only-testing:LaCarteUITests/StudyUITests/testStudy_offlineThenRetry \
@@ -103,7 +114,7 @@ jobs:
             -only-testing:LaCarteUITests/DeckUITests/testDeck_addFromDeck \
             -only-testing:LaCarteUITests/DeckUITests/testDeck_swipeToDelete \
             -only-testing:LaCarteUITests/SettingsUITests/testSettings_testConnectionMock \
-            -only-testing:LaCarteUITests/SettingsUITests/testSetup_connectFromStudy \
+            -only-testing:LaCarteUITests/SetupUITests/testSetup_connectFromStudy \
             -only-testing:LaCarteUITests/RefreshUITests/testStudy_foregroundReload
       - name: Upload screenshots
         if: always()
@@ -113,36 +124,84 @@ jobs:
           path: qa/screenshots/
           if-no-files-found: ignore
 
-  ios-ui:
-    name: iOS UI (${{ matrix.shard.name }})
+  ios-ui-build:
+    name: iOS UI build (once, for all UI jobs)
     if: github.event_name != 'pull_request'
     runs-on: macos-26
-    strategy:
-      fail-fast: false
-      matrix:
-        # Balanced on measured class durations (Theme 715 s, Deck 641, Study 461, Settings 335,
-        # Refresh 316, LaCarteUITests 97). A new test class must be added to one shard.
-        shard:
-          - name: theme
-            tests: -only-testing:LaCarteUITests/ThemeUITests
-          - name: deck
-            tests: -only-testing:LaCarteUITests/DeckUITests
-          - name: study
-            tests: -only-testing:LaCarteUITests/StudyUITests
-          - name: settings-refresh-misc
-            tests: >-
-              -only-testing:LaCarteUITests/SettingsUITests
-              -only-testing:LaCarteUITests/RefreshUITests
-              -only-testing:LaCarteUITests/LaCarteUITests
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90  # v1.7.0
         with:
           xcode-version: latest-stable
-      - name: Boot simulator (appearance switching for dark UI tests)
-        run: ci/boot-simulator.sh
+      - name: Build app + UI tests (build-for-testing)
+        run: ci/build-ui-tests.sh "$RUNNER_TEMP/LaCarte.xctestproducts"
+      - name: Pack (tar keeps the executable bits an artifact zip drops)
+        run: tar -cf "$RUNNER_TEMP/ui-products.tar" -C "$RUNNER_TEMP" LaCarte.xctestproducts
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+        with:
+          name: ui-products
+          path: ${{ runner.temp }}/ui-products.tar
+          retention-days: 1
+          compression-level: 1
+
+  ios-ui:
+    name: iOS UI (${{ matrix.shard.name }})
+    needs: ios-ui-build
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        # Balanced on measured class durations (local seconds, CI ≈ ×1.8; docs/ci-cd.md → Shards). The last shard runs
+        # every class the others don't name (-skip-testing), so a new UI test class always runs somewhere.
+        # MarketingUITests is not a test suite (demo frames, owner: marketing) and never runs on CI.
+        shard:
+          - name: deck-settings-study
+            tests: >-
+              -only-testing:LaCarteUITests/DeckUITests
+              -only-testing:LaCarteUITests/SettingsUITests
+              -only-testing:LaCarteUITests/StudyUITests
+              -only-testing:LaCarteUITests/LaCarteUITests
+          - name: setup-report-launch
+            tests: >-
+              -only-testing:LaCarteUITests/SetupUITests
+              -only-testing:LaCarteUITests/ReportUITests
+              -only-testing:LaCarteUITests/LaunchUITests
+          - name: theme-ratings
+            tests: >-
+              -only-testing:LaCarteUITests/ThemeUITests
+              -only-testing:LaCarteUITests/RatingsUITests
+          - name: rest
+            tests: >-
+              -only-testing:LaCarteUITests
+              -skip-testing:LaCarteUITests/DeckUITests
+              -skip-testing:LaCarteUITests/SettingsUITests
+              -skip-testing:LaCarteUITests/StudyUITests
+              -skip-testing:LaCarteUITests/LaCarteUITests
+              -skip-testing:LaCarteUITests/SetupUITests
+              -skip-testing:LaCarteUITests/ReportUITests
+              -skip-testing:LaCarteUITests/LaunchUITests
+              -skip-testing:LaCarteUITests/ThemeUITests
+              -skip-testing:LaCarteUITests/RatingsUITests
+              -skip-testing:LaCarteUITests/MarketingUITests
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90  # v1.7.0
+        with:
+          xcode-version: latest-stable
+      - name: Boot simulator (background; appearance switching for dark UI tests)
+        run: ci/boot-simulator.sh --start
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: ui-products
+          path: ${{ runner.temp }}
+      - name: Unpack the UI build
+        run: tar -xf "$RUNNER_TEMP/ui-products.tar" -C "$RUNNER_TEMP"
+      - name: Wait for the simulator
+        run: ci/boot-simulator.sh --wait
       - name: UI tests (mock deck, light + dark)
-        run: scripts/ios-ui-test.sh ci-${{ matrix.shard.name }} ${{ matrix.shard.tests }}
+        env:
+          UI_TEST_PRODUCTS: ${{ runner.temp }}/LaCarte.xctestproducts
+        run: ci/ui-test.sh scripts/ios-ui-test.sh ci-${{ matrix.shard.name }} ${{ matrix.shard.tests }}
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
@@ -153,8 +212,7 @@ jobs:
 
   ios-e2e:
     name: iOS E2E (live API)
-    needs: ios-unit  # starts after it so at most 5 macOS jobs run at once (free plan limit)
-    if: ${{ !cancelled() && github.event_name != 'pull_request' }}  # runs even if unit tests fail
+    needs: ios-ui-build  # with the 4 shards: 5 macOS jobs, the free plan's limit (unit tests end before the build)
     runs-on: macos-26
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
@@ -162,10 +220,20 @@ jobs:
         with:
           xcode-version: latest-stable
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
-      - name: Boot simulator
-        run: ci/boot-simulator.sh
+      - name: Boot simulator (background)
+        run: ci/boot-simulator.sh --start
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: ui-products
+          path: ${{ runner.temp }}
+      - name: Unpack the UI build
+        run: tar -xf "$RUNNER_TEMP/ui-products.tar" -C "$RUNNER_TEMP"
+      - name: Wait for the simulator
+        run: ci/boot-simulator.sh --wait
       - name: E2E (fresh API + seeded deck)
-        run: scripts/e2e.sh ci-e2e
+        env:
+          UI_TEST_PRODUCTS: ${{ runner.temp }}/LaCarte.xctestproducts
+        run: ci/ui-test.sh scripts/e2e.sh ci-e2e
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0

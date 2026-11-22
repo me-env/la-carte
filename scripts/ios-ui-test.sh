@@ -37,17 +37,19 @@ if [ "$UI_WORKERS" -gt 1 ]; then  # full parallel run = split over the warm pool
 fi
 OUT="$ROOT/qa/screenshots/$RUN"
 RESULT="$RESULTS_DIR/$RUN.xcresult"   # qa/.results, or $LA_CARTE_SCRATCH/qa-results/<checkout>
-PRODUCTS="$RESULTS_DIR/$RUN.xctestproducts"  # this run's own app + runner; removed on exit
-trap 'rm -rf "$PRODUCTS"' EXIT
-rm -rf "$OUT" "$RESULT" "$PRODUCTS"; mkdir -p "$OUT" "$(dirname "$RESULT")"
+# UI_TEST_PRODUCTS=<dir>.xctestproducts: test these prebuilt products, no build (CI builds once: ci/build-ui-tests.sh).
+PREBUILT="${UI_TEST_PRODUCTS:-}"
+PRODUCTS="${PREBUILT:-$RESULTS_DIR/$RUN.xctestproducts}"  # else this run's own app + runner; removed on exit
+if [ -z "$PREBUILT" ]; then trap 'rm -rf "$PRODUCTS"' EXIT; rm -rf "$PRODUCTS"; fi
+rm -rf "$OUT" "$RESULT"; mkdir -p "$OUT" "$(dirname "$RESULT")"
 
 cd "$ROOT/ios"
 # Keeps errors plus located notes: an error inside #expect/#require points at the test file only in its note.
-FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|\.swift:[0-9]+:[0-9]+: note:|TEST( EXECUTE)? (SUCCEEDED|FAILED)|^🔒"
+FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|preflight checks|\.swift:[0-9]+:[0-9]+: note:|TEST( EXECUTE)? (SUCCEEDED|FAILED)|^🔒"
 export NSUnbufferedIO=YES  # xcodebuild writes each line as it happens, even into a pipe
 set +e
 # 1. Build under the app's DerivedData lock, copying the products out so a later build can't replace them.
-"$LOCK" "$APP_BUILD_LOCK" $BUILD_SLOT xcodebuild build-for-testing $BUILD_JOBS_FLAGS -project LaCarte.xcodeproj -scheme LaCarte \
+[ -n "$PREBUILT" ] || "$LOCK" "$APP_BUILD_LOCK" $BUILD_SLOT xcodebuild build-for-testing $BUILD_JOBS_FLAGS -project LaCarte.xcodeproj -scheme LaCarte \
   -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER"
 STATUS=${PIPESTATUS[0]}
 # 2. Test the copy on the first free UI simulator ($POOL_DESTINATION), under its lock only.

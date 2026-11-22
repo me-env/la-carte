@@ -8,14 +8,17 @@ Owner: `cicd-lead` agent. One workflow, `.github/workflows/ci.yml`. Signing and 
 ```
 pull_request ──┬─ API (ruff + pytest)          ubuntu   ~1 min
                ├─ API (docker build + /health) ubuntu   ~1 min
-               ├─ iOS unit tests               macos-26 ~4 min
-               └─ iOS UI smoke (light, 9 tests) macos-26 ~10 min   → PR feedback ≈ 10 min
+               ├─ iOS unit tests               macos-26
+               └─ iOS UI smoke (light, 9 tests) macos-26: simulator boots in the background while the app
+                                                builds, then tests the build      → PR feedback ≈ slowest job
 
 push to main ──┬─ API ──────┐
                ├─ API image ┴─► Deploy API (Dokploy) → wait → scripts/api-live-check.sh   ~5 min after push
-               ├─ iOS unit tests ──► iOS E2E (live API, its own job)                    ~4 + ~10 min
-               └─ iOS UI, 4 shards in parallel (light + dark):                           ~18 min
-                    theme │ deck │ study │ settings + setup + refresh + design system
+               ├─ iOS unit tests
+               └─ iOS UI build (once: build-for-testing → artifact `ui-products`)
+                    ├─ iOS UI, 4 shards in parallel (light + dark), no build: download, boot, test
+                    │    deck-settings-study │ setup-report-launch │ theme-ratings │ rest
+                    └─ iOS E2E (live API), same build
 
 nightly 03:00 UTC (schedule) and manual run (workflow_dispatch): same jobs as a push to main.
 The deploy job runs only on push and on a manual run of main.
@@ -23,11 +26,23 @@ The deploy job runs only on push and on a manual run of main.
 
 Concurrency: on a PR, a new push cancels the old run. On `main`, runs queue instead of cancelling, so a deploy
 is never cut off half-way. The deploy job has its own `deploy-api` group, so deploys never overlap.
-The free plan runs at most 5 macOS jobs at once: the 4 shards plus unit tests start together, and E2E starts
-when unit tests end (it runs even if they fail).
+The free plan runs at most 5 macOS jobs at once: unit tests + the UI build start together; the 4 shards and E2E
+start when the build ends (unit tests are done by then).
 
-Screenshots: each UI job uploads its own artifact (`screenshots-smoke`, `screenshots-theme`,
-`screenshots-deck`, `screenshots-study`, `screenshots-settings-refresh-misc`, `screenshots-e2e`).
+Speed settings (measured 2026-11-22, run 45032373007):
+- `BUILD_SLOTS: 1` (workflow env): `scripts/_ios-env.sh` splits CPUs over 2 build slots by default, which gave
+  the 3-CPU runner `-jobs 1` (app build ≈ 15 min per job). One slot = `-jobs 3`.
+- Build once: `ci/build-ui-tests.sh` runs the same `build-for-testing` as `scripts/ios-ui-test.sh`; the test jobs
+  get the `.xctestproducts` as a tar artifact (a zip artifact drops executable bits) and run
+  `UI_TEST_PRODUCTS=<dir> scripts/ios-ui-test.sh …`, which then skips its build.
+- `ci/boot-simulator.sh --start` / `--wait`: the boot (CoreSimulator start ≈ 1 min, data migration ≈ 2 min,
+  appearance switch, one system-app launch so SpringBoard is not "Busy") overlaps the build or the download.
+  It prints how long each phase took.
+- `ci/ui-test.sh` wraps every UI run: when the simulator, not a test, failed (the runner was refused with
+  "Application failed preflight checks … Busy", or prebuilt products ran no test at all) it waits 30 s and
+  retries once, with a `CI infra` warning. A failing test is never retried.
+
+Screenshots: each UI job uploads its own artifact (`screenshots-smoke`, `screenshots-<shard>`, `screenshots-e2e`).
 
 ## Gates
 
@@ -39,9 +54,11 @@ Screenshots: each UI job uploads its own artifact (`screenshots-smoke`, `screens
 **Smoke set** (in `ci.yml`, job `ios-ui-smoke`): core study, deck, settings/setup and refresh flows in light
 mode. `qa-validator` owns the list. Keep it under about 10 tests and pick tests that are not flaky.
 
-**Shards** (job `ios-ui`, matrix): one entry per `XCTestCase` class, balanced on measured durations. A new UI
-test class must be added to a shard, or it never runs on CI. `SetupUITests.swift` is an extension of
-`SettingsUITests`, so it runs in that shard. The `*_liveAPI` tests skip in the mock shards and run in E2E.
+**Shards** (job `ios-ui`, matrix): whole `XCTestCase` classes, balanced on measured durations (local
+`ui-test-durations.tsv`; CI is ≈ 1.6–1.9× slower). The `rest` shard runs `-only-testing:LaCarteUITests` minus
+every class the other shards name, so a new class runs there without any change. Move it to a named shard (and
+add it to `rest`'s skips) when `rest` gets too long. `MarketingUITests` (demo frames) never runs on CI. The
+`*_liveAPI` tests skip in the mock shards and run in E2E.
 
 ## API deploy
 
@@ -91,11 +108,10 @@ in `deploy.md` → Backups.
 
 ## Expected timings
 
-| Run | Before | Target (to be measured on the first runs) |
+| Run | Before (run 45032373007, 2026-11-22) | After |
 |---|---|---|
-| PR | ~50 min (full UI suite in one job) | ~10 min (slowest job: UI smoke) |
-| push to main, full UI | ~50 min, E2E skipped when UI failed | ~18 min (slowest shard: theme, ~5 min build + ~12 min tests); E2E always runs |
-| API live after push to main | ~3 min, untested (Dokploy auto-deploy on every push) | ~5 min, only after API tests pass |
+| PR | unit 13 min; smoke ≈ 15 min build + boot + tests | to be measured on the next PR |
+| push to main, iOS | 43 min (4 shards of 27–32 min: boot 3–4.5, build ≈ 15, tests 8–10; E2E after unit, 30 min). 8 classes (≈ 50 tests) never ran | pending (next main run) |
+| API live after push to main | ~5 min, only after API tests pass | unchanged |
 
-Each shard builds the app itself (about 5 min). Next step if needed: one `build-for-testing` job plus
-`test-without-building` shards (`docs/tooling.md` P2), which saves about 4 min per shard.
+Before: every UI job built the app itself at `-jobs 1`.
