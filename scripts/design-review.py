@@ -24,7 +24,10 @@ Exit code 1 on any FAIL. Several renders: each is reviewed. `--watch`: re-runs w
 (polls mtime) and prints one PASS/FAIL line per run with the failing metrics and their spots. `--frames DIR|GLOB`
 (repeatable, one per animation): every metric on every frame, one line per frame, then the worst frame per metric
 (its value, frame and spot, and how many frames fail). The optical centre is shown but not counted on frames (a
-fill moves the ink centroid; the still icon is reviewed on its own).
+fill moves the ink centroid; the still icon is reviewed on its own). A render or frame with too little ink to
+measure (blank, or under MIN_MEASURE_MARKS grains: an animation's first frames) is N/A, not a crash; so is a single
+metric with nothing to measure (e.g. a ramp under 3 columns). Sheets go to $TMPDIR/design-review/<the render's last
+3 folders>/<name>-review.png (variants a, b, c with the same file names no longer overwrite each other).
 All lengths are in px of a 1024 tile; other sizes are resampled to 1024 first. SVGs go through rsvg-convert.
 
 Screens (`--screen`, the critic picks it per proposal from the render's construction):
@@ -56,7 +59,8 @@ What it measures, along the transition axis (default x; the direction of rising 
 2. The same on the 58 px and 29 px icons (area downsample + 0.7 px blur: roughly what the eye integrates).
 3. Order along the axis, per 32 px band of marks (dots and holes together): hexatic order |psi6| over
    Delaunay neighbours, and regularity 1 - CV(nearest-neighbour distance). Both must rise without an
-   adjacent-band step or a drop: "random, then suddenly a lattice" fails here.
+   adjacent-band step or a drop: "random, then suddenly a lattice" fails here. Both count only what exceeds
+   2 standard errors of the band means (ORDER_NOISE_SE: the raw values flipped with the render's seed).
 3s. Stochastic only (`--screen stochastic`), on the same bands, with l = the band's median NN distance (the density
    follows the ramp, so distances are scaled per band): 1 - CV(NN) must not fall (drawdown) and stays above
    NN_FLOOR_STOCHASTIC (Poisson-disc ~0.80-0.85, uniform random ~0.5); clumped marks (NN < 0.6 l: the pair
@@ -145,6 +149,15 @@ ORDER_BAND_PX = 32              # band width for order / size statistics
 ORDER_MIN_DOTS = 10             # bands with fewer marks are skipped
 ORDER_MAX_STEP = 0.25           # max change of |psi6| or 1-CV(NN) between adjacent bands (band noise ~0.05)
 ORDER_DRAWDOWN = 0.08           # max fall of an order measure below its running max (order must rise)
+ORDER_NOISE_SE = 2.0            # both order checks count only what exceeds the bands' sampling noise: value =
+                                # |difference| - 2 standard errors of that difference (SE of a band's mean |psi6| =
+                                # std / sqrt(n); of its CV(NN) ~ CV sqrt((1/2 + CV^2) / n)). Why: a band holds 10-60
+                                # marks, so its |psi6| moves ~0.03-0.05 with the render's seed and the raw step / drawdown
+                                # flipped PASS/FAIL with the seed (round 11 a/b/c, 11 seeds: raw |psi6| step 0.07-0.29,
+                                # drawdown up to 0.17). Corrected, the same renders read step <= 0.234, drawdown <= 0.035
+                                # on every seed (each variant one verdict); round6/pass5 ("random, then suddenly a
+                                # lattice") still fails at 0.302, round 7's flip at 1-CV(NN) drawdown 0.091, and the
+                                # synthetic stays <= 0.144. A real jump is far above the noise; only noise is removed.
 MIN_GAP_RATIO = 0.20            # mark gap >= 20% of the pair's summed radii (round 6 built with 25%)
 MERGED_ASPECT = 1.4             # a mark blob this elongated (second moments) is two touching marks
 TOUCH_OK_COVERAGE = 0.65        # touching / merging is allowed only where local coverage >= this (marks closing
@@ -216,6 +229,11 @@ FRONT_SPREAD_MAX = 24.0         # px: max - min of the strip fronts (8 px column
 # lattice synthetic 0.003 / 0.002, round 8b 0.010 / 0.004; round 7's rejected bitten front 0.055 / 0.032.
 EDGE_MIN_COVERAGE = 0.8
 EDGE_SPREAD_MAX = {58: 0.045, 29: 0.025}
+# Nothing to measure: a render (e.g. the first frame of a "grain streams in" animation) whose colours are all within
+# INK_MIN_CONTRAST of the paper, or with fewer than MIN_MEASURE_MARKS marks, gets every metric reported N/A (it
+# neither passes nor fails anything): order, spacing and profiles need a few marks to mean anything.
+INK_MIN_CONTRAST = 0.1          # RGB distance 0..sqrt(3)
+MIN_MEASURE_MARKS = 8
 
 ICON_IDS = [1110145109, 1108187841, 1108185179, 1069512882, 1584215688, 915056765]   # Notes, Reminders,
 # Calendar, Stocks, Clock, Maps: Apple's own apps via the public iTunes lookup API (no personal data).
@@ -260,7 +278,11 @@ def ink_map(rgb):
     c = 16
     bg = np.median(np.concatenate([rgb[:c, :c], rgb[:c, -c:], rgb[-c:, :c], rgb[-c:, -c:]]).reshape(-1, 3), axis=0)
     d = np.linalg.norm(rgb - bg, axis=2)
-    ink = np.median(rgb[d >= np.percentile(d, 99.9)], axis=0)
+    if d.max() < INK_MIN_CONTRAST:                     # blank (e.g. the first frame of an animation): no ink
+        return np.zeros(d.shape), bg, bg
+    # the top 0.1% of pixels, but never the paper: with less ink than that (a near-empty frame) the percentile
+    # falls on the background and the ink colour would be the paper's
+    ink = np.median(rgb[d >= max(np.percentile(d, 99.9), d.max() / 2)], axis=0)
     v = ink - bg
     return np.clip(((rgb - bg) @ v) / (v @ v), 0, 1), bg, ink
 
@@ -382,9 +404,9 @@ def psi6(xy):
 
 def order_bands(marks, psi, nn, x0, x1):
     """Per 32 px band of marks (dots and holes together): centre x, mean |psi6|, 1 - CV(NN), median r, CV(r),
-    mark count, hole fraction."""
+    mark count, hole fraction, and the standard errors of the mean |psi6| and of CV(NN) (see ORDER_NOISE_SE)."""
     if len(marks) < 8:
-        return np.zeros((0, 7))
+        return np.zeros((0, 9))
     xy = marks[:, :2]
     lo, hi = np.percentile(xy[:, 0], [1, 99])
     lo, hi = max(lo, x0), min(hi, x1)
@@ -395,10 +417,11 @@ def order_bands(marks, psi, nn, x0, x1):
             continue
         p = psi[sel][~np.isnan(psi[sel])]
         r = marks[sel, 2]
-        rows.append([b0 + ORDER_BAND_PX / 2, p.mean() if len(p) else np.nan,
-                     1 - nn[sel].std() / nn[sel].mean(), np.median(r), r.std() / r.mean(), sel.sum(),
-                     (marks[sel, 3] < 0).mean()])
-    return np.array(rows) if rows else np.zeros((0, 7))
+        cv = nn[sel].std() / nn[sel].mean()
+        rows.append([b0 + ORDER_BAND_PX / 2, p.mean() if len(p) else np.nan, 1 - cv, np.median(r), r.std() / r.mean(),
+                     sel.sum(), (marks[sel, 3] < 0).mean(), p.std() / math.sqrt(len(p)) if len(p) > 1 else 0.0,
+                     cv * math.sqrt((0.5 + cv ** 2) / sel.sum())])
+    return np.array(rows) if rows else np.zeros((0, 9))
 
 
 def flip_metrics(marks, psi, nn, pitch):
@@ -634,6 +657,22 @@ def edge_spread(small, size, y0, y1, x0, x1):
     return float(s[j]), (c0 + j + 0.5) * k
 
 
+def na(metric, limit, why):
+    """A metric with nothing to measure: reported N/A, neither a pass nor a fail."""
+    return (metric, float("nan"), limit, True, f"N/A: {why}")
+
+
+def fmt(v):
+    return "     N/A" if v != v else f"{v:>8.3f}"
+
+
+def default_out(path):
+    """$TMPDIR/design-review/<render's folder>/<stem>-review.png. The folder is named after the render's last
+    folders (e.g. explorations-round11-a, round11-a-frames), so variants with the same file names don't overwrite each other."""
+    parent = Path(path).resolve().parent
+    return Path(tempfile.gettempdir()) / "design-review" / "-".join(parent.parts[-3:]) / f"{Path(path).stem}-review.png"
+
+
 def ramp_metrics(p):
     """p: coverage per column. Returns (i0, i1, steps, drawdown, d2) over the ramp i0..i1 inclusive."""
     i0 = int(np.argmax(p > 0.01))
@@ -641,7 +680,7 @@ def ramp_metrics(p):
     r = p[i0:i1 + 1]
     steps = np.abs(np.diff(r))
     draw = np.maximum.accumulate(r) - r
-    d2 = np.abs(np.diff(r, 2)) if len(r) > 2 else np.zeros(1)
+    d2 = np.abs(np.diff(r, 2)) if len(r) > 2 else np.zeros(0)
     return i0, i1, steps, draw, d2
 
 
@@ -653,6 +692,8 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
     touch = TOUCH_OK_COVERAGE if screen == "lattice" else TOUCH_OK_COVERAGE_STOCHASTIC
     img, rgb, circles = load(path, axis)
     ink, bg, inkc = ink_map(rgb)
+    if (ink > 0.5).sum() < 3 * MIN_MEASURE_MARKS:     # blank or a few specks (an animation's first frame)
+        return nothing_measured(path, quiet, f"{int((ink > 0.5).sum())} ink px")
     if region:
         x0, y0, x1, y1 = region if axis == "x" else (region[1], region[0], region[3], region[2])
     else:
@@ -671,6 +712,8 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
             circles = circles.copy(); circles[:, 0] = TILE - circles[:, 0]
     marks, labels, ids = detect_marks(ink, circles)
     in_rows = (marks[:, 1] >= y0) & (marks[:, 1] < y1) if len(marks) else np.zeros(0, bool)
+    if in_rows.sum() < MIN_MEASURE_MARKS and ink.mean() < 0.01:   # near-empty: a few grains, no solid
+        return nothing_measured(path, quiet, f"{int(in_rows.sum())} marks, ink {ink.mean():.2%} of the tile")
     pitch = float(np.median(cKDTree(marks[in_rows, :2]).query(marks[in_rows, :2], k=2)[0][:, 1])) if in_rows.sum() > 8 else 4.0
     sigma = max(4.0, pitch)
     # local coverage = the grain-blurred coverage profile along the axis (middle rows, so the paper around the
@@ -716,6 +759,9 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
         unit = "8 px" if size == 1024 else "px"
         for name, arr, limit, off in (("max |step|", steps, lim[0], 0.5), ("max drawdown", draw, lim[1], 0),
                                       ("max |2nd diff|", d2, lim[2], 1)):
+            if not len(arr):                           # a ramp of one column (a near-empty frame)
+                results.append(na(f"coverage {size:>4} {name} / {unit}", limit, "the ramp is under 3 columns"))
+                continue
             j = int(np.argmax(arr))
             xs_at = float(np.interp(i0 + j + off, np.arange(len(xs_)), xs_))
             ok = arr[j] <= limit
@@ -736,7 +782,7 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
         return f"at x {px:.0f}, y {py:.0f}{band}"
     bad_pts = []                                       # (x, y) failing marks, circled on the sheet
 
-    results = [(m, v, lim, ok, at(note)) for m, v, lim, ok, note in results]   # coverage spots, now with bands
+    results = [(m, v, lim, ok, note if isinstance(note, str) else at(note)) for m, v, lim, ok, note in results]   # coverage spots, now with bands
 
     # 0. guard: every band of intermediate coverage holds detected marks (nothing measured is not a pass)
     empty = []
@@ -762,9 +808,15 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
             results.append((f"{name} drawdown", 0, ORDER_DRAWDOWN, True, "fewer than 2 mark bands"))
             continue
         bx_ = bands[~np.isnan(bands[:, col]), 0]
-        st = np.abs(np.diff(v)); dd = np.maximum.accumulate(v) - v
+        se = bands[~np.isnan(bands[:, col]), 6 + col]          # standard error per band (columns 7, 8)
+        raw = np.abs(np.diff(v))
+        st = np.maximum(raw - ORDER_NOISE_SE * np.hypot(se[1:], se[:-1]), 0)
+        top = np.array([int(np.argmax(v[:i + 1])) for i in range(len(v))])   # the running max's band
+        rawdd = v[top] - v
+        dd = np.maximum(rawdd - ORDER_NOISE_SE * np.hypot(se[top], se) * (top != np.arange(len(v))), 0)
         j, k = int(np.argmax(st)), int(np.argmax(dd))
-        span = f"{v.min():.2f} -> {v.max():.2f}, {len(v)} bands of {ORDER_BAND_PX} px"
+        span = (f"{v.min():.2f} -> {v.max():.2f}, {len(v)} bands of {ORDER_BAND_PX} px, minus {ORDER_NOISE_SE:g} SE "
+                f"(raw max step {raw.max():.2f}, drawdown {rawdd.max():.2f})")
         if screen == "lattice":
             results.append((f"{name} band step", st[j], ORDER_MAX_STEP, st[j] <= ORDER_MAX_STEP,
                             f"{span}; worst " + at(bx_[j] + ORDER_BAND_PX / 2)))
@@ -772,7 +824,7 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
         info = screen == "stochastic" and col == 1         # blue noise: |psi6| ~0.3-0.5 per band by design, noisy
         results.append((f"{name} drawdown", dd.max(), ORDER_DRAWDOWN, info or dd.max() <= ORDER_DRAWDOWN,
                         ("INFO, not counted on a stochastic screen; " if info else "")
-                        + ("must rise" if screen == "lattice" else f"must not fall; {span}") + "; worst " + at(bx_[k])))
+                        + (f"must rise (raw {rawdd.max():.2f} minus {ORDER_NOISE_SE:g} SE)" if screen == "lattice" else f"must not fall; {span}") + "; worst " + at(bx_[k])))
         if not info:
             bad_x += [float(bx_[i]) for i in np.nonzero(dd > ORDER_DRAWDOWN)[0]]
     if screen == "stochastic":                        # evenly spaced: no clumps, no voids, regularity above a floor
@@ -930,7 +982,7 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
     # report
     name = Path(path).name
     fails = sum(not r[3] for r in results)
-    out = Path(out) if out else Path(tempfile.gettempdir()) / "design-review" / f"{Path(path).stem}-review.png"
+    out = Path(out) if out else default_out(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     home_img = home_mock(img, out.with_name(f"{Path(path).stem}-home.png")) if home else None
     sheet(img, curves, bands, ramp, (ry0, ry1), bad_x, bad_pts, flip, axis, previews, results, out, home_img)
@@ -943,10 +995,17 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
     print(f"{'METRIC':<40}{'VALUE':>8}{'LIMIT':>8}  RESULT")
     for m, v, lim, ok, note in results:
         cmp = ">=" if higher_is_better(m) else "<="
-        print(f"{m:<40}{v:>8.3f}{cmp:>4}{lim:<5.3g} {'PASS' if ok else 'FAIL'}  {note}")
+        print(f"{m:<40}{fmt(v)}{cmp:>4}{lim:<5.3g} {'N/A ' if v != v else 'PASS' if ok else 'FAIL'}  {note}")
     print(f"RESULT: {'FAIL' if fails else 'PASS'} ({fails} of {len(results)} metrics failed)")
     print(f"sheet: {out}" + (f"\nhome:  {out.with_name(Path(path).stem + '-home.png')}" if home else ""))
     return fails, results
+
+
+def nothing_measured(path, quiet, why):
+    """Too little ink to measure anything: every metric N/A, no sheet. Returns (0 fails, None)."""
+    if not quiet:
+        print(f"design-review {Path(path).name}: RESULT: N/A, nothing to measure ({why}); no sheet")
+    return 0, None
 
 
 def frame_paths(spec):
@@ -959,29 +1018,41 @@ def frame_paths(spec):
 
 
 def review_frames(paths, axis, region, home, screen="lattice"):
-    """Every metric on every frame; prints one line per frame, then the worst frame per metric. Returns fails."""
+    """Every metric on every frame; prints one line per frame, then the worst frame per metric (frames or metrics
+    with nothing to measure are N/A and skipped). Returns fails."""
     runs = []
     for p in paths:
         fails, results = review(p, axis, region, None, home, quiet=True, frame=True, screen=screen)
+        if results is None:
+            print(f"frame {Path(p).name}: N/A (nothing to measure)")
+            continue
         runs.append((Path(p).name, fails, results))
         bad = ", ".join(m.strip() for m, _, _, ok, _ in results if not ok)
         print(f"frame {Path(p).name}: {'FAIL' if fails else 'PASS'} ({fails} of {len(results)})" + (f": {bad}" if bad else ""))
-    print(f"\ndesign-review frames: {len(runs)} frames, worst frame per metric")
+    print(f"\ndesign-review frames: {len(paths)} frames ({len(paths) - len(runs)} N/A), worst frame per metric")
+    if not runs:
+        print("RESULT: N/A (nothing to measure on any frame)")
+        return 0
     print(f"{'METRIC':<40}{'VALUE':>8}{'LIMIT':>8}  RESULT  FRAME / WHERE")
+    metrics = list(dict.fromkeys(r[0] for _, _, res in runs for r in res))
     nfail = 0
-    for k, (m, _, lim, _, _) in enumerate(runs[0][2]):
+    for m in metrics:
         higher = higher_is_better(m)
-        rows = [(name, res[k]) for name, _, res in runs]
+        rows = [(name, r) for name, _, res in runs for r in res if r[0] == m]
+        lim = rows[0][1][2]
         bad = [r for r in rows if not r[1][3]]
-        pool = bad or rows                             # the worst failing frame, else the worst value
+        pool = bad or [r for r in rows if r[1][1] == r[1][1]]   # the worst failing frame, else the worst measured value
+        if not pool:
+            print(f"{m:<40}{fmt(float('nan'))}{'>=' if higher else '<=':>4}{lim:<5.3g} N/A   {rows[0][1][4]}")
+            continue
         name, (_, v, _, ok, note) = (min if higher else max)(pool, key=lambda r: r[1][1])
         nfail += not ok
         tail = f" ({len(bad)} of {len(rows)} frames fail)" if bad else ""
         print(f"{m:<40}{v:>8.3f}{'>=' if higher else '<=':>4}{lim:<5.3g} {'PASS' if ok else 'FAIL'}  {name}: {note}{tail}")
     worst = max(runs, key=lambda r: r[1])
-    print(f"RESULT: {'FAIL' if nfail else 'PASS'} ({nfail} of {len(runs[0][2])} metrics fail on some frame)")
-    print(f"sheets: {Path(tempfile.gettempdir()) / 'design-review'}/<frame>-review.png; most failures: "
-          f"{Path(tempfile.gettempdir()) / 'design-review' / (Path(worst[0]).stem + '-review.png')}")
+    print(f"RESULT: {'FAIL' if nfail else 'PASS'} ({nfail} of {len(metrics)} metrics fail on some frame)")
+    print(f"sheets: {default_out(paths[0]).parent}/<frame>-review.png; most failures: "
+          f"{default_out(paths[0]).parent / (Path(worst[0]).stem + '-review.png')}")
     return nfail
 
 
@@ -1000,6 +1071,9 @@ def watch(paths, run):
                 time.sleep(0.3)                        # let the writer finish
                 try:
                     fails, results = run(p)
+                    if results is None:
+                        print(f"{time.strftime('%H:%M:%S')} {Path(p).name}: N/A (nothing to measure)", flush=True)
+                        continue
                     loc = lambda note: (m_.group(0) if (m_ := re.search(r"at (x|y) [^;:]*", note)) else "")
                     bad = "; ".join(f"{n.strip()} {v:.3f} {loc(note)}".rstrip() for n, v, _, ok, note in results if not ok)
                     print(f"{time.strftime('%H:%M:%S')} {Path(p).name}: {'FAIL' if fails else 'PASS'} "
@@ -1070,7 +1144,7 @@ def sheet(img, curves, bands, ramp, rows_px, bad_x, bad_pts, flip, axis, preview
         a.plot(bands[:, 0], bands[:, 6], "o-", color="tab:orange")
     a.set_ylim(0, 1.05)
     txt = fig.add_subplot(gs[1:6, 3]); txt.axis("off")
-    txt.text(0, 1, "\n".join(f"{'PASS' if ok else 'FAIL'} {m}: {v:.3f}" for m, v, _, ok, _ in results),
+    txt.text(0, 1, "\n".join(f"{'N/A ' if v != v else 'PASS' if ok else 'FAIL'} {m}: {v:.3f}" for m, v, _, ok, _ in results),
              fontsize=7, va="top", family="monospace")
     if home_img is not None:
         a = fig.add_subplot(gs[6:, :]); a.imshow(home_img); a.axis("off")
@@ -1303,12 +1377,16 @@ def synthetic_stochastic(out, seed=7):
 
 # ---------------------------------------------------------------- main
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter,
+                                 epilog="Order checks (|psi6|, 1-CV(NN) band step and drawdown) report |difference| minus "
+                                        f"{ORDER_NOISE_SE:g} standard errors of the band means, so the verdict doesn't flip "
+                                        "with the render's seed; thresholds and their calibration: the constants at the "
+                                        "top of this script and docs/tooling.md (P1).")
     ap.add_argument("render", nargs="*", help="render-1024.png or .svg (several: each is reviewed)")
     ap.add_argument("--axis", choices=("x", "y"), default="x", help="transition axis (default x)")
     ap.add_argument("--region", help="x0,y0,x1,y1 in 1024 px (default: the ink bounding box)")
     ap.add_argument("--home", action="store_true", help="also render home-screen rows with Apple's icons")
-    ap.add_argument("--out", help="sheet path (default: $TMPDIR/design-review/<name>-review.png)")
+    ap.add_argument("--out", help="sheet path (default: $TMPDIR/design-review/<render's last 3 folders>/<name>-review.png)")
     ap.add_argument("--screen", choices=("lattice", "stochastic"), default="lattice",
                     help="lattice (default): order must rise to a hex lattice; stochastic: blue noise, order must "
                          "stay even (NN floor, no clumps or voids), touching allowed from coverage "
@@ -1325,7 +1403,7 @@ if __name__ == "__main__":
     if not a.render and not a.frames:
         ap.error("render path (or --frames) required")
     if a.out and (len(a.render) > 1 or a.frames):
-        ap.error("--out takes one render (frame sheets go to $TMPDIR/design-review/)")
+        ap.error("--out takes one render (frame sheets go to $TMPDIR/design-review/<frames' folders>/)")
     if a.watch and a.frames:
         ap.error("--watch takes renders, not --frames")
     region = tuple(int(v) for v in a.region.split(",")) if a.region else None

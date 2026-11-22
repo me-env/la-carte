@@ -17,8 +17,8 @@ lattice, then the settled dots grow. The construction is in `render.py`'s docstr
 
 Regenerate the PNGs, `frames/` and `strip.png` (all gitignored) with `VAR=<a|b|c> uv run --script render.py`.
 Check them with `uv run scripts/design-review.py <v>/card-light-1024.png --home --frames <v>/frames`: all three
-pass on the still and on every frame. The order metrics are seed-sensitive at this ramp length, so the
-seeds above were picked to pass.
+pass on the still and on every frame. The order checks no longer depend on the seed (they discount
+band sampling noise since 2026-11-22); a few other seeds make two dots touch (`touching: min gap`).
 
 Decisions:
 - Each start is the site plus a relaxed random offset, paired with its site by optimal transport. A
