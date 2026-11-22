@@ -629,17 +629,18 @@ public struct StudyView: View {
             photo(of: card, side: .back)
           } else {
             personText(name, of: card, revealed: revealed)
-              .accessibilityActions { ratingActions }
               .accessibilityIdentifier(isPrompt ? "study.front" : "study.back")
           }
         }
+        .accessibilityActions { ratingActions }
         .padding(.top, Self.gap(before: name, in: shown))
+        // Spec 014d's timings, not tokens: new rows fade in as room opens, so nothing overlaps the moving text.
         .transition(isPrompt ? .identity : .opacity.animation(.easeOut(duration: 0.25).delay(0.1)))
       }
       if !revealed, let hint = store.answerHint {
         answerHint(hint)
           .padding(.top, Theme.Spacing.m)
-          .transition(.opacity.animation(.easeIn(duration: 0.15)))
+          .transition(.opacity.animation(.easeIn(duration: 0.15)))  // spec 014d
       }
     }
   }
