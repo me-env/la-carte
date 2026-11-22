@@ -209,12 +209,11 @@ final class DeckUITests: XCTestCase {
     el(app, "deck.add").tap()
     assertNewCardEditor(app)
     snapshot("editor-new", appearance: .light)
-    el(app, "editor.front").typeText("feline")
+    replaceText(app, "editor.front", with: "feline")
     XCTAssertFalse(el(app, "editor.save").isEnabled, "editor.save enabled with an empty back")
-    el(app, "editor.back").tap()
-    el(app, "editor.back").typeText("   ")
+    replaceText(app, "editor.back", with: "   ")
     XCTAssertFalse(el(app, "editor.save").isEnabled, "editor.save enabled with a whitespace-only back")
-    el(app, "editor.back").typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3) + "cat")
+    replaceText(app, "editor.back", with: "cat")
     XCTAssertTrue(el(app, "editor.save").isEnabled, "editor.save disabled with front + back filled")
     snapshot("editor-filled", appearance: .light)
     el(app, "editor.save").tap()
@@ -243,9 +242,8 @@ final class DeckUITests: XCTestCase {
     waitForLabel(el(app, "study.message"), "All caught up")
     el(app, "study.add").tap()
     assertNewCardEditor(app)
-    el(app, "editor.front").typeText("feline")
-    el(app, "editor.back").tap()
-    el(app, "editor.back").typeText("cat")
+    replaceText(app, "editor.front", with: "feline")
+    replaceText(app, "editor.back", with: "cat")
     el(app, "editor.save").tap()
     waitForAbsence(editorBar(app), "editor still open after saving")
     waitForLabel(el(app, "study.front"), "feline")
@@ -291,9 +289,8 @@ final class DeckUITests: XCTestCase {
     openDeck(app)
     el(app, "deck.add").tap()
     assertNewCardEditor(app)
-    el(app, "editor.front").typeText("feline")
-    el(app, "editor.back").tap()
-    el(app, "editor.back").typeText("cat")
+    replaceText(app, "editor.front", with: "feline")
+    replaceText(app, "editor.back", with: "cat")
     el(app, "editor.save").tap()
     waitForAbsence(editorBar(app))
     swipeSheetDown(app, from: deckTitle(app))
@@ -323,9 +320,8 @@ final class DeckUITests: XCTestCase {
       front.tap()
       waitUntil("editor.front focused after tapping it") { self.hasFocus(front) }
     }
-    front.typeText("feline")
-    el(app, "editor.back").tap()
-    el(app, "editor.back").typeText("cat")
+    replaceText(app, "editor.front", with: "feline")
+    replaceText(app, "editor.back", with: "cat")
     el(app, "editor.save").tap()
     waitForAbsence(editorBar(app), timeout: 10, "editor still open after saving")
 
@@ -637,6 +633,8 @@ final class DeckUITests: XCTestCase {
 
   private static let editorPlaceholders = ["Word or question", "Answer", "Front", "Back"]
 
+  /// Types through a focus-checked step: never relies on the new-card auto-focus surviving (on a cold CI simulator
+  /// the keyboard can drop first responder seconds after the focus assertion passed).
   @MainActor
   private func replaceText(_ app: XCUIApplication, _ id: String, with text: String,
                            file: StaticString = #filePath, line: UInt = #line) {
@@ -808,7 +806,7 @@ extension DeckUITests {
     // New card: typed text → swipe-down blocked → dialog → Keep editing → Discard.
     el(app, "deck.add").tap()
     waitForSheet(app, "New card")
-    el(app, "editor.front").typeText("feline")
+    replaceText(app, "editor.front", with: "feline")
     for _ in 0..<2 {  // first drag may only drop the keyboard; nothing to poll for: the sheet must stay
       swipeSheetDown(app, from: editorBar(app))
       Thread.sleep(forTimeInterval: 0.8)
@@ -840,7 +838,7 @@ extension DeckUITests {
     // New card, whitespace only: no change → close dismisses without a dialog.
     el(app, "deck.add").tap()
     waitForSheet(app, "New card")
-    el(app, "editor.front").typeText("   ")
+    replaceText(app, "editor.front", with: "   ")
     el(app, "editor.close").tap()
     waitForAbsence(editorBar(app), "whitespace-only new card asked to discard / stayed open")
     XCTAssertFalse(el(app, "editor.discard").exists || app.buttons["Discard"].exists, "dialog for whitespace only")

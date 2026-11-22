@@ -1,3 +1,4 @@
+import os
 import XCTest
 
 /// Spec 006 + 018: the app reloads by itself (scene becomes active, `next_due` reached) and has no pull-to-refresh.
@@ -133,16 +134,24 @@ final class RefreshUITests: XCTestCase {
 
   // MARK: - 018 #12 (next_due reached → card shows by itself)
 
-  /// 018 #12: caught up with one card due 8 s after launch → within 15 s the card shows, unrevealed, "1 to review",
-  /// with no tap or drag.
+  /// 018 #12: caught up with one card due 8 s after the app's first request → the card shows by itself (no tap or
+  /// drag), unrevealed, "1 to review", after it's due and within 7 s of it. The due time is anchored to the app's first
+  /// request, not to the test's clock, so a slow launch can't make the card due before "All caught up" shows.
   @MainActor
   func testStudy_autoRefreshAtNextDue() throws {
     for appearance in [XCUIDevice.Appearance.light, .dark] {
       XCUIDevice.shared.appearance = appearance
-      let launchedAt = Date()
-      let deck = StubDeck([.init(id: Self.idA, front: "canine", back: "dog", due: launchedAt.addingTimeInterval(8),
-                                 createdAt: Self.base)])
-      let server = StubAPIServer(handler: deck.handle)
+      let deck = StubDeck([])
+      let dueAt = OSAllocatedUnfairLock<Date?>(initialState: nil)
+      let server = StubAPIServer { request in
+        dueAt.withLock { due in
+          guard due == nil else { return }
+          let at = Date().addingTimeInterval(8)
+          due = at
+          deck.add(.init(id: Self.idA, front: "canine", back: "dog", due: at, createdAt: Self.base))
+        }
+        return deck.handle(request)
+      }
       try server.start()
       let app = launch(api: .live(server.url))
       waitForLabel(el(app, "study.message"), "All caught up")
@@ -150,9 +159,10 @@ final class RefreshUITests: XCTestCase {
       XCTAssertFalse(el(app, "study.front").exists, "card shown before it is due")
       snapshot("study-auto-due-before", appearance: appearance)
 
-      waitForLabel(el(app, "study.front"), "canine", timeout: max(launchedAt.addingTimeInterval(15).timeIntervalSinceNow, 0.1))
-      XCTAssertLessThanOrEqual(Date().timeIntervalSince(launchedAt), 15.5, "card shown later than 15 s after launch")
-      XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(launchedAt), 7.5, "card shown before it was due")
+      let due = try XCTUnwrap(dueAt.withLock { $0 }, "the app made no request")
+      waitForLabel(el(app, "study.front"), "canine", timeout: max(due.addingTimeInterval(7).timeIntervalSinceNow, 0.1))
+      XCTAssertLessThanOrEqual(Date().timeIntervalSince(due), 7.5, "card shown later than 7 s after it was due")
+      XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(due), -0.5, "card shown before it was due")
       assertFront(app, "canine", remaining: "1 to review")
       XCTAssertFalse(el(app, "study.message").exists, "study.message still shown with the card")
       snapshot("study-auto-due", appearance: appearance)
