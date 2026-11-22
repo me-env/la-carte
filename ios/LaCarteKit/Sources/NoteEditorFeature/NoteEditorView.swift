@@ -32,6 +32,8 @@ public struct NoteEditorView: View {
         case .basic:
           Section {
             field("front", prompt: "Word or question")
+              // On the field, not the sheet: focus set before the Form has built this row is dropped (CI flake).
+              .onAppear { if store.note == nil { focusedField = "front" } }
             field("back", prompt: "Answer")
           }
         case .person:
@@ -79,9 +81,6 @@ public struct NoteEditorView: View {
     .tint(Theme.ink)
     .interactiveDismissDisabled(store.hasChanges)
     .sensoryFeedback(.error, trigger: store.saveFailed) { _, new in new }
-    .onAppear {
-      if store.note == nil { focusedField = "front" }
-    }
   }
 
   private var title: String {
