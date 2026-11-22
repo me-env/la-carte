@@ -126,6 +126,28 @@ final class DeckUITests: XCTestCase {
     snapshot("deck-offline", appearance: .light)
   }
 
+  /// Offline Deck shows `deck.retry`; tapping it reloads once the stub is back up.
+  @MainActor
+  func testDeck_offlineThenRetry() throws {
+    XCUIDevice.shared.appearance = .light
+    let server = StubAPIServer { request in
+      if request.path.hasPrefix("/notes") || request.path.hasPrefix("/cards") { return .init(body: "[]") }
+      return .init(status: 404, body: "{}")
+    }
+    try server.start()
+    server.stop()
+    let app = launch(api: .live(server.url))
+    openDeck(app)
+    waitForLabel(el(app, "deck.message"), "Can't reach your deck", timeout: 20)
+    XCTAssertTrue(el(app, "deck.retry").waitFor(timeout: 5), "deck.retry missing offline")
+    snapshot("deck-offline-retry", appearance: .light)
+    try server.start()
+    el(app, "deck.retry").tap()
+    waitForLabel(el(app, "deck.message"), "No cards yet", timeout: 10)
+    XCTAssertFalse(el(app, "deck.retry").exists, "deck.retry still shown after reload")
+    server.stop()
+  }
+
   // MARK: - #4 swipe to delete
 
   /// #4: swipe left reveals "Delete"; confirming removes the row immediately; it stays gone on reopen.
