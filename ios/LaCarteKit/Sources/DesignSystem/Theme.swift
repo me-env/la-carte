@@ -148,8 +148,8 @@ extension Font {
   public static let meta = Font.footnote
 }
 
-/// Size and alignment of a card's text from its length (spec 017): a word stays big and centred, a paragraph
-/// is smaller and leading-aligned. Character counts, not measured lines, so it's deterministic and testable.
+/// Size of a card's text from its length (spec 017): a word stays big, a paragraph is smaller. Character counts,
+/// so the size never changes with the width or while editing. (Alignment follows rendered lines, in Study.)
 public enum CardText {
   public static let shortLimit = 24
   public static let longLimit = 60
@@ -169,15 +169,6 @@ public enum CardText {
   /// Always a tier below the question: `.body` once the question is at its smallest.
   public static func answerFont(_ answer: String, prompt: String) -> Font {
     isShort(answer) && !isLong(prompt) ? .cardAnswer : .body
-  }
-
-  public static func promptAlignment(_ prompt: String) -> TextAlignment {
-    isLong(prompt) ? .leading : .center
-  }
-
-  /// A short answer under a leading question follows its edge, so a card never mixes the two that way.
-  public static func answerAlignment(_ answer: String, prompt: String) -> TextAlignment {
-    isLong(answer) || isLong(prompt) ? .leading : .center
   }
 
   private static func isShort(_ text: String) -> Bool {

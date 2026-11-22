@@ -61,6 +61,32 @@ struct ScreenColorTests {
     screen.expectNoBlue()
   }
 
+  /// Spec 017: the question depends only on itself, in every candidate layout. Revealing the answer doesn't change a
+  /// pixel of it, and short, 2-line and 4-line answers leave it at the same horizontal place (the stack's vertical
+  /// centring may differ).
+  @Test(arguments: StudyView.TextLayout.allCases, CardLines.questions.map(\.1))
+  func questionStaysPut(_ layout: StudyView.TextLayout, _ question: String) throws {
+    StudyView.textLayout = layout
+    defer { StudyView.textLayout = .column }
+    var columns: [ClosedRange<CGFloat>] = []
+    for (_, answer) in CardLines.answers {
+      let card = CardLines.card(question, answer)
+      func screen(revealed: Bool) throws -> Screen {
+        var state = StudyFeature.State()
+        state.cards = [card]
+        state.phase = .studying
+        state.isRevealed = revealed
+        return try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), Self.looks[0],
+                          name: "study-reveal-check")
+      }
+      let front = try screen(revealed: false), revealed = try screen(revealed: true)
+      let ink = try #require(front.inkBounds(in: front.band(0.14, 0.85)), "no question drawn")
+      #expect(revealed.changedPixels(from: front, in: ink) == 0, "question moved on reveal (answer: \(answer))")
+      columns.append(ink.minX...ink.maxX)
+    }
+    #expect(Set(columns.map { "\($0)" }).count == 1, "question's columns depend on the answer: \(columns)")
+  }
+
   /// Native screens (spec 009a/b): system navigation title and glass buttons, so only our fills are checked.
   @Test(arguments: looks)
   func deck(_ look: Look) throws {
@@ -259,6 +285,32 @@ struct Screen {
     let text = core.max { $0.value < $1.value }?.key ?? palette.background
     #expect(Self.isClose(text, expected, tolerance: 10), "\(what) text is \(Self.hex(text)), expected \(Self.hex(expected))",
             sourceLocation: sourceLocation)
+  }
+
+  /// The bounding box, in points, of the pixels in `rect` more than 24 per channel away from the background.
+  func inkBounds(in rect: CGRect) -> CGRect? {
+    let (xs, ys) = pixelRanges(rect)
+    var box: (x0: Int, y0: Int, x1: Int, y1: Int)?
+    for y in ys {
+      for x in xs where Self.distances(color(atPixel: x, y), palette.background).contains(where: { $0 > 24 }) {
+        box = box.map { (min($0.x0, x), min($0.y0, y), max($0.x1, x), max($0.y1, y)) } ?? (x, y, x, y)
+      }
+    }
+    return box.map {
+      CGRect(x: CGFloat($0.x0) / Self.scale, y: CGFloat($0.y0) / Self.scale,
+             width: CGFloat($0.x1 - $0.x0 + 1) / Self.scale, height: CGFloat($0.y1 - $0.y0 + 1) / Self.scale)
+    }
+  }
+
+  /// How many pixels in `rect` differ between the two screens.
+  func changedPixels(from other: Screen, in rect: CGRect) -> Int {
+    let (xs, ys) = pixelRanges(rect)
+    return ys.reduce(0) { n, y in n + xs.count { color(atPixel: $0, y) != other.color(atPixel: $0, y) } }
+  }
+
+  private func color(atPixel x: Int, _ y: Int) -> UInt32 {
+    let i = (y * width + x) * 4
+    return UInt32(pixels[i]) << 16 | UInt32(pixels[i + 1]) << 8 | UInt32(pixels[i + 2])
   }
 
   /// Design system "no default blue tint": no saturated blue pixel anywhere (same rule as the UI tests).

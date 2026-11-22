@@ -29,19 +29,7 @@ struct CardTextTests {
     #expect(CardText.answerFont("one\ntwo", prompt: "la mer") == .body)
   }
 
-  @Test func promptAlignmentIsLeadingOnlyWhenLong() {
-    #expect(CardText.promptAlignment(text(24)) == .center)
-    #expect(CardText.promptAlignment(text(60)) == .center)
-    #expect(CardText.promptAlignment(text(61)) == .leading)
-    #expect(CardText.promptAlignment("abcd\nefghi") == .leading)
-  }
-
-  @Test func answerAlignmentFollowsALongAnswerOrALongPrompt() {
-    #expect(CardText.answerAlignment(text(60), prompt: text(60)) == .center)
-    #expect(CardText.answerAlignment(text(61), prompt: "la mer") == .leading)
-    #expect(CardText.answerAlignment("the sea", prompt: text(61)) == .leading)
-    #expect(CardText.answerAlignment(text(60), prompt: text(61)) == .leading)
+  @Test func aLongPromptKeepsTheAnswerAtBody() {
     #expect(CardText.answerFont(text(60), prompt: text(61)) == .body)
-    #expect(CardText.answerAlignment("one\ntwo", prompt: "la mer") == .leading)
   }
 }

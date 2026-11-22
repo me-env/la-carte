@@ -76,6 +76,43 @@ struct StudyRenders {
     print("StudyRenders: \(count) PNGs in \(dir)")
     print("StudyRenders: Liquid Glass hidden in these renders; judge glass on UI-test screenshots")
   }
+
+  /// Spec 017's candidate layouts side by side, revealed, light: `screen-study-layout-<A|B|C>-q<lines>-a<lines>.png`.
+  @Test func layouts() throws {
+    defer { StudyView.textLayout = .column }
+    for (layout, letter) in zip(StudyView.TextLayout.allCases, ["A", "B", "C"]) {
+      StudyView.textLayout = layout
+      for (q, question) in CardLines.questions {
+        for (a, answer) in CardLines.answers {
+          let state = Self.studying(CardLines.card(question, answer), revealed: true)
+          _ = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), Self.looks[0],
+                         name: "study-layout-\(letter)-q\(q)-a\(a)")
+        }
+      }
+    }
+  }
+}
+
+/// Questions and answers of known rendered line counts on an iPhone 17 Pro at the default text size (spec 017).
+enum CardLines {
+  static let questions = [
+    (1, "la mer"),
+    (2, "What is the largest planet in the Solar System?"),
+    (3, "Which treaty, signed in 1648 in Osnabrück and Münster, ended the Thirty Years' War in Europe?"),
+    (5, "Which treaty, signed in 1648 in the cities of Osnabrück and Münster, ended the Thirty Years' War and is "
+      + "often cited as the origin of the modern state system?"),
+  ]
+  static let answers = [
+    (1, "the sea"),
+    (2, "Jupiter, a gas giant mostly made of hydrogen and helium"),
+    (4, "The Peace of Westphalia: two treaties signed in Osnabrück and Münster that ended the war in the Holy Roman "
+      + "Empire and the Eighty Years' War between Spain and the Dutch Republic."),
+  ]
+
+  static func card(_ front: String, _ back: String) -> Card {
+    let date = Date(timeIntervalSince1970: 1_767_225_600)
+    return Card(id: UUID(), front: front, back: back, due: date, createdAt: date, updatedAt: date)
+  }
 }
 
 /// Demo-safe English cards, one per length tier. Spec 017 measures the shown text after trimming: short ≤ 24

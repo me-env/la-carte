@@ -21,6 +21,15 @@ public struct StudyView: View {
   /// The edit field's global frame: a touch that starts inside it moves the caret instead of ending the edit.
   @State private var fieldFrame = CGRect.zero
   @State private var reportMenuHeight: CGFloat = 360
+  /// Each side's saved text as laid out in the card's column (spec 017): its line count picks the alignment.
+  @State private var frontMeasure = TextMeasure()
+  @State private var backMeasure = TextMeasure()
+
+  /// Spec 017's candidate layouts for text of 3+ lines, until the user picks one: the leading full-width column (A),
+  /// a leading block as wide as its widest line, centred (B), or B with an answer of nearly the question's width
+  /// moved to the question's left edge (C).
+  enum TextLayout: CaseIterable { case column, blocks, snappedBlocks }
+  static var textLayout = TextLayout.column
 
   public init(store: StoreOf<StudyFeature>) {
     self.store = store
@@ -211,10 +220,16 @@ public struct StudyView: View {
           // transition, so the next card popped in.
           ZStack {
             VStack(spacing: Theme.Spacing.m) {
-              prompt(card).aligned(card.promptAlignment)
-              answerSlot(card).aligned(card.answerAlignment)
+              prompt(card).placed(promptAlignment)
+              answerSlot(card).placed(answerAlignment).offset(x: answerSnap)
             }
             .frame(maxWidth: .infinity)
+            .background(alignment: .top) {
+              VStack {
+                probe(card.promptText, font: card.promptFont, into: $frontMeasure)
+                probe(card.answerText, font: card.answerFont, into: $backMeasure)
+              }
+            }
             .dynamicTypeSize(...DynamicTypeSize.accessibility2)
             // Fades under the dial while a drag is held; animated only as the drag starts and ends.
             .opacity(store.cardTextOpacity)
@@ -384,7 +399,8 @@ public struct StudyView: View {
       // field is ~2 pt taller than its text (TextKit pads below the last line), which moved the answer below.
       Text(store.draft.isEmpty ? " " : store.draft)
         .font(font)
-        .frame(maxWidth: .infinity)
+        // A leading block keeps the saved text's width, so it doesn't move as the user types.
+        .frame(minWidth: editWidth(field), maxWidth: editWidth(field) ?? .infinity)
         .hidden()
         .overlay(alignment: .top) {
           TextField("", text: $store.draft.sending(\.draftChanged), axis: .vertical)
@@ -432,7 +448,7 @@ public struct StudyView: View {
       side(.front, text: card.text(.front), font: card.promptFont, color: Theme.ink)
     } else {
       let firstText = card.firstPromptText
-      VStack(alignment: card.promptAlignment.horizontal, spacing: Theme.Spacing.s) {
+      VStack(alignment: promptAlignment.horizontal, spacing: Theme.Spacing.s) {
         ForEach(card.shown(card.prompt), id: \.self) { name in
           field(
             name, of: card, side: .front, font: name == firstText ? card.promptFont : .body,
@@ -448,7 +464,7 @@ public struct StudyView: View {
 
   /// The answer and, before reveal, a person card's hint share one slot, so the prompt never moves.
   private func answerSlot(_ card: Card) -> some View {
-    ZStack(alignment: Alignment(horizontal: card.answerAlignment.horizontal, vertical: .center)) {
+    ZStack(alignment: Alignment(horizontal: answerAlignment.horizontal, vertical: .center)) {
       if let hint = store.answerHint {
         Text(hint)
           .font(.meta)
@@ -467,7 +483,7 @@ public struct StudyView: View {
     if store.canEditInline {
       side(.back, text: card.text(.back), font: card.answerFont, color: Theme.secondaryInk)
     } else {
-      VStack(alignment: card.answerAlignment.horizontal, spacing: Theme.Spacing.xs) {
+      VStack(alignment: answerAlignment.horizontal, spacing: Theme.Spacing.xs) {
         ForEach(card.shown(card.answer), id: \.self) { name in
           field(name, of: card, side: .back, font: card.answerFont, color: Theme.secondaryInk)
         }
@@ -476,6 +492,68 @@ public struct StudyView: View {
       .accessibilityActions { ratingActions }
       .accessibilityIdentifier("study.back")
     }
+  }
+
+  /// The question depends only on itself, so it never moves on reveal.
+  private var promptAlignment: TextAlignment {
+    frontMeasure.isMultiline ? .leading : .center
+  }
+
+  /// Under a leading question the answer is leading too; otherwise it follows its own line count.
+  private var answerAlignment: TextAlignment {
+    promptAlignment == .leading || backMeasure.isMultiline ? .leading : .center
+  }
+
+  private var answerSnap: CGFloat {
+    guard Self.textLayout == .snappedBlocks, promptAlignment == .leading else { return 0 }
+    return Self.snap(answer: backMeasure.width, toQuestion: frontMeasure.width, column: cardSize.width)
+  }
+
+  /// Layout C: how far to move a leading answer block so its left edge meets the question's, when the two widths are
+  /// within 15 % (an "almost aligned" pair looks like a mistake) and the answer still fits the column.
+  static func snap(answer: CGFloat, toQuestion question: CGFloat, column: CGFloat) -> CGFloat {
+    let wider = max(answer, question)
+    guard wider > 0, abs(answer - question) < 0.15 * wider, 2 * answer - question <= column else { return 0 }
+    return (answer - question) / 2
+  }
+
+  /// A hidden copy of a side's saved text in the column, cut to two lines, with the full text over it: a full text
+  /// taller than the cut one has 3+ lines. Laid out with the card, so it follows the width and text size. One
+  /// callback per side: two writes to the same state in one layout pass lost one of them.
+  private func probe(_ text: String, font: Font, into measure: Binding<TextMeasure>) -> some View {
+    Text(text).font(font).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+      .frame(maxWidth: .infinity)
+      .overlay(alignment: .top) {
+        Text(text).font(font).fixedSize(horizontal: false, vertical: true)
+          .onGeometryChange(for: TextMeasure.self) { proxy in
+            TextMeasure(
+              width: proxy.size.width, height: proxy.size.height,
+              twoLines: proxy.bounds(of: .named(Self.twoLines))?.height ?? proxy.size.height
+            )
+          } action: { measure.wrappedValue = $0 }
+      }
+      // After the overlay, which doesn't change the size: the space is the cut text's, and the full text is inside it.
+      .coordinateSpace(.named(Self.twoLines))
+      .hidden()
+      .accessibilityHidden(true)
+  }
+
+  nonisolated private static let twoLines = "study.twoLines"
+
+  /// Layouts B and C: the width a leading side's edit field keeps; nil spans the column.
+  private func editWidth(_ field: StudyFeature.State.Field) -> CGFloat? {
+    let alignment = field == .front ? promptAlignment : answerAlignment
+    guard alignment == .leading, Self.textLayout != .column else { return nil }
+    return (field == .front ? frontMeasure : backMeasure).width
+  }
+
+  struct TextMeasure: Equatable {
+    var width: CGFloat = 0
+    var height: CGFloat = 0
+    /// The text's height cut to two lines.
+    var twoLines: CGFloat = 0
+
+    var isMultiline: Bool { height > twoLines + 1 }
   }
 
   /// A photo field shows the image at its public URL, never the URL text.
@@ -489,7 +567,7 @@ public struct StudyView: View {
         store.send(.photoLoadFailed(cardID: card.id, url: url, side: side))
       }
       // A photo stays centred even among leading text.
-      .frame(maxWidth: (side == .front ? card.promptAlignment : card.answerAlignment) == .leading ? .infinity : nil)
+      .frame(maxWidth: (side == .front ? promptAlignment : answerAlignment) == .leading ? .infinity : nil)
       .accessibilityIdentifier("study.photo")
     } else {
       Text(card.fields[name] ?? "")
@@ -701,8 +779,6 @@ extension Card {
 
   var promptFont: Font { CardText.promptFont(promptText) }
   var answerFont: Font { CardText.answerFont(answerText, prompt: promptText) }
-  var promptAlignment: TextAlignment { CardText.promptAlignment(promptText) }
-  var answerAlignment: TextAlignment { CardText.answerAlignment(answerText, prompt: promptText) }
 }
 
 extension TextAlignment {
@@ -716,10 +792,12 @@ extension TextAlignment {
 }
 
 extension View {
-  /// Leading text spans the card's width from its leading edge; centred text keeps the centred layout.
-  fileprivate func aligned(_ alignment: TextAlignment) -> some View {
-    multilineTextAlignment(alignment)
-      .frame(maxWidth: .infinity, alignment: Alignment(horizontal: alignment.horizontal, vertical: .center))
+  /// Centred text fills the column; leading text fills it too in layout A, and is a block centred on its widest
+  /// line in B and C.
+  @MainActor fileprivate func placed(_ alignment: TextAlignment) -> some View {
+    let isBlock = alignment == .leading && StudyView.textLayout != .column
+    return multilineTextAlignment(alignment)
+      .frame(maxWidth: isBlock ? nil : .infinity, alignment: Alignment(horizontal: alignment.horizontal, vertical: .center))
   }
 }
 
