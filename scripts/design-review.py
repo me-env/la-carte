@@ -3745,6 +3745,7 @@ if __name__ == "__main__":
     if a.mode == "line" and a.make_synthetic:
         sys.exit(synthetic_line(a.make_synthetic))
     if a.make_synthetic:
+        Path(a.make_synthetic).resolve().parent.mkdir(parents=True, exist_ok=True)
         (synthetic_ramp if a.screen == "lattice" else synthetic_stochastic)(a.make_synthetic)
         a.render = a.render or [a.make_synthetic]
     if not a.render and not a.frames:
