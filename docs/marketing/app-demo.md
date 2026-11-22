@@ -11,7 +11,7 @@ predates the two-button ratings, inline edit, notes, report and ask features).
 ```bash
 LACARTE_AGENT=marketing UI_WORKERS=1 scripts/ios-ui-test.sh marketing \
   -only-testing:LaCarteUITests/MarketingUITests          # ~2 min → qa/screenshots/marketing/
-uv run marketing/build-demo.py                            # → /Volumes/cyprienricque_ssd/la-carte/marketing/
+uv run marketing/build-demo.py                            # → $LA_CARTE_MARKETING_OUT (default build/marketing/)
 ```
 
 Outputs (not committed): `app-demo.mp4`, `frames/NN.png` (each composed shot), `readme/` (cleaned screens and

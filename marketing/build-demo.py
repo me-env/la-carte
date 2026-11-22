@@ -8,13 +8,14 @@
         -only-testing:LaCarteUITests/MarketingUITests
     uv run marketing/build-demo.py [frames_dir] [out_dir]
 
-frames_dir defaults to qa/screenshots/marketing, out_dir to /Volumes/cyprienricque_ssd/la-carte/marketing
+frames_dir defaults to qa/screenshots/marketing, out_dir to $LA_CARTE_MARKETING_OUT (default: build/marketing)
 (big media: never committed). ffmpeg comes from the imageio-ffmpeg wheel (no Homebrew).
 Writes: out/app-demo.mp4, out/frames/NN.png (composed 1920x1080 shots), out/readme/*.png.
 Shot list and captions: docs/marketing/app-demo.md (keep both in sync).
 """
 
 import subprocess
+import os
 import sys
 from pathlib import Path
 
@@ -23,7 +24,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 FRAMES = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "qa/screenshots/marketing"
-OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("/Volumes/cyprienricque_ssd/la-carte/marketing")
+OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(os.environ.get("LA_CARTE_MARKETING_OUT", "build/marketing"))
 
 W, H = 1920, 1080
 BG = {"light": (249, 250, 245), "dark": (26, 26, 26)}  # brand palette `background`

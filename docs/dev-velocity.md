@@ -98,27 +98,16 @@ recordings/renders, design-review caches) should read `$LA_CARTE_SCRATCH` the sa
 `scripts/_ios-env.sh` and use the variable when it is non-empty); their owners adopt it when they next touch
 those scripts.
 
-### This Mac: DerivedData and simulators live on the SSD (2026-11-21)
+### This Mac: DerivedData lives on an external SSD (2026-11-22)
 
-Machine-wide settings, not in the repo (CI and other Macs are unaffected):
+Machine-wide setting, not in the repo (CI and other Macs are unaffected):
+`defaults read com.apple.dt.Xcode IDECustomDerivedDataLocation` points at `<external SSD>/Xcode/DerivedData`
+(Xcode and every `xcodebuild` without `-derivedDataPath`). If the SSD is not mounted, builds fail to create
+DerivedData: plug it in, or `defaults delete com.apple.dt.Xcode IDECustomDerivedDataLocation` to go back to
+`~/Library/Developer/Xcode/DerivedData`.
 
-- **DerivedData**: `defaults read com.apple.dt.Xcode IDECustomDerivedDataLocation` →
-  `/Volumes/cyprienricque_ssd/Xcode/DerivedData` (Xcode and every `xcodebuild` without `-derivedDataPath`, so all
-  our scripts, every checkout and worktree; still one hashed folder per checkout, so the locks are unchanged).
-- **Simulator devices**: `~/Library/Developer/CoreSimulator/Devices` is a symlink to
-  `/Volumes/cyprienricque_ssd/CoreSimulator/Devices` (all devices, all projects). Runtimes stay on the internal disk.
-
-**If the SSD is not mounted**, simulators and builds fail: `xcrun simctl list devices` shows no devices (or
-errors), `ios-*.sh` fail to find the destination / pool simulator, and Xcode cannot create DerivedData.
-Check with `ls /Volumes/cyprienricque_ssd`. Fix: plug in the SSD (then `killall -9
-com.apple.CoreSimulator.CoreSimulatorService` so it re-reads the device set). Don't "fix" it by creating a
-`Devices` folder or deleting the symlink: that silently starts an empty device set on the internal disk.
-To undo the move: shut simulators down, stop CoreSimulatorService, replace the symlink with an `rsync -a` copy
-of the SSD folder, and `defaults delete com.apple.dt.Xcode IDECustomDerivedDataLocation`.
-
-Measured 2026-11-21: one `-only-testing` UI run plus two `ios-build.sh` started 3 s later. The builds
-waited about 20 s for the UI build phase, then ran one after the other (+23 s, +33 s) while the UI test ran;
-the UI test passed at +44 s. `ios-test.sh` (114 tests, 91 s) passed on `iPhone 17` during a UI suite.
+Simulator devices stay in `~/Library/Developer/CoreSimulator/Devices`: a symlink to another volume makes
+Xcode 27's `simctl` list no devices (tried and rolled back 2026-11-22). Don't move them.
 
 ### Unit-test pool: before / after (2026-11-21)
 
