@@ -38,6 +38,15 @@ Screens (`--screen`, the critic picks it per proposal from the render's construc
   random gaps between merging disks, so their size / spacing metrics are INFO; the per-row front swing is replaced
   by an INFO hole-area front, and the edge spread at 58/29 px (6b) judges the edge. Everything else is the same.
 
+Overhang and bbox margins (overhang counts on frames; bbox margins, like the optical centre, only on stills):
+- Overhang: the card is the solid core of the ink (a 48 px opening); ink past its top, bottom or right edge (the dotted
+  stream left of the card may fill the card's height) is an overhang: the farthest distance (limit 3 px) and the
+  share of all ink outside (limit 0.5%). N/A without a solid card of 48 px (most older rounds, early frames).
+- Bbox margin imbalance: |left - right| and |top - bottom| margins of the ink bbox in the tile, each <= 10% of the
+  tile. The optical centre (3%, midpoint of bbox centre and ink centroid) is reported too: it accepts a heavy card
+  balanced by a light stream, so this check only caps how far the bbox itself may sit off the tile centre (5%).
+  Both must pass; neither relaxes the other.
+
 Marks are dots (small ink components: SVG circles or PNG connected components) AND holes (small paper
 components sitting in ink: the inverted image). An AM halftone flips from ink dots to paper holes at 50%
 coverage; both halves are marks, stitched into one point set along the axis. Local coverage = the grain-blurred
@@ -176,6 +185,14 @@ FLIP_STEP_MAX = 0.15            # last dots vs first holes (2 pitches each side 
                                 # |d radius|/max radius and |d |psi6||; the negative must continue the positive
 CENTROID_TOL = 0.03             # optical centre (midpoint of bbox centre and ink centroid) within 3% of the
                                 # tile (31 px) of the tile centre, per axis
+OVERHANG_PX = 3                 # ink outside the card's silhouette edge: farthest ink <= 3 px (anti-aliasing) beyond it,
+OVERHANG_SHARE = 0.005          # and <= 0.5% of all ink outside. A loose dot poking past the card's edge reads as a
+                                # defect at 58/29 px; the card is the solid core (CARD_CORE_PX opening), the dotted
+                                # stream to its left is allowed inside the card's height only
+CARD_CORE_PX = 48               # the card = ink surviving a 48 px square opening (dots/ramp are smaller than that)
+BBOX_IMBALANCE = 0.10           # |left - right| (and |top - bottom|) margin of the ink bbox <= 10% of the tile, i.e.
+                                # the bbox centre within 5% of the tile centre; the optical centre (3%) may let the
+                                # centroid offset a lopsided bbox, this caps how far
 SIZE_CV_MAX = 0.20              # mark radius CV inside one band (one size per position)
 SIZE_STEP_MAX = 0.20            # change of median mark radius between adjacent bands, as a fraction of the max
 # Stochastic screen (--screen stochastic: blue noise, |psi6| low by design). Order must not fall, and the marks must
@@ -966,6 +983,30 @@ def review(path, axis="x", region=None, out=None, home=False, quiet=False, frame
     off = max(abs(ox - TILE / 2), abs(oy - TILE / 2)) / TILE
     results.append(("optical centre offset / tile", off, CENTROID_TOL, frame or off <= CENTROID_TOL,
                     ("INFO, not counted on a frame: " if frame and off > CENTROID_TOL else "") + f"centroid ({cx:.0f}, {cy:.0f}), bbox centre ({bx:.0f}, {by:.0f})"))
+    # overhang: ink outside the card (solid core) silhouette; the stream left of the card may fill its height only
+    solid = ink > 0.5
+    core = ndimage.maximum_filter(ndimage.minimum_filter(solid.astype(np.uint8), CARD_CORE_PX), CARD_CORE_PX) > 0
+    if core.sum() < CARD_CORE_PX ** 2:
+        results.append(na("overhang: farthest ink past the card / px", OVERHANG_PX, "no solid card (under 48 px core)"))
+    else:
+        cys, cxs = np.nonzero(core)
+        cx1, cy0, cy1 = cxs.max() + 1, cys.min(), cys.max() + 1
+        ys_, xs_ = np.nonzero(solid)
+        past = np.maximum.reduce([cy0 - ys_, ys_ + 1 - cy1, xs_ + 1 - cx1, np.zeros(len(xs_), int)])
+        n_out = int((past > 0).sum())
+        dist, share = (past.max(), n_out / len(xs_))
+        k = int(np.argmax(past))
+        results.append(("overhang: farthest ink past the card / px", dist, OVERHANG_PX, dist <= OVERHANG_PX,
+                        f"card rows {cy0}-{cy1}, right edge {cx1}" + (f"; worst {at(*(xs_[k], ys_[k]))}" if dist > 0 else "")))
+        results.append(("overhang: share of ink outside the card", share, OVERHANG_SHARE, share <= OVERHANG_SHARE,
+                        f"{n_out} of {len(xs_)} ink px"))
+    # bbox margins in the tile (the ink bbox, not the region); the optical centre above also weighs the centroid
+    ys_, xs_ = np.nonzero(solid)
+    ml, mr, mt, mb = xs_.min(), TILE - 1 - xs_.max(), ys_.min(), TILE - 1 - ys_.max()
+    for nm, a_, b_ in (("left/right", ml, mr), ("top/bottom", mt, mb)):
+        imb = abs(a_ - b_) / TILE
+        results.append((f"bbox margin imbalance {nm} / tile", imb, BBOX_IMBALANCE, frame or imb <= BBOX_IMBALANCE,
+                        ("INFO, not counted on a frame: " if frame and imb > BBOX_IMBALANCE else "") + f"margins {a_} vs {b_} px"))
     if len(bands):
         j = int(np.nanargmax(bands[:, 4]))
         cv = bands[j, 4]
@@ -1381,7 +1422,11 @@ if __name__ == "__main__":
                                  epilog="Order checks (|psi6|, 1-CV(NN) band step and drawdown) report |difference| minus "
                                         f"{ORDER_NOISE_SE:g} standard errors of the band means, so the verdict doesn't flip "
                                         "with the render's seed; thresholds and their calibration: the constants at the "
-                                        "top of this script and docs/tooling.md (P1).")
+                                        "top of this script and docs/tooling.md (P1). Overhang: ink past the solid card's top/bottom/right edge "
+                                        f"(farthest <= {OVERHANG_PX} px, share <= {OVERHANG_SHARE:.1%}). Bbox margin imbalance: "
+                                        f"|left-right| and |top-bottom| margins of the ink bbox <= {BBOX_IMBALANCE:.0%} of the tile "
+                                        "(stills only); reported next to the optical centre (centroid + bbox, 3%), which it "
+                                        "does not relax: it only caps how far the bbox alone may sit off-centre.")
     ap.add_argument("render", nargs="*", help="render-1024.png or .svg (several: each is reviewed)")
     ap.add_argument("--axis", choices=("x", "y"), default="x", help="transition axis (default x)")
     ap.add_argument("--region", help="x0,y0,x1,y1 in 1024 px (default: the ink bounding box)")

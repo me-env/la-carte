@@ -36,6 +36,7 @@ payoff. Measurements are from 2026-11-21 (CI run 44907442393, local `qa/.results
 
 - **Owner:** design-critic (the tool and its thresholds), design-lead (render scripts, generation method).
 - **Status:** **done 2026-11-21** (uncommitted, awaiting the manager). `scripts/design-review.py` (531 lines,
+  2026-11-22: added overhang (ink past the solid card's edge, <= 3 px and <= 0.5%) and bbox margin imbalance (<= 10% of the tile) checks.
   PEP 723, runs with `uv run`, ~1 s per render after the first dependency install). Thresholds are the named
   constants at the top of the script (not in `design-critic.md`); the critic's rule (run it on every
   proposal, paste the report verbatim, any FAIL ⇒ ITERATE) is in `.claude/agents/design-critic.md`.
