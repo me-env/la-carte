@@ -60,3 +60,37 @@ to see what a real drag did mid-gesture; I had to add temporary snapshots and re
 would save a rerun per investigation. Also `scripts/ios-ui-test.sh --split <run>` with no `-only-testing` fails with
 "0 UI tests matched (no filter)", and `-only-testing:LaCarteUITests` matches only the class of that name: a full-suite
 split needs every class listed.
+
+
+## Re-validation 2026-11-22 (d683688 dial rings, 516178b AC8 fix, 015b7db release reward) — interim, run paused
+
+Verdict so far: **FAIL** (2 bugs below). Paused by the manager mid-run (Xcode updated to 27.2; toolchain being
+restored by dev-velocity). Not yet run: full UI suite (`--split 3`), `scripts/e2e.sh`, `testRatings_releaseTiming`.
+Runs: `qa/screenshots/019b-mock/` (Ratings + StudyLengths: 15 passed, 2 failed), `qa/screenshots/019b-mock2/`.
+
+- **AC8 fixed: PASS.** New `testRatings_longCardAngleSweep` (long card at AX-XL, real drags, hold 0.4 s): near-vertical
+  up / down (17° from vertical) scroll with no dial and no review; 30°, 40°, 45°, 45° slow (→ good), 50°, 55° up-right
+  rate `easy`; 45° down-left rates `again`. `testRatings_longCardScroll` (incl. 45°) green. `study-long-45deg-rated-light.png`.
+- **AC5/6 held dial: PASS** (`testRatings_swipeHeldPreview` green after widening my frame bound: the element frame is
+  ~274 pt, sized for pulse/release growth; the drawn dial measures ~219 pt = 2 × (R + 16) + dot). `screen-sample.py dots
+  --tol 120` (excludes the 30 % text) on `019b-mock/study-drag-*-{light,dark,forest-dark}.png`, rect 80,320,322,565:
+  96 dots in every armed state. Easy / Easy-up: d 4.42–4.54 pt (one size), min edge gap 5.26 pt, mirror symmetry max
+  0.04 pt, 0 unmatched. Got it: spread 1.12 pt, min gap 2.98 pt (spec 1.5 + 6.5 × 0.2 = 2.8). Hard: spread 2.47, min
+  gap 4.47 (spec 4.4). Forgot: sizes 2.58–8.04 pt (spread 5.46 > 3), min gap 8.01 pt (spec ≥ 8). Same in all themes.
+  Contrast: armed dots on dark 15.5:1; dead-zone dots 1.7:1 light (#C2C2BF on #F9FAF5), 2.64:1 dark, 2.8:1 forest
+  (visible, below 3:1: for design-critic).
+- Release reward: Got it reward plays over the next card (recording `019b-mock2/recordings/testRatings_releaseRewardNextCardImmediate.mp4`
+  7.717 → 7.782 s: next card under the settling dial). See bug 2 for Easy.
+
+### Bugs (re-validation)
+2. **The dial stays in the accessibility tree during the Got it reward** (019 §6 "hidden from accessibility"; also
+   breaks 011 regression `testRatings_buttonsAndDragsSendGrade`: "ring on next card 3"). Repro:
+   `testRatings_releaseRewardNextCardImmediate`, drag up 0.13 w on a revealed card, query after release:
+   `+0.68 s id 'study.swipeRing' label 'Rating' value 'None' frame {{58,290},{286,286}}`, `+0.81 s … {{53,285},{296,296}}`
+   (the frame grows: it is the reward's grow-and-fade). Not seen after Easy releases in the same test.
+3. **(to confirm, timing run pending) Easy release: the next card appears only after the reward fades.** Recording
+   `019b-mock2/recordings/testRatings_releaseRewardNextCardImmediate.mp4`, frames 10.95–11.25 s: at 10.952 s the
+   released card (front 1 / back 1, text back to full) is still shown under the dial with the row reading "Easy";
+   the dial grows and fades over that old card until 11.083 s; no frame changes until 11.198 s, when "front 2" starts
+   fading in. For Got it (7.717 → 7.782 s) the next card is under the dial at once. `testRatings_releaseTiming` (added,
+   not yet run) measures next-card delay per grade to confirm.

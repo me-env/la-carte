@@ -73,12 +73,14 @@ final class RatingsUITests: XCTestCase {
         // (Easy) is a full circle, scattered layouts drift up to 15 % radially (spec 019 #3).
         let card = cardArea(app).frame, radius = card.width * 0.25 + 16
         // The threshold pulse (1 → 1.3 → 1, 0.2 s) can be caught right after the dial appears: let it settle.
-        _ = poll(timeout: 2) { r.frame.width <= 2 * radius * 1.15 + 20 }
+        _ = poll(timeout: 2) { r.frame.width <= 2 * radius * 1.3 + 20 }
         if abs(r.frame.midX - card.midX) > 12 || abs(r.frame.midY - card.midY) > 12 {
           issues.append(String(format: "dial centre off the card centre by (%.1f, %.1f) pt (%@)",
                                r.frame.midX - card.midX, r.frame.midY - card.midY, ctx))
         }
-        if r.frame.width < 2 * radius * 0.95 || r.frame.width > 2 * radius * 1.15 + 20 {
+        // The element's frame has room for the pulse (1.3×) and the release growth; the drawn dots are measured
+        // on the screenshots (screen-sample dots).
+        if r.frame.width < 2 * radius * 0.95 || r.frame.width > 2 * radius * 1.3 + 20 {
           issues.append(String(format: "dial frame %.0f wide, expected ~%.0f (%@)", r.frame.width, 2 * radius, ctx))
         }
         // #6: the row echoes the target; ids and positions unchanged.
@@ -232,6 +234,170 @@ final class RatingsUITests: XCTestCase {
     let post = try waitForPost(server, count: 1)
     let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(post.body.utf8)) as? [String: Any])
     XCTAssertEqual(body["rating"] as? String, "easy", "45° drag on the long card sent \(post.body)")
+    server.stop()
+  }
+
+  // MARK: - 019 #8 angle sweep on a long (scrolling) card
+
+  /// Long card at AX-XL text (it scrolls): a first movement within 30° of vertical (|dx| < 0.58 |dy|) is the scroll
+  /// view's (no dial, no review); anything else is a rating drag in every direction. Vectors in card widths, y down.
+  @MainActor
+  func testRatings_longCardAngleSweep() throws {
+    continueAfterFailure = true  // report every angle, not only the first failing one
+    XCUIDevice.shared.appearance = .light
+    let back = "a long answer written on purpose to need scrolling at large text sizes: it goes on about the "
+      + "menu and the map, the card and the deck, the word and its meaning, the front and the back, the question "
+      + "and the answer, the day and the night, until at last, after all of that, it finally ends here: the end"
+    let plan: [(name: String, dx: Double, dy: Double, rating: String?)] = [
+      ("near-vertical-up", 0.09, -0.3, nil),     // 17° from vertical: scrolls
+      ("near-vertical-down", -0.09, 0.3, nil),   // 17° from vertical: scrolls back
+      ("30deg", 0.3, -0.17, "easy"),             // 30° above horizontal
+      ("40deg", 0.25, -0.21, "easy"),
+      ("45deg", 0.2, -0.2, "easy"),
+      ("45deg-slow", 0.12, -0.12, "good"),       // projection 0.17 w → good
+      ("50deg", 0.2, -0.24, "easy"),
+      ("55deg", 0.17, -0.24, "easy"),            // 35° from vertical: still a rating
+      ("45deg-downleft", -0.2, 0.2, "again"),
+    ]
+    let cards = plan.indices.map { i in
+      StubDeck.Card(id: "CCCCCCC\(i)-1111-1111-1111-111111111111", front: "long \(i)", back: back,
+                    due: Date(timeIntervalSince1970: 1_767_225_600 + Double(i) * 60))
+    }
+    let (server, _) = try startReviewStub(cards)
+    let app = launch(api: .live(server.url), arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"])
+    var posts = 0, i = 0
+    var results: [String] = []
+    for step in plan {
+      waitForLabel(el(app, "study.front"), "long \(i)")
+      if el(app, "study.reveal").exists { el(app, "study.card").tap() }
+      waitForLabel(el(app, "study.back"), back)
+      XCTAssertGreaterThan(el(app, "study.back").frame.maxY, cardArea(app).frame.maxY - 40, "long card doesn't scroll")
+      let before = el(app, "study.back").frame
+      drag(app, dx: step.dx, dy: step.dy, hold: 0.4)
+      let ringShown = ring(app).exists  // still held: the dial must be up for a rating drag
+      if let rating = step.rating {
+        posts += 1
+        let deadline = Date().addingTimeInterval(4)
+        while server.requests.filter({ $0.method == "POST" }).count < posts, Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+        let got = server.requests.filter { $0.method == "POST" }
+        let sent = got.count >= posts ? ((try? JSONSerialization.jsonObject(with: Data(got[posts - 1].body.utf8))) as? [String: Any])?["rating"] as? String : nil
+        results.append("\(step.name): dial \(ringShown), sent \(sent ?? "nothing")")
+        XCTAssertEqual(sent, rating, "\(step.name) (\(step.dx), \(step.dy)) on the long card")
+        if sent == nil { posts -= 1 } else { i += 1 }
+      } else {
+        Thread.sleep(forTimeInterval: 0.8)
+        let moved = el(app, "study.back").frame.minY - before.minY
+        results.append(String(format: "%@: dial %@, scrolled %.0f pt", step.name, ringShown ? "true" : "false", moved))
+        XCTAssertFalse(ringShown, "\(step.name): dial during a near-vertical drag")
+        XCTAssertGreaterThan(abs(moved), 5, "\(step.name): near-vertical drag did not scroll")
+        XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, posts, "\(step.name) sent a review")
+      }
+      if step.name == "45deg" { snapshot("study-long-45deg-rated", appearance: .light) }
+    }
+    print("019 #8 sweep:\n" + results.joined(separator: "\n"))
+    server.stop()
+  }
+
+  // MARK: - 019 §6 / #11 release reward: never delays the next card, a new drag still works
+
+  /// Got it / Easy releases on fitting cards: the next card's front is on screen right away (the reward is an
+  /// overlay), the dial is hidden from accessibility during the reward, and the next card rates normally.
+  /// Timing is read from the recording (image-ops track); here the test checks order and outcome.
+  @MainActor
+  func testRatings_releaseRewardNextCardImmediate() throws {
+    continueAfterFailure = true
+    XCUIDevice.shared.appearance = .light
+    let plan: [(dx: Double, dy: Double, rating: String)] = [
+      (0, -0.13, "good"), (0, -0.22, "easy"), (0, 0.22, "again"), (0.22, 0, "easy"),
+    ]
+    let cards = plan.indices.map { i in
+      StubDeck.Card(id: "DDDDDDD\(i)-1111-1111-1111-111111111111", front: "front \(i)", back: "back \(i)",
+                    due: Date(timeIntervalSince1970: 1_767_225_600 + Double(i) * 60))
+    }
+    let (server, _) = try startReviewStub(cards)
+    let app = launch(api: .live(server.url))
+    for (i, step) in plan.enumerated() {
+      waitForLabel(el(app, "study.front"), "front \(i)")
+      el(app, "study.card").tap()
+      waitForLabel(el(app, "study.back"), "back \(i)")
+      let released = Date()
+      drag(app, dx: step.dx, dy: step.dy)
+      print(String(format: "019 reward: release %d (%@) at +%.2f s", i, step.rating, Date().timeIntervalSince(released)))
+      if i == 0 || i == 1 { snapshot("study-release-\(step.rating)-overlay", appearance: .light) }
+      // The reward overlay is hidden from accessibility: no "Rating" element once the finger is up.
+      var seen: [String] = []
+      let until = Date().addingTimeInterval(1.2)
+      while Date() < until {
+        let r = ring(app)
+        if r.exists {
+          seen.append(String(format: "+%.2f s id '%@' label '%@' value '%@' frame %@", Date().timeIntervalSince(released),
+                             r.identifier, r.label, (r.value as? String) ?? "-", NSCoder.string(for: r.frame)))
+        }
+        Thread.sleep(forTimeInterval: 0.05)
+      }
+      XCTAssertTrue(seen.isEmpty, "dial in the accessibility tree after a \(step.rating) release:\n" + seen.joined(separator: "\n"))
+      let post = try waitForPost(server, count: i + 1)
+      let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(post.body.utf8)) as? [String: Any])
+      XCTAssertEqual(body["rating"] as? String, step.rating, "release \(i)")
+      if i + 1 < plan.count {
+        XCTAssertTrue(poll(timeout: 1) { el(app, "study.front").label == "front \(i + 1)" },
+                      "next card not shown within 1 s of a \(step.rating) release")
+        print(String(format: "019 reward: next card %d seen at +%.2f s", i + 1, Date().timeIntervalSince(released)))
+      }
+    }
+    server.stop()
+  }
+
+  /// 019 §6: a Got it / Easy release must not delay the next card. Alternates Got it and Easy drags and times, from
+  /// the end of the drag call, how long until `study.front` shows the next card; Easy (0.6 s reward) must not be
+  /// slower than Got it (0.5 s) or than a Forgot release (no reward). The last step drags again right after an Easy
+  /// release (reveal + drag while the reward may still play): it must rate normally.
+  @MainActor
+  func testRatings_releaseTiming() throws {
+    continueAfterFailure = true
+    XCUIDevice.shared.appearance = .light
+    let plan: [(dx: Double, dy: Double, rating: String)] = [
+      (0, -0.13, "good"), (0, -0.22, "easy"), (0, 0.22, "again"), (0, -0.13, "good"), (0, -0.22, "easy"),
+      (0, 0.22, "again"), (0, -0.13, "good"), (0, -0.22, "easy"), (0, 0.22, "again"),
+    ]
+    let cards = plan.indices.map { i in
+      StubDeck.Card(id: "FFFFFFF\(i)-1111-1111-1111-111111111111", front: "front \(i)", back: "back \(i)",
+                    due: Date(timeIntervalSince1970: 1_767_225_600 + Double(i) * 60))
+    }
+    let (server, _) = try startReviewStub(cards)
+    let app = launch(api: .live(server.url))
+    var lines: [String] = [], delays: [String: [Double]] = [:], lastRelease = Date()
+    for (i, step) in plan.enumerated() {
+      waitForLabel(el(app, "study.front"), "front \(i)")
+      el(app, "study.card").tap()
+      waitForLabel(el(app, "study.back"), "back \(i)")
+      let start = Date()
+      drag(app, dx: step.dx, dy: step.dy)
+      let returned = Date().timeIntervalSince(start)
+      let sincePrevious = i == 0 ? 0 : start.timeIntervalSince(lastRelease)  // previous release → this drag's start
+      lastRelease = Date()
+      var next = -1.0
+      if i + 1 < plan.count {
+        let front = el(app, "study.front")
+        if poll(timeout: 3, { front.label == "front \(i + 1)" }) { next = Date().timeIntervalSince(start) - returned }
+        delays[step.rating, default: []].append(next)
+      }
+      lines.append(String(format: "%d %@: drag starts %.2f s after the previous release · drag call %.2f s · next card seen +%.2f s after",
+                          i, step.rating, sincePrevious, returned, next))
+    }
+    _ = try waitForPost(server, count: plan.count)
+    let bodies = server.requests.filter { $0.method == "POST" }.map(\.body)
+    for (i, step) in plan.enumerated() where i < bodies.count {
+      XCTAssertTrue(bodies[i].contains("\"\(step.rating)\""), "release \(i) sent \(bodies[i]), expected \(step.rating)")
+    }
+    let avg = { (k: String) in (delays[k] ?? []).reduce(0, +) / Double(max(1, (delays[k] ?? []).count)) }
+    lines.append(String(format: "mean next-card delay: good %.2f · easy %.2f · again %.2f s", avg("good"), avg("easy"), avg("again")))
+    let report = XCTAttachment(string: lines.joined(separator: "\n"))
+    report.name = "release-timing"
+    report.lifetime = .keepAlways
+    add(report)
+    XCTAssertLessThan(avg("easy"), avg("again") + 0.15, "Easy release delays the next card:\n" + lines.joined(separator: "\n"))
+    XCTAssertLessThan(avg("good"), avg("again") + 0.15, "Got it release delays the next card:\n" + lines.joined(separator: "\n"))
     server.stop()
   }
 
