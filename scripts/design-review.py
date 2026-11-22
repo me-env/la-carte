@@ -3318,9 +3318,9 @@ def synthetic_line(out_dir):
         rows.append((name, expect or "(none)", failed, okk, what))
     print(f"design-review --mode line --make-synthetic {out_dir}: the clean mark must pass every geometry metric, each "
           "defect must fail its own (other failures are listed)")
-    print(f"{'SVG':<16}{'MUST FAIL':<18}{'RESULT':<8}GEOMETRY METRICS FAILED")
+    print(f"{'SVG':<19}{'MUST FAIL':<13}{'RESULT':<8}GEOMETRY METRICS FAILED")
     for name, expect, failed, okk, what in rows:
-        print(f"line-{name + '.svg':<11}{expect:<18}{'OK' if okk else 'BROKEN':<8}{', '.join(failed) or 'none'}   [{what}]")
+        print(f"line-{name + '.svg':<14}{expect:<13}{'OK' if okk else 'BROKEN':<8}{', '.join(failed) or 'none'}   [{what}]")
     print(f"RESULT: {'PASS' if not bad else 'FAIL'} ({bad} of {len(rows)} broken); SVGs and sheets in {out_dir}")
     return 1 if bad else 0
 
