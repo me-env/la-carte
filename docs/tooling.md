@@ -125,6 +125,22 @@ payoff. Measurements are from 2026-11-21 (CI run 44907442393, local `qa/.results
     0.66, edge 0.055/0.032). Lattice synthetic PASS 30/30 on 12 of 12 seeds. Round 9 (`--screen stochastic`):
     **FAIL 4/31** light and dark: edge spread at 58 px 0.061, merged blobs 3/2 at x 343, min gap 0.084/0.093 at
     x ≈ 372 (11 marks below), dot size CV 0.224/0.208 at x 371; frames: FAIL 6/31 (merged blobs on 5 of 5).
+- **Update 2026-11-22 (round 11; design-lead reported, tooling-lead agreed).** Three fixes:
+  - **Near-empty frames no longer crash.** A frame with less ink than 0.1% of the tile picked the paper as the ink
+    colour (empty mark set → `ValueError`), and a ramp of 1–2 columns crashed the profile metrics (round10
+    `frame-010`). Now a render with too little ink (`MIN_MEASURE_MARKS`) is `N/A`, and so is a metric with
+    nothing to measure. `--frames` skips N/A frames.
+  - **Sheets no longer overwrite each other.** They go to `$TMPDIR/design-review/<render's last 3 folders>/`,
+    e.g. `explorations-round11-a/` and `round11-a-frames/`.
+  - **Order checks are seed-stable.** A 32 px band holds 10–60 marks, so its mean |ψ6| moves by about 0.03–0.05
+    with the render's seed. Across 11 seeds of round 11 a/b/c (still + 6 frames), the raw |ψ6| step was
+    0.07–0.29 and the drawdown reached 0.17, so the verdict flipped with the seed. The step and drawdown (|ψ6| and
+    1-CV(NN)) now count only what exceeds 2 standard errors of the band means (`ORDER_NOISE_SE`). Results:
+    every round 11 seed passes them (step ≤ 0.234, drawdown ≤ 0.035). pass5 still FAILS (step 0.302), and the
+    synthetic passes on 12 of 12 seeds (step ≤ 0.144). round7 flip still fails 1-CV(NN) drawdown (0.091). The
+    only verdict change on the old rounds is round7 `card-frame-050` (raw |ψ6| drawdown 0.101), which now
+    PASSES: that drawdown was within noise (0.031 after the correction). The remaining seed-dependence is real
+    geometry: some seeds make two dots touch (`touching: min gap`), which is a defect in the render.
 
 **Problem (measured on `round6/pass5/card-light-1024.png`).** The user saw a non-smooth noise→structure
 transition. The critic missed it because it reviews by eye and with zoom crops, and has no numeric test for
@@ -388,3 +404,4 @@ Verify each step with `TESTS: … (x min)` from a full run, in order 1 → 3 →
 | 2026-11-21 | stale owners (rows 4, 11, 12), P2 status | instructions-keeper via manager | fixed: dev-velocity / cicd-lead; P2 done (82574ce) |
 | 2026-11-21 | P1 closing-hole bug + `--screen stochastic` (+ brandkit `progressive_blue_noise`) | design-lead + design-critic requested, manager approved | implemented: round 8b's 312 closing holes measured; stochastic mode + synthetic (11 of 12 seeds); round 9 FAILS 4/31 |
 | 2026-11-21 | P7 live progress, P8 contact sheet + colour helper + P4, P9 iOS 26 dark | manager pre-approved, qa-validator requested | P7, P8 implementers spawned; P9 documented as CI-only / forced-theme locally |
+| 2026-11-22 | P1 round 11 fixes: near-empty frame crash, sheet name collisions, seed-dependent order checks | design-lead reported, tooling-lead agreed | implemented: N/A instead of a crash, per-folder sheets, order step/drawdown minus 2 SE; round 11 order checks pass on 11 of 11 seeds |
