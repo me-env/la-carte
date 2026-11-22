@@ -43,7 +43,8 @@ New endpoints (old ones unchanged; 014c removes the ones it stops using):
   `stats` keep their current behavior on `basic` notes (legacy semantics of 014a: `updateCard` edits the shown
   sides, deleting a note's last card deletes the note).
 - `dueCards`: due, at most one card per note, and a card is skipped if a sibling's `lastReview` is within 6 h of
-  `now` (same rule as the API, `siblingBury = 6 * 3600` constant). `stats.due` = that count.
+  `now` (`siblingBury = 6 * 3600` constant). The API since 2026-11-22 holds a sibling only until
+  `min(lastReview + 6 h, sibling.due)` (014a); the mock deliberately keeps the simpler fixed 6 h. `stats.due` = that count.
 - `LA_CARTE_API=mock` is **unchanged**: the 3 fixture cards become 3 `basic` notes (`note.id == card.id`, as the
   migration does), so every existing screenshot and UI test stays valid.
 - New `LA_CARTE_API=mock-notes` = those 3 notes, plus `"la carte"` gets a second direction `back → front`, plus one

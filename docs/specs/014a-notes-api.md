@@ -44,15 +44,18 @@ Messages are written for an LLM reader and name the offending field or direction
    name + description, name → photo + description, description → name + photo". `basic` with none given → `front → back`.
 
 ## Sibling burying (`deck.py`)
-`SIBLING_BURY = timedelta(hours=6)` (named constant, user decision). One function decides what is servable now and
-is used by both `due_cards` and `stats`:
-- A card is **buried** if another card of the same note has a `ReviewLog` row with `reviewed_at > now − 6 h`. The
-  reviewed card itself is not buried by its own review (a relearning step due in 10 min is still served).
+`SIBLING_BURY = timedelta(hours=6)` (named constant): a 6 h cap, shortened to the reviewed card's own next due
+(user decision 2026-11-22). One function decides what is servable now and is used by both `due_cards` and `stats`:
+- Each card A of a note whose latest review is at `t` holds its siblings until `min(t + 6 h, A.due)`, where `A.due`
+  is A's current due (the one set by that latest review). A card is **buried** while any sibling's hold is in the
+  future. So a card rated `again` frees its siblings as soon as it is due again; a card with an interval longer than
+  6 h holds them 6 h. The reviewed card itself is not buried by its own review (a relearning step due in 10 min is
+  still served).
 - The servable queue is: due cards (`due <= now`), not buried, most overdue first, **at most one card per note**
   (the most overdue wins). So the app's local queue never holds two siblings.
 - `stats.due` = the size of that queue (the widget and Study's counter agree with what can be studied now).
   `stats.next_due` = the earliest time after now at which a card not servable now becomes servable: its `due` if in
-  the future, or `latest sibling review + 6 h` if it is due but buried; `null` if none. `total` and `new` keep
+  the future, or the latest of its siblings' holds if it is due but buried; `null` if none. `total` and `new` keep
   counting cards. `reviewed_today` and `streak` are unchanged.
 
 ## Startup migration (`db._migrate`, after 012's and 013's steps)
@@ -153,7 +156,8 @@ Cards stay minimalist: front = a word or short question, back = the shortest ans
 Photos are of real people: only use URLs the user gave you or asked you to use; never repeat them
 outside this deck.
 
-Quiz: `due_cards` (siblings of a just-reviewed card are held back for 6 hours), then `review_card`.
+Quiz: `due_cards` (siblings of a just-reviewed card are held back until that card is due again,
+at most 6 hours), then `review_card`.
 Ready-made prompts: `quiz_me`, `make_cards`.
 ```
 - `quiz_me`: show only the card's prompt fields (a `photo` is a URL: show it as an image or link), wait, then the
@@ -171,17 +175,17 @@ Ready-made prompts: `quiz_me`, `make_cards`.
 | 5 | `PATCH /notes/{id}` with `fields.name` changes `fields` on every sibling's `Card` (`GET /cards/{id}` of both) and keeps their FSRS state | pytest |
 | 6 | `PATCH /notes/{id}` with `directions` = {kept A, new C}, dropping B: A keeps its id and `due`; C is new and due now; B returns 404; B's `ReviewLog` rows still exist | pytest |
 | 7 | `DELETE /notes/{id}` → 204; its cards are gone from `/cards` and `/cards/due`; `streak`/`reviewed_today` unchanged | pytest |
-| 8 | Burying: note with cards A, B both due. `GET /cards/due` returns only A (most overdue, one per note). Review A (`good`): B is not returned for 6 h (test at now+5h59 → absent, now+6h01 → present) | pytest (deck, injected `now`) |
-| 9 | A relearning card reviewed `again` is served again when due, even though it was reviewed < 6 h ago, while its sibling stays buried | pytest |
+| 8 | Burying: note with cards A, B both due. `GET /cards/due` returns only A (most overdue, one per note). Review A (`easy`, interval > 6 h): B is not returned for 6 h (test at now+5h59 → absent, now+6h01 → present) | pytest (deck, injected `now`) |
+| 9 | *Amended 2026-11-22 (user).* A card A rated `again` (due again in < 6 h) holds its sibling B only until A's due: B is absent just before it and servable at it (B wins over A, most overdue, one per note); a card whose latest review gives an interval > 6 h holds its siblings 6 h | pytest |
 | 10 | Unrelated notes are never affected by burying; a note with one card behaves exactly as before | pytest |
-| 11 | `GET /stats`: `due` equals the length of `/cards/due?limit=500`; with only a buried card left, `due` is 0 and `next_due` = sibling review time + 6 h | pytest |
+| 11 | `GET /stats`: `due` equals the length of `/cards/due?limit=500`; with only a buried card left, `due` is 0 and `next_due` = the end of its sibling's hold (`min(review + 6 h, sibling's due)`) | pytest |
 | 12 | Legacy: `POST /cards`, `GET /cards?query=`, `PATCH /cards/{id}`, `DELETE /cards/{id}`, review and stats keep their old behavior on `basic` `front → back` notes (existing REST tests pass unchanged apart from added keys) | pytest |
 | 13 | Legacy `PATCH /cards/{id} {"front":"x"}` on a `back → front` card sets the note's `back` to "x"; on a card with a multi-field side → 422 | pytest |
 | 14 | Legacy `DELETE /cards/{id}` of a note's last card deletes the note (`GET /notes/{note_id}` → 404); of a non-last card keeps the note | pytest |
 | 15 | MCP: `add_notes` adds, skips a duplicate key (case/whitespace-insensitive, also within one call) and returns the existing note in `skipped`; `allow_duplicates=true` adds it; a `person` and a `basic` with the same key text don't collide | pytest (MCP) |
 | 16 | MCP: `find_notes`, `update_note`, `add_direction` (duplicate direction → error), `remove_direction` (last card → error), `delete_note` behave as REST | pytest (MCP) |
 | 17 | MCP: old tools (`add_cards`, `list_cards`, `update_card`, `delete_card`, `due_cards`, `review_card`, `deck_stats`) pass their existing tests | pytest (MCP) |
-| 18 | `INSTRUCTIONS` contain the notes/cards explanation, both types, "Choose directions deliberately" and the 6-hour burying; `quiz_me` / `make_cards` reference `prompt`/`answer` and `find_notes`/`add_notes` | pytest (substring) + review |
+| 18 | `INSTRUCTIONS` contain the notes/cards explanation, both types, "Choose directions deliberately" and the burying (at most 6 hours); `quiz_me` / `make_cards` reference `prompt`/`answer` and `find_notes`/`add_notes` | pytest (substring) + review |
 | 19 | **Migration**: an old-schema file DB (cards with front/back, review logs) → after `make_engine`: one `basic` note per card with `note.id == card.id` and `fields == {front, back}`; each card has `prompt ["front"]`, `answer ["back"]` and identical FSRS columns; `card` has no `front`/`back` columns; `PRAGMA foreign_key_list(card)` points to `note`; review logs identical; a `.pre-014-*.bak` file exists | pytest (`tmp_path`) |
 | 20 | Migration is idempotent (second start changes nothing, no new backup) and a fresh DB skips it; a failure mid-rebuild leaves the old tables intact | pytest + review |
 | 21 | No photo URL appears in the API's log output for any request (no request-body logging added; validation messages name the field, not the value) | review |

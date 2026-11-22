@@ -52,10 +52,11 @@ Rules:
   else 422. `card.note_id` → `note.id ON DELETE CASCADE`. Cards of one note are siblings.
 - Validation lives in `deck` (`InvalidNote`): REST → 422 `{"detail": message}`, MCP → `ToolError`. Messages name the
   field/direction, never a value (photo URLs are private; they're never logged).
-- **Sibling burying**: `deck.SIBLING_BURY = 6 h`. A card is buried while a sibling has a review newer than 6 h (its
-  own reviews don't bury it). The servable queue (`deck._queue`) = due, not buried, most overdue first, at most one
-  card per note; it backs `/cards/due`, `due_cards`, `stats.due`, and `stats.next_due` (earliest time a card not
-  servable now becomes servable: `max(due, latest sibling review + 6 h)`). `total` / `new` count cards.
+- **Sibling burying**: `deck.SIBLING_BURY = 6 h` cap. A card reviewed at `t` (its latest review) holds its
+  siblings until `min(t + 6 h, its current due)`: never past its own next due (spec 014, user decision
+  2026-11-22; its own reviews don't bury it). The servable queue (`deck._queue`) = due, not buried, most overdue
+  first, at most one card per note; it backs `/cards/due`, `due_cards`, `stats.due`, and `stats.next_due` (earliest time a card not
+  servable now becomes servable: `max(due, every sibling's hold)`). `total` / `new` count cards.
 - **Held cards (spec 015)**: a card with any `Report` whose status is `open` or `waiting_user` is left out of the
   servable queue entirely (so out of `/cards/due`, `due_cards`, `stats.due`, `stats.next_due`; it doesn't bury its
   siblings). It still counts in `total` and shows in `/cards`, `/notes`. Its FSRS state is never touched.
@@ -112,7 +113,8 @@ also `all` or one status). `update_report(report_id, outcome, note)` stores `not
 
 Server `instructions` (sent on initialize, `mcp_server.INSTRUCTIONS`) explain notes vs cards and siblings, both
 types, "edit the note, not loose cards", "choose directions deliberately", minimalist cards, photo privacy, and the
-6-hour burying, and how to handle each report reason (doubt / rephrase: ask the user before changing anything).
+burying (until the reviewed sibling is due again, at most 6 hours), and how to handle each report reason
+(doubt / rephrase: ask the user before changing anything).
 `allow_duplicates` is only for when the user explicitly asks.
 
 ### MCP prompts (spec 005, 014)

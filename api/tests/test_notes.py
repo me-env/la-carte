@@ -268,15 +268,59 @@ def test_due_queue_serves_one_card_per_note_and_buries_siblings_for_6_hours(sess
     assert due_at(timedelta(hours=6, minutes=1)) == [b.id]
 
 
-def test_relearning_card_is_served_while_its_sibling_stays_buried(session):
+def test_a_card_rated_again_frees_its_sibling_when_it_is_due_again(session):
     now = utcnow()
-    a, b = _person(session, now).cards
-    deck.review_card(session, a.id, Rating.again, now=now)
-    again = deck.get_card(session, a.id)
-    assert now < again.due < now + timedelta(hours=1)
+    a, b = _person(session, now - timedelta(minutes=1)).cards
+    again = deck.review_card(session, a.id, Rating.again, now=now).due
+    assert now < again < now + deck.SIBLING_BURY
 
-    assert [c.id for c in deck.due_cards(session, now=again.due)] == [a.id]
-    assert b.id not in [c.id for c in deck.due_cards(session, now=again.due)]
+    def due_at(t):
+        return [c.id for c in deck.due_cards(session, now=t)]
+
+    assert due_at(again - timedelta(seconds=1)) == []  # B held until A is due again
+    assert due_at(again) == [b.id]  # both due now, one per note: B is the most overdue
+    b_again = deck.review_card(session, b.id, Rating.again, now=again).due
+    assert due_at(again) == []  # now A is held until B is due again: never back to back
+    assert due_at(b_again) == [a.id]  # both due, A is the most overdue
+
+
+def _three_ways(session, now):
+    ways = _directions(
+        (["photo"], ["name", "description"]), (["description"], None), (["name"], None)
+    )
+    [note] = deck.add_notes(session, [NoteCreate.model_validate(ways)], now=now).added
+    return note.cards
+
+
+def test_a_hold_follows_the_reviewed_cards_latest_review_and_every_sibling_holds(session):
+    now = utcnow()
+    a, b, c = _three_ways(session, now - timedelta(minutes=1))
+    deck.review_card(session, a.id, Rating.again, now=now)
+    later = now + timedelta(minutes=1)
+    deck.review_card(session, a.id, Rating.easy, now=later)  # A's latest review: due in days
+
+    def due_at(t):
+        return [x.id for x in deck.due_cards(session, now=t)]
+
+    assert due_at(later + deck.SIBLING_BURY - timedelta(seconds=1)) == []
+    assert due_at(later + deck.SIBLING_BURY) == [b.id]
+
+    relearn = deck.review_card(session, b.id, Rating.again, now=later).due  # B frees A, C early
+    assert relearn < later + deck.SIBLING_BURY
+    assert due_at(relearn) == []  # C is still held by A (6 h), A isn't due
+    assert due_at(later + deck.SIBLING_BURY) == [c.id]  # C most overdue (B was reviewed)
+
+
+def test_a_card_rated_good_with_a_long_interval_holds_its_sibling_6_hours(session):
+    now = utcnow()
+    a, b = _person(session, now - timedelta(minutes=1)).cards
+    step = deck.review_card(session, a.id, Rating.good, now=now).due  # learning step
+    later = step + timedelta(minutes=1)
+    due = deck.review_card(session, a.id, Rating.good, now=later).due  # graduates: days
+    assert due > later + deck.SIBLING_BURY
+
+    assert deck.due_cards(session, now=later + deck.SIBLING_BURY - timedelta(seconds=1)) == []
+    assert [x.id for x in deck.due_cards(session, now=later + deck.SIBLING_BURY)] == [b.id]
 
 
 def test_burying_never_touches_other_notes(session):
@@ -300,6 +344,17 @@ def test_stats_due_matches_the_queue_and_next_due_is_the_end_of_burying(session)
     stats = deck.stats(session, now=now + timedelta(minutes=1))
     assert (stats.total, stats.due, stats.new) == (2, 0, 1)
     assert stats.next_due == now + deck.SIBLING_BURY
+
+
+def test_stats_next_due_is_the_failed_siblings_due_and_matches_the_queue(session):
+    now = utcnow()
+    a, b = _person(session, now - timedelta(minutes=1)).cards
+    again = deck.review_card(session, a.id, Rating.again, now=now).due
+
+    stats = deck.stats(session, now=now + timedelta(seconds=1))
+    assert (stats.due, stats.next_due) == (0, again)  # B freed when A is due, not in 6 h
+    at_due = deck.stats(session, now=again)
+    assert at_due.due == len(deck.due_cards(session, limit=500, now=again)) == 1
 
 
 # --- /cards compatibility -----------------------------------------------------------------------

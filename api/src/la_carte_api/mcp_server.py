@@ -55,7 +55,8 @@ note. No explanations, no full sentences unless unavoidable.
 Photos are of real people: only use URLs the user gave you or asked you to use; never repeat them
 outside this deck.
 
-Quiz: `due_cards` (siblings of a just-reviewed card are held back for 6 hours), then `review_card`.
+Quiz: `due_cards` (siblings of a just-reviewed card are held back until that card is due again,
+at most 6 hours), then `review_card`.
 Ready-made prompts: `quiz_me`, `make_cards`, `add_people`.
 
 Reports. While studying, the user flags cards; a reported card is out of study until its report is
@@ -250,8 +251,8 @@ def build_mcp(engine: Engine) -> MCPServer:
     @mcp.tool()
     def due_cards(limit: int = 20) -> list[CardRead]:
         """Cards to review now, most overdue first, at most one per note. A card whose sibling was
-        reviewed in the last 6 hours is held back. Show the `fields` named by `prompt`, then
-        those named by `answer`."""
+        just reviewed is held back until that sibling is due again, at most 6 hours. Show the
+        `fields` named by `prompt`, then those named by `answer`."""
         return run(deck.due_cards, limit)
 
     @mcp.tool()
@@ -261,7 +262,7 @@ def build_mcp(engine: Engine) -> MCPServer:
         confidence: Annotated[float | None, Field(ge=0, le=1)] = None,
     ) -> CardRead:
         """Record a review: again (forgot), hard, good, or easy. Returns the rescheduled card. Its
-        siblings are then held back from `due_cards` for 6 hours.
+        siblings are then held back from `due_cards` until it is due again, at most 6 hours.
 
         `confidence` is optional: pass it only when you have a measured 0-1 value (e.g. from a
         slider); never guess one. It is stored with the review; scheduling uses `rating` only."""

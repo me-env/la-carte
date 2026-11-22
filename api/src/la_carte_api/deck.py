@@ -46,7 +46,8 @@ from la_carte_api.models import (
 _scheduler = fsrs.Scheduler()
 _DAY = timedelta(days=1)
 
-# After any card of a note is reviewed, its siblings are not served for this long (user decision).
+# After a card of a note is reviewed, its siblings are held for at most this long, and never past
+# that card's own next due (user decision 2026-11-22: a weak note comes back sooner).
 SIBLING_BURY = timedelta(hours=6)
 
 Side = tuple[str, ...]  # field names, in the type's field order
@@ -503,8 +504,10 @@ def delete_card(session: Session, card_id: UUID) -> None:
 def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], datetime | None]:
     """The servable queue and the next time a card not servable now becomes servable.
 
-    A card is buried while a sibling was reviewed less than `SIBLING_BURY` ago (its own reviews
-    don't bury it). Servable = due, not buried, most overdue first, at most one card per note.
+    A sibling's latest review at `t` buries a card until `min(t + SIBLING_BURY, sibling.due)`:
+    never longer than until that sibling is due again (its own reviews don't bury it). The
+    sibling's current `due` is the one set by that latest review. Servable = due, not buried,
+    most overdue first, at most one card per note (so siblings never come back to back).
     Held cards (an active report, spec 015) are left out entirely: they don't bury siblings."""
     held = set(
         session.exec(select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))).all()
@@ -523,17 +526,18 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
         )
         if card.id not in held
     ]
-    sibling_reviews: dict[UUID, list[tuple[UUID, datetime]]] = {}
+    # note -> [(recently reviewed card, the time until which it holds its siblings)]
+    holds: dict[UUID, list[tuple[UUID, datetime]]] = {}
     for card, _ in rows:
         if card.id in recent:
-            sibling_reviews.setdefault(card.note_id, []).append((card.id, recent[card.id]))
+            until = min(recent[card.id] + SIBLING_BURY, card.due)
+            holds.setdefault(card.note_id, []).append((card.id, until))
 
     servable: list[tuple[Card, Note]] = []
     served_notes: set[UUID] = set()
     later: list[datetime] = []
     for card, note in sorted(rows, key=lambda row: (row[0].due, *_card_order(*row))):
-        others = [t for cid, t in sibling_reviews.get(card.note_id, []) if cid != card.id]
-        ready_at = max([card.due, *(t + SIBLING_BURY for t in others)])
+        ready_at = max([card.due, *(t for cid, t in holds.get(card.note_id, []) if cid != card.id)])
         if ready_at > now:
             later.append(ready_at)
         elif card.note_id not in served_notes:
@@ -556,7 +560,7 @@ def review_card(
     confidence: float | None = None,
 ) -> CardRead:
     """Reschedules the card from `rating` alone; `confidence` (0-1, optional) is only stored.
-    Its siblings are then buried for `SIBLING_BURY`."""
+    Its siblings are then buried until its new due, at most `SIBLING_BURY` (see `_queue`)."""
     now = now or utcnow()
     card = _card(session, card_id)
     scheduled, _ = _scheduler.review_card(card.to_fsrs(), rating.to_fsrs(), review_datetime=now)
