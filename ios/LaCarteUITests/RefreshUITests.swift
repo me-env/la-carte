@@ -224,14 +224,26 @@ final class RefreshUITests: XCTestCase {
     }
   }
 
-  /// Topmost y (pt, 0.5 pt steps) in `rect` with dark text (light appearance), nil if none.
-  private func inkTop(_ probe: ColorProbe, in rect: CGRect) -> CGFloat? {
-    stride(from: rect.minY, to: min(rect.maxY, probe.size.height), by: 0.5).first { y in
-      stride(from: rect.minX, to: rect.maxX, by: 0.5).contains { x in
-        let c = probe.color(at: CGPoint(x: x, y: y))
-        return c.r + c.g + c.b < 200
-      }
+  /// How far (pt, 0.5 pt steps within `range`) the dark ink (light appearance) of `rect` in `a` moved down in `b`: the
+  /// offset where `b` best matches `a`'s dark/light pattern, nil when even the best one misses over a quarter of the ink.
+  private func verticalShift(of rect: CGRect, from a: ColorProbe, to b: ColorProbe,
+                             in range: ClosedRange<CGFloat>) -> CGFloat? {
+    func dark(_ p: ColorProbe, _ x: CGFloat, _ y: CGFloat) -> Bool {
+      let c = p.color(at: CGPoint(x: x, y: y))
+      return c.r + c.g + c.b < 200
     }
+    let samples = stride(from: rect.minY, to: rect.maxY, by: 1).flatMap { y in
+      stride(from: rect.minX, to: rect.maxX, by: 1).map { x in (x: x, y: y, dark: dark(a, x, y)) }
+    }
+    let ink = samples.count(where: \.dark)
+    guard ink >= 10 else { return nil }
+    var best: (d: CGFloat, misses: Int)?
+    for d in stride(from: range.lowerBound, through: range.upperBound, by: 0.5) where rect.maxY + d < b.size.height {
+      let misses = samples.count { dark(b, $0.x, $0.y + d) != $0.dark }
+      if misses < best?.misses ?? .max { best = (d, misses) }
+    }
+    guard let best, best.misses * 4 <= ink else { return nil }
+    return best.d
   }
 
   /// 018 #1–#3: drag down from `from` (held, with a mid-drag screenshot): `watching` doesn't move during the drag
@@ -247,26 +259,21 @@ final class RefreshUITests: XCTestCase {
     let anchorFrame = anchor?.frame
     let still = XCUIScreen.main.screenshot().image.cgImage
     let during = dragDownHoldingCapture(app, from: from, name: name, appearance: .light)
-    if let anchorFrame {
-      // The sheet may follow the finger (interactive dismiss, native): compare the row to the sheet's toolbar.
-      // The anchor is a toolbar glyph: fixed in the sheet, so it moves only if the whole sheet follows the finger.
-      let anchorRect = CGRect(x: anchorFrame.minX, y: anchorFrame.minY - 10, width: anchorFrame.width, height: 400)
-      func offset(_ img: CGImage?) -> CGFloat? {
-        guard let img else { return nil }
-        let probe = ColorProbe(at3x: img)
-        guard let t = inkTop(probe, in: anchorRect) else { return nil }
-        let rowRect = CGRect(x: frame.minX, y: t + frame.minY - anchorFrame.minY - 40, width: frame.width * 0.5,
-                             height: frame.height + 80)
-        return inkTop(probe, in: rowRect).map { $0 - t }
-      }
-      let o1 = offset(still), o2 = offset(during)
-      XCTAssertNotNil(o1, "\(name): no text found before the drag", file: file, line: line)
-      XCTAssertNotNil(o2, "\(name): no text found mid-drag", file: file, line: line)
-      if let o1, let o2 {
-        // A rubber-band would pull the row down by tens of points; the dragged sheet itself shifts its content by a
-        // few points (measured −3.5 pt on iOS 27), so allow 5 pt and never a downward move.
-        XCTAssertTrue(o2 <= o1 + 1 && abs(o2 - o1) <= 5,
-                      "\(name): the list moved under the drag (bounce): row−toolbar \(o1) → \(o2)", file: file, line: line)
+    if let anchorFrame, let still, let during {
+      // The sheet may follow the finger (interactive dismiss, native), by a different distance on each run. Find how
+      // far the sheet's toolbar glyph moved, then how far the row moved: a bounce moves the row within the sheet by
+      // tens of points. (The study screen's own toolbar shows above a lowered sheet, so search downward only.)
+      let a = ColorProbe(at3x: still), b = ColorProbe(at3x: during)
+      let sheet = verticalShift(of: anchorFrame, from: a, to: b, in: -5...450)
+      let rowRect = CGRect(x: frame.minX, y: frame.minY, width: frame.width * 0.5, height: frame.height)
+      let rowShift = sheet.flatMap { verticalShift(of: rowRect, from: a, to: b, in: ($0 - 60)...($0 + 150)) }
+      XCTContext.runActivity(named: "\(name): sheet moved \(sheet.map { "\($0)" } ?? "?") pt, row \(rowShift.map { "\($0)" } ?? "?") pt") { _ in }
+      XCTAssertNotNil(sheet, "\(name): the sheet's toolbar wasn't found mid-drag", file: file, line: line)
+      XCTAssertNotNil(rowShift, "\(name): the row wasn't found mid-drag", file: file, line: line)
+      if let sheet, let rowShift {
+        XCTAssertEqual(rowShift, sheet, accuracy: 2,
+                       "\(name): the list moved inside the sheet under the drag (bounce): sheet +\(sheet) pt, row +\(rowShift) pt",
+                       file: file, line: line)
       }
     } else {
       let changed = changedPoints(still, during, in: frame.insetBy(dx: -4, dy: -4))
