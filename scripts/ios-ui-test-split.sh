@@ -7,10 +7,14 @@
 # methods (grep of `func test` in ios/LaCarteUITests), deals them into N shards balanced by the last measured
 # durations ($RESULTS_DIR/ui-test-durations.tsv, rewritten after each split run; test count otherwise), then
 # runs every shard at once with test-without-building on its own pool slot and result bundle.
+# Tests with no result in any shard bundle (a crash can end a shard early) are retried once, in one extra
+# run on a free slot (lines prefixed [retry]).
 # N defaults to the number of free UI slots and is capped by it and by the test count; at 1 this simply
 # runs scripts/ios-ui-test.sh. Results: screenshots merged into qa/screenshots/<run-name>/, shard bundles
-# merged into <run-name>.xcresult, one `TESTS: …` line (wall time) plus the failed tests.
-# Exit code = first failing shard's xcodebuild code (or the build's); merge/summary failures only warn.
+# merged into <run-name>.xcresult, one `TESTS: …` line (wall time, "not run" count) plus the failed and
+# not-run tests.
+# Exit code = first failing shard's xcodebuild code (or the build's), else 65 if a test was still not run;
+# merge/summary failures only warn.
 set -euo pipefail
 source "$(dirname "$0")/_ios-env.sh"
 [ "${1:-}" = --split ] && shift
@@ -40,7 +44,8 @@ DURATIONS="$RESULTS_DIR/ui-test-durations.tsv"
 mkdir -p "$RESULTS_DIR"; rm -rf "$OUT" "$RESULT" "$PRODUCTS" "$WORK"; mkdir -p "$OUT" "$WORK"
 trap 'rm -rf "$PRODUCTS" "$WORK"' EXIT
 cd "$ROOT/ios"
-FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|TEST( EXECUTE)? (SUCCEEDED|FAILED)|^🔒"
+# Keeps errors plus located notes: an error inside #expect/#require points at the test file only in its note.
+FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|\.swift:[0-9]+:[0-9]+: note:|TEST( EXECUTE)? (SUCCEEDED|FAILED)|^🔒"
 export NSUnbufferedIO=YES
 START=$SECONDS
 set +e
@@ -82,30 +87,57 @@ PY
 
 
 # 4. Every shard at once, each on its own free pool slot with its own result bundle.
+shard() {  # <name>: runs the tests in $WORK/<name>.args into $WORK/<name>.xcresult, log lines prefixed [<name>]
+  ARGS=(); while IFS= read -r a; do ARGS+=("$a"); done <"$WORK/$1.args"
+  set +e
+  TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \
+  SIM_POOL=ui "$ROOT/scripts/_sim-pool.sh" /bin/sh -c 'exec xcodebuild test-without-building -destination "$POOL_DESTINATION" "$@"' \
+    sh -testProductsPath "$PRODUCTS" -collect-test-diagnostics never -resultBundlePath "$WORK/$1.xcresult" \
+    "${ARGS[@]}" "${PASS[@]+"${PASS[@]}"}" 2>&1 | grep --line-buffered -E "$FILTER" | sed -l "s/^/[$1] /"
+  exit "${PIPESTATUS[0]}"
+}
 PIDS=()
-for k in $(seq 1 "$N"); do
-  ARGS=(); while IFS= read -r a; do ARGS+=("$a"); done <"$WORK/$k.args"
-  (
-    set +e
-    TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \
-    SIM_POOL=ui "$ROOT/scripts/_sim-pool.sh" /bin/sh -c 'exec xcodebuild test-without-building -destination "$POOL_DESTINATION" "$@"' \
-      sh -testProductsPath "$PRODUCTS" -collect-test-diagnostics never -resultBundlePath "$WORK/$k.xcresult" \
-      "${ARGS[@]}" "${PASS[@]+"${PASS[@]}"}" 2>&1 | grep --line-buffered -E "$FILTER" | sed -l "s/^/[$k] /"
-    exit "${PIPESTATUS[0]}"
-  ) &
-  PIDS+=($!)
-done
+for k in $(seq 1 "$N"); do ( shard "$k" ) & PIDS+=($!); done
 trap 'kill "${PIDS[@]}" 2>/dev/null; rm -rf "$PRODUCTS" "$WORK"' INT TERM
 for p in "${PIDS[@]}"; do
   wait "$p" && S=0 || S=$?
   [ "$STATUS" -ne 0 ] || STATUS=$S
 done
-WALL=$((SECONDS - START))
-
-# 5. Merge: screenshots, one xcresult, durations, summary.
-warn() { echo "⚠️  $1 failed (exit code unchanged: $STATUS)" >&2; }
 BUNDLES=(); for k in $(seq 1 "$N"); do [ -d "$WORK/$k.xcresult" ] && BUNDLES+=("$WORK/$k.xcresult"); done
 [ ${#BUNDLES[@]} -gt 0 ] || { echo "TESTS: none run (exit $STATUS: no shard produced results)"; exit "$STATUS"; }
+
+# 5. Selected tests with no result in any bundle (a crash ends a shard early): retry them once, in one run.
+not_run() {  # writes the not-run tests as -only-testing args to $WORK/$1.args; true if there are any
+  python3 -I - "$WORK" "$WORK/$1.args" <<'PY'
+import glob, json, subprocess, sys
+work, out = sys.argv[1], sys.argv[2]
+expected = [l.strip() for f in sorted(glob.glob(f"{work}/[0-9]*.args")) for l in open(f)]
+seen = set()
+for b in glob.glob(f"{work}/*.xcresult"):
+    r = subprocess.run(["xcrun", "xcresulttool", "get", "test-results", "tests", "--path", b], capture_output=True)
+    stack = json.loads(r.stdout)["testNodes"] if r.returncode == 0 else []
+    while stack:
+        node = stack.pop()
+        if node.get("nodeType") == "Test Case": seen.add("-only-testing:LaCarteUITests/" + node["nodeIdentifier"].removesuffix("()"))
+        stack += node.get("children", [])
+missing = [t for t in expected if t not in seen]
+open(out, "w").write("".join(t + "\n" for t in missing))
+sys.exit(0 if missing else 1)
+PY
+}
+RETRIED=0; : >"$WORK/still.args"
+if not_run retry; then
+  RETRIED=$(wc -l <"$WORK/retry.args" | tr -d ' ')
+  echo "🔁 retrying $RETRIED not-run tests" >&2
+  ( shard retry ) && S=0 || S=$?
+  [ "$STATUS" -ne 0 ] || STATUS=$S
+  [ -d "$WORK/retry.xcresult" ] && BUNDLES+=("$WORK/retry.xcresult")
+  not_run still && { [ "$STATUS" -ne 0 ] || STATUS=65; }
+fi
+WALL=$((SECONDS - START))
+
+# 6. Merge: screenshots, one xcresult, durations, summary.
+warn() { echo "⚠️  $1 failed (exit code unchanged: $STATUS)" >&2; }
 for b in "${BUNDLES[@]}"; do
   EXP="$OUT/.export"; rm -rf "$EXP"   # same volume as $OUT: renames, not copies
   xcrun xcresulttool export attachments --path "$b" --output-path "$EXP" >/dev/null || { warn "screenshot export"; continue; }
@@ -130,14 +162,16 @@ done
 if [ -f "$ROOT/scripts/contact-sheet.py" ] && command -v uv >/dev/null; then
   uv run "$ROOT/scripts/contact-sheet.py" "$OUT" || warn "contact sheet"
 fi
-if [ ${#BUNDLES[@]} -eq 1 ]; then mv "${BUNDLES[0]}" "$RESULT"
+if [ ${#BUNDLES[@]} -eq 1 ]; then mv "${BUNDLES[0]}" "$RESULT"; BUNDLES=("$RESULT")
 else xcrun xcresulttool merge "${BUNDLES[@]}" --output-path "$RESULT" >/dev/null || warn "xcresult merge"; fi
 echo "📸 screenshots: $OUT  (xcresult: $RESULT)"
 ls -R "$OUT" || true
-# TESTS: 22 passed, 0 failed, 1 skipped (3.1 min wall, 3 shards), then one line per failed test.
-python3 -I - "$WALL" "$N" "$DURATIONS" "${BUNDLES[@]}" <<'PY' || warn "summary"
+# TESTS: 22 passed, 0 failed, 1 skipped, 1 not run (3.1 min wall, 3 shards, 2 retried), then one line per failed
+# and per not-run test.
+python3 -I - "$WALL" "$N" "$RETRIED" "$WORK/still.args" "$DURATIONS" "${BUNDLES[@]}" <<'PY' || warn "summary"
 import json, os, subprocess, sys
-wall, n, durations, bundles = float(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4:]
+wall, n, retried, still, durations, bundles = float(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5], sys.argv[6:]
+not_run = [l.strip().removeprefix("-only-testing:LaCarteUITests/") for l in open(still)]
 get = lambda kind, b: json.loads(subprocess.run(["xcrun", "xcresulttool", "get", "test-results", kind, "--path", b],
                                                 capture_output=True, check=True).stdout)
 passed = failed = skipped = 0; failures = []
@@ -158,8 +192,11 @@ for b in bundles:
 with open(durations, "w") as f:
     f.writelines(f"{secs}\t{test}\n" for test, secs in sorted(known.items()))
 took = f"{wall / 60:.1f} min" if wall >= 120 else f"{wall:.0f} s"
-print(f"TESTS: {passed} passed, {failed} failed, {skipped} skipped ({took} wall, {n} shards)")
+print(f"TESTS: {passed} passed, {failed} failed, {skipped} skipped" + (f", {len(not_run)} not run" if not_run else "")
+      + f" ({took} wall, {n} shards" + (f", {retried} retried" if retried else "") + ")")
 for f in failures:
     print(f"  ✘ {f['testIdentifierString']}: {f['failureText'][:200]}")
+for t in not_run:
+    print(f"  ⊘ {t}: not run")
 PY
 exit "$STATUS"

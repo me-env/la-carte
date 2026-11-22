@@ -66,6 +66,9 @@ the selected test methods into N shards (balanced by the last measured durations
 `<results dir>/ui-test-durations.tsv`, else by count) and runs them at once, one UI pool simulator each. Output is
 the same as a plain run: screenshots in `qa/screenshots/<run>/`, one merged `<run>.xcresult`, one `TESTS: …` line
 (wall time), exit code non-zero if any shard fails. Shard lines are prefixed `[k]`.
+- **Not run:** a crash can end a shard early. Selected tests with no result in any shard are retried once in one
+  extra run (lines `[retry]`); any still missing are counted as `N not run` and listed `⊘ <test>: not run`, and the
+  exit code is non-zero (65 if nothing else failed).
 - **When:** 8+ tests or about 4 min of runtime; below that run plainly (each shard costs ~1 min of fixed overhead).
 - **N** defaults to, and is capped by, the free UI simulators; with one free (busy pool) it is a plain run.
 

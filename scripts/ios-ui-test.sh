@@ -42,7 +42,8 @@ trap 'rm -rf "$PRODUCTS"' EXIT
 rm -rf "$OUT" "$RESULT" "$PRODUCTS"; mkdir -p "$OUT" "$(dirname "$RESULT")"
 
 cd "$ROOT/ios"
-FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|TEST( EXECUTE)? (SUCCEEDED|FAILED)|^🔒"
+# Keeps errors plus located notes: an error inside #expect/#require points at the test file only in its note.
+FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|\.swift:[0-9]+:[0-9]+: note:|TEST( EXECUTE)? (SUCCEEDED|FAILED)|^🔒"
 export NSUnbufferedIO=YES  # xcodebuild writes each line as it happens, even into a pipe
 set +e
 # 1. Build under the app's DerivedData lock, copying the products out so a later build can't replace them.
