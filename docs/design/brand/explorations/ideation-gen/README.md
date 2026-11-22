@@ -343,3 +343,23 @@ reset, a clean cut that holds at 29 px; lead with it), 34 (the line alone, but a
 lightning bolt or a "4"), and 35 (the tail's end cap nearly touches the card edge). Remaining issue: without a
 caption, the stroke doesn't say "forgetting curve". The decay should read as a drop-off, and the reset as a visible
 jump of its own.
+
+### Line in a card: rounds 5-7 (user chose this direction)
+
+Variants 39-94 in `forgetcurve.py` (blocks "round 5" to "round 7b"). The decays are true exponentials, steepest
+right after each review. Every peak returns to 100 %, and every reset is strictly vertical.
+- **Round 5 (39-72):** free lines. Even at 80+ px strokes, the critic read every free-floating line as a bolt, "4"
+  or "N", and the lines sat small in the tile.
+- **Round 6 (73-84):** the curve knocked out of a 3:2 card, with the card as the chart frame. Three cycles read as
+  handwriting ("W") or a heartbeat, and a thin top strip read as a lid.
+- **Round 7 (85-94):** one grid, set out in `chart7()`. The card is 696 px wide (0.68 of the tile), corner radius
+  0.09 W, stroke s = 72. The start cap sits on the 100 % line, 1 s of card in from the left edge, followed by a
+  plateau of 1 s before each decay. There are two cycles (1 : 2) with lows at 40 % and 70 %. The second decay
+  leaves through the right edge while still falling (no swoosh), and inner corners are rounded to s / 2.
+- **Round 7b (93-94):** 93 adds one margin rule: 1 s of card left, above the 100 % line and below the lowest low.
+
+`design-review.py --mode flat` gates the size: knocked-out lines under about 72 px close at 29 px.
+
+Critic's final ranking: 85, 88, 87. 93 is 85 with the critic's margin fix: it passes 0 of 12 failures and leads
+the shortlist. Shortlist order: 93, 85, 87, 88, 81, 75. 93 exists in ink, dark, forest and tinted. 75, 81, 85, 87
+and 88 exist in ink, dark and forest.
