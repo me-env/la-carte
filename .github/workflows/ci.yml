@@ -1,8 +1,11 @@
 name: CI
 # Pipeline map, gates and timings: docs/ci-cd.md.
 #   pull_request            API + API image + iOS unit + UI smoke (≈10 min)
-#   push to main            API + API image → Deploy API; iOS unit; UI build once → full UI suite (4 shards) + E2E
-#   nightly, manual run     same as push to main (manual run on main also re-tries the deploy)
+#   push to main            API + API image + E2E → Deploy API; iOS unit; UI build once → full UI suite (4 shards) + E2E
+#   nightly, manual run     everything, same as a push to main (manual run on main also re-tries the deploy)
+# Path filters (job "changes", ci/changes.sh): PRs and pushes run only what their changes need. docs-only: nothing;
+# api-only: API jobs (+ on main: UI build, E2E, deploy), no iOS unit or UI shards. A push compares with the last green
+# run of main, so commits whose runs were cancelled are still covered.
 
 on:
   pull_request:
@@ -18,7 +21,9 @@ permissions:
 concurrency:
   # Nightly runs get their own group, so they never replace a pending push run (and its deploy).
   group: ci-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
-  # PRs: a new push cancels the old run. main: runs queue, so a deploy is never cut off mid-way.
+  # PRs: a new push cancels the old run. main: a running run is never cut off (nor its deploy); GitHub keeps one
+  # pending run per group, so a newer push replaces the waiting one. The waiting run is always the newest commit,
+  # and ci/changes.sh diffs it against the last green run, so it tests every skipped commit's changes too.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -29,8 +34,30 @@ env:
   BUILD_SLOTS: 1
 
 jobs:
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read  # ci/changes.sh: the last green run of main
+    outputs:
+      api: ${{ steps.diff.outputs.api }}
+      app: ${{ steps.diff.outputs.app }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          fetch-depth: 0  # diff against an older commit
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: ci/changes.sh >> "$GITHUB_OUTPUT"
+
   api:
     name: API (ruff + pytest)
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
@@ -39,6 +66,8 @@ jobs:
 
   api-image:
     name: API (docker build)
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
@@ -52,7 +81,8 @@ jobs:
 
   deploy-api:
     name: Deploy API (Dokploy)
-    needs: [api, api-image]
+    # E2E runs the app against this commit's API: an API change deploys only once it passes too.
+    needs: [api, api-image, ios-e2e]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     environment: api-prod  # holds the Dokploy key + live URL secrets; deployment branches: main only
@@ -78,6 +108,8 @@ jobs:
 
   ios-unit:
     name: iOS unit tests
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -89,7 +121,8 @@ jobs:
 
   ios-ui-smoke:
     name: iOS UI smoke (light)
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.app == 'true'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
@@ -128,7 +161,8 @@ jobs:
 
   ios-ui-build:
     name: iOS UI build (once, for all UI jobs)
-    if: github.event_name != 'pull_request'
+    needs: changes
+    if: github.event_name != 'pull_request' && (needs.changes.outputs.app == 'true' || needs.changes.outputs.api == 'true')
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -149,7 +183,8 @@ jobs:
 
   ios-ui:
     name: iOS UI (${{ matrix.shard.name }})
-    needs: ios-ui-build
+    needs: [changes, ios-ui-build]
+    if: needs.changes.outputs.app == 'true'  # api-only changes: E2E only
     runs-on: macos-26
     strategy:
       fail-fast: false

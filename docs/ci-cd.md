@@ -5,6 +5,9 @@ Owner: `cicd-lead` agent. Workflows: `.github/workflows/ci.yml` (every push/PR/n
 
 ## Pipeline map
 
+Every run starts with `What changed` (`ci/changes.sh`, ≈ 10 s), which decides which of the jobs below run
+(see *Path filters*).
+
 ```
 pull_request ──┬─ API (ruff + pytest)          ubuntu   ~1 min
                ├─ API (docker build + /health) ubuntu   ~1 min
@@ -12,20 +15,25 @@ pull_request ──┬─ API (ruff + pytest)          ubuntu   ~1 min
                └─ iOS UI smoke (light, 9 tests) macos-26: simulator boots in the background while the app
                                                 builds, then tests the build      → PR feedback ≈ slowest job
 
-push to main ──┬─ API ──────┐
-               ├─ API image ┴─► Deploy API (Dokploy) → wait → scripts/api-live-check.sh   ~5 min after push
-               ├─ iOS unit tests
+push to main ──┬─ API ───────────────────────────────┐
+               ├─ API image ─────────────────────────┤
+               ├─ iOS unit tests                     ├─► Deploy API (Dokploy) → wait → scripts/api-live-check.sh
                └─ iOS UI build (once: build-for-testing → artifact `ui-products`)
-                    ├─ iOS UI, 4 shards in parallel (light + dark), no build: download, boot, test
-                    │    deck-settings-study │ setup-report-launch │ theme-ratings │ rest
-                    └─ iOS E2E (live API), same build
+                    ├─ iOS E2E (live API), same build ┘    ≈ 25 min after the run starts
+                    └─ iOS UI, 4 shards in parallel (light + dark), no build: download, boot, test
+                         deck-settings-study │ setup-report-launch │ theme-ratings │ rest
 
 nightly 03:00 UTC (schedule) and manual run (workflow_dispatch): same jobs as a push to main.
 The deploy job runs only on push and on a manual run of main.
 ```
 
-Concurrency: on a PR, a new push cancels the old run. On `main`, runs queue instead of cancelling, so a deploy
-is never cut off half-way. The deploy job has its own `deploy-api` group, so deploys never overlap.
+Concurrency: on a PR, a new push cancels the old run. On `main`, a running run is never cancelled (nor its
+deploy), but GitHub keeps only **one pending run per group**: each new push replaces the waiting one. With several
+pushes an hour and a 45 min full run, most commits get no run of their own. That is by design: the waiting run is
+always the newest commit, and its `What changed` diff starts at the last green run of `main`, so it tests the
+changes of every commit in between. One run at a time on `main` also means deploys run one at a time and in commit
+order (the deploy job also has its own `deploy-api` group). A run per commit is not possible: the free plan has
+5 macOS jobs and a full run uses 6.
 The free plan runs at most 5 macOS jobs at once: unit tests + the UI build start together; the 4 shards and E2E
 start when the build ends (unit tests are done by then).
 
@@ -51,6 +59,20 @@ Speed settings (measured 2026-11-22, run 45032373007):
 
 Screenshots: each UI job uploads its own artifact (`screenshots-smoke`, `screenshots-<shard>`, `screenshots-e2e`).
 
+## Path filters
+
+`ci/changes.sh` sorts the changed files (a PR: against its base; a push to `main`: against the newest `main` commit
+with a green CI run; nightly and manual runs: everything):
+
+| Changed | Runs on a PR | Runs on `main` |
+|---|---|---|
+| only `docs/`, `qa/`, `marketing/`, `.claude/`, `*.md`, `LICENSE`, `.gitignore`, `adhoc.yml`, `ui-only.yml` | `What changed` only | `What changed` only (no deploy) |
+| also `api/`, `docker-compose.yml`, `scripts/api-*` | API + API image | API + API image, UI build + E2E, then deploy |
+| anything else (`ios/`, other `scripts/`, `ci/`, `ci.yml`, …) | everything (unit + API + smoke) | everything |
+
+Unknown paths run everything, so a new top-level file is tested until it is added to a list. A red or cancelled
+run never becomes a base, so its changes are tested again by the next run.
+
 ## Run one test class on CI
 
 For a test that fails only on CI: *Actions → UI tests (selected) → Run workflow*, or
@@ -68,8 +90,8 @@ every test's recording (`recordings/`) and the runner output (`logs/`). No deplo
 
 | What | Gated by | Not gated by |
 |---|---|---|
-| API deploy | `API (ruff + pytest)` and `API (docker build)` green on that exact commit, which is also the head of `main` | iOS jobs (the app ships separately, via `adhoc.yml`) |
-| PR merge | every job of the PR run (unit + API + smoke) | the full UI suite (it runs on `main` and nightly) |
+| API deploy | `API (ruff + pytest)`, `API (docker build)` and `iOS E2E (live API)` green on that exact commit, which is also the head of `main`; only when the API changed since the last green run | iOS unit tests and UI shards (the app ships separately, via `adhoc.yml`) |
+| PR merge | every job of the PR run that its changes need (unit + API + smoke) | the full UI suite (it runs on `main` and nightly) |
 
 **Smoke set** (in `ci.yml`, job `ios-ui-smoke`): core study, deck, settings/setup and refresh flows in light
 mode. `qa-validator` owns the list. Keep it under about 10 tests and pick tests that are not flaky.
@@ -99,7 +121,7 @@ Dokploy's auto-deploy is **off** for the API compose service. The job `deploy-ap
 Why the API and not the per-service webhook: Dokploy's webhook (`/api/deploy/compose/<token>`) refuses
 requests when auto-deploy is off and expects a git-provider push payload.
 
-Retry a failed deploy: *Actions → CI → Run workflow* on `main` (it re-runs the API jobs, then deploys).
+Retry a failed deploy: *Actions → CI → Run workflow* on `main` (it runs everything, then deploys after E2E).
 
 ### One-time setup (manager)
 
@@ -132,7 +154,13 @@ in `deploy.md` → Backups.
 |---|---|---|
 | PR | unit 13 min; smoke ≈ 15 min build + boot + tests | unit 9.3–10.5 min; smoke ≈ 7 min build (boot overlapped) + tests: to be measured on the next PR |
 | push to main, iOS | 43 min (4 shards of 27–32 min: boot 3–4.5, build ≈ 15, tests 8–10; E2E after unit, 30 min). 8 classes (≈ 50 tests) never ran | UI build 6.8 min once; shards (download 2.3 + boot wait ≈ 1–3 + tests 16–20) 21–27 min, E2E 13.9 min (done at +21); iOS done at ≈ +38 min with all classes (≈ 95 mock tests instead of 45) |
-| API live after push to main | ~5 min, only after API tests pass | unchanged |
+| API live after push to main | ~5 min, only after API tests pass | ≈ 25 min after the run starts: also gated on E2E (2026-11-22, path filters) |
+
+Path filters (2026-11-22): before, 15 of the 18 pushes to `main` between 18:06 and 20:42 UTC were cancelled while
+waiting, and the last full run (45058790864) waited 40 min for the slot, then took 45 min.
+Of the 136 commits on 2026-11-22, 36 were docs-only (now ≈ 1 min), 7 API-only (≈ 25 min: UI build + E2E, no
+shards or unit) and 93 touched the app (full run). A waiting run covers the union since the last green run, so
+most runs stay full: the filters mainly stop docs pushes from holding the slot; the real cost is the 45 min full run.
 
 Before: every UI job built the app itself at `-jobs 1`. Test steps have timeouts (shard 40, E2E 30, smoke 20 min;
 unit and build jobs 30): a hung test held a shard for over 50 min (and main's run queue behind it).
