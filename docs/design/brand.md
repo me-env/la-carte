@@ -42,6 +42,11 @@ Never use a bitmap.
 | accent | `#B8325A` | `#ED6E8C` | `#ED6E8C` | Pink, very small amounts (below) |
 | accentOnInk | `#ED6E8C` | `#B8325A` | `#B8325A` | The logo's word only |
 
+**Brand colour rule (user, 2026-11-22):** la-carte's standout colour is the pink accent, nothing else. The default
+icon and every hero/marketing visual is ink + pink on light; the dark variant is light ink + pink on dark. Forest is
+an app theme only: it may have its own themed render (the icon's forest variant, a forest screenshot), but it is
+never the hero, the default, or a brand colour next to the pink.
+
 The accent pink is `#ED6E8C`; its darker text
 shade `#B8325A`. **Very small amounts:** in the app it's limited to the logo's word, the text cursor/selection, the
 widget's streak number and Study's count (`docs/design-system.md`). In marketing: the logo's word, and at most one

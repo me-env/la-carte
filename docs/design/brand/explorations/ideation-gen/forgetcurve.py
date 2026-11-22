@@ -1164,6 +1164,7 @@ def side_split(cw=500.0, ratio=1.5, entry=0.26, w1=150.0, d1=0.44, k1=3.6, insid
                 bot = d1 * ch + sw / 2
                 bar = card(x0_, -sw / 2, x1_, bot, bar_r).union(card(x0_, (bot - sw / 2) / 2, x1_ - bar_r, bot, sw / 2))
             line = line.union(bar)
+        build.parts = {"card": c, "line": line, "pts": pts}  # for accent treatments (accent131.py)
         return c.symmetric_difference(line)
 
     return build

@@ -403,3 +403,24 @@ Rounds 8-9 were about 1.8:1 wide. Round 10 fits the ink bounding box to about 1:
 | 4 | 129 | 801 x 700 | 1.14 | "$"/"S" at 29 px (the decay 2 stub plus the hook) |
 
 Shortlist order: 130, 131, 135, 129. All four exist in ink, dark, forest and tinted.
+
+### Accent on 131: round 11 (user picked 131: "it might lack some colour or a thin line that makes it stand out")
+
+`accent131.py` writes `accent131/accent-N-<light|dark|forest|tinted>.svg`. The geometry is 131 unchanged (#0). Only
+the app's pink is used (`Theme.accent` #B8325A on light grounds, `accentOnInk` #ED6E8C on ink, the reverse in dark;
+see the brand colour rule in `docs/design/brand.md`). Forest is a theme render only. In tinted, the pink becomes grey.
+The treatments:
+- 1: the line outside the card
+- 2: the line inside the card
+- 3: the whole line
+- 4: the reset bar, two pinks
+- 5: decay 2's end
+- 6: a 26 px hairline in the card
+- 7: an echo line
+- 8: a pink card
+- 9: a pink tile
+- 10: the reset bar in one pink
+
+6 and 7 are large-size only (0.7 px at 29 px). 2 fades at 29 px (pink on ink), and so does 5's pink end
+(`design-review.py --mode flat` FAIL). The critic's ranking: 1, 4, 5, 9 (0 as the control). 10 was added for the
+two-tone seam in 4. 2, 3, 6, 7 and 8 were dropped. Shortlist: 0, 1, 4, 10, 5, 9.
