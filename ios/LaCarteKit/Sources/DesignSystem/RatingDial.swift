@@ -1,18 +1,5 @@
 import SwiftUI
 
-/// The dial around the finger during a rating drag (spec 019): 96 dots whose order is the grade. Toward "Got it" /
-/// "Easy" they settle into three rings, evenly spaced along each ring, all one size (fully ordered at Easy); toward
-/// "Hard" / "Forgot" they scatter, with varied sizes (fully scattered at Forgot). The scatter is seeded per dot, so it
-/// never flickers, and follows `value` continuously with no animation of its own. Once a grade is reached the dots
-/// turn ink and pulse once. Each outer grade has its own cue on top (2026-11-22): Easy links the dots of each ring
-/// into three closed chains (grown in only past the Got it → Easy midpoint, so Got it never shows a line), Forgot
-/// turns a fifth of its dots pink (the accent; Hard stays ink). Drawn in a `Canvas`: one stroked path, one filled
-/// path, at most 20 pink fills.
-///
-/// Released on a positive grade (`release`), the dial plays its reward over the next card, which is already fading
-/// in: Got it settles into the rings and fades (0.5 s, success haptic); Easy settles, a ripple runs out through the
-/// rings and it fades a little larger (0.6 s, success haptic and a second beat). Reduce Motion: a 0.15 s fade and the
-/// haptics, nothing moves. It never takes touches; the caller removes it after `Release.duration`.
 /// The rating drag's grade bands on the ease (0 = full Forgot side, 0.5 = touch-down, 1 = full Easy side; spec 011):
 /// the one place they live, so `StudyFeature.rating(forEase:)`, the dial's looks and its cues always agree.
 /// Forgot at or below `forgot`, Hard at or below `hard`, nothing below `gotIt`, Got it below `easy`, Easy from it.
@@ -23,6 +10,20 @@ public enum RatingBands {
   public static let easy = 0.97
 }
 
+/// The dial around the finger during a rating drag (spec 019): 96 dots whose order is the grade. Toward "Got it" /
+/// "Easy" they settle into three rings, evenly spaced along each ring, all one size (fully ordered at Easy); toward
+/// "Hard" / "Forgot" they scatter, with varied sizes (fully scattered at Forgot). The scatter is seeded per dot, so it
+/// never flickers, and follows `value` continuously with no animation of its own. Once a grade is reached the dots
+/// turn ink and pulse once. Each outer grade has its own cue on top (2026-11-22): Easy links the dots of each ring
+/// into three closed chains (grown in late, past the Got it → Easy midpoint, from both dots' edges; the two halves
+/// of every link stay `RatingDialLayout.linkGap` apart until Easy, where they click shut, so no chain ever looks
+/// closed on a Got it), Forgot turns a fifth of its dots pink (the accent; Hard stays ink). Drawn in a `Canvas`: one
+/// stroked path, one filled path, at most 20 pink fills.
+///
+/// Released on a positive grade (`release`), the dial plays its reward over the next card, which is already fading
+/// in: Got it settles into the rings and fades (0.5 s, success haptic); Easy settles, a ripple runs out through the
+/// rings and it fades a little larger (0.6 s, success haptic and a second beat). Reduce Motion: a 0.15 s fade and the
+/// haptics, nothing moves. It never takes touches; the caller removes it after `Release.duration`.
 public struct RatingDial: View {
   /// The reward a positive release earns.
   public enum Release: Equatable, Sendable {
@@ -99,12 +100,13 @@ public struct RatingDial: View {
           return CGRect(x: point(i).x - d / 2, y: point(i).y - d / 2, width: d, height: d)
         }
         // Links first, under the dots: each grows out of both dots' edges toward its middle, fading in as it grows.
-        func grow(_ path: inout Path, from i: Int, to j: Int, _ grown: CGFloat) {
+        func grow(_ path: inout Path, from i: Int, to j: Int) {
           let (a, b) = (point(i), point(j))
           let length = max(hypot(b.x - a.x, b.y - a.y), 0.001)
           let (ux, uy) = ((b.x - a.x) / length, (b.y - a.y) / length)
           let edge = min(placed[i].diameter / 2, length / 2)
-          let tip = edge + grown * (length / 2 - edge)
+          let tip = RatingDialLayout.linkReach(
+            length: length, edge: placed[i].diameter / 2, grown: CGFloat(layout.links), joined: layout.linksJoined)
           path.move(to: CGPoint(x: a.x + ux * edge, y: a.y + uy * edge))
           path.addLine(to: CGPoint(x: a.x + ux * tip, y: a.y + uy * tip))
         }
@@ -112,8 +114,8 @@ public struct RatingDial: View {
         if layout.links > 0 {
           var path = Path()
           for (i, j) in RatingDialLayout.ringLinks {
-            grow(&path, from: i, to: j, CGFloat(layout.links))
-            grow(&path, from: j, to: i, CGFloat(layout.links))
+            grow(&path, from: i, to: j)
+            grow(&path, from: j, to: i)
           }
           context.stroke(path, with: .color(color.opacity(Self.linkOpacity * layout.links)), lineWidth: Self.linkWidth)
         }
@@ -269,6 +271,8 @@ struct RatingDialLayout: Equatable {
   /// Easy's links (every pair of neighbours along each ring), 0 ... 1: none up to `linkStart`, then grown in to
   /// complete chains at Easy's bin edge, then held.
   var links: Double
+  /// Whether the links' halves meet: only from Easy's bin edge on; short of it they stop `linkGap` apart.
+  var linksJoined: Bool
   var dots: [Dot]
 
   /// The dots that turn pink toward Forgot (about a fifth, never the tiniest: a pink speck reads as noise), seeded
@@ -297,6 +301,21 @@ struct RatingDialLayout: Equatable {
   /// Where Easy's links start, as a fraction of the drag from Got it's bin edge to Easy's: past the midpoint, so
   /// Got it, and anything short of clearly heading to Easy, shows no line at all (user, 2026-11-22).
   static let linkStart = 0.6
+
+  /// The space left between a link's two halves anywhere short of Easy, in points: with 1 pt butt-capped lines and
+  /// antialiasing that still reads as a clear break (≥ 1.5 pt), so a chain never looks closed on a Got it (user,
+  /// 2026-11-22: lines may appear in Got it "as long as they are not connected").
+  static let linkGap: CGFloat = 3
+
+  /// How far one half of a link reaches from its dot's centre toward the other dot, `length` away: from the dot's
+  /// `edge`, `grown` (0 ... 1) of the way to its stop, `linkGap / 2` short of the middle, or the middle once `joined`.
+  /// Growing to the stop rather than capping keeps the growth gradual to the end; Easy closes the last
+  /// `linkGap` at once, the click into the chain.
+  static func linkReach(length: CGFloat, edge: CGFloat, grown: CGFloat, joined: Bool) -> CGFloat {
+    let edge = min(edge, length / 2)
+    let stop = joined ? length / 2 : max(length / 2 - linkGap / 2, edge)
+    return edge + grown * (stop - edge)
+  }
 
   /// Half the frame: the outer ring plus the furthest drift, the release ripple (6 pt) and the largest grown dot.
   static func extent(radius: CGFloat) -> CGFloat {
@@ -392,11 +411,12 @@ struct RatingDialLayout: Equatable {
     let disorder = p < 1 ? hold(Self.rest, near, p) : hold(near, far, p - 1)
     self.disorder = disorder
     // Forgot's pink rides the disorder ramp, so it arrives exactly with Forgot's look. Easy's links start late
-    // (`linkStart` of the way from Got it to Easy) and ease in and out (smoothstep), so they neither pop in nor
-    // snap shut, complete at Easy's bin edge.
+    // (`linkStart` of the way from Got it to Easy) and ease in and out (smoothstep), so they don't pop in; they
+    // stay open by `linkGap` until Easy's bin edge, where they click shut (`linkReach`).
     blush = positive ? 0 : unit((disorder - Self.hard) / (Self.forgot - Self.hard))
     let x = positive ? unit((p - 1 - Self.linkStart) / (1 - Self.linkStart)) : 0
     links = x * x * (3 - 2 * x)
+    linksJoined = value >= bands.easy
     let c = CGFloat(disorder * (1 - settle)), k = radius / Self.referenceRadius
     let blend = (0..<Self.count).map { i in
       let a = Self.latticePoint(i), b = Self.scatter[i]

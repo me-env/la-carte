@@ -78,9 +78,15 @@ The held drag must say, at a glance, **which grade a release gives and when a th
        Easy's (1), read off the shared bands (`RatingBands` in `DesignSystem`, which `StudyFeature.rating(forEase:)`
        also uses). So **zero links up to 60 % of the way** from Got it to Easy (past the midpoint: Got it and
        anything short of clearly heading to Easy show no line), then every link between neighbours on a ring grows
-       in together, eased in and out (no pop when they start, no snap when they close), to **three closed chains
-       exactly at Easy's bin edge**. 1 pt lines in the dots' colour, opacity `0.6 × links`, growing out of both
-       dots' edges to meet in the middle, under the dots: Easy = three closed, perfect circles. Why not links
+       in together, eased in and out (no pop when they start), to **three closed chains exactly at Easy's bin
+       edge**. 1 pt lines in the dots' colour, opacity `0.6 × links`, growing out of both dots' edges toward the
+       middle, under the dots: Easy = three closed, perfect circles.
+       **Rule (user, 2026-11-22: lines may appear while still in Got it "as long as they are not connected")**: at
+       every ease below `RatingBands.easy`, the two halves of every link stop `linkGap` = 3 pt apart (a clear
+       ≥ 1.5 pt break once caps and antialiasing are counted); each half grows toward that stop, not toward the
+       middle, so the growth stays gradual. Only at Easy's bin edge do they join: the last 3 pt close at once, the
+       click into the chain. No link ever looks closed while the release is still Got it (`linkReach`, tested in
+       `RatingDialTests.linksStayOpenUntilEasy`). Why not links
        across rings: with 29 / 32 / 35 dots (even pitch, user's request) no cross-ring mesh is regular
        (nearest-neighbour links measured 1.8–49° tilt, 9.7–14 pt, 1–3 per dot).
      - On release the cues stay as held (the settle doesn't grow Easy's links on a Got it release).

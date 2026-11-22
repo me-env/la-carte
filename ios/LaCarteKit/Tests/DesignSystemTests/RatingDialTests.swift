@@ -252,6 +252,32 @@ struct RatingDialCueTests {
     for value in [easy, (easy + 1) / 2, 1] { #expect(Layout(value: value).links == 1, "value \(value)") }
   }
 
+  /// Lines may show in Got it, never connected (user, 2026-11-22): at every ease short of Easy the two halves of every
+  /// link stop a clear break apart (≥ 1.5 pt once 1 pt butt caps' antialiasing, half a point each side, eats into
+  /// it); from Easy's bin edge on, every link is closed.
+  @Test func linksStayOpenUntilEasy() {
+    let (gotIt, easy) = (RatingBands.gotIt, RatingBands.easy)
+    let values = (0...400).map { gotIt + (easy - gotIt) * Double($0) / 400 }.filter { $0 < easy }
+      + [easy.nextDown, easy - 1e-6, easy, (easy + 1) / 2, 1]
+    for value in values {
+      let layout = Layout(value: value)
+      let dots = layout.dots
+      var smallest = CGFloat.infinity
+      for (i, j) in Layout.ringLinks {
+        let length = hypot(dots[j].x - dots[i].x, dots[j].y - dots[i].y)
+        func reach(_ k: Int) -> CGFloat {
+          Layout.linkReach(length: length, edge: dots[k].diameter / 2, grown: layout.links, joined: layout.linksJoined)
+        }
+        smallest = min(smallest, length - reach(i) - reach(j))
+      }
+      if value < easy {
+        #expect(smallest - 1 >= 1.5, "value \(value): gap \(smallest)")
+      } else {
+        #expect(abs(smallest) < 1e-9, "value \(value): gap \(smallest)")
+      }
+    }
+  }
+
   /// No pop: every cue moves by at most a small step per 0.005 of value, and never backs off toward its grade; the
   /// links grow strictly from their start to Easy.
   @Test func theCuesFollowTheDragContinuously() {
