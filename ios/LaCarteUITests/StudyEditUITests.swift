@@ -345,10 +345,12 @@ final class StudyEditUITests: XCTestCase {
   func testStudyEdit_swipeDownOnScrollingCardCommits() throws {
     XCUIDevice.shared.appearance = .light
     let front = "Which treaty, signed in 1648, ended the Thirty Years' War?"
-    let back = String(repeating: "Spaced repetition schedules each review just before you would forget. ", count: 14)
+    let back = String(repeating: "Spaced repetition schedules each review just before you would forget. ", count: 20)
       .trimmingCharacters(in: .whitespaces)
     let (server, deck) = try startStub(front: front, back: back)
-    let app = launch(api: .live(server.url))
+    // English-only language list: a simulator's default list (th, vi, ar…) raises the line height, CI's doesn't
+    // (RatingsUITests.longCardArguments), so the card must overflow at the shorter CI line height.
+    let app = launch(api: .live(server.url), arguments: ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"])
     reveal(app, front: front, back: back)
     let rateTop = el(app, "study.rate.good").frame.minY
     XCTAssertGreaterThan(el(app, "study.back").frame.maxY, rateTop, "card does not overflow: \(el(app, "study.back").frame)")
@@ -369,8 +371,9 @@ final class StudyEditUITests: XCTestCase {
     let origin = window.coordinate(withNormalizedOffset: .zero)
     origin.withOffset(CGVector(dx: 201, dy: startY))
       .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 201, dy: startY - 120)))
-    Thread.sleep(forTimeInterval: 1)
-    note("QA tap-away: after an upward drag on the answer, field exists=\(field.exists) focused=\(hasFocus(field)) "
+    // The edit may end a moment after the drag (keyboard dismissal): give it time before reading the field.
+    _ = poll(timeout: 2) { !field.exists }
+    note("QA tap-away: after an upward drag on the answer, field exists=\(field.exists) focused=\(field.exists && hasFocus(field)) "
          + "keyboard=\(app.keyboards.firstMatch.exists)")
     if !field.exists {
       // The upward drag ended the edit: restart it for the downward swipe.
@@ -405,7 +408,7 @@ final class StudyEditUITests: XCTestCase {
 
     func assertStillEditing(_ what: String) {
       Thread.sleep(forTimeInterval: 1)
-      note("QA tap-away: after \(what): field exists=\(field.exists) focused=\(hasFocus(field)) "
+      note("QA tap-away: after \(what): field exists=\(field.exists) focused=\(field.exists && hasFocus(field)) "
            + "keyboard=\(app.keyboards.firstMatch.exists)")
       if !field.exists || !hasFocus(field) { snapshot("study-edit-drag-ended-\(what)", appearance: .light) }
       XCTAssertTrue(field.exists, "\(what) ended the edit")
