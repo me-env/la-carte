@@ -12,7 +12,7 @@ import Testing
 struct StudyReleaseTimingTests {
   let cards = [Card].fixtures
 
-  @Test(arguments: [(0.13, Rating.good), (0.22, .easy)])
+  @Test(arguments: [(0.13, Rating.good), (0.24, .easy)])
   func thePositiveRewardNeverDelaysTheNextCard(fraction: Double, rating: Rating) async {
     let clock = TestClock()
     var state = StudyFeature.State()

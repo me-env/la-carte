@@ -943,8 +943,8 @@ struct StudyFeatureTests {
 
   @Test func easeIsQuantizedIntoFourGradesAndADeadZone() {
     let expected: [(Double, Rating?)] = [
-      (0, .again), (0.125, .again), (0.126, .hard), (0.35, .hard), (0.351, nil), (0.5, nil), (0.649, nil),
-      (0.65, .good), (0.874, .good), (0.875, .easy), (1, .easy),
+      (0, .again), (0.03, .again), (0.031, .hard), (0.35, .hard), (0.351, nil), (0.5, nil), (0.649, nil),
+      (0.65, .good), (0.969, .good), (0.97, .easy), (1, .easy),
     ]
     for (ease, rating) in expected {
       #expect(StudyFeature.rating(forEase: ease) == rating, "v = \(ease)")
@@ -958,16 +958,16 @@ struct StudyFeatureTests {
       $0.swipeEase = StudyFeature.ease(forSwipe: 0.13)
     }
     #expect(store.state.swipeRating == .good)
-    await store.send(.swipeChanged(fraction: 0.22)) {
-      $0.swipeEase = StudyFeature.ease(forSwipe: 0.22)
+    await store.send(.swipeChanged(fraction: 0.24)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: 0.24)
     }
     #expect(store.state.swipeRating == .easy)
     await store.send(.swipeChanged(fraction: -0.13)) {
       $0.swipeEase = StudyFeature.ease(forSwipe: -0.13)
     }
     #expect(store.state.swipeRating == .hard)
-    await store.send(.swipeChanged(fraction: -0.22)) {
-      $0.swipeEase = StudyFeature.ease(forSwipe: -0.22)
+    await store.send(.swipeChanged(fraction: -0.24)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: -0.24)
     }
     #expect(store.state.swipeRating == .again)
     await store.send(.swipeChanged(fraction: 0.04)) {
@@ -976,7 +976,7 @@ struct StudyFeatureTests {
     #expect(store.state.swipeRating == nil)
   }
 
-  @Test(arguments: [(0.13, Rating.good), (0.22, .easy), (-0.13, .hard), (-0.22, .again)])
+  @Test(arguments: [(0.13, Rating.good), (0.24, .easy), (-0.13, .hard), (-0.24, .again)])
   func releasingReviewsWithTheQuantizedGrade(fraction: Double, rating: Rating) async {
     let reviewed = LockIsolated<[(Card.ID, Rating)]>([])
     let store = TestStore(initialState: revealed(cards)) {
@@ -1015,8 +1015,8 @@ struct StudyFeatureTests {
     await store.send(.swipeEnded(fraction: 0.04)) {
       $0.swipeEase = nil
     }
-    await store.send(.swipeChanged(fraction: 0.22)) {
-      $0.swipeEase = StudyFeature.ease(forSwipe: 0.22)
+    await store.send(.swipeChanged(fraction: 0.24)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: 0.24)
     }
     await store.send(.swipeChanged(fraction: 0)) {
       $0.swipeEase = 0.5
@@ -1029,8 +1029,8 @@ struct StudyFeatureTests {
   @Test func draggingAnUnrevealedCardDoesNothing() async {
     let store = TestStore(initialState: studying(cards)) { StudyFeature() }
 
-    await store.send(.swipeChanged(fraction: 0.22))
-    await store.send(.swipeEnded(fraction: 0.22))
+    await store.send(.swipeChanged(fraction: 0.24))
+    await store.send(.swipeEnded(fraction: 0.24))
   }
 
   @Test func draggingWhileEditingDoesNothing() async {
@@ -1039,8 +1039,8 @@ struct StudyFeatureTests {
     state.draft = cards[0].back
     let store = TestStore(initialState: state) { StudyFeature() }
 
-    await store.send(.swipeChanged(fraction: 0.22))
-    await store.send(.swipeEnded(fraction: 0.22))
+    await store.send(.swipeChanged(fraction: 0.24))
+    await store.send(.swipeEnded(fraction: 0.24))
   }
 
   @Test func draggingWhileAReviewIsInFlightDoesNothing() async {
@@ -1048,8 +1048,8 @@ struct StudyFeatureTests {
     state.isReviewing = true
     let store = TestStore(initialState: state) { StudyFeature() }
 
-    await store.send(.swipeChanged(fraction: -0.22))
-    await store.send(.swipeEnded(fraction: -0.22))
+    await store.send(.swipeChanged(fraction: -0.24))
+    await store.send(.swipeEnded(fraction: -0.24))
   }
 
   @Test func aFailedDragReviewRetriesToTheSameRevealedCardWithoutARing() async {
@@ -1143,7 +1143,7 @@ struct StudyFeatureTests {
     state.phase = .offline
     let store = TestStore(initialState: state) { StudyFeature() }
 
-    await store.send(.swipeEnded(fraction: 0.22)) {
+    await store.send(.swipeEnded(fraction: 0.24)) {
       $0.swipeEase = nil
     }
   }

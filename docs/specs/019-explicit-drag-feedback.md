@@ -16,9 +16,25 @@ The held drag must say, at a glance, **which grade a release gives and when a th
 1. **Direction: a projection on the up-right diagonal.** With the pan translation `(dx, dy)` in screen points
    (y down) and `d = √(dx² + dy²)`: `p = clamp(dx − dy, −d, d)`. Right, up and up-right all give `p = d`; left,
    down and down-left give `−d`; up-left and down-right give ~0. The fraction sent to the reducer is
-   `f = p / cardWidth`; `ease(forSwipe:)`, the bins and the haptics are unchanged (so 100 % = `p = R`, R = 0.25 ×
+   `f = p / cardWidth`; `ease(forSwipe:)` and the haptics are unchanged, the bins are amended below (so 100 % = `p = R`, R = 0.25 ×
    card width, 92 pt on iPhone 17 Pro). Why this formula: the three positive directions feel the same distance,
    and the ambiguous diagonals cancel instead of guessing.
+
+   **Bands, amended 2026-11-22 per user: wider middle grades** ("the extremes are easy to hit with a big swipe,
+   but Hard and Got it are hard to aim for"). They replace 011's bin table; the edges live once, in `RatingBands`
+   (DesignSystem), read by `StudyFeature.rating(forEase:)`, the dial, its cues and the release reward:
+
+   | `v` (ease) | `m` | Distance (iPhone 17 Pro, R = 92 pt) | Rating on release |
+   |---|---|---|---|
+   | `v <= 0.03` | `>= 0.94`, negative | 86.5 pt or more | `again` (Forgot) |
+   | `0.03 < v <= 0.35` | 0.3 to 0.94, negative | 28 to 86.5 pt | `hard` |
+   | `0.35 < v < 0.65` | `< 0.3` | under 28 pt | nothing (cancel) |
+   | `0.65 <= v < 0.97` | 0.3 to 0.94, positive | 28 to 86.5 pt | `good` (Got it) |
+   | `v >= 0.97` | `>= 0.94`, positive | 86.5 pt or more | `easy` |
+
+   Was 0.125 / 0.35 / 0.65 / 0.875 (extremes from `m = 0.75`). Hard and Got it now run from the dead zone to just
+   inside the ring (0.3 R to 0.94 R, 59 pt wide instead of 41, +42 %); Forgot and Easy start just inside the ring,
+   so a finger landing on the ring counts, and still have no outer limit.
 2. **When the pan begins** (`gestureRecognizerShouldBegin`): any first direction **when the card's content fits**
    (018 removed pull-to-refresh, and a fitting card doesn't scroll). When the content **scrolls** (long card), a
    first movement within **30°** of vertical (`|dx| < 0.58·|dy|`) is left to the scroll view; anything else begins
@@ -35,9 +51,9 @@ The held drag must say, at a glance, **which grade a release gives and when a th
      dots"). Dot `j` of a ring of `n` sits at `(j + φ) × 360° / n` from 12 o'clock, `φ` = 0 / ½ / 0 (inner / middle /
      outer): the top is staggered, not a spoke, and the ordered dial is mirror-symmetric; ordered dot **4.5 pt**.
    - **Disorder** `c` (0 = ordered, 1 = scattered), one look per grade: **Forgot 1 · Hard 0.45 · rest 0.3 ·
-     Got it 0.2 · Easy 0**. Each stretch (dead zone `m < 0.3`; first grade `0.3 ≤ m < 0.75`) **holds its own value
+     Got it 0.2 · Easy 0**. Each stretch (dead zone `m < 0.3`; first grade `0.3 ≤ m < 0.94`) **holds its own value
      for the first 70 % of its travel**, then ramps linearly to the next grade's value at the bin edge, so a grade
-     reads as itself, not a blend; clamped beyond `m = 0.75`. The fully scattered layout (Forgot) is computed once
+     reads as itself, not a blend; clamped beyond `m = 0.94`. The fully scattered layout (Forgot) is computed once
      and is **deterministic** (SplitMix64 seeded by dot index, so it never flickers): angle drift `±1` pitch of its ring,
      radial drift `±15 %` of radius, size `0.6…1.8 ×` (squared, so most scattered dots are small, a few large),
      then pushed apart (80 passes) until **no two dots' edges are closer than 8 pt** and kept in the band, so the
@@ -114,14 +130,14 @@ The held drag must say, at a glance, **which grade a release gives and when a th
 | 1 | `StudyFeature.swipeFraction(translation:cardWidth:)` returns `clamp(dx − dy, −d, d) / width`: for width 370, (+46, 0), (0, −46), (+32.5, −32.5) → +0.124…+0.125; (−46, 0), (0, +46), (−32.5, +32.5) → −0.124…−0.125; (−40, −40) and (+40, +40) → 0; (+200, 0) → 0.54 (ease clamps); width 0 → 0 | unit |
 | 2 | Through `ease(forSwipe:)` + `rating(forEase:)`, a drag of 0.13 card width up, right or up-right gives `good`, 0.22 gives `easy`; down, left or down-left gives `hard` / `again`; up-left / down-right at any length give `nil` | unit |
 | 3 | `RatingPan` begin rule (pure function `shouldBegin(velocity:isScrollable:)`): not scrollable → true for every non-zero velocity; scrollable → false for (0, ±100) and (±50, ±100) (within 30° of vertical), true for (±100, 0), (±70, −70), (±60, ±100)… i.e. `|dx| ≥ 0.58·|dy|` | unit |
-| 4 | `RatingDial` layout (pure, `RatingDialLayout(value:radius:)`): 96 dots; at 0.875 and 1.0 disorder 0, every dot exactly on its lattice point (rings of 29 / 32 / 35, equal pitch) and all 4.5 pt; at 0.125 and 0 disorder 1, some dot > 15 pt off the lattice, sizes spread > 3 pt, no two dots' edges closer than 8 pt (and never closer than 1.5 pt at any value, checked every 0.05), no empty sector over 2 pitches, no dot inside 0.66 R; disorder is 1 / 0.45 / 0.3 / 0.2 / 0 at values 0.125 / 0.35 / 0.5 / 0.65 / 0.875, the same at 0.25 / 0.45 / 0.8 (held), and never rises from value 0 to 1; the same value gives the same layout; every dot (pulsed) fits the frame; the stage changes exactly where `rating(forEase:)` changes, checked at every 0.005 of value | unit (DesignSystemTests + one StudyFeatureTests consistency test) |
+| 4 | `RatingDial` layout (pure, `RatingDialLayout(value:radius:)`): 96 dots; at 0.97 and 1.0 disorder 0, every dot exactly on its lattice point (rings of 29 / 32 / 35, equal pitch) and all 4.5 pt; at 0.03 and 0 disorder 1, some dot > 15 pt off the lattice, sizes spread > 3 pt, no two dots' edges closer than 8 pt (and never closer than 1.5 pt at any value, checked every 0.05), no empty sector over 2 pitches, no dot inside 0.66 R; disorder is 1 / 0.45 / 0.3 / 0.2 / 0 at values 0.03 / 0.35 / 0.5 / 0.65 / 0.97, the same at 0.25 / 0.45 / 0.8 (held), and never rises from value 0 to 1; the same value gives the same layout; every dot (pulsed) fits the frame; the stage changes exactly where `rating(forEase:)` changes, checked at every 0.005 of value | unit (DesignSystemTests + one StudyFeatureTests consistency test) |
 | 5 | Held drag (`-studySwipePreview <f>` holds the translation `(f·w, 0)` as today; new `-studySwipePreviewUp <f>` holds `(0, −f·w)`): `study.swipeRing` exists, its accessibility value is the grade ("Got it" +0.13, "Easy" +0.22, "Hard" −0.13, "Forgot" −0.22, "None" +0.04; "Easy" for Up 0.22) | UI (held, screenshots `study-drag-<grade>` light + dark: the scattered and the 60 % dead-zone dots must read on dark) |
 | 6 | Held drag: `study.rate.good`'s label reads "Easy" at +0.22 and "Got it" at +0.13; `study.rate.again`'s label reads "Forgot" at −0.22 and "Hard" at −0.13; at +0.04 the right label reads "Got it"; ids unchanged | UI |
 | 7 | A real drag up (0.22 card width) on a revealed short card sends `easy`; a real drag down (0.22) sends `again`; a drag up-left sends nothing and the card stays revealed | UI (stub body) |
 | 8 | Long card (011 #10 stub): a vertical drag scrolls and shows no ring; a drag starting at 45° up-right shows the ring and rates | UI (stub) |
 | 9 | 011 #6–#9, #11–#14, #17, #19, #20 still pass (release, cancel, unrevealed, editing, double-tap, haptics, VoiceOver actions, live API) | UI + unit (regression) |
 | 10 | Visual: scattered (varied sizes) toward Forgot, ordered (one size) toward Easy, readable at a glance on iPhone 17 Pro light/dark/forest; ink once armed; text fade, row echo, pulse, release scales match "What changes" 3–6; Reduce Motion drops pulse and scales | design-critic (screenshots) + device check |
-| 11 | Release reward (pure, `RatingDialReward` / `RatingDial.Release`): only values ≥ 0.65 earn one (≥ 0.875 burst); each starts at the released layout, settles monotonically to fully ordered by 0.3 s, ends at opacity 0 and scale > 1 at its duration (0.5 / 0.6 s), Easy grows more and lasts longer; Easy's ripple peaks inner → outer and its second beat lands on the outer ring's peak; Got it never pushes rings; no two dots touch at any frame; Reduce Motion: 0.15 s, opacity only. **The next card is never delayed**: with a clock that never advances, a Got it / Easy release still sends the review and shows the next card | unit (DesignSystemTests `RatingDialRewardTests`, StudyFeatureTests `StudyReleaseTimingTests`) + design-critic (frame strip `dial-release-*` from `RenderTests`) + device check (haptics) |
+| 11 | Release reward (pure, `RatingDialReward` / `RatingDial.Release`): only values ≥ 0.65 earn one (≥ 0.97 burst); each starts at the released layout, settles monotonically to fully ordered by 0.3 s, ends at opacity 0 and scale > 1 at its duration (0.5 / 0.6 s), Easy grows more and lasts longer; Easy's ripple peaks inner → outer and its second beat lands on the outer ring's peak; Got it never pushes rings; no two dots touch at any frame; Reduce Motion: 0.15 s, opacity only. **The next card is never delayed**: with a clock that never advances, a Got it / Easy release still sends the review and shows the next card | unit (DesignSystemTests `RatingDialRewardTests`, StudyFeatureTests `StudyReleaseTimingTests`) + design-critic (frame strip `dial-release-*` from `RenderTests`) + device check (haptics) |
 
 ## Accessibility identifiers
 Unchanged: `study.card`, `study.swipeRing` (label "Rating", value = grade or "None"), `study.rate.again`,

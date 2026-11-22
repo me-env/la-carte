@@ -1,6 +1,7 @@
 import APIClient
 import AskAIClient
 import ComposableArchitecture
+import DesignSystem
 import Foundation
 import SwiftUI
 
@@ -177,10 +178,10 @@ public struct StudyFeature {
   /// FSRS takes four grades; the middle band is a dead zone so going back to the start cancels.
   static func rating(forEase ease: Double) -> Rating? {
     switch ease {
-    case ...0.125: .again
-    case ...0.35: .hard
-    case ..<0.65: nil
-    case ..<0.875: .good
+    case ...RatingBands.forgot: .again
+    case ...RatingBands.hard: .hard
+    case ..<RatingBands.gotIt: nil
+    case ..<RatingBands.easy: .good
     default: .easy
     }
   }

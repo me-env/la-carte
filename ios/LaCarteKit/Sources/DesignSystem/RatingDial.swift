@@ -17,10 +17,10 @@ import SwiftUI
 /// the one place they live, so `StudyFeature.rating(forEase:)`, the dial's looks and its cues always agree.
 /// Forgot at or below `forgot`, Hard at or below `hard`, nothing below `gotIt`, Got it below `easy`, Easy from it.
 public enum RatingBands {
-  public static let forgot = 0.125
+  public static let forgot = 0.03
   public static let hard = 0.35
   public static let gotIt = 0.65
-  public static let easy = 0.875
+  public static let easy = 0.97
 }
 
 public struct RatingDial: View {

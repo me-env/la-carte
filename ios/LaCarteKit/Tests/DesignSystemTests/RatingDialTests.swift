@@ -249,7 +249,7 @@ struct RatingDialCueTests {
       let value = Double(step) / 400
       if value < start - 1e-9 { #expect(Layout(value: value).links == 0, "value \(value)") }
     }
-    for value in [easy, 0.95, 1] { #expect(Layout(value: value).links == 1, "value \(value)") }
+    for value in [easy, (easy + 1) / 2, 1] { #expect(Layout(value: value).links == 1, "value \(value)") }
   }
 
   /// No pop: every cue moves by at most a small step per 0.005 of value, and never backs off toward its grade; the
