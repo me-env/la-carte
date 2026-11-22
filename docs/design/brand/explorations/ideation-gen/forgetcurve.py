@@ -1084,6 +1084,230 @@ for _v in (v113, v114, v115, v116):
 VARIANTS += [v113, v114, v115, v116]
 
 
+# ---- round 10 (user: "too horizontal, it must fit a square"; then: "it starts by going down, then goes up in a
+# vertical line. That vertical line should be half in the card, half out."). The mark's bounding box is ~1:1. The
+# line starts on the 100 % peak with a round cap (no lead-in), decay 1 is steep and deep, the reset is vertical and the
+# card's edge splits it: along its width (the card's side runs down the middle of the reset stroke: one half ink, the
+# other inverted) or along its length (the card's top or bottom edge crosses the reset at mid-height). Decay 2 is
+# flatter and shallower. Each variant is fitted with its stroke compensated, so the drawn stroke at 1024 is exact.
+
+def exp_run(x0: float, y0: float, run: float, a: float, l: float, n: int = 128):
+    """y0 + a (1 - e^(-t/l)) for t in (0, run]: decay 2, still falling where it is cut."""
+    import math
+
+    return [(x0 + run * i / n, y0 + a * (1 - math.exp(-run * i / n / l))) for i in range(1, n + 1)]
+
+
+def a_for(drop: float, t: float, l: float) -> float:
+    """The amplitude that makes decay 2 drop `drop` after a run of t."""
+    import math
+
+    return drop / (1 - math.exp(-t / l))
+
+
+def fitted(build, s: float = 84.0, fit: float = 800.0):
+    """Build at stroke s, scale the mark so its longer side is `fit`, and rebuild with the stroke compensated so the
+    stroke at 1024 is exactly s. build(stroke) -> geometry."""
+    k = 1.0
+    for _ in range(4):
+        g = build(s / k)
+        x0, y0, x1, y1 = g.bounds
+        k = fit / max(x1 - x0, y1 - y0)
+    g = affinity.scale(g, k, k, origin=(0, 0))
+    return g
+
+
+def side_split(cw=500.0, ratio=1.5, entry=0.26, w1=150.0, d1=0.44, k1=3.6, inside=70.0, exit_=0.58, l2=260.0,
+               out=40.0, edge="left", rw=1.0, cut1=1.0, bar_r=None):
+    """Reading 1: the card's side edge runs down the middle of the reset stroke.
+    left: decay 1 outside, the reset on the left edge, plateau + decay 2 inside (leaving the right edge by `out`;
+    out < 0 ends the line inside the card, |out| before the edge). rw: the reset bar's width in strokes (> 1 keeps
+    each half at least a stroke's half wide at 29 px).
+    right: decay 1 inside (from `inside` after the left edge), the reset on the right edge, decay 2 outside.
+    cut1 < 1: decay 1 is cut at that share of its exponential run, so it still falls steeply into the reset.
+    bar_r: the bar's corner radius (default: square foot, stroke-round top); both ends rounded when given."""
+    import math
+
+    ch = cw * ratio
+    top = -entry * ch
+    c = card(0, top, cw, top + ch, 0.15 * cw)
+
+    def build(sw):
+        if edge == "left":
+            # with a rounded bar, decay 1 ends one half-stroke inside the bar's outer face: its round end cap then
+            # coincides with the bar's outer foot corner (radius sw / 2), so the outline runs on without a kink
+            xend = (-rw * sw / 2 + sw / 2) if (rw > 1 and bar_r is not None) else 0.0
+            w = xend + w1
+            if cut1 < 1:
+                dd = d1 * ch * (1 - math.exp(-k1)) / (1 - math.exp(-k1 * cut1))
+                pts = [(-w1 + w / cut1 * t, dd * (1 - math.exp(-k1 * t)) / (1 - math.exp(-k1)))
+                       for t in (cut1 * i / 96 for i in range(97))]
+            else:
+                pts = [(-w1, 0.0)] + decay(-w1, 0.0, w, d1 * ch, k1)[1:]
+            pts += [(0.0, 0.0), (inside, 0.0)]
+            t_edge = cw - inside
+            a = a_for((exit_ - entry) * ch, t_edge, l2)
+            pts += exp_run(inside, 0.0, t_edge + out, a, l2)
+        else:
+            x0 = inside
+            pts = [(x0, 0.0)] + decay(x0, 0.0, cw - x0, d1 * ch, k1)[1:] + [(cw, 0.0), (cw + 30, 0.0)]
+            a = a_for((exit_ - entry) * ch, out, l2)
+            pts += exp_run(cw + 30, 0.0, out, a, l2)
+        line = stroke(pts, sw)
+        if rw > 1:  # the reset as a wider bar centred on the card's edge, round ends like the stroke
+            xe = 0.0 if edge == "left" else cw
+            x0_, x1_ = xe - rw * sw / 2, xe + rw * sw / 2  # rounded top (the peak), square foot (the low point)
+            if bar_r is None:
+                bar = card(x0_, -sw / 2, x1_, d1 * ch + sw / 2, sw / 2).union(
+                    box(x0_, d1 * ch / 2, x1_, d1 * ch + sw / 2))
+            else:  # corners rounded like the card, but the outer foot = decay 1's end cap (radius sw / 2)
+                bot = d1 * ch + sw / 2
+                bar = card(x0_, -sw / 2, x1_, bot, bar_r).union(card(x0_, (bot - sw / 2) / 2, x1_ - bar_r, bot, sw / 2))
+            line = line.union(bar)
+        return c.symmetric_difference(line)
+
+    return build
+
+
+def top_split(cw=470.0, ratio=1.45, up=150.0, x1=-150.0, w1=330.0, d1=300.0, k1=3.6, plateau=60.0, w2=330.0,
+              d2=0.30, l2=230.0, bottom=False):
+    """Reading 2: the card's top edge crosses the reset at mid-height. The 100 % line runs `up` above the card; decay 1
+    starts at x1 (left of the card when < 0), dips through the top edge to d1 below the peak (so about d1 - up inside),
+    the reset rises at x1 + w1 back out through the top edge, a plateau above the card, then decay 2 dips into the
+    card again (d2 of the card height below the top edge where it leaves the right edge, w2 after its start).
+    bottom: the card's bottom edge crosses the reset instead (the card sits above, the low point hangs below it)."""
+    ch = cw * ratio
+    if bottom:
+        top = up + d1 / 2 - ch  # the card's bottom edge at the reset's mid-height
+    else:
+        top = up  # the 100 % line at y = 0, the card's top edge `up` below it
+    c = card(0, top, cw, top + ch, 0.15 * cw)
+
+    def build(sw):
+        pts = [(x1, 0.0)] + decay(x1, 0.0, w1, d1, k1)[1:]
+        xr = x1 + w1
+        pts += [(xr, 0.0), (xr + plateau, 0.0)]
+        x0 = xr + plateau
+        exit_y = (top + d2 * ch) if not bottom else top + d2 * ch
+        a = a_for(exit_y, w2, l2)
+        pts += exp_run(x0, 0.0, w2, a, l2)
+        return c.symmetric_difference(stroke(pts, sw))
+
+    return build
+
+
+def v117():  # reading 1: the reset on the card's left edge, decay 1 outside, decay 2 leaves the right edge (2:3)
+    return fitted(side_split())
+
+
+def v118():  # as 117, decay 2 ends inside the card (round cap a stroke before the right edge): the card holds the end
+    return fitted(side_split(out=-90, exit_=0.56))
+
+
+def v119():  # as 117, a 3:4 card (more card, shorter decay 1 run)
+    return fitted(side_split(cw=560, ratio=4 / 3, w1=150, d1=0.46, entry=0.24, exit_=0.56))
+
+
+def v120():  # reading 1 mirrored: decay 1 inside the card, the reset on its right edge, decay 2 runs out to the right
+    return fitted(side_split(cw=470, ratio=1.5, entry=0.24, inside=60, d1=0.50, edge="right", out=200, exit_=0.52,
+                             l2=170))
+
+
+def v121():  # reading 2: the top edge crosses the reset; decay 1 from the left, plateau above, decay 2 dips back in
+    return fitted(top_split())
+
+
+def v122():  # 117 with the reset a 1.8-stroke bar: each half (ink / inverted) stays a full stroke wide at 29 px
+    return fitted(side_split(rw=1.8))
+
+
+def v123():  # reading 1 with a narrower 3:5 card and a wider, softer decay 1 (k 3.0): less of a "U" hook
+    return fitted(side_split(cw=420, ratio=5 / 3, entry=0.24, w1=230, d1=0.40, k1=3.0, inside=50, exit_=0.52,
+                             l2=220, out=40))
+
+
+def v124():  # as 121, steeper decay 1 (k 4.5) and a shorter tail: the most compact
+    return fitted(top_split(x1=-120, w1=280, d1=310, k1=4.5, w2=300, d2=0.26))
+
+
+def v125():  # reading 1 on a near-square card (4:5): the card fills the tile, the line a little lighter
+    return fitted(side_split(cw=600, ratio=1.25, entry=0.24, w1=140, d1=0.46, inside=60, exit_=0.54, out=30), s=80)
+
+
+def v126():  # as 117, steeper and deeper decay 1 (0.52 H, k 4.5), entry higher: more contrast between the decays
+    return fitted(side_split(entry=0.22, d1=0.52, k1=4.5, w1=140, exit_=0.52, l2=300))
+
+
+def v127():  # 123 (narrow card, wide soft decay 1) with the 1.8-stroke reset bar
+    return fitted(side_split(cw=420, ratio=5 / 3, entry=0.24, w1=230, d1=0.40, k1=3.0, inside=50, exit_=0.52,
+                             l2=220, out=40, rw=1.8))
+
+
+def v128():  # 126 (deep steep decay 1) with a 2-stroke reset bar and decay 2 ending inside the card
+    return fitted(side_split(entry=0.22, d1=0.52, k1=4.5, w1=170, exit_=0.50, l2=300, out=-90, rw=2.0))
+
+
+for _v in (v117, v118, v119, v120, v121, v122, v123, v124, v125, v126, v127, v128):
+    _v.fit = None  # fitted() already scaled the mark and its stroke
+    _v.optical = True
+VARIANTS += [v117, v118, v119, v120, v121, v122, v123, v124, v125, v126, v127, v128]
+
+
+# ---- round 10b (critic on round 10: 127 > 128 > 122, every width-split reads as a mug handle; round the bar like
+# the card, end it flush with decay 1, open the wedge between decay 1 and the bar, less dead card below the bar).
+
+def v129():  # 127 fixed: card 2:3, plateau at 0.30 H, decay 1 0.38 H deep and 0.45 of the card wide, bar 1.9 strokes
+    cw = 460
+    return fitted(side_split(cw=cw, ratio=1.5, entry=0.30, w1=0.45 * cw, d1=0.38, k1=3.0, inside=50, exit_=0.55,
+                             l2=220, out=40, rw=1.9, bar_r=60))
+
+
+def v130():  # 128 fixed: decay 1 cut while still steep (meets the bar at about 60 deg), 0.45 H deep, ends inside
+    cw = 533
+    return fitted(side_split(cw=cw, ratio=1.5, entry=0.22, w1=0.35 * cw, d1=0.45, k1=3.6, cut1=0.55, exit_=0.50,
+                             l2=300, out=-90, rw=1.9, bar_r=60))
+
+
+def v131():  # 122 fixed: rounded bar, decay 2 ends inside the card
+    return fitted(side_split(rw=1.9, bar_r=60, out=-90, exit_=0.54, w1=200, d1=0.40, k1=3.2))
+
+
+def v132():  # 129 with decay 1 cut while still steep (cut 0.6)
+    cw = 460
+    return fitted(side_split(cw=cw, ratio=1.5, entry=0.30, w1=0.45 * cw, d1=0.38, k1=3.0, cut1=0.6, inside=50,
+                             exit_=0.55, l2=220, out=40, rw=1.9, bar_r=60))
+
+
+def v133():  # 130 with decay 2 leaving the card a full 1.6 strokes (a clear exit, not a nub)
+    cw = 533
+    return fitted(side_split(cw=cw, ratio=1.5, entry=0.22, w1=0.35 * cw, d1=0.45, k1=3.6, cut1=0.55, exit_=0.50,
+                             l2=300, out=140, rw=1.9, bar_r=60))
+
+
+def v134():  # 130 with a plain 1-stroke reset (no bar): the halves are thin, but no handle mass
+    cw = 533
+    return fitted(side_split(cw=cw, ratio=1.5, entry=0.22, w1=0.35 * cw, d1=0.45, k1=3.6, cut1=0.55, exit_=0.50,
+                             l2=300, out=-90), s=96)
+
+
+def v135():  # 130 on a shorter 3:4 card (less dead card below the bar)
+    cw = 560
+    return fitted(side_split(cw=cw, ratio=4 / 3, entry=0.24, w1=0.33 * cw, d1=0.46, k1=3.6, cut1=0.55, exit_=0.52,
+                             l2=300, out=-90, rw=1.9, bar_r=60))
+
+
+def v136():  # 129 with a wider, gentler decay 1 (0.6 of the card wide, k 2.6): a slope, not a hook
+    cw = 440
+    return fitted(side_split(cw=cw, ratio=1.5, entry=0.30, w1=0.6 * cw, d1=0.38, k1=2.6, cut1=0.7, inside=50,
+                             exit_=0.55, l2=220, out=-80, rw=1.9, bar_r=60))
+
+
+for _v in (v129, v130, v131, v132, v133, v134, v135, v136):
+    _v.fit = None
+    _v.optical = "half"  # the card weighs the right side: half-way between bbox-centred and centroid-centred
+VARIANTS += [v129, v130, v131, v132, v133, v134, v135, v136]
+
+
 # ---------------------------------------------------------------- output
 
 def recentre(g, optical: bool = False):
@@ -1091,6 +1315,8 @@ def recentre(g, optical: bool = False):
     tile centre horizontally (a card on one side weighs that side down)."""
     x0, y0, x1, y1 = g.bounds
     g = affinity.translate(g, S / 2 - (x0 + x1) / 2, S / 2 - (y0 + y1) / 2)
+    if optical == "half":  # split the difference: centroid and bbox centre equally off the tile centre
+        return affinity.translate(g, -(g.centroid.x - S / 2) / 2, 0)
     if optical:
         off = g.centroid.x - S / 2
         lim = 0.025 * S
@@ -1197,7 +1423,8 @@ def main() -> None:
             g = affinity.scale(g, f_, f_, origin=(0, 0))
         if a.soften:  # morphological opening: rounds convex corners (peaks), leaves concave ones sharp
             g = g.buffer(-a.soften, quad_segs=32).buffer(a.soften, quad_segs=32)
-        f.write_text(svg(recentre(g, optical=i >= R5_FIRST and getattr(fn, "fit", FIT) is not None), bg, fg))
+        opt = getattr(fn, "optical", i >= R5_FIRST and getattr(fn, "fit", FIT) is not None)
+        f.write_text(svg(recentre(g, optical=opt), bg, fg))
         files.append(f)
     if a.sheet:
         sheets(files, a.out)

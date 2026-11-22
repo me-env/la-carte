@@ -377,3 +377,29 @@ outside the card, inverted inside it.
 
 Critic's ranking: 99, 110, 105 (113 applies the critic's last numeric fix to 99 and has not been re-judged).
 Shortlist order: 113, 99, 110, 105, 36, 112. 99 and 113 exist in ink, dark, forest and tinted.
+
+### Square composition, reset split by the card: round 10 (user: "too horizontal, it must fit a square"; then "it starts by going down, then goes up in a vertical line. That vertical line should be half in the card, half out")
+
+Rounds 8-9 were about 1.8:1 wide. Round 10 fits the ink bounding box to about 1:1 at 0.78 of the tile (800 px at
+1024, the stroke compensated so it is exact at 1024). The line starts on the 100 % peak with a round cap, falls
+(decay 1), and the vertical reset is split by the card.
+- **Round 10 (117-128):** two readings of "half in, half out". (a) The card's left edge runs down the middle of the
+  reset (117-120, 123, 125, 126). (b) The card's top edge crosses the reset at mid-height (121, 124). (b) reads as a
+  bottle or tag. In (a), a plain reset splits into two 42 px halves, and those fade at 29 px. So 122, 127 and 128
+  widen the reset into a bar of 1.8-2 strokes centred on the edge. The critic's ranking: 127, 128, 122. The risk is
+  a mug or kettle handle (decay 1 plus the outer half).
+- **Round 10b (129-136):** the critic's fixes. The bar's corners are rounded like the card's. Decay 1 ends half a
+  stroke inside the bar, so its end cap is the bar's outer foot (no kink). Decay 1 is shallower and wider (129), or
+  cut while still steep (130, 135). The card's mass pulls to the right, so the mark sits half-way between bbox-centred
+  and centroid-centred (`optical="half"`).
+
+`design-review.py --mode flat`: 129, 130, 131 and 135 pass 0 of 12 failures.
+
+| # | variant | bbox w x h (px at 1024) | aspect | main risk (critic) |
+|---|---|---|---|---|
+| 1 | 130 | 763 x 800 | 0.95 | "√" (slant, vertical, bar over the top), then a mug handle |
+| 2 | 131 | 789 x 800 | 0.99 | "√", the strongest mug read |
+| 3 | 135 (3:4 card) | 801 x 760 | 1.05 | the card reads as a mug or phone, and the inside reads as "1"/"7" |
+| 4 | 129 | 801 x 700 | 1.14 | "$"/"S" at 29 px (the decay 2 stub plus the hook) |
+
+Shortlist order: 130, 131, 135, 129. All four exist in ink, dark, forest and tinted.
