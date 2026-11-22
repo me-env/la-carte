@@ -72,8 +72,9 @@ Rules:
   6 h hold for new siblings; the 014 hold still applies on top, and an allowed but buried card keeps its slot). Cards
   already reviewed (incl. `learning` / `relearning`) are never held back; report-held cards take no slot and don't
   wait. **`next_due`**: a waiting card counts only at the time it can be let in: `max(slot frees, its note's window
-  ends, its ready time)`, where a slot frees at the `(introduced - per_day + 1)`-th oldest introduction + 24 h (now
-  if a slot is unused); none when paused (`per_day = 0`) or when it waits behind a card allowed now. `stats.new`
+  ends, its ready time)`, where one more slot (beyond the cards allowed now) frees when the
+  `(introduced - per_day + available + 1)`-th oldest introduction leaves the window (now if a slot is unused); none
+  when paused (`per_day = 0`), when no such introduction exists, or when it waits behind a sibling allowed now. `stats.new`
   still counts every never-reviewed card. No REST change: `/cards/due` and `/stats` just follow the cap.
 - **`settings` table** (spec 021): one row, `id = 1`, `new_cards_per_day` (default 15, 0–200; 0 pauses). A missing
   row means the defaults (`deck.get_settings`); `deck.set_new_cards_per_day` upserts it (`InvalidSetting` outside

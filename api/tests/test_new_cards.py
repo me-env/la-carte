@@ -210,6 +210,28 @@ def test_7_next_due_waits_for_a_siblings_window_after_a_slot_frees(session):
     assert _queue(session, next_due) == [cards["name"].id]
 
 
+def test_7_next_due_counts_a_slot_freeing_while_the_allowed_card_is_buried(session):
+    deck.set_new_cards_per_day(session, 2)
+    [base] = _add(session, 1, now=T0 - timedelta(days=10), prefix="base")
+    _review(session, [base], T0 - timedelta(days=10))  # introduced long ago
+    note = deck.add_direction(
+        session, base.note_id, Direction(prompt=["back"]), now=T0 - timedelta(days=10)
+    )
+    [reverse] = [c for c in note.cards if c.prompt == ["back"]]
+    [old] = _add(session, 1, now=T0 - timedelta(hours=1), prefix="old")
+    _review(session, [old], T0)  # introduced at T0: leaves the window at T0 + 24 h
+    [later] = _add(session, 1, now=T0 + timedelta(hours=1), prefix="later")
+    _review(session, [base], T0 + timedelta(hours=19))  # buries `reverse` until T0 + 25 h
+
+    now = T0 + timedelta(hours=20)
+    status = deck.new_cards_status(session, now)
+    assert (status.introduced, status.available, status.waiting) == (1, 1, 1)  # reverse; later
+    assert _queue(session, now) == []
+    next_due = deck.stats(session, now).next_due
+    assert next_due == T0 + DAY  # not when `reverse` is unburied
+    assert _queue(session, next_due) == [later.id]
+
+
 # --- 8: changing the cap -----------------------------------------------------------------------
 
 

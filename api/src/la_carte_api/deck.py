@@ -126,7 +126,7 @@ class InvalidNote(ValueError):
 
 
 class InvalidSetting(ValueError):
-    pass
+    """A deck setting outside its range (e.g. `new_cards_per_day` not in 0-200)."""
 
 
 class UnknownTimeZone(ValueError):
@@ -539,9 +539,10 @@ def _admit_new(
 
     One pass: the first `per_day - introduced` cards are allowed, skipping a card whose note had
     a card introduced in the window or already allowed in this pass (one new card per note per
-    day). A waiting card can be let in once a slot frees and its note's window has ended, never
-    before its `ready_at`. A card waiting behind a sibling allowed now, or with no slot ever
-    freeing by itself (paused, or every free slot taken now), sets no time."""
+    day). A waiting card can be let in once one more slot frees (beyond those of the cards
+    allowed now) and its note's window has ended, never before its `ready_at`. A card waiting
+    behind a sibling allowed now, or with no slot ever freeing by itself (paused, or no
+    introduction left to leave the window), sets no time."""
     per_day = get_settings(session).new_cards_per_day
     intros = _introductions(session, now)
     note_of = dict(
@@ -559,20 +560,18 @@ def _admit_new(
     picked: set[UUID] = set()  # notes with a card allowed in this pass
     waiting: list[Card] = []
     for card in new:
-        if len(allowed) < slots and card.note_id not in window_end.keys() | picked:
+        if len(allowed) < slots and card.note_id not in window_end and card.note_id not in picked:
             allowed.add(card.id)
             picked.add(card.note_id)
         else:
             waiting.append(card)
 
-    if per_day == 0:
+    # One more card fits once intros[k] (and older) left the window; k < 0: a slot is free now.
+    k = len(intros) - per_day + len(allowed)
+    if per_day == 0 or k >= len(intros):
         slot_at = None
-    elif len(intros) >= per_day:  # when the oldest introduction that must go leaves the window
-        slot_at = intros[len(intros) - per_day][1] + NEW_CARD_WINDOW
-    elif len(allowed) < slots:  # a slot is free now
-        slot_at = now
-    else:  # every free slot went to a card now: none frees until those are studied
-        slot_at = None
+    else:
+        slot_at = now if k < 0 else intros[k][1] + NEW_CARD_WINDOW
     later = [
         max(slot_at, window_end.get(card.note_id, slot_at), ready_at(card))
         for card in waiting
