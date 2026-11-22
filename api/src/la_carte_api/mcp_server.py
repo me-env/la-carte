@@ -57,9 +57,9 @@ note. No explanations, no full sentences unless unavoidable.
 Photos are of real people: only use URLs the user gave you or asked you to use; never repeat them
 outside this deck.
 
-Quiz: `due_cards` (siblings of a just-reviewed card are held back until that card is due again,
-at most 6 hours; a card still being (re)learned, e.g. just failed, is never held back), then
-`review_card`.
+Quiz: `due_cards` (most at risk of being forgotten first; siblings of a just-reviewed card are
+held back until that card is due again, at most 6 hours; a card still being (re)learned, e.g. just
+failed, is never held back), then `review_card`.
 New cards: N per day is a daily target (default 15), not a limit: every new card is always
 available to study. After adding, you may tell the user how many new cards are beyond today's
 target (`new_cards`). Change the target with `new_cards_per_day` only when the user asks.
@@ -294,9 +294,11 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
 
     @mcp.tool()
     def due_cards(limit: int = 20) -> list[CardRead]:
-        """Cards to review now, most overdue first, at most one per note. A card whose sibling was
-        just reviewed is held back until that sibling is due again, at most 6 hours; a card still
-        being (re)learned (e.g. just failed) is never held back and comes first within its note.
+        """Cards to review now, most at risk of being forgotten first: cards being (re)learned,
+        then reviews by lowest recall probability, then new cards oldest first. At most one card
+        per note. A card whose sibling was just reviewed is held back until that sibling is due
+        again, at most 6 hours; a card still being (re)learned (e.g. just failed) is never held
+        back and comes first within its note.
         Show the `fields` named by `prompt`, then those named by `answer`."""
         return run(deck.due_cards, limit)
 

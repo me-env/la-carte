@@ -257,7 +257,7 @@ def test_due_queue_serves_one_card_per_note_and_buries_siblings_for_6_hours(sess
     now = utcnow()
     note = _person(session, now - timedelta(minutes=1))
     a, b = note.cards
-    assert [c.id for c in deck.due_cards(session, now=now)] == [a.id]  # most overdue, one per note
+    assert [c.id for c in deck.due_cards(session, now=now)] == [a.id]  # oldest first, one per note
 
     assert deck.review_card(session, a.id, Rating.easy, now=now).due > now + timedelta(days=1)
 

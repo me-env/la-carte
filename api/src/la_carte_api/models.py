@@ -106,7 +106,9 @@ class Card(SQLModel, table=True):
         return CardState(fsrs.State(self.fsrs_state).name.lower())
 
     def to_fsrs(self) -> fsrs.Card:
+        # A fixed card_id: without one, `fsrs.Card` sleeps 1 ms to make a unique id (unused here).
         return fsrs.Card(
+            card_id=0,
             state=fsrs.State(self.fsrs_state),
             step=self.step,
             stability=self.stability,

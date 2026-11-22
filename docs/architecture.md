@@ -56,8 +56,10 @@ Rules:
 - **Sibling burying**: `deck.SIBLING_BURY = 6 h` cap. A card reviewed at `t` (its latest review) holds its
   siblings until `min(t + 6 h, its current due)`: never past its own next due (spec 014, user decision
   2026-11-22; its own reviews don't bury it). A `learning` / `relearning` card is never buried. The servable queue
-  (`deck._queue`) = due, not buried, most overdue first, at most one card per note (a (re)learning card wins, then
-  the most overdue); it backs `/cards/due`, `due_cards`, `stats.due`, and `stats.next_due` (earliest time a card not
+  (`deck._queue`) = due, not buried, at most one card per note, in one order (specs 021, 022): `learning` /
+  `relearning` cards by `due`, then `review` cards lowest FSRS retrievability first
+  (`Scheduler.get_card_retrievability` at `now`), then new cards oldest first (`_card_order`); ties by `due`, then
+  `_card_order`, then id. The first card of a note in that order is its one servable card. It backs `/cards/due`, `due_cards`, `stats.due`, and `stats.next_due` (earliest time a card not
   servable now becomes servable: `max(due, every sibling's hold)`, just `due` for a (re)learning card). `total` /
   `new` count cards.
 - **Held cards (spec 015)**: a card with any `Report` whose status is `open` or `waiting_user` is left out of the

@@ -537,7 +537,8 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
     never longer than until that sibling is due again (its own reviews don't bury it). The
     sibling's current `due` is the one set by that latest review. A (re)learning card is never
     buried: a card the user failed comes back at its own due. Servable = due, not buried, at most
-    one card per note (a (re)learning card wins, then the most overdue), most overdue first.
+    one card per note: the first in `order` (a (re)learning card, then the review most at risk of
+    being forgotten, then the oldest new card). The queue keeps that same order.
     Held cards (an active report, spec 015) are left out entirely: they don't bury siblings."""
     held = set(
         session.exec(select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))).all()
@@ -568,19 +569,28 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
             return card.due
         return max([card.due, *(t for cid, t in holds.get(card.note_id, []) if cid != card.id)])
 
+    def order(row: tuple[Card, Note]) -> tuple:
+        """(Re)learning by due, then reviews lowest retrievability first, then new cards oldest
+        first (specs 021, 022). Ties: earlier due, then `_card_order`, then id."""
+        card, note = row
+        if card.state in LEARNING:
+            group, risk = 0, 0.0
+        elif card.state == CardState.review:
+            group, risk = 1, _scheduler.get_card_retrievability(card.to_fsrs(), now)
+        else:
+            group, risk = 2, 0.0
+        return group, risk, card.due, *_card_order(card, note), str(card.id)
+
     servable: list[tuple[Card, Note]] = []
     served_notes: set[UUID] = set()
     later: list[datetime] = []
-    for card, note in sorted(
-        rows, key=lambda row: (row[0].state not in LEARNING, row[0].due, *_card_order(*row))
-    ):
+    for card, note in sorted(rows, key=order):
         ready = ready_at(card)
         if ready > now:
             later.append(ready)
         elif card.note_id not in served_notes:
             served_notes.add(card.note_id)
             servable.append((card, note))
-    servable.sort(key=lambda row: (row[0].due, *_card_order(*row)))
     return servable, min(later, default=None)
 
 
