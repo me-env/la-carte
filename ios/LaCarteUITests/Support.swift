@@ -109,6 +109,37 @@ extension XCTestCase {
     app.descendants(matching: .any).matching(identifier: id).firstMatch
   }
 
+  @MainActor
+  func hasFocus(_ element: XCUIElement) -> Bool {
+    (element.value(forKey: "hasKeyboardFocus") as? Bool) ?? false
+  }
+
+  /// Replaces a field's text one checked step at a time, so a slow runner (CI) can't type before the focus or the
+  /// deletes land: tap at `caret` (the end of the text), wait for focus, delete until empty, type, wait for the text.
+  /// `placeholders`: values the field reports when empty. `secure`: only the length can be read back.
+  @MainActor
+  func replaceText(_ field: XCUIElement, with text: String, placeholders: [String] = [],
+                   caret: CGVector = CGVector(dx: 0.97, dy: 0.5), secure: Bool = false,
+                   file: StaticString = #filePath, line: UInt = #line) {
+    func current() -> String {
+      let value = field.value as? String ?? ""
+      return value == field.placeholderValue || placeholders.contains(value) ? "" : value
+    }
+    XCTAssertTrue(field.waitFor(timeout: 5), "\(field.identifier) missing", file: file, line: line)
+    for _ in 0..<3 {
+      field.coordinate(withNormalizedOffset: caret).tap()
+      XCTAssertTrue(poll(timeout: 5) { hasFocus(field) }, "\(field.identifier) not focused", file: file, line: line)
+      let old = current()
+      if old.isEmpty { break }
+      field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count + 2))
+      if poll(timeout: 2, { current().isEmpty }) { break }
+    }
+    XCTAssertEqual(current(), "", "\(field.identifier) not cleared", file: file, line: line)
+    field.typeText(text)
+    let typed = poll(timeout: 5) { secure ? current().count == text.count : current() == text }
+    XCTAssertTrue(typed, "\(field.identifier) is '\(current())' after typing '\(text)'", file: file, line: line)
+  }
+
   /// Waits until `element` no longer exists.
   @MainActor
   func waitForAbsence(_ element: XCUIElement, timeout: TimeInterval = 5, _ message: String = "",

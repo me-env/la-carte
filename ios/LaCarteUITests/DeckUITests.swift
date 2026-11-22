@@ -605,24 +605,15 @@ final class DeckUITests: XCTestCase {
   @MainActor
   private func fieldText(_ app: XCUIApplication, _ id: String) -> String {
     let value = el(app, id).value as? String ?? ""
-    return ["Word or question", "Answer", "Front", "Back"].contains(value) ? "" : value
+    return Self.editorPlaceholders.contains(value) ? "" : value
   }
 
-  @MainActor
-  private func hasFocus(_ element: XCUIElement) -> Bool {
-    (element.value(forKey: "hasKeyboardFocus") as? Bool) ?? false
-  }
+  private static let editorPlaceholders = ["Word or question", "Answer", "Front", "Back"]
 
-  /// Puts the cursor at the end of a one-line field, deletes its text and types `text`.
   @MainActor
   private func replaceText(_ app: XCUIApplication, _ id: String, with text: String,
                            file: StaticString = #filePath, line: UInt = #line) {
-    let field = el(app, id)
-    let old = fieldText(app, id)
-    field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
-    waitUntil("\(id) focused", file: file, line: line) { self.hasFocus(field) }
-    field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count + 2) + text)
-    XCTAssertEqual(fieldText(app, id), text, "\(id) text after replacing", file: file, line: line)
+    replaceText(el(app, id), with: text, placeholders: Self.editorPlaceholders, file: file, line: line)
   }
 
   @MainActor

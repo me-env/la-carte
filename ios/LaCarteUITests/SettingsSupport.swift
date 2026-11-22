@@ -81,33 +81,22 @@ class SettingsTestCase: XCTestCase {
     XCTAssertEqual(clear.count, 0, "token shown in clear", file: file, line: line)
   }
 
-  @MainActor
-  func hasFocus(_ element: XCUIElement) -> Bool {
-    (element.value(forKey: "hasKeyboardFocus") as? Bool) ?? false
-  }
-
   /// Taps right of the (short) text so the cursor lands at its end. Not at the far right edge: the last ~10pt of
   /// the row don't focus the field (see report).
+  static let endOfText = CGVector(dx: 0.85, dy: 0.5)
+
   @MainActor
   func tapEnd(_ field: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
-    field.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).tap()
+    field.coordinate(withNormalizedOffset: Self.endOfText).tap()
     waitUntil("\(field.identifier) focused", timeout: 5, file: file, line: line) { self.hasFocus(field) }
   }
 
   /// Replaces a field's text: cursor at the end, delete everything, type `text`.
   @MainActor
   func setText(_ app: XCUIApplication, _ id: String, _ text: String, secure: Bool = false,
-                       file: StaticString = #filePath, line: UInt = #line) {
-    let field = el(app, id)
-    XCTAssertTrue(field.waitFor(timeout: 5), "\(id) missing", file: file, line: line)
-    let old = fieldText(app, id)
-    tapEnd(field, file: file, line: line)
-    field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count + 2) + text)
-    if secure {
-      XCTAssertEqual(fieldText(app, id).count, text.count, "\(id) length after typing", file: file, line: line)
-    } else {
-      XCTAssertEqual(fieldText(app, id), text, "\(id) text after typing", file: file, line: line)
-    }
+               file: StaticString = #filePath, line: UInt = #line) {
+    replaceText(el(app, id), with: text, placeholders: [Self.urlPlaceholder, "Token"],
+                caret: Self.endOfText, secure: secure, file: file, line: line)
   }
 
   @MainActor

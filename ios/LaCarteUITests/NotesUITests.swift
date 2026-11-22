@@ -431,10 +431,8 @@ final class NotesUITests: XCTestCase {
   @MainActor
   private func replace(_ app: XCUIApplication, _ id: String, with text: String) {
     let field = el(app, id)
-    let old = field.value as? String ?? ""
-    field.tap()
-    field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
-    field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count + 2) + text)
+    scrollIntoView(app, field)
+    replaceText(field, with: text)
   }
 
   private func json(_ body: String) throws -> [String: Any] {
