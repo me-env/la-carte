@@ -110,3 +110,15 @@ struct InMemoryAPIClientTests {
     #expect(try await client.dueCards(100).count == 3)
   }
 }
+
+/// `LA_CARTE_API=mock-lengths` (spec 017): QA expects these four cards first, in this order.
+struct LengthFixturesTests {
+  @Test func mockLengthsServesTheFourLengthCardsBeforeTheUsualDeck() async throws {
+    let client = APIClient.live(environment: ["LA_CARTE_API": "mock-lengths"]) { nil }
+    let cards = try await client.dueCards(100)
+    #expect(cards.prefix(3).map(\.front) == ["la mer", [Card].lengthFixtures[1].front, "mitochondria"])
+    #expect(cards[3].front.count > 500)
+    #expect(cards[3].back.count == 120)
+    #expect(cards.dropFirst(4).map(\.front) == [Card].fixtures.map(\.front))
+  }
+}

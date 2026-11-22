@@ -52,6 +52,9 @@ struct DesignSystemGalleryContent: View {
       section("Type") {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
           Text("serendipity").font(.cardFace)
+          Text("What does ephemeral mean?").font(.cardFaceMedium)
+          Text("Which treaty, signed in 1648, ended the Thirty Years' War?").font(.cardFaceSmall)
+          Text("the sea").font(.cardAnswer).foregroundStyle(Theme.secondaryInk)
           Text("Cards").font(.screenTitle)
           Text("finding something good without looking for it").font(.body)
           Text("Jan 1, 2026 · new").font(.meta).foregroundStyle(Theme.secondaryInk)

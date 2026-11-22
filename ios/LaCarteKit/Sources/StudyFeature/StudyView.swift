@@ -201,13 +201,19 @@ public struct StudyView: View {
       ScrollViewReader { proxy in
         ScrollView {
           VStack(spacing: Theme.Spacing.m) {
-            prompt(card).background { textHalo }
-            answerSlot(card).background { textHalo }
+            prompt(card).background { textHalo }.aligned(card.promptAlignment)
+            answerSlot(card).background { textHalo }.aligned(card.answerAlignment)
           }
-          .multilineTextAlignment(.center)
           .frame(maxWidth: .infinity)
           .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+          // The next card fades in from the top; the outgoing one leaves at once so its answer never lingers.
+          // The animation rides on the transition alone, so the scroll view's size and offset don't glide.
+          .id(card.id)
+          .transition(
+            .asymmetric(insertion: AnyTransition.opacity.animation(Theme.Motion.standard), removal: .identity)
+          )
         }
+        .onChange(of: card.id) { _, id in proxy.scrollTo(id, anchor: .top) }
         .defaultScrollAnchor(.center, for: .alignment)
         .scrollIndicatorsFlash(trigger: store.isRevealed)
         // Not `.interactively`: on a card that fits, the keyboard never followed the drag and stayed up.
@@ -388,13 +394,13 @@ public struct StudyView: View {
   /// The prompt fields (spec 014d): a photo replaces the centered word; the first text field is the card face.
   @ViewBuilder private func prompt(_ card: Card) -> some View {
     if store.canEditInline {
-      side(.front, text: card.text(.front), font: .cardFace, color: Theme.ink)
+      side(.front, text: card.text(.front), font: card.promptFont, color: Theme.ink)
     } else {
-      let firstText = card.shown(card.prompt).first { $0 != Card.photoField }
-      VStack(spacing: Theme.Spacing.s) {
+      let firstText = card.firstPromptText
+      VStack(alignment: card.promptAlignment.horizontal, spacing: Theme.Spacing.s) {
         ForEach(card.shown(card.prompt), id: \.self) { name in
           field(
-            name, of: card, side: .front, font: name == firstText ? .cardFace : .body,
+            name, of: card, side: .front, font: name == firstText ? card.promptFont : .body,
             color: name == firstText ? Theme.ink : Theme.secondaryInk
           )
         }
@@ -407,7 +413,7 @@ public struct StudyView: View {
 
   /// The answer and, before reveal, a person card's hint share one slot, so the prompt never moves.
   private func answerSlot(_ card: Card) -> some View {
-    ZStack {
+    ZStack(alignment: Alignment(horizontal: card.answerAlignment.horizontal, vertical: .center)) {
       if let hint = store.answerHint {
         Text(hint)
           .font(.meta)
@@ -424,11 +430,11 @@ public struct StudyView: View {
 
   @ViewBuilder private func answer(_ card: Card) -> some View {
     if store.canEditInline {
-      side(.back, text: card.text(.back), font: .body, color: Theme.secondaryInk)
+      side(.back, text: card.text(.back), font: card.answerFont, color: Theme.secondaryInk)
     } else {
-      VStack(spacing: Theme.Spacing.xs) {
+      VStack(alignment: card.answerAlignment.horizontal, spacing: Theme.Spacing.xs) {
         ForEach(card.shown(card.answer), id: \.self) { name in
-          field(name, of: card, side: .back, font: .body, color: Theme.secondaryInk)
+          field(name, of: card, side: .back, font: card.answerFont, color: Theme.secondaryInk)
         }
       }
       .accessibilityElement(children: .contain)
@@ -447,6 +453,8 @@ public struct StudyView: View {
       CardPhoto(url: URL(string: url), style: .card) {
         store.send(.photoLoadFailed(cardID: card.id, url: url, side: side))
       }
+      // A photo stays centred even among leading text.
+      .frame(maxWidth: (side == .front ? card.promptAlignment : card.answerAlignment) == .leading ? .infinity : nil)
       .accessibilityIdentifier("study.photo")
     } else {
       Text(card.fields[name] ?? "")
@@ -589,6 +597,48 @@ public struct StudyView: View {
   }
 }
 
+/// The text the card's size and alignment are measured from (spec 017), always the saved fields, never a draft.
+extension Card {
+  /// The card face: the prompt's first text field (spec 014d). The other prompt fields follow it.
+  var firstPromptText: String? {
+    shown(prompt).first { $0 != Card.photoField }
+  }
+
+  var promptText: String {
+    firstPromptText.flatMap { fields[$0] } ?? ""
+  }
+
+  /// All the answer's shown text fields, each trimmed, joined by a space.
+  var answerText: String {
+    shown(answer).filter { $0 != Card.photoField }
+      .compactMap { fields[$0]?.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .joined(separator: " ")
+  }
+
+  var promptFont: Font { CardText.promptFont(promptText) }
+  var answerFont: Font { CardText.answerFont(answerText, prompt: promptText) }
+  var promptAlignment: TextAlignment { CardText.promptAlignment(promptText) }
+  var answerAlignment: TextAlignment { CardText.answerAlignment(answerText, prompt: promptText) }
+}
+
+extension TextAlignment {
+  fileprivate var horizontal: HorizontalAlignment {
+    switch self {
+    case .leading: .leading
+    case .center: .center
+    case .trailing: .trailing
+    }
+  }
+}
+
+extension View {
+  /// Leading text spans the card's width from its leading edge; centred text keeps the centred layout.
+  fileprivate func aligned(_ alignment: TextAlignment) -> some View {
+    multilineTextAlignment(alignment)
+      .frame(maxWidth: .infinity, alignment: Alignment(horizontal: alignment.horizontal, vertical: .center))
+  }
+}
+
 #Preview("Studying") {
   StudyView(store: Store(initialState: StudyFeature.State()) { StudyFeature() })
 }
@@ -608,6 +658,12 @@ public struct StudyView: View {
 #Preview("Person photo") {
   StudyView(store: Store(initialState: StudyFeature.State()) { StudyFeature() } withDependencies: {
     $0.apiClient = .inMemory(notes: .fixtures)
+  })
+}
+
+#Preview("Card lengths") {
+  StudyView(store: Store(initialState: StudyFeature.State()) { StudyFeature() } withDependencies: {
+    $0.apiClient = .inMemory(cards: .lengthFixtures)
   })
 }
 

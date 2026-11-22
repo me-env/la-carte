@@ -8,6 +8,7 @@ extension APIClient: DependencyKey {
   /// Launch environment (set by UI tests, or in the Xcode scheme):
   /// - `LA_CARTE_API=mock`      → in-memory deck seeded with `[Card].fixtures` (deterministic screenshots)
   /// - `LA_CARTE_API=mock-notes` → in-memory deck seeded with `[Note].fixtures` (several directions, a person)
+  /// - `LA_CARTE_API=mock-lengths` → `[Card].lengthFixtures` (short, long and very long cards first, spec 017)
   /// - `LA_CARTE_API_URL=…`     → base URL of the API, wins over the one entered in Settings (no default)
   /// - `LA_CARTE_API_TOKEN=…`   → bearer token, wins over the one entered in Settings
   /// The widget has no launch environment, so it resolves from the App Group and the Keychain only.
@@ -21,6 +22,9 @@ extension APIClient: DependencyKey {
     }
     if environment["LA_CARTE_API"] == "mock-notes" {
       return .inMemory(notes: .fixtures)
+    }
+    if environment["LA_CARTE_API"] == "mock-lengths" {
+      return .inMemory(cards: .lengthFixtures)
     }
     return .live(
       baseURL: {

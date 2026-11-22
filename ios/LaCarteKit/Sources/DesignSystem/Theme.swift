@@ -138,10 +138,57 @@ private struct WindowStyle: UIViewRepresentable {
 extension Font {
   /// The single word / phrase in the middle of the screen. 34pt.
   public static let cardFace = Font.system(.largeTitle, weight: .medium)
+  /// A card question of 25–60 characters. 28pt.
+  public static let cardFaceMedium = Font.system(.title, weight: .medium)
+  /// A long card question (> 60 characters or a line break), the smallest a question gets. 22pt.
+  public static let cardFaceSmall = Font.system(.title2, weight: .medium)
+  /// A short answer under a question that isn't long, the largest an answer gets. 22pt.
+  public static let cardAnswer = Font.system(.title2)
   /// 28pt.
   public static let screenTitle = Font.system(.title, weight: .bold)
   /// 13pt.
   public static let meta = Font.footnote
+}
+
+/// Size and alignment of a card's text from its length (spec 017): a word stays big and centred, a paragraph
+/// is smaller and leading-aligned. Character counts, not measured lines, so it's deterministic and testable.
+public enum CardText {
+  public static let shortLimit = 24
+  public static let longLimit = 60
+
+  /// More than `longLimit` characters or a line break, surrounding whitespace not counted.
+  public static func isLong(_ text: String) -> Bool {
+    let text = trimmed(text)
+    return text.count > longLimit || text.contains(where: \.isNewline)
+  }
+
+  /// The question depends only on itself: it's shown before the answer, so it must not hint at it.
+  public static func promptFont(_ prompt: String) -> Font {
+    if isLong(prompt) { return .cardFaceSmall }
+    return isShort(prompt) ? .cardFace : .cardFaceMedium
+  }
+
+  /// Always a tier below the question: `.body` once the question is at its smallest.
+  public static func answerFont(_ answer: String, prompt: String) -> Font {
+    isShort(answer) && !isLong(prompt) ? .cardAnswer : .body
+  }
+
+  public static func promptAlignment(_ prompt: String) -> TextAlignment {
+    isLong(prompt) ? .leading : .center
+  }
+
+  /// A short answer under a leading question follows its edge, so a card never mixes the two that way.
+  public static func answerAlignment(_ answer: String, prompt: String) -> TextAlignment {
+    isLong(answer) || isLong(prompt) ? .leading : .center
+  }
+
+  private static func isShort(_ text: String) -> Bool {
+    !isLong(text) && trimmed(text).count <= shortLimit
+  }
+
+  private static func trimmed(_ text: String) -> String {
+    text.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
 }
 
 extension Color {

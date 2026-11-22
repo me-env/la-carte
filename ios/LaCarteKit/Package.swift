@@ -81,7 +81,7 @@ let package = Package(
         .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
       ]
     ),
-    .testTarget(name: "StudyFeatureTests", dependencies: ["StudyFeature", "APIClient", "AskAIClient"]),
+    .testTarget(name: "StudyFeatureTests", dependencies: ["StudyFeature", "APIClient", "AskAIClient", "DesignSystem"]),
 
     // MARK: Clients (dependencies, no UI, no TCA)
     .target(

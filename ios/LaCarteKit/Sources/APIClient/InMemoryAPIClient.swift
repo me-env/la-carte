@@ -198,6 +198,47 @@ extension [Card] {
   }()
 }
 
+extension [Card] {
+  /// Sample deck for `LA_CARTE_API=mock-lengths` (spec 017): `fixtures` after a short, a long-question, a
+  /// short-question-long-answer and a very long card. Keep it stable: UI screenshots depend on it.
+  public static let lengthFixtures: [Card] = {
+    let date = Date(timeIntervalSince1970: 1_767_225_600)  // 2026-01-01
+    let samples = [
+      ("la mer", "the sea"),
+      (
+        "Which treaty, signed in 1648, ended the Thirty Years' War and is often cited as the origin of the modern "
+          + "state system?",
+        "The Peace of Westphalia"
+      ),
+      (
+        "mitochondria",
+        "The organelle that produces most of the cell's energy (ATP) through cellular respiration, often called the "
+          + "powerhouse of the cell."
+      ),
+      (
+        "In 1859, Charles Darwin published On the Origin of Species, arguing that populations change over many "
+          + "generations: individuals whose inherited traits suit their environment tend to survive and leave more "
+          + "offspring, so those traits become more common over time. Alfred Russel Wallace had reached the same "
+          + "idea on his own while working in the Malay Archipelago, and papers by both men were read together at "
+          + "the Linnean Society of London the year before. Which mechanism did both of them propose to explain how "
+          + "species adapt to their environment?",
+        "Natural selection: heritable traits that favor survival and reproduction become more common over "
+          + "successive generations."
+      ),
+    ]
+    return samples.enumerated().map { index, pair in
+      Card(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000\(index + 21)")!,
+        front: pair.0,
+        back: pair.1,
+        due: date,
+        createdAt: date,
+        updatedAt: date
+      )
+    } + fixtures
+  }()
+}
+
 extension [Note] {
   /// Sample deck for `LA_CARTE_API=mock-notes`: `[Card].fixtures` as notes, "la carte" also asked `back → front`,
   /// and a made-up person first. Keep it stable: UI screenshots depend on it.
