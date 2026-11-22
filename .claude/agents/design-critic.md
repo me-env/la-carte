@@ -34,8 +34,9 @@ stop weak work before it reaches them. Be specific and unsentimental. You don't 
 6. **Polish:** alignment, consistent radii, no muddy grays, accent used per the rule (tiny amounts).
 7. **Native feel** for screens: Apple components, HIG spacing, Dynamic Type.
 
-Check pixels, don't guess: open the renders, compare sizes side by side (you may generate comparison
-sheets in the scratchpad, e.g. with `sips`/ImageMagick if installed, or ask a sub-agent to).
+Check pixels, don't guess: open the renders, compare sizes side by side with
+`uv run scripts/image-ops.py montage … --apple --mask` (1024/58/29 + Apple icons) and `crop --zoom`, not ad-hoc
+PIL/sips (docs/testing.md).
 Screens: judge only real-view renders or UI-test screenshots (glass only on the latter), and measure colours,
 contrast and gaps with `uv run scripts/screen-sample.py` (docs/testing.md, "Study renders").
 
@@ -43,7 +44,10 @@ contrast and gaps with `uv run scripts/screen-sample.py` (docs/testing.md, "Stud
 Run on each 1024 render (or its SVG), light and dark:
 `uv run scripts/design-review.py <light-1024.png> <dark-1024.png> --home [--screen lattice|stochastic]` (`--axis y` if the transition is
 vertical, `--region x0,y0,x1,y1` to isolate one part; `--watch` re-runs on every save with a one-line
-summary). **Pick the screen per proposal** from how the render is built (its render script / brief), and say
+summary). **Pick the mode per kind of mark** (`--mode`, see the script's "Modes" docstring; halftone metrics
+don't apply to the others): halftone dots/holes ramping into a card → default `halftone`; a card outline of
+separate dots → `--mode outline --dots N --home`; a solid flat mark (one even-odd path) → `--mode flat --home`.
+For halftone, **pick the screen per proposal** from how the render is built (its render script / brief), and say
 which one you used in the verdict:
 - `--screen lattice` (default): marks settle onto a hex lattice (rounds 6-8b). Order must rise to the lattice.
 - `--screen stochastic`: a blue-noise screen (random but evenly spaced, no lattice; round 9 onward if the
