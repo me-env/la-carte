@@ -1,0 +1,67 @@
+name: UI tests (selected)
+# Manual: run only the given UI tests on the CI runner, with recordings and logs (docs/ci-cd.md → Run one test class
+# on CI). Same build (ci/build-ui-tests.sh), boot and warm-up as ci.yml; no deploy.
+#   gh workflow run ui-only.yml -f tests="LaCarteUITests/DeckUITests" [--ref <branch>]
+
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: "Space-separated -only-testing targets, e.g. LaCarteUITests/DeckUITests or LaCarteUITests/DeckUITests/testDeck_addFromDeck"
+        required: true
+        type: string
+      record:
+        description: "Keep the screen recordings of passing tests too (failed tests are always recorded)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  SIMULATOR: ${{ vars.CI_SIMULATOR || 'iPhone 17' }}
+  OS: ${{ vars.CI_IOS_VERSION || 'latest' }}
+  BUILD_SLOTS: 1
+
+jobs:
+  ui:
+    name: iOS UI (selected tests)
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90  # v1.7.0
+        with:
+          xcode-version: latest-stable
+      - name: Check the test list
+        env:
+          TESTS: ${{ inputs.tests }}
+        run: |
+          ARGS=""
+          for t in $TESTS; do
+            [[ "$t" =~ ^LaCarteUITests(/[A-Za-z0-9_]+){0,2}$ ]] || { echo "::error::not a UI test target: $t"; exit 1; }
+            ARGS="$ARGS -only-testing:$t"
+          done
+          [ -n "$ARGS" ] || { echo "::error::no test given"; exit 1; }
+          echo "ONLY_TESTING=$ARGS" >> "$GITHUB_ENV"
+      - name: Boot simulator (background, during the build)
+        run: ci/boot-simulator.sh --start
+      - name: Build app + UI tests
+        run: ci/build-ui-tests.sh "$RUNNER_TEMP/LaCarte.xctestproducts"
+      - name: Wait for the simulator
+        run: ci/boot-simulator.sh --wait
+      - name: Warm up the app (cold first launch)
+        run: ci/boot-simulator.sh --warm-app "$RUNNER_TEMP/LaCarte.xctestproducts"
+      - name: UI tests (selected)
+        timeout-minutes: 40
+        env:
+          UI_TEST_PRODUCTS: ${{ runner.temp }}/LaCarte.xctestproducts
+          UI_RECORD: ${{ inputs.record && '1' || '' }}
+        run: ci/ui-test.sh scripts/ios-ui-test.sh ci-selected $ONLY_TESTING
+      - name: Upload screenshots, recordings, logs
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+        with:
+          name: screenshots-selected
+          path: qa/screenshots/
+          if-no-files-found: ignore

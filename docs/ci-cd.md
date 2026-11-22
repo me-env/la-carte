@@ -1,6 +1,6 @@
 # CI/CD: from a push to production
 
-Owner: `cicd-lead` agent. One workflow, `.github/workflows/ci.yml`. Signing and Ad Hoc builds
+Owner: `cicd-lead` agent. Workflows: `.github/workflows/ci.yml` (every push/PR/nightly) and `ui-only.yml` (manual: selected UI tests, below). Signing and Ad Hoc builds
 (`adhoc.yml`) belong to `release-engineer` (see `release.md`). The API server setup is in `deploy.md`.
 
 ## Pipeline map
@@ -37,13 +37,31 @@ Speed settings (measured 2026-11-22, run 45032373007):
   `UI_TEST_PRODUCTS=<dir> scripts/ios-ui-test.sh …`, which then skips its build.
 - `ci/boot-simulator.sh --start` / `--wait`: the boot (CoreSimulator start ≈ 1 min, data migration ≈ 2 min,
   appearance switch, one system-app launch so SpringBoard is not "Busy") overlaps the build or the download.
-  It prints how long each phase took.
+  It prints how long each phase took. It also marks the keyboard's "slide to type" intro as shown (in
+  `com.apple.keyboard.preferences`, which iOS 26+ reads, and `com.apple.Preferences`): that screen covered the
+  first keyboard on CI and swallowed typing.
+- `ci/boot-simulator.sh --warm-app <products>` (step *Warm up the app*, after the boot): installs, launches
+  (mock deck), terminates and uninstalls the built app once, so the first test doesn't pay the cold first launch
+  ("Timed out while launching application via Xcode", after which xcodebuild hung for 49 min).
 - A runner refused by the simulator ("Application failed preflight checks … Busy") is retried once inside
   `scripts/ios-ui-test.sh` (`scripts/_ui-retry.sh`, `CI infra` warning); refused twice prints
   `TESTS: infra failure (…)` and fails. `ci/ui-test.sh` wraps every UI run and only covers prebuilt products
   that ran no test at all (`TESTS: none run`): it waits 30 s and retries once. A failing test is never retried.
 
 Screenshots: each UI job uploads its own artifact (`screenshots-smoke`, `screenshots-<shard>`, `screenshots-e2e`).
+
+## Run one test class on CI
+
+For a test that fails only on CI: *Actions → UI tests (selected) → Run workflow*, or
+```bash
+gh workflow run ui-only.yml -R me-env/la-carte -f tests="LaCarteUITests/DeckUITests"   # --ref <branch> for a branch
+gh run watch -R me-env/la-carte "$(gh run list -R me-env/la-carte -w ui-only.yml -L 1 --json databaseId -q '.[0].databaseId')"
+gh run download -R me-env/la-carte <run id> -n screenshots-selected -D /tmp/ci-selected
+```
+`tests` is space-separated `-only-testing` targets (`LaCarteUITests/<Class>` or `LaCarteUITests/<Class>/<test>`).
+One macOS job (`.github/workflows/ui-only.yml`): the same build (`ci/build-ui-tests.sh`), background boot and
+warm-up as `ci.yml`, then only those tests. With `record` (default on) the artifact `screenshots-selected` keeps
+every test's recording (`recordings/`) and the runner output (`logs/`). No deploy, no other jobs.
 
 ## Gates
 

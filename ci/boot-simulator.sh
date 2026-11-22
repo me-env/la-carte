@@ -9,6 +9,10 @@
 #   ci/boot-simulator.sh --start    boot in the background (log + exit code in $RUNNER_TEMP), e.g. while building
 #   ci/boot-simulator.sh --udid     only print the device's UDID (starts CoreSimulator, does not boot)
 #   ci/boot-simulator.sh --wait     wait for that background boot (max 15 min), print its log, exit with its code
+#   ci/boot-simulator.sh --warm-app <dir>.xctestproducts
+#                                   after the boot: install, launch, terminate and uninstall the app once, so the first
+#                                   test doesn't pay the cold first launch (CI: "Timed out while launching application
+#                                   via Xcode", then xcodebuild hung for 49 min)
 set -euo pipefail
 STATE="${RUNNER_TEMP:-/tmp}/boot-simulator"
 case "${1:-}" in
@@ -44,12 +48,30 @@ sys.exit(f"no available simulator named {name!r} for iOS {os_}")
 ' "$SIMULATOR" "$OS")
 
 if [ "${1:-}" = --udid ]; then echo "$UDID"; exit 0; fi
+if [ "${1:-}" = --warm-app ]; then
+  APP="$(find "$2" -name LaCarte.app -type d -not -path '*-Runner.app/*' | head -1)"
+  [ -n "$APP" ] || { echo "::error::no LaCarte.app in $2"; exit 1; }
+  BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
+  step "warm-up: installing $BUNDLE_ID"
+  xcrun simctl install "$UDID" "$APP"
+  step "warm-up: launching (mock deck)"
+  SIMCTL_CHILD_LA_CARTE_API=mock xcrun simctl launch "$UDID" "$BUNDLE_ID" >/dev/null
+  sleep 5
+  xcrun simctl terminate "$UDID" "$BUNDLE_ID" || true
+  xcrun simctl uninstall "$UDID" "$BUNDLE_ID" || true  # tests start from a fresh install, as before
+  step "warm-up: done"
+  exit 0
+fi
 step "booting $SIMULATOR ($OS): $UDID"
 xcrun simctl boot "$UDID" 2>/dev/null || true  # already booted is fine
 xcrun simctl bootstatus "$UDID" -b >/dev/null
 step "booted"
-# No "slide to type" intro over the first keyboard a test opens.
-xcrun simctl spawn "$UDID" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true || true
+# No "slide to type" intro over the first keyboard a test opens (it swallowed typing in testDeck_addFromDeck).
+# iOS 26+ reads the flag from com.apple.keyboard.preferences; older runtimes from com.apple.Preferences.
+for domain in com.apple.keyboard.preferences com.apple.Preferences; do
+  xcrun simctl spawn "$UDID" defaults write "$domain" DidShowContinuousPathIntroduction -bool true || true
+done
+step "keyboard intro flag: $(xcrun simctl spawn "$UDID" defaults read com.apple.keyboard.preferences DidShowContinuousPathIntroduction 2>&1)"
 xcrun simctl ui "$UDID" appearance dark
 xcrun simctl ui "$UDID" appearance light
 step "appearance: $(xcrun simctl ui "$UDID" appearance)"
