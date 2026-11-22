@@ -45,7 +45,10 @@ error or empty states. Swipe-delete stays the **system red** (hue 3°, vs the pi
 
 | Type | Font | Use |
 |---|---|---|
-| `.cardFace` | `.largeTitle` medium (34 at default size) | the card text in the middle |
+| `.cardFace` | `.largeTitle` medium (34 at default size) | the card question, ≤ 24 chars (spec 017) |
+| `.cardFaceMedium` | `.title` medium (28) | the card question, 25–60 chars |
+| `.cardFaceSmall` | `.title2` medium (22) | the card question, > 60 chars or a line break (minimum; leading-aligned) |
+| `.cardAnswer` | `.title2` (22) | a short answer (≤ 24 chars) under a question that isn't long; else `.body` |
 | `.screenTitle` | `.title` bold (28) | list screen titles ("Cards") |
 | `.body` | `.body` (17) | list row text, card back |
 | `.meta` | `.footnote` (13) | dates, counts, status lines |
@@ -112,5 +115,5 @@ iPhone 17 Pro), `Theme.background`, radius 22, 16 pt padding, on a `Theme.surfac
 - Background is `Theme.background` edge to edge, light **and** dark.
 - Nothing competes with the centered text; no default iOS blue tint (button tint = ink). Pink appears only in the 4 accent places.
 - Buttons are the circle style, 44pt hit area, aligned to the same top margin.
-- Text doesn't truncate in the main area; long card text wraps and stays centered.
+- Card text never truncates. Size and alignment follow its length (`CardText`, spec 017): a word or a short question is big and centred, a paragraph is smaller and leading-aligned, and the answer is always one tier below the question. Anything longer scrolls.
 - Dynamic Type at XL doesn't break layout.
