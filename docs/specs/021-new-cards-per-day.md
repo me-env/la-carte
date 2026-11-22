@@ -242,7 +242,7 @@ Delegate actions: none new. The widget and Settings keep reading `stats()` and i
 - Any hold, cap or "pause new cards". A user who wants fewer new cards simply stops at a milestone.
 - An in-app setting or REST endpoint for M (backlog #44).
 - The widget: it still shows `stats.due`, which now includes every new card ("64 to review" where the app says
-  "14"). Aligning it is backlog #45.
+  "14"). Aligning it is backlog #46.
 - Streak-like rewards, confetti, sounds, a milestone history across days.
 - A `tz` on `add_notes` / `add_cards`.
 - Reordering new cards (priority, random), or interleaving new cards with reviews.

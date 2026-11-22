@@ -63,6 +63,12 @@ Rules:
   `/cards/due`, `due_cards`, `stats.due`, and `stats.next_due` (earliest time a card not servable now
   becomes servable: `max(due, every sibling's hold)`, just `due` for a (re)learning card). `total` / `new` count
   cards.
+- **Due-date spreading (spec 023)**: `deck._scheduler` runs with `enable_fuzzing=False`; `deck.review_card` does
+  the fuzz itself. When the result is a `review` card with an FSRS interval `i` ≥ 3 days, the new due is
+  `now + k days` for one `k` in the library's fuzz window around `i` (`fsrs.scheduler.FUZZ_RANGES`), picked at
+  random with Anki 24.11's load-balancer weights: 1 for an empty day, else `count^-2.15 · k^-3`, where `count` =
+  other cards due in `(now + (k-1) d, now + k d]` (one query per review). Learning steps and intervals under 3 days
+  are never moved; nothing about the shift is stored. RNG injectable (`rng=`) for tests.
 - **Held cards (spec 015)**: a card with any `Report` whose status is `open` or `waiting_user` is left out of the
   servable queue entirely (so out of `/cards/due`, `due_cards`, `stats.due`, `stats.next_due`; it doesn't bury its
   siblings). It still counts in `total` and shows in `/cards`, `/notes`. Its FSRS state is never touched.
