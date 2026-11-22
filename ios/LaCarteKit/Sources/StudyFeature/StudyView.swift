@@ -200,8 +200,8 @@ public struct StudyView: View {
       ScrollViewReader { proxy in
         ScrollView {
           VStack(spacing: Theme.Spacing.m) {
-            prompt(card)
-            answerSlot(card)
+            prompt(card).background { textHalo }
+            answerSlot(card).background { textHalo }
           }
           .multilineTextAlignment(.center)
           .frame(maxWidth: .infinity)
@@ -500,6 +500,15 @@ public struct StudyView: View {
     }
     .allowsHitTesting(false)
     .animation(Theme.Motion.standard, value: store.swipeEase == nil)
+  }
+
+  /// A soft patch of background behind each side's text: the swipe ring's dots fade out under it, never touch a glyph.
+  private var textHalo: some View {
+    Rectangle()
+      .fill(Theme.background)
+      .padding(-Theme.Spacing.s)
+      .blur(radius: Theme.Spacing.s / 2)
+      .allowsHitTesting(false)
   }
 
   private static func binOrder(_ rating: Rating?) -> Double {

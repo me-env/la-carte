@@ -136,6 +136,25 @@ struct DeckFeatureTests {
     #expect(store.state.message == .offline)
   }
 
+  @Test func retryReloadsAfterGoingOffline() async {
+    var state = DeckFeature.State()
+    state.phase = .offline
+    let store = TestStore(initialState: state) {
+      DeckFeature()
+    } withDependencies: {
+      $0.apiClient.isConfigured = { true }
+      $0.apiClient.notes = { [notes] _ in notes }
+    }
+
+    await store.send(.retryButtonTapped) {
+      $0.phase = .loading
+    }
+    await store.receive(\.notesResponse.success) {
+      $0.notes = IdentifiedArray(uniqueElements: self.notes)
+      $0.phase = .loaded
+    }
+  }
+
   @Test func swipingDeletesTheRowAndTellsTheParent() async {
     let deck = LockIsolated(notes)
     let store = TestStore(initialState: loaded(notes)) {

@@ -89,6 +89,7 @@ public struct DeckFeature {
     case rowTapped(Note.ID)
     case rowSwipedToDelete(Note.ID)
     case pulledToRefresh
+    case retryButtonTapped
     case scenePhaseChanged(ScenePhase)
     case notesResponse(Result<[Note], any Error>)
     case deleteResponse(Result<Note.ID, any Error>)
@@ -120,6 +121,10 @@ public struct DeckFeature {
 
       case .scenePhaseChanged:
         return .none
+
+      case .retryButtonTapped:
+        state.phase = .loading
+        return loadNotes(&state)
 
       case .addButtonTapped:
         state.destination = .editor(NoteEditorFeature.State())

@@ -140,6 +140,12 @@ public struct DeckView: View {
           .accessibilityIdentifier("deck.detail")
       }
     } actions: {
+      if message == .offline {
+        CircleIconButton("arrow.clockwise", accessibilityLabel: "Retry") {
+          store.send(.retryButtonTapped)
+        }
+        .accessibilityIdentifier("deck.retry")
+      }
       if store.showsSettingsButton {
         Button("Open Settings") { store.send(.settingsButtonTapped) }
           .font(.body)
@@ -211,6 +217,12 @@ public struct DeckView: View {
 #Preview("Not set up") {
   DeckView(store: Store(initialState: DeckFeature.State()) { DeckFeature() } withDependencies: {
     $0.apiClient.isConfigured = { false }
+  })
+}
+
+#Preview("Offline") {
+  DeckView(store: Store(initialState: DeckFeature.State()) { DeckFeature() } withDependencies: {
+    $0.apiClient.notes = { _ in throw URLError(.notConnectedToInternet) }
   })
 }
 
