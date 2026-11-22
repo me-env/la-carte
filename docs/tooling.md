@@ -25,6 +25,8 @@ payoff. Measurements are from 2026-11-21 (CI run 44907442393, local `qa/.results
 | 16 | Brand render scripts: `docs/design/brand/render.sh` (82), `explorations/render.sh` (53), 9× `explorations/round*/render.py` (1,515 lines) | hand-written seeded Python/SVG per round → rsvg-convert PNGs + a sheet | design-lead | every logo round (6 rounds, 5 passes in round 6) | each round re-implements PRNG, SVG writer, PNG export, sheet layout and its own checks; checks report per-15-px-band coverage only, which hides the joint seam (see P1) |
 | 16b | Brand-render library (P5) | shared PRNG, Poisson-disc, lattice matching, SVG/PNG, sheets for new rounds | design-lead | every logo round from round 8 | done: 285 lines, selftest PASS in 3.2 s; round script ~25 lines (was 140–165) |
 | 16c | Swift logo/gallery PNG renders (P6) | `ImageRenderer` in DesignSystemTests → PNGs | design-lead | every logo/design-system change | logo done (15 PNGs, 14.9 s); gallery renders blank (ScrollView), needs a `content` view exposed in `Sources` by design-lead |
+| 16d | Study screen renders (P10): `ScreenColorTests/StudyRenders.swift` (109) | real `StudyView` in a UIWindow → 44 PNGs (12 states × light/dark/forest + system) | design-lead | every study-screen design change | done 2026-11-22: 30 s, byte-identical across runs; glass hidden (layer.render), judge glass on UI-test screenshots |
+| 16e | `scripts/screen-sample.py` (318) (P10) | colour at a point, region uniformity, ΔE2000/WCAG diff, text contrast, min gap between colour classes, on any exported PNG | qa-validator | colour/glass/contrast ACs in qa/reports | done 2026-11-22: selftest 11/11 in 0.13 s; region on a full 3× render 0.66 s |
 | 17 | Critic review sheets (scratchpad `critic/sheet*.py`, zooms) | ad hoc contact sheets, home-screen mocks with hand-drawn fake Apple icons | design-critic | every design review | replaced by `scripts/design-review.py` (P1, done): measured PASS/FAIL, sheet, home mock with real Apple icons |
 | 18 | Marketing video pipeline (`docs/marketing/video-tools.md`) | simctl recordVideo → ffmpeg → VHS → gifski | marketing | planned | not built; ffmpeg, gifski, vhs not installed |
 | 19 | `marketing/seed-demo.sh` (37) | seeds the demo deck | marketing | demo takes | none |
@@ -347,6 +349,24 @@ XCUITest keeps navigation, E2E and one appearance-switch smoke test.
   dark" on iOS 26: CI shards only (`ci/boot-simulator.sh`), or locally with the user at the Mac running
   `SIMULATOR=… OS=26.5 ci/boot-simulator.sh` once. (3) P8c moves most colour checks off the device appearance.
 
+### P10. Real study-screen renders + a screenshot sampler (design-lead and design-critic requests, specs 017/019)
+
+- **Owners:** design-lead (render method), qa-validator (sampler). **Status:** both accepted with changes, implemented 2026-11-22 (b1c518b, e1eaf7c).
+- **Problem:** `ImageRenderer` draws the card's ScrollView empty, so two design rounds were judged on hand-built mocks, not
+  the real view. Colour, glass and contrast acceptance criteria were judged by eye.
+- **Finding:** the P8 `Screen` helper (UIWindow + `layer.render`, 3×) already drew the real StudyView. 24 renders took 48 s.
+  `drawHierarchy(afterScreenUpdates:)` gave all-white PNGs (also with the window in the scene), so it isn't usable for glass.
+- **Result:** `scripts/ios-test.sh --render -only-testing:ScreenColorTests/StudyRenders` gives 44 PNGs
+  `screen-study-<state>-<theme>-<scheme>.png` in about 30 s. States are set as store state (`swipeEase` holds the drag).
+  To add a state, add one `catalogue` line. Glass is hidden and the run says so. `uv run scripts/screen-sample.py
+  at|region|diff|contrast|gap` works on any PNG; points are inferred from the width (1206/804/402), anything else fails loudly.
+  Rule in docs/design-system.md: judge screens on real renders or UI-test screenshots, never mocks; judge glass on screenshots only.
+- **Limits / follow-ups:** the next-card fade midpoint and 019's second drag direction aren't store state, so they aren't
+  rendered. `gap` needs `--tol 0.5` next to anti-aliased greys, and can't separate the dots from the glyphs when both are ink.
+  Add a back-reference comment above `expectText` once ScreenColorTests.swift is no longer dirty. Finding for design-lead:
+  the answer text #9D9D9B on #F9FAF5 is 2.59:1 (below AA 4.5).
+- **Rollback:** `git revert b1c518b e1eaf7c`.
+
 ## UI suite speed (audit 2026-11-21, tooling-lead)
 
 Target: full UI suite < 10 min locally, PR smoke < 3 min. Read-only audit, no runs.
@@ -407,3 +427,4 @@ Verify each step with `TESTS: … (x min)` from a full run, in order 1 → 3 →
 | 2026-11-21 | P1 closing-hole bug + `--screen stochastic` (+ brandkit `progressive_blue_noise`) | design-lead + design-critic requested, manager approved | implemented: round 8b's 312 closing holes measured; stochastic mode + synthetic (11 of 12 seeds); round 9 FAILS 4/31 |
 | 2026-11-21 | P7 live progress, P8 contact sheet + colour helper + P4, P9 iOS 26 dark | manager pre-approved, qa-validator requested | P7, P8 implementers spawned; P9 documented as CI-only / forced-theme locally |
 | 2026-11-22 | P1 round 11 fixes: near-empty frame crash, sheet name collisions, seed-dependent order checks | design-lead reported, tooling-lead agreed | implemented: N/A instead of a crash, per-folder sheets, order step/drawdown minus 2 SE; round 11 order checks pass on 11 of 11 seeds |
+| 2026-11-22 | P10 study renders + screen-sample.py | design-lead and qa-validator accepted with changes | implemented: b1c518b (44 PNGs, 30 s), e1eaf7c (selftest 11/11, 0.13 s) |
