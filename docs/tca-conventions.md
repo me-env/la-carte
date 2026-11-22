@@ -94,6 +94,9 @@ public struct StudyFeature {
 - Override only the dependency endpoints the test uses: `$0.apiClient.dueCards = { _ in [...] }`.
 - Receive by case key path: `await store.receive(\.cardsResponse.success) { … }`.
 - Time: `TestClock`; ids: `.incrementing` UUID generator.
+- To keep an effect in flight (to prove something cancels it), stub with `try await Task.never()` or
+  an `AsyncStream` the test releases, never a `TestClock` sleep: the sleep can register after the
+  cancel and flake. The store's end-of-test check then fails on any effect left uncancelled.
 - One test per acceptance criterion that involves logic; name it after the behavior.
 
 ## Simplicity checklist (code-reviewer uses this)
