@@ -1,9 +1,43 @@
 # QA: 017 Adaptive card text
 
-Verdict: PASS (latest: re-validation 3, amendment `4df0a43`; earlier: fix `30a7d0a`; the first run's FAIL on AC 11 is kept below for history)
+Verdict: PASS (latest: re-validation 4, amendment `f906538`; re-validation 3, amendment `4df0a43`; earlier: fix `30a7d0a`; the first run's FAIL on AC 11 is kept below for history)
 Date: 2026-11-22 · Simulator: iPhone 17 Pro / iOS 27 · light mode (spec: one simulator, light)
 Build: `30a7d0a` (rebased on main incl. spec 018) on `worktree-agent-af2975cb0d52400eb`
 
+
+## Re-validation 4: amendment "trigger the question-width column on width only" (`f906538`)
+Verdict: **PASS** (AC 6, 7, 13 as amended 2026-11-22).
+Date: 2026-11-22 · iPhone 17 Pro / iOS 27 · light · branch `worktree-agent-a314a60085f1fceda`
+
+Run: `scripts/ios-ui-test.sh --split 2 --wait 017-d85-mock` on StudyLengthsUITests + StudyUITests: 13 passed,
+0 failed, 2 skipped (`qa/screenshots/017-d85-mock/`, logs in `logs/`). Full suite not run (CI's job).
+
+`testStudyLengths_layoutD` now asserts each leading-answer fixture's fill (question ink width / column) against
+the 85 % rule, then checks where the answer sits. Measured (`logs/StudyLengthsUITests_testStudyLengths_layoutD.txt`,
+`QA017D … ink fill`):
+
+| Question | Lines | Fill | Answer | Result (screenshot `study-layoutD-<name>-back-light.png`) |
+|---|---|---|---|---|
+| Who composed The Magic Flute? | 2 | 67 % | 3+ lines | `2line-long`: starts at the column edge, 16 pt, 370 pt wide. PASS |
+| Who discovered penicillin? | 1 | 88.8 % | 3+ lines | `penicillin-long`: answer ink 35.8 vs question ink 36.0, inside the question's right edge. PASS |
+| Speed of light (km/s)? | 1 | 88.3 % | 3+ lines | `wide1line-long`: answer ink 36.9 vs 37.5. PASS (inline edit field keeps that column) |
+| Which treaty, signed in Osnabrück and Münster, … 1648? (new) | 3 | 95.9 % | 3+ lines | `wrappedWide-long`: wrapped + wide, answer at the question's left edge 19.5 (ink 20.2 vs 20.5). PASS |
+| Photosynthesis | 1 | 62 % | 3+ lines | `shortq-long`: column edge. PASS |
+| Which river flows through Paris? | 2 | **57 %** | 1 line | `2line-short`: centred in the column. PASS |
+| Who composed The Magic Flute? | 2 | 67 % | "Wolfgang Amadeus Mozart" | `2line-widerAnswer`: centred, one line, wider than the question; edit field spans the column. PASS |
+| Speed of light (km/s)? | 1 | 88.3 % | 1 line | `wide1line-short`: centred. PASS |
+
+The question's frame is identical before and after reveal on all eight cards (asserted).
+
+Test changes: Magic Flute + long answer is now a narrow case (column edge); "Which river flows through Paris?" is
+**not** ≥ 85 % (57 %), so it's marked narrow (it has a centred answer, so the rule doesn't apply to it); added
+penicillin (one line ≈ 89 %) and a wrapped wide question (no other fixture covered "wraps and ≥ 85 %"); the inline
+edit check moved to the speed-of-light card, the one that still takes the question's column; the wrapped case expects
+the answer at the frame's left edge (a wrapped block is leading).
+
+Note (not blocking): `testStudyLengths_inlineEditTrailingNewline` failed once in the first run (`study.back` read at
+y 342 above the editing field, then 489 in the reruns), and passed in the next two runs. The answer was correctly placed
+in the screenshot. Looks like a frame read mid-layout; watch it in CI.
 
 ## Re-validation 3: amendment "a centred answer keeps the full column" (`4df0a43`)
 Verdict: **PASS** (AC 6, 7, 10, 13 as amended 2026-11-22).
