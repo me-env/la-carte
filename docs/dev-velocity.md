@@ -109,6 +109,24 @@ DerivedData: plug it in, or `defaults delete com.apple.dt.Xcode IDECustomDerived
 Simulator devices stay in `~/Library/Developer/CoreSimulator/Devices`: a symlink to another volume makes
 Xcode 27's `simctl` list no devices (tried and rolled back 2026-11-22). Don't move them.
 
+### Xcode update mid-session (recovery, 2026-11-22: 27.0 -> 27.2)
+
+Symptoms: "CoreSimulator is out of date (old < new)", and macro targets (swift-perception, TCA, dependencies)
+fail with "Unable to resolve Swift module dependency ... 'SwiftSyntax'". Every running build/UI run fails; nothing
+to save, so recover at once:
+1. CoreSimulatorService must relaunch on the new framework: `killall -9 com.apple.CoreSimulator.CoreSimulatorService`
+   (it restarts on the next `simctl`). Check `xcrun simctl list runtimes` and that the `la-carte-ui-*` /
+   `la-carte-unit-*` pool devices are still listed. Runtimes don't change with a point release (27.2 kept iOS 27.0).
+2. Stale build products: for each checkout that fails, delete only its `<DerivedData>/LaCarte-<hash>/Build`
+   (or `LaCarteKit-<hash>/Build`) under that checkout's build lock:
+   `scripts/_lock.sh build-LaCarte-<id> rm -rf <dir>/Build` (`build-LaCarteKit-<id>` for the package), with
+   `<id>` = `printf %s <checkout root> | cksum | cut -d' ' -f1`. (Sourcing `_ios-env.sh` from zsh gives a wrong
+   id: it needs bash's `BASH_SOURCE`.) Each checkout's folder: `WorkspacePath` in `<dir>/info.plist`.
+   Keep `SourcePackages/` (the new swift-syntax prebuilt for the new compiler downloads next to the old one),
+   don't wipe the shared `ModuleCache.noindex` (other projects use it). Don't delete `SourcePackages/prebuilts`
+   by hand; if it was deleted, the next build re-fetches it.
+3. Rebuild: `scripts/ios-build.sh` (~25 s warm after the wipe), `scripts/ios-test.sh`.
+
 ### Unit-test pool: before / after (2026-11-21)
 
 Before (one unit simulator, 17:30–17:46): 6 worktree/main runs of `ios-test.sh` queued. Slot holder acquired
