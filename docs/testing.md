@@ -80,6 +80,8 @@ qa/screenshots/<run>/home-dark.png
 qa/screenshots/<run>/recordings/<test>.mp4   # when Xcode records the run
 ```
 `qa/screenshots/` is gitignored; the QA report references the run, and the manager shows the user the key images.
+Colour, contrast and spacing criteria are measured, not eyeballed: QA cites `uv run scripts/screen-sample.py`
+output (`at`, `region`, `diff`, `contrast`, `gap`; coordinates in points) per criterion in `qa/reports/`.
 Ad-hoc capture of a running simulator, only when the user is at the Mac (macOS privacy prompt):
 `xcrun simctl io booted screenshot qa/screenshots/adhoc.png`.
 
