@@ -47,22 +47,27 @@ The held drag must say, at a glance, **which grade a release gives and when a th
      negative side **scatters with varied sizes** (fully at Forgot) and the positive side **settles into the even
      3-ring lattice, all one size** (exactly at Easy); the finger's movement moves every dot continuously.
    - **Grade cues** (amended 2026-11-22 per user: "hard to tell Got it from Easy, and Hard from Forgot, by the dots
-     alone; some Forgot dots in the accent; lines connecting the dots for Got it"). Each cue rides the disorder ramp
-     of its grade, so it is continuous with the drag (no pop) and complete exactly at the grade's bin edge; Hard
-     and the dead zone carry none. All three are state, not motion, so Reduce Motion keeps them.
+     alone; some Forgot dots in the accent; lines connecting the dots for Got it"). Each cue is continuous with the drag
+     (no pop) and complete exactly at its grade's bin edge; Hard, Got it and the dead zone carry none. Both are
+     state, not motion, so Reduce Motion keeps them.
      - **Forgot**: `blush = (c − 0.45) / 0.55` (negative side). A seeded fifth of the dots (20, never the tiniest
        scattered ones: scatter size ≥ 0.8×) turn from ink to `Theme.accent`, staggered over `blush`, each over a
        quarter of it (so few dots sit half-way, where ink and pink blend muddy): the pink share grows in. Hard stays
        monochrome.
-     - **Got it**: `pairs = (0.3 − c) / 0.1` (positive side). Every other link between neighbours on a ring,
-       mirror-symmetric (counted from 12 o'clock; the 29- and 35-dot rings leave their top dot single): each ring
-       reads as pairs of dots. 1 pt lines in the dots' colour at 40 %, growing out of both dots' edges to meet in
-       the middle, under the dots.
-     - **Easy**: `chains = (0.2 − c) / 0.2`. The other half of the links grows in, closing each ring into a
-       complete chain, and every line darkens to 60 %: Got it = broken pairs on wobbly rings; Easy = three closed,
-       perfect circles. Why not links across rings: with 29 / 32 / 35 dots (even pitch, user's request) no
-       cross-ring mesh is regular (nearest-neighbour links measured 1.8–49° tilt, 9.7–14 pt, 1–3 per dot).
-     - On release the cues stay as held (the settle doesn't close Got it's chains).
+     - **Got it**: no cue of its own (amended again 2026-11-22 per user: "the dots should not have any line at
+       Got it [...] when you're on Got it, you know for sure you've not picked Easy by error, because there are no
+       lines": no links before the Got it → Easy midpoint). Got it reads from rest by the dots' order (disorder
+       0.3 → 0.2), the ink (secondary 60 % → ink 100 %), the threshold pulse and the row's semibold "Got it".
+     - **Easy**: `links = smoothstep((q − 0.6) / 0.4)`, `q` = how far the drag is from Got it's bin edge (0) to
+       Easy's (1), read off the shared bands (`RatingBands` in `DesignSystem`, which `StudyFeature.rating(forEase:)`
+       also uses). So **zero links up to 60 % of the way** from Got it to Easy (past the midpoint: Got it and
+       anything short of clearly heading to Easy show no line), then every link between neighbours on a ring grows
+       in together, eased in and out (no pop when they start, no snap when they close), to **three closed chains
+       exactly at Easy's bin edge**. 1 pt lines in the dots' colour, opacity `0.6 × links`, growing out of both
+       dots' edges to meet in the middle, under the dots: Easy = three closed, perfect circles. Why not links
+       across rings: with 29 / 32 / 35 dots (even pitch, user's request) no cross-ring mesh is regular
+       (nearest-neighbour links measured 1.8–49° tilt, 9.7–14 pt, 1–3 per dot).
+     - On release the cues stay as held (the settle doesn't grow Easy's links on a Got it release).
      - Cost: one stroked `Path` (links) and one filled `Path` (dots) per frame, fewer draw calls than before; pink
        dots are at most 20 extra fills.
    - **Ink**: before a grade (dead zone) all dots are `Theme.secondaryInk` at 60 % opacity; once Hard / Got it or
