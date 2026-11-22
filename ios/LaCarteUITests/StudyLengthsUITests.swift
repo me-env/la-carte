@@ -158,7 +158,10 @@ final class StudyLengthsUITests: XCTestCase {
     rateGood(app, next: Self.long.0)
 
     reveal(app, Self.long.1)
-    let text = front.frame
+    let back = el(app, "study.back")
+    Thread.sleep(forTimeInterval: 0.4)
+    let text = front.frame, answer = back.frame
+    snapshot("study-lengths-long-revealed", appearance: .light)
     front.doubleTap()
     XCTAssertTrue(field.waitFor(timeout: 5), "frontField missing after double-tap on the long front")
     XCTAssertTrue(app.keyboards.firstMatch.waitFor(timeout: 5), "no keyboard")
@@ -166,6 +169,14 @@ final class StudyLengthsUITests: XCTestCase {
     XCTAssertEqual(field.frame.minX, text.minX, accuracy: 1, "frontField leading edge \(field.frame) vs text \(text)")
     // Not an AC 10 item: the 5-line field measures ~0.5 pt per line taller than the text (noted in the QA report).
     XCTAssertEqual(field.frame.height, text.height, accuracy: 4, "frontField height \(field.frame) vs text \(text)")
+    // Starting the edit must not move the answer relative to the question (the keyboard lifts the whole centred
+    // stack; the field may be ~2 pt taller than the text, drawn over its slot, not over the answer).
+    let offsetBefore = answer.minY - text.minY, offsetEditing = back.frame.minY - field.frame.minY
+    print("QA017 edit start: text \(text) answer \(answer) field \(field.frame) back \(back.frame)")
+    XCTAssertEqual(offsetEditing, offsetBefore, accuracy: 0.5,
+                   "answer moved relative to the question when the edit started: \(offsetBefore) → \(offsetEditing)")
+    XCTAssertEqual(back.frame.height, answer.height, accuracy: 0.5, "study.back resized when the edit started")
+    assertAnswerClear(field, back, "edit start")
     snapshot("study-lengths-long-editing", appearance: .light)
 
     // Short draft (13 chars: the "short" tier if the field followed the draft).
@@ -184,13 +195,61 @@ final class StudyLengthsUITests: XCTestCase {
     Thread.sleep(forTimeInterval: 0.4)
     XCTAssertEqual(field.frame.height, shortDraft.height, accuracy: 0.5, "line height changed while typing: \(shortDraft) → \(field.frame)")
     XCTAssertEqual(field.frame.minX, text.minX, accuracy: 1, "frontField moved while typing")
+    assertAnswerClear(field, back, "medium draft")
     snapshot("study-lengths-long-editing-medium-draft", appearance: .light)
+
+    // A draft that can wrap differently in the field and in a Text (very long words, no break opportunity).
+    let longWords = "Pneumonoultramicroscopicsilicovolcanoconiosis, Hippopotomonstrosesquippedaliophobia?"
+    replaceText(field, with: longWords, caret: CGVector(dx: 0.99, dy: 0.95))
+    XCTAssertTrue(poll(timeout: 3) { (field.value as? String) == longWords }, "draft is '\(field.value as? String ?? "")'")
+    Thread.sleep(forTimeInterval: 0.4)
+    XCTAssertEqual(field.frame.minX, text.minX, accuracy: 1, "frontField moved off the leading edge: \(field.frame)")
+    assertAnswerClear(field, back, "long-word draft")
+    snapshot("study-lengths-long-editing-longword-draft", appearance: .light)
+
+    replaceText(field, with: "Which treaty, signed in 1648?", caret: CGVector(dx: 0.99, dy: 0.95))
+    Thread.sleep(forTimeInterval: 0.4)
 
     // Saved: the size may change once (now a centred medium question).
     tapDone(app)
     waitForLabel(front, "Which treaty, signed in 1648?", timeout: 3)
     XCTAssertEqual(front.frame.midX, el(app, "study.card").frame.midX, accuracy: 1, "saved medium question not centred")
     snapshot("study-lengths-long-edited", appearance: .light)
+  }
+
+  /// Inline edit, draft ending in a newline. Return (and a pasted newline) commit the edit, so the only way to get
+  /// there is to delete the last line of a card that has a line break. The field then shows an empty last line:
+  /// it must not draw over the answer, and starting the edit must not move the answer relative to the question.
+  @MainActor
+  func testStudyLengths_inlineEditTrailingNewline() throws {
+    let deck = StubDeck([.init(id: "CCCCCCCC-0000-0000-0000-0000000000C3",
+                               front: "Which treaty ended the Thirty Years' War?\nWestphalia", back: "1648")])
+    let server = StubAPIServer { deck.handle($0) }
+    try server.start()
+    let app = launch(api: .live(server.url))
+    let front = el(app, "study.front"), back = el(app, "study.back"), field = el(app, "study.frontField")
+    XCTAssertTrue(poll(timeout: 10) { front.label.hasSuffix("Westphalia") }, "stub card not shown: '\(front.label)'")
+    reveal(app, "1648")
+    Thread.sleep(forTimeInterval: 0.4)
+    let text = front.frame, answer = back.frame
+    snapshot("study-lengths-newline-revealed", appearance: .light)
+
+    front.doubleTap()
+    XCTAssertTrue(field.waitFor(timeout: 5), "frontField missing after double-tap")
+    XCTAssertTrue(app.keyboards.firstMatch.waitFor(timeout: 5), "no keyboard")
+    Thread.sleep(forTimeInterval: 0.6)
+    XCTAssertEqual(back.frame.minY - field.frame.minY, answer.minY - text.minY, accuracy: 0.5,
+                   "answer moved relative to the question when the edit started")
+    assertAnswerClear(field, back, "two-line card, edit start")
+    snapshot("study-lengths-newline-editing", appearance: .light)
+
+    field.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.95)).tap()
+    field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Westphalia".count))
+    XCTAssertTrue(poll(timeout: 3) { (field.value as? String) == "Which treaty ended the Thirty Years' War?\n" },
+                  "draft is '\(field.value as? String ?? "")'")
+    Thread.sleep(forTimeInterval: 0.4)
+    assertAnswerClear(field, back, "draft ending in a newline")
+    snapshot("study-lengths-newline-draft", appearance: .light)
   }
 
   // MARK: - medium screenshot (25–60 characters)
@@ -307,6 +366,17 @@ final class StudyLengthsUITests: XCTestCase {
     let same = abs(a.minX - b.minX) <= 0.5 && abs(a.minY - b.minY) <= 0.5 && abs(a.width - b.width) <= 0.5
       && abs(a.height - b.height) <= 0.5
     XCTAssertTrue(same, "\(what) frame \(a) differs from the short card's \(b)", file: file, line: line)
+  }
+
+  /// The field's frame ends above the answer's, with at least the pre-edit text/answer spacing minus the field's
+  /// ~2 pt extra height (so the field never draws over the answer).
+  @MainActor
+  private func assertAnswerClear(_ field: XCUIElement, _ back: XCUIElement, _ what: String,
+                                 file: StaticString = #filePath, line: UInt = #line) {
+    let f = field.frame, b = back.frame
+    print("QA017 \(what): field \(f) back \(b) gap \(b.minY - f.maxY)")
+    XCTAssertTrue(back.exists, "study.back hidden while editing (\(what))", file: file, line: line)
+    XCTAssertLessThanOrEqual(f.maxY, b.minY, "frontField \(f) overlaps study.back \(b) (\(what))", file: file, line: line)
   }
 
   /// Return commits the edit (spec 010 #4, `submitLabel(.done)`); typed into the focused field.
