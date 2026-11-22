@@ -128,6 +128,43 @@ final class SettingsUITests: SettingsTestCase {
     server.stop()
   }
 
+  // MARK: - 016b Ask AI app picker
+
+  /// 016b #1/#2: the picker lists the six apps, defaults to Vibe, and a pick survives a relaunch.
+  /// Opening other apps can't be checked on the simulator: left for the user on device (016b #7).
+  @MainActor
+  func testSettings_aiAppPicker() {
+    for appearance in [XCUIDevice.Appearance.light, .dark] {
+      XCUIDevice.shared.appearance = appearance
+      var app = launch(api: .mock, theme: nil)
+      openDeck(app)
+      openSettings(app)
+      let picker = el(app, "settings.aiApp")
+      scrollIntoView(app, picker)
+      XCTAssertTrue(picker.label.contains("Vibe") || (picker.value as? String) == "Vibe",
+                    "default isn't Vibe: \(picker.label) / \(String(describing: picker.value))")
+      picker.tap()
+      for title in ["Vibe", "Claude", "ChatGPT", "Perplexity", "Grok", "Copy only"] {
+        XCTAssertTrue(app.buttons[title].waitFor(timeout: 5), "no \(title) in the picker")
+      }
+      Thread.sleep(forTimeInterval: 0.5)
+      snapshot("settings-ai-app", appearance: appearance)
+      app.buttons["Grok"].tap()
+      XCTAssertTrue(poll(timeout: 3) { (el(app, "settings.aiApp").value as? String) == "Grok" || el(app, "settings.aiApp").label.contains("Grok") })
+      app.terminate()
+      app = launch(api: .mock, theme: nil)
+      openDeck(app)
+      openSettings(app)
+      scrollIntoView(app, el(app, "settings.aiApp"))
+      let after = el(app, "settings.aiApp")
+      XCTAssertTrue((after.value as? String) == "Grok" || after.label.contains("Grok"), "Grok not kept after relaunch")
+      after.tap()
+      app.buttons["Vibe"].tap()  // back to the default
+      XCTAssertTrue(poll(timeout: 3) { (el(app, "settings.aiApp").value as? String) == "Vibe" || el(app, "settings.aiApp").label.contains("Vibe") })
+      app.terminate()
+    }
+  }
+
   // MARK: - #9 live API (scripts/e2e.sh)
 
   /// #9: no launch env at all; type the e2e URL + token → "Connected · 2 cards"; token "wrong" → "Wrong token";

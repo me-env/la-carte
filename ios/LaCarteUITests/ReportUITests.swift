@@ -268,10 +268,12 @@ final class ReportUITests: XCTestCase {
       let before = server.requests.count
       openMenu(app)
       menuButton(app, "ask", "Ask about this card").tap()
-      waitForLabel(el(app, "study.reportNotice"), "Copied", timeout: 3)
+      // 016b #6: default Vibe isn't installed on the simulator.
+      waitForLabel(el(app, "study.reportNotice"), "Copied · Vibe isn't installed", timeout: 3)
+      XCTAssertTrue(el(app, "study.reportNotice").label.hasPrefix("Copied"))
       XCTAssertFalse(el(app, "study.remaining").exists, "counter shown next to the Copied notice")
       Thread.sleep(forTimeInterval: 0.5)  // counter cross-fade (Theme.Motion.standard) settled
-      snapshot("study-ask-copied", appearance: appearance)
+      snapshot("study-ask-not-installed", appearance: appearance)
       waitForLabel(el(app, "study.back"), Self.back)
       assertRatingsEnabled(app)
       waitForLabel(el(app, "study.remaining"), "2 to review", timeout: 4)
@@ -285,6 +287,23 @@ final class ReportUITests: XCTestCase {
       app.terminate()
       server.stop()
     }
+  }
+
+  /// 016b #5: with "Copy only" chosen (`-aiApp copyOnly`, the stored value), Ask shows just "Copied".
+  @MainActor
+  func testAsk_copyOnlyShowsCopied() throws {
+    XCUIDevice.shared.appearance = .light
+    let (server, _) = try stub([
+      .init(id: "AAAAAAAA-0000-0000-0000-0000000000A1", front: Self.front, back: Self.back, due: Self.base),
+    ])
+    let app = launch(api: .live(server.url), arguments: ["-aiApp", "copyOnly"])
+    reveal(app)
+    openMenu(app)
+    menuButton(app, "ask", "Ask about this card").tap()
+    waitForLabel(el(app, "study.reportNotice"), "Copied", timeout: 3)
+    snapshot("study-ask-copy-only", appearance: .light)
+    app.terminate()
+    server.stop()
   }
 
   // MARK: - Broken photo (015b #13, #14)
