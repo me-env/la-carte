@@ -8,7 +8,7 @@ struct AIAppTests {
   let encoded = "Question%3A%20a%20%26%20b%0AAnswer%3A%201%2B1%20caf%C3%A9"
 
   @Test func eachAppHasItsLink() {
-    #expect(AIApp.vibe.link(for: text)?.absoluteString == "https://chat.mistral.ai/chat/")
+    #expect(AIApp.vibe.link(for: text)?.absoluteString == "https://chat.mistral.ai/chat/?q=\(encoded)")
     #expect(AIApp.claude.link(for: text)?.absoluteString == "https://claude.ai/new?q=\(encoded)")
     #expect(AIApp.chatgpt.link(for: text)?.absoluteString == "https://chatgpt.com/?q=\(encoded)")
     #expect(AIApp.perplexity.link(for: text)?.absoluteString == "https://www.perplexity.ai/search")

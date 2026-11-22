@@ -20,7 +20,8 @@ and opens that app.
    install detection, see 1).
 3. **Six choices**: Vibe, Claude, ChatGPT, Perplexity, Grok, Copy only. Gemini, Copilot, DeepSeek, Meta AI and Poe
    are left out: they have no documented link that opens their app (backlog #37: Gemini after a device check).
-4. **The text is always copied**, even when the app link carries it. Claude and ChatGPT get it prefilled; Vibe,
+4. **The text is always copied**, even when the app link carries it. Vibe, Claude and ChatGPT get it prefilled
+   (Vibe's `?q=` is undocumented and unverified in the app, device check pending; the copy is its fallback);
    Perplexity and Grok open empty and the user pastes. Perplexity isn't prefilled on purpose: its link searches
    at once, before the user has typed a question.
 5. **The menu loses its title.** With "Ask about this card" in it, "Report this card" no longer fits. The dialog
@@ -57,7 +58,7 @@ Each site's live `apple-app-site-association` file (AASA) was read: it lists the
 
 | App | Link that opens the app | Prefilled prompt | Scheme (`canOpenURL`) | Decision |
 |---|---|---|---|---|
-| Mistral Vibe (was Le Chat, renamed May 2026) | `https://chat.mistral.ai/chat/` (AASA `/chat/*`; `/chat?q=` without the slash doesn't match) | `?q=` works on the web, unverified in the app | none found | **Open + copy** |
+| Mistral Vibe (was Le Chat, renamed May 2026) | `https://chat.mistral.ai/chat/` (AASA `/chat/*`; `/chat?q=` without the slash doesn't match) | `?q=` works on the web, unverified in the app (device check pending) | none found | **Prefill + copy** (`/chat/?q=`, slash kept for the AASA) |
 | Claude | `https://claude.ai/new` (AASA, query kept) | `?q=` fills the box, doesn't send (official for desktop/web; iOS app unverified); ~14k chars cap | `claude://` (official) | **Prefill + copy** |
 | ChatGPT | `https://chatgpt.com/?q=` (AASA routes `?q=` and `?prompt=` to the app) | `?q=` fills the box (community; auto-send unverified) | `chatgpt://` unverified | **Prefill + copy** |
 | Perplexity | `https://www.perplexity.ai/search` (AASA) | `?q=` searches at once | `perplexity-app://` (community) | **Open + copy** (decision 4) |
@@ -106,11 +107,11 @@ Screenshots: `study-ask-menu` (light + dark), `study-ask-copied` (light).
 |---|---|---|
 | 1 | Settings has a section "Ask AI" with a native menu `Picker` "App" (`settings.aiApp`) listing Vibe, Claude, ChatGPT, Perplexity, Grok, Copy only. Footer: "Ask about this card copies the card and opens this app." | unit + UI (light, dark) |
 | 2 | First launch: the picker shows Vibe. A pick is stored in `@Shared(.appStorage("aiApp"))` and survives a relaunch | unit + UI |
-| 3 | `AIApp.link(for:)` returns exactly: Vibe `https://chat.mistral.ai/chat/`; Claude `https://claude.ai/new?q=<enc>`; ChatGPT `https://chatgpt.com/?q=<enc>`; Perplexity `https://www.perplexity.ai/search`; Grok `https://grok.com/`; Copy only `nil`. `<enc>` as in "Prefill encoding" (test a text with a newline, `&`, `+` and `é`) | unit |
+| 3 | `AIApp.link(for:)` returns exactly: Vibe `https://chat.mistral.ai/chat/?q=<enc>`; Claude `https://claude.ai/new?q=<enc>`; ChatGPT `https://chatgpt.com/?q=<enc>`; Perplexity `https://www.perplexity.ai/search`; Grok `https://grok.com/`; Copy only `nil`. `<enc>` as in "Prefill encoding" (test a text with a newline, `&`, `+` and `é`) | unit |
 | 4 | Ask with an app chosen: copy first, then `askAI.open(link)`. Opened → notice "Copied". Not opened (app not installed) → "Copied · Vibe isn't installed" (the app's name). Both last 2 s | unit (open stubbed `true` / `false`) |
 | 5 | Ask with "Copy only": copies, calls no `open`, notice "Copied" (016a behaviour) | unit |
 | 6 | Simulator, no AI app installed, default Vibe: Ask shows "Copied · Vibe isn't installed" and the app stays in front | UI |
-| 7 | Left for the user (device): with Vibe, Claude and ChatGPT installed, Ask opens each one; Claude and ChatGPT show the text in their box; pasting into Vibe gives the exact text | manual |
+| 7 | Left for the user (device): with Vibe, Claude and ChatGPT installed, Ask opens each one; Vibe, Claude and ChatGPT show the text in their box (Vibe pending: if it ignores `q`, pasting gives the exact text) | manual |
 
 Screenshots: `settings-ai-app` (light + dark, menu open), `study-ask-not-installed` (light).
 

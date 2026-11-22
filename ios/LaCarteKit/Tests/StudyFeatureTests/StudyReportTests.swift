@@ -307,7 +307,7 @@ struct StudyReportTests {
       $0.continuousClock = ImmediateClock()
       $0.askAI.copy = { _ in }
       $0.askAI.open = { url in
-        #expect(url == URL(string: "https://chat.mistral.ai/chat/"))
+        #expect(url == AIApp.vibe.link(for: AskText.make(for: cards[0])))
         return false
       }
     }
