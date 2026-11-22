@@ -90,6 +90,13 @@ qa/screenshots/<run>/recordings/<test>.mp4   # when Xcode records the run
 `qa/screenshots/` is gitignored; the QA report references the run, and the manager shows the user the key images.
 Colour, contrast and spacing criteria are measured, not eyeballed: QA cites `uv run scripts/screen-sample.py`
 output (`at`, `region`, `diff`, `contrast`, `gap`; coordinates in points) per criterion in `qa/reports/`.
+Image and video ops (`uv run scripts/image-ops.py --selftest`; same point/scale rules, outputs in `$TMPDIR/image-ops/`):
+```bash
+uv run scripts/image-ops.py crop <png> x0,y0,x1,y1 --zoom 8                  # pixel-level inspection
+uv run scripts/image-ops.py montage a.svg b.png --apple --mask [--sizes 1024,58,29]   # icon contact sheet
+uv run scripts/image-ops.py frames <mp4> --from 2 --to 4 [--every 0.1]       # PNGs named by real timestamp
+uv run scripts/image-ops.py track <mp4> x0,y0,x1,y1 [--from S --to S] [--json]  # luma per frame + 10-90 % transition times
+```
 Ad-hoc capture of a running simulator, only when the user is at the Mac (macOS privacy prompt):
 `xcrun simctl io booted screenshot qa/screenshots/adhoc.png`.
 
