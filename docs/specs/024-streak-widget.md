@@ -1,10 +1,11 @@
 # 024 — Widget: the streak as a history grid (with freezes)
 
-Status: draft (v3, user decisions of 2026-11-22 folded in; awaiting the user's approval of the v3 mockup, then
-`ready`)
+Status: ready (v3 approved by the user on 2026-11-22: "the design you sent looks great"; final design choices
+below)
 Owners: api-engineer (step 1: `/stats` fields, freeze rule) → ios-engineer (step 2: contract, grid, widget,
 renders) → qa-validator. design-lead updates `docs/design-system.md` (Widget section, accent rule 3) with step 2.
-Depends on: 007 (widget, merged), 021 step 1 (`new_today`, `milestone` on `/stats`; same `api/**` lane, do it first).
+Depends on: 007 (widget, merged). The count needs 021's `new_today` and `milestone` on `/stats`: 024 step 1 adds
+exactly those two fields as 021 defines them (additive, read-only), so 024 doesn't wait on 021's milestone UI.
 Replaces in 007: the widget layout, AC 2 (streak cases), AC 16–19 and the gallery tiles. Everything else in 007
 (App Group, Keychain, provider, cache, refresh, theme, signing) stays. Settles backlog #46.
 Design reference: `docs/design/renders/024/streak-widget-v3.png` (design-lead mockup drawn from the reference
@@ -135,22 +136,22 @@ and 76 pt tall.
 |---|---|
 | day | circle Ø 9 |
 | week | rounded square 8.5, radius 2 |
-| month | rounded regular pentagon, point up, circumradius 5.25, corner radius 1.2, drawn 0.25 pt low |
+| month | rounded regular pentagon, point up, circumradius 5.5, corner radius 1.2, drawn 0.25 pt low |
 | year | rounded 5-point star, outer radius 7.4, inner radius 3.7, corner rounding 1.2, drawn 0.5 pt low |
 
 | Status | Look (tokens; the same in all themes) |
 |---|---|
 | `run` | `ink`, solid |
-| `older` | `secondaryInk`, solid |
+| `older` | `secondaryInk` at 60%, solid (lighter, so the current run stands out) |
 | `missed` | `secondaryInk` at 35%, solid |
 | `frozenRun` (day only) | the circle hollow, 1.5 pt inside stroke, `ink` |
-| `frozenOlder` (day only) | the same, `secondaryInk` |
+| `frozenOlder` (day only) | the same, `secondaryInk` at 60% |
 | `todayPending` | a 2 pt `accent` ring over a `secondaryInk` 35% fill |
 | `todayStudied` | `accent`, solid |
 
 Tinted and clear Home Screens (`widgetRenderingMode != .fullColor`):
 - today's mark is `.widgetAccentable()`;
-- `ink` becomes `.primary`, and `secondaryInk` (35% included) becomes `.secondary`;
+- `ink` becomes `.primary`, and `secondaryInk` (35% and 60% included) becomes `.secondary`;
 - frozen and today stay distinct by stroke (a 1.5 pt hollow circle vs a 2 pt ring over a fill).
 
 ## Screens & states
@@ -212,7 +213,7 @@ Screenshots (QA, gallery, light + dark + `-theme forest`):
 ### API
 | # | Criterion (observable) | Validated by |
 |---|---|---|
-| 1 | `GET /stats` adds `history` (string over `s` studied, `f` frozen, `m` missed, `p` pending; one character per local day from `history_start` to today in `tz`; `p` only as the last character, when today has no review; `"p"` when there are no reviews), `history_start` (ISO date), `streak_start` (ISO date or null) and `due_new` (int, 0 ≤ `due_new` ≤ `due`) | pytest |
+| 1 | `GET /stats` adds `new_today` and `milestone` (exactly as spec 021 defines them), `history` (string over `s` studied, `f` frozen, `m` missed, `p` pending; one character per local day from `history_start` to today in `tz`; `p` only as the last character, when today has no review; `"p"` when there are no reviews), `history_start` (ISO date), `streak_start` (ISO date or null) and `due_new` (int, 0 ≤ `due_new` ≤ `due`) | pytest |
 | 2 | Streak cases, `now` = 2026-11-21 12:00 UTC, reviews at `days_ago`: [] → 0; [0] → 1; [0,1,2] → 3; [1,2] → 2; [2] → 2 (yesterday frozen); [3] → 0; [0,1,3] → 4 (2 days ago frozen); [0,0,0] → 1; [0,1,2,4,5,6,8] → 3, `streak_start` = 2 days ago (day 7 is frozen first, so day 3, within 6 days of it, is missed) | pytest (`deck.stats`) |
 | 3 | Chronological freeze: studied D−10, missed D−9, studied D−8..D−5, missed D−4, studied D−3..D0 → `history` has `f` at D−9 and `m` at D−4, `streak` 4, `streak_start` = D−3. Two misses in a row: studied D−5, missed D−4 and D−3, studied D−2..D0 → both `m`, `streak` 3 | pytest |
 | 4 | Every scenario fixture (built from reviews at 10:00 local, `tz=Europe/Paris`, `now` 2026-11-22 12:00 Paris) returns the table's `streak` and `streak_start`, and a `history` matching its studied days and the freeze rule | pytest |
@@ -316,6 +317,15 @@ for level in range(4):                      # 0 days, 1 +weeks, 2 +months, 3 +ye
   `scripts/screen-sample.py`.
 - Run the affected classes only (gallery UI tests), light, dark and forest. Run the full suite only if CI asks.
 - #20 is the user's device check: record it as pending.
+
+## Final design choices (2026-11-22; the manager's picks, the user didn't object)
+1. **Keep the simple status rule for coarse marks.** The oldest week, month or year can straddle the history's start
+   and read faint (`missed`), as `Y.` in `eightHundred`. Accepted.
+2. **Keep the simple rule at the run's start too.** The oldest week can read grey (`older`) when fewer than half its
+   days are in the run, as `W+` in `sixty`. Accepted.
+3. **"Studied before the streak" is lighter:** `older` and `frozenOlder` use `secondaryInk` at 60% (status table),
+   so the current run's `ink` marks stand out.
+4. **Pentagon circumradius 5.5** (was 5.25; shapes table).
 
 ## Defaults (the user didn't object; listed so they can be revisited)
 - Pink marks only today (decision 8).
