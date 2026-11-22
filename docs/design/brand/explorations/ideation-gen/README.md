@@ -363,3 +363,17 @@ right after each review. Every peak returns to 100 %, and every reset is strictl
 Critic's final ranking: 85, 88, 87. 93 is 85 with the critic's margin fix: it passes 0 of 12 failures and leads
 the shortlist. Shortlist order: 93, 85, 87, 88, 81, 75. 93 exists in ink, dark, forest and tinted. 75, 81, 85, 87
 and 88 exist in ink, dark and forest.
+
+### Portrait card crossed by the line: rounds 8-9 (user: "the card vertical, the line goes through it, with the colour inversion")
+
+The 35/36 composition comes back, using the lessons from rounds 5-7. A portrait card XOR the line: ink on paper
+outside the card, inverted inside it.
+- **Round 8 (95-104):** a reset inside the card reads as an "S" or "$". The card works when it sits on the
+  plateau after the reset, so the line enters flat at 0.30 H and decay 2 leaves through the right edge (99).
+- **Round 9 (105-112):** the critic's grid. Drawn too wide, then fit to 800 px with the stroke compensated (78 px
+  faded at 29 px), but the card ended up too small.
+- **Round 9b (113-116):** a 2:3 card at 0.48 of the tile and a compact decay 1, fit to 880 px. In 114 and 116
+  (no decay 1, or a slanted rise) the mark reads as a watering can.
+
+Critic's ranking: 99, 110, 105 (113 applies the critic's last numeric fix to 99 and has not been re-judged).
+Shortlist order: 113, 99, 110, 105, 36, 112. 99 and 113 exist in ink, dark, forest and tinted.

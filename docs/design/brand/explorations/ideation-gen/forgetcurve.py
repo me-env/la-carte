@@ -854,6 +854,236 @@ v93.fit = v94.fit = 696
 VARIANTS += [v93, v94]
 
 
+# ---- round 8 (user on the round-7 shortlist: "I preferred when the card was vertical and the line goes through it,
+# with the colour inversion"): back to 35/36, a PORTRAIT card XOR the line (ink on paper, paper inside the card),
+# with the round 5-7 lessons. Drawn at final size (no fit): the line about 740 px wide with caps, a start cap and a
+# plateau on the 100 % line outside the card, decay 1 (k 3.6), a vertical reset, a plateau of 60, decay 2 (k 3.0,
+# flatter and 1.7x longer) leaving with its slope still falling, an end cap outside the card. The reset never sits on
+# a card edge (>= 1 stroke clear of it).
+
+def line8(lead=60.0, w1=200.0, d1=230.0, plateau=60.0, w2=340.0, d2=120.0, cut=0.72, k1=3.6, k2=3.0):
+    """Centreline from (0, 0); returns (points, x of the reset)."""
+    import math
+
+    pts = [(0.0, 0.0)]
+    x = lead
+    pts += decay(x, 0.0, w1, d1, k1)
+    x += w1
+    xr = x
+    pts += [(x, 0.0), (x + plateau, 0.0)]
+    x += plateau
+    full = w2 / cut
+    dd = d2 / ((1 - math.exp(-k2 * cut)) / (1 - math.exp(-k2)))  # d2 = the drop actually drawn
+    for i in range(1, 97):
+        t = cut * i / 96
+        pts.append((x + full * t, dd * (1 - math.exp(-k2 * t)) / (1 - math.exp(-k2))))
+    return pts, xr
+
+
+def cut8(cx, w, h, pts, sw, cy=None, r=None):
+    """Portrait card centred at x = cx (and y = cy, default the middle of the line's height) XOR the line."""
+    ys = [p[1] for p in pts]
+    cy = (min(ys) + max(ys)) / 2 if cy is None else cy
+    c = card(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, 0.15 * w if r is None else r)
+    return c.symmetric_difference(stroke(pts, sw))
+
+
+def v95():  # card around the reset: left edge crosses decay 1 at about 30 deg, right edge crosses decay 2, 2:3
+    pts, xr = line8(w1=240)
+    return cut8(xr + 40, 320, 480, pts, 80)
+
+
+def v96():  # as 95, 5:7 card (330 x 462)
+    pts, xr = line8(w1=240)
+    return cut8(xr + 45, 330, 462, pts, 80)
+
+
+def v97():  # card on the start: the line enters on the 100 % plateau (a clean horizontal crossing), decay 1 leaves
+    pts, xr = line8(lead=200, w1=240)  # through the bottom, the reset 1.5 s outside on the right
+    return cut8(xr - 120 - 150, 300, 450, pts, 80)
+
+
+def v98():  # card after the reset: a long plateau crosses the left edge (horizontal), the reset 1 s clear of it
+    pts, xr = line8(w1=220, plateau=170)
+    return cut8(xr + 110 + 150, 300, 450, pts, 80)
+
+
+def v99():  # card on the tail: decay 2 leaves through the right edge still falling and runs on 1.5 s outside
+    pts, xr = line8(w1=220, plateau=170, w2=420)
+    return cut8(xr + 110 + 150, 300, 450, pts, 80)
+
+
+def v100():  # 95 with stroke 72
+    pts, xr = line8(w1=240)
+    return cut8(xr + 40, 320, 480, pts, 72)
+
+
+def v101():  # 95 with the 100 % line at the card's upper third (more card below the curve)
+    pts, xr = line8(w1=240)
+    return cut8(xr + 40, 320, 480, pts, 80, cy=80)
+
+
+def v102():  # 95 with a longer lead-in outside the card (the line clearly arrives from the left)
+    pts, xr = line8(lead=140, w1=220, w2=300)
+    return cut8(xr + 40, 300, 450, pts, 80)
+
+
+def v103():  # 95 with stroke 88
+    pts, xr = line8(w1=240)
+    return cut8(xr + 40, 320, 480, pts, 88)
+
+
+def v104():  # 95 with a shallower first drop (d1 190) and the second flatter still (d2 95)
+    pts, xr = line8(w1=240, d1=190, d2=95)
+    return cut8(xr + 40, 320, 480, pts, 80)
+
+
+for _v in (v95, v96, v97, v98, v99, v100, v101, v102, v103, v104):
+    _v.fit = None  # drawn at final size
+VARIANTS += [v95, v96, v97, v98, v99, v100, v101, v102, v103, v104]
+
+
+# ---- round 9 (critic on round 8: 99 > 98 > 97; a reset inside the card reads as an "S"/"$", so never put one there).
+# From 99: the card sits on the plateau after the reset. Grid (s = stroke): the card's left edge 130 px (1.6 s) clear
+# of the reset's outer edge; the 100 % plateau enters it flat at 0.30 H and runs 90 px inside before decay 2; decay 2
+# (y = A (1 - e^(-x/L)), steepest at its start) leaves the right edge at 0.55-0.65 H and runs >= 220 px outside, its
+# total drop smaller than decay 1's (drawn with s = 104, then fit to 800 px: s about 84, gap about 140; 78 faded at 29 px); on the left either no lead-in (a round cap on the peak) or >= 1.5 s of plateau.
+
+def line9(lead=0.0, w1=240.0, d1=300.0, s=104.0, gap=172.0, inside=90.0, cw=300.0, a2=230.0, l2=300.0, out=220.0):
+    """(points, card's left x, card's right x)."""
+    import math
+
+    pts = [(0.0, 0.0)]
+    x = lead
+    pts += decay(x, 0.0, w1, d1, 3.6)
+    x += w1
+    xl = x + s / 2 + gap  # the card's left edge
+    pts.append((x, 0.0))
+    x0 = xl + inside  # decay 2 starts
+    pts.append((x0, 0.0))
+    run = (xl + cw - x0) + out
+    for i in range(1, 129):
+        t = run * i / 128
+        pts.append((x0 + t, a2 * (1 - math.exp(-t / l2))))
+    return pts, xl, xl + cw
+
+
+def cut9(pts, xl, xr_, s, ratio=1.5, entry=0.30):
+    w = xr_ - xl
+    h = w * ratio
+    top = -entry * h
+    c = card(xl, top, xr_, top + h, 0.15 * w)
+    return c.symmetric_difference(stroke(pts, s))
+
+
+def v105():  # the grid; no lead-in: a round cap on the first peak
+    pts, a, b = line9()
+    return cut9(pts, a, b, 104)
+
+
+def v106():  # as 105 with a lead-in plateau of 130 (1.6 s)
+    pts, a, b = line9(lead=130, w1=220)
+    return cut9(pts, a, b, 104)
+
+
+def v107():  # as 105, a lighter stroke (98 drawn) and a 1.5 s gap
+    pts, a, b = line9(s=98, gap=147)
+    return cut9(pts, a, b, 98)
+
+
+def v108():  # as 105, a 5:7 card
+    pts, a, b = line9()
+    return cut9(pts, a, b, 104, ratio=1.4)
+
+
+def v109():  # as 105, the plateau entering at 0.25 H (more card below)
+    pts, a, b = line9()
+    return cut9(pts, a, b, 104, entry=0.25)
+
+
+def v110():  # as 105, a steeper decay 2 (exit near 0.62 H) and a deeper decay 1 to stay the larger drop
+    pts, a, b = line9(d1=340, a2=260, l2=260)
+    return cut9(pts, a, b, 104)
+
+
+def v111():  # as 105 on a smaller card (280 x 420)
+    pts, a, b = line9(cw=280, inside=80)
+    return cut9(pts, a, b, 104)
+
+
+def v112():  # as 105 with a narrower first decay (200) and a longer tail outside (260)
+    pts, a, b = line9(w1=200, out=260)
+    return cut9(pts, a, b, 104)
+
+
+for _v in (v105, v106, v107, v108, v109, v110, v111, v112):
+    _v.fit = 800  # drawn about 950 wide with s = 104: fit to 0.78 of the tile, s becomes about 84
+VARIANTS += [v105, v106, v107, v108, v109, v110, v111, v112]
+
+
+# ---- round 9b (critic on round 9: 99 > 110 > 105; the card is too small, and decay 1 + the vertical reset read as
+# a "√"). Card 2:3 at 0.48 of the tile (327 x 490 drawn), s = 80 drawn (about 75 after fit), the plateau entering the
+# card at 0.30 H, decay 2 leaving it at 0.60 H and running about 200 px outside, the mark fit to 880 px. The critic
+# asked for a slanted (65-70 deg) rise with a rounded foot; the user's reference has a vertical jump, so both exist.
+
+def line10(s=86.0, w1=170.0, d1=220.0, slant=0.0, start_low=False, gap=1.6, cw=327.0, inside=90.0, out=200.0,
+           a2=260.0, l2=300.0, entry=0.30, exit_=0.60, ratio=1.5):
+    """(points, card) — decay 2 is fitted so it crosses the card's right edge at exit_ H."""
+    import math
+
+    h = cw * ratio
+    pts = []
+    if start_low:  # no decay 1: the line starts low (forgotten) and rises into the plateau
+        pts.append((0.0, d1))
+        x = 0.0
+    else:
+        pts.append((0.0, 0.0))
+        pts += decay(0.0, 0.0, w1, d1, 3.6)
+        x = w1
+    run_up = d1 / math.tan(math.radians(slant)) if slant else 0.0
+    if slant:  # a slanted rise with a rounded foot (stroke join) instead of the vertical reset
+        pts.append((x + run_up, 0.0))
+    else:
+        pts.append((x, 0.0))
+    xl = x + run_up + s / 2 + gap * s
+    x0 = xl + inside
+    pts.append((x0, 0.0))
+    # decay 2 = a (1 - e^(-t/l)); choose a so it is at (exit_ - entry) h at the card's right edge
+    t_edge = xl + cw - x0
+    a = (exit_ - entry) * h / (1 - math.exp(-t_edge / l2))
+    run = t_edge + out
+    for i in range(1, 129):
+        t = run * i / 128
+        pts.append((x0 + t, a * (1 - math.exp(-t / l2))))
+    top = -entry * h
+    return pts, card(xl, top, xl + cw, top + h, 0.15 * cw)
+
+
+def v113():  # 99 rebuilt: compact decay 1 (0.45 H deep), vertical reset, a big 2:3 card
+    pts, c = line10()
+    return c.symmetric_difference(stroke(pts, 86))
+
+
+def v114():  # no decay 1: the line starts low and rises vertically into the 100 % plateau (one review, one decay)
+    pts, c = line10(start_low=True, d1=200)
+    return c.symmetric_difference(stroke(pts, 86))
+
+
+def v115():  # 113 with the critic's slanted rise (68 deg)
+    pts, c = line10(slant=68)
+    return c.symmetric_difference(stroke(pts, 86))
+
+
+def v116():  # 114 with the slanted rise (68 deg)
+    pts, c = line10(start_low=True, d1=200, slant=68)
+    return c.symmetric_difference(stroke(pts, 86))
+
+
+for _v in (v113, v114, v115, v116):
+    _v.fit = 880
+VARIANTS += [v113, v114, v115, v116]
+
+
 # ---------------------------------------------------------------- output
 
 def recentre(g, optical: bool = False):
@@ -961,13 +1191,13 @@ def main() -> None:
             continue
         f = a.out / f"curve-{i:02d}-{a.palette}.svg"
         g = fn()
-        if i >= R5_FIRST:  # round 5+ is drawn at natural size: fit the mark into FIT px (strokes scale with it)
+        if i >= R5_FIRST and getattr(fn, "fit", FIT):  # round 5+ is drawn at natural size: fit the mark into FIT px (strokes scale with it)
             x0, y0, x1, y1 = g.bounds
             f_ = getattr(fn, "fit", FIT) / max(x1 - x0, y1 - y0)
             g = affinity.scale(g, f_, f_, origin=(0, 0))
         if a.soften:  # morphological opening: rounds convex corners (peaks), leaves concave ones sharp
             g = g.buffer(-a.soften, quad_segs=32).buffer(a.soften, quad_segs=32)
-        f.write_text(svg(recentre(g, optical=i >= R5_FIRST), bg, fg))
+        f.write_text(svg(recentre(g, optical=i >= R5_FIRST and getattr(fn, "fit", FIT) is not None), bg, fg))
         files.append(f)
     if a.sheet:
         sheets(files, a.out)
