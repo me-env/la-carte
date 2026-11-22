@@ -200,18 +200,22 @@ public struct StudyView: View {
     VStack(spacing: Theme.Spacing.m) {
       ScrollViewReader { proxy in
         ScrollView {
-          VStack(spacing: Theme.Spacing.m) {
-            prompt(card).background { textHalo }.aligned(card.promptAlignment)
-            answerSlot(card).background { textHalo }.aligned(card.answerAlignment)
+          // Without a container, the card's id change as the scroll view's direct content never runs its
+          // transition, so the next card popped in.
+          ZStack {
+            VStack(spacing: Theme.Spacing.m) {
+              prompt(card).background { textHalo }.aligned(card.promptAlignment)
+              answerSlot(card).background { textHalo }.aligned(card.answerAlignment)
+            }
+            .frame(maxWidth: .infinity)
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            // The next card fades in from the top; the outgoing one leaves at once so its answer never lingers.
+            // The animation rides on the transition alone, so the scroll view's size and offset don't glide.
+            .id(card.id)
+            .transition(
+              .asymmetric(insertion: AnyTransition.opacity.animation(Theme.Motion.standard), removal: .identity)
+            )
           }
-          .frame(maxWidth: .infinity)
-          .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-          // The next card fades in from the top; the outgoing one leaves at once so its answer never lingers.
-          // The animation rides on the transition alone, so the scroll view's size and offset don't glide.
-          .id(card.id)
-          .transition(
-            .asymmetric(insertion: AnyTransition.opacity.animation(Theme.Motion.standard), removal: .identity)
-          )
         }
         .onChange(of: card.id) { _, id in proxy.scrollTo(id, anchor: .top) }
         .defaultScrollAnchor(.center, for: .alignment)
@@ -353,19 +357,27 @@ public struct StudyView: View {
     let name = field == .front ? "front" : "back"
     let canEdit = store.isRevealed && store.editing == nil
     if store.editing == field {
-      TextField("", text: $store.draft.sending(\.draftChanged), axis: .vertical)
+      // The draft as text sizes the slot and the field draws over it from the same first baseline: a multi-line
+      // field is ~2 pt taller than its text (TextKit pads below the last line), which moved the answer below.
+      Text(store.draft.isEmpty ? " " : store.draft)
         .font(font)
-        .foregroundStyle(color)
-        .textFieldStyle(.plain)
-        .submitLabel(.done)
-        .tint(Theme.accent)
-        .focused($focusedField, equals: field)
-        .onSubmit { focusedField = nil }
-        .onAppear { focusedField = field }
-        .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { fieldFrame = $0 }
-        .id(field)
-        .accessibilityLabel(field == .front ? "Front" : "Back")
-        .accessibilityIdentifier("study.\(name)Field")
+        .frame(maxWidth: .infinity)
+        .hidden()
+        .overlay(alignment: .top) {
+          TextField("", text: $store.draft.sending(\.draftChanged), axis: .vertical)
+            .font(font)
+            .foregroundStyle(color)
+            .textFieldStyle(.plain)
+            .submitLabel(.done)
+            .tint(Theme.accent)
+            .focused($focusedField, equals: field)
+            .onSubmit { focusedField = nil }
+            .onAppear { focusedField = field }
+            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { fieldFrame = $0 }
+            .id(field)
+            .accessibilityLabel(field == .front ? "Front" : "Back")
+            .accessibilityIdentifier("study.\(name)Field")
+        }
     } else {
       Text(text)
         .font(font)
