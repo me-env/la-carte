@@ -8,9 +8,11 @@ extension APIClient {
   }
 
   /// A fake deck of notes held in memory; cards are derived from them, like on the server.
-  /// Scheduling is deliberately naive: any review pushes the card one day out. Burying matches the API.
+  /// Scheduling is deliberately naive: any review pushes the card one day out. Burying and holding match the API.
   public static func inMemory(notes: [Note], now: Date = Date()) -> APIClient {
     let deck = LockIsolated(notes)
+    /// Reported cards: out of study for good, as no agent closes reports here (spec 015).
+    let held = LockIsolated<Set<Card.ID>>([])
 
     @Sendable func cards(_ notes: [Note]) -> [Card] {
       notes.flatMap { note in note.cards.map { Card(note: note, card: $0) } }
@@ -39,7 +41,7 @@ extension APIClient {
         var servedNotes = Set<Note.ID>()
         // `sorted` is stable, so cards due at the same time keep fixture order.
         let servable = cards(notes)
-          .filter { readyAt($0, notes) <= now }
+          .filter { !held.value.contains($0.id) && readyAt($0, notes) <= now }
           .sorted { $0.due < $1.due }
           .filter { servedNotes.insert($0.noteId).inserted }
         return Array(servable.prefix(limit))
@@ -63,14 +65,19 @@ extension APIClient {
           return Card(note: note, card: note.cards[index])
         }
       },
+      reportCard: { id, _, _ in
+        try editCard(id) { _, _ in }
+        held.withValue { _ = $0.insert(id) }
+      },
       stats: {
         let notes = deck.value
         let cards = cards(notes)
-        let readyDates = cards.map { readyAt($0, notes) }
+        let studied = cards.filter { !held.value.contains($0.id) }
+        let readyDates = studied.map { readyAt($0, notes) }
         let reviewedToday = cards.filter { $0.lastReview.map(Calendar.current.isDateInToday) ?? false }.count
         return DeckStats(
           total: cards.count,
-          due: Set(zip(cards, readyDates).filter { $1 <= now }.map(\.0.noteId)).count,
+          due: Set(zip(studied, readyDates).filter { $1 <= now }.map(\.0.noteId)).count,
           new: cards.filter { $0.lastReview == nil }.count,
           reviewedToday: reviewedToday,
           nextDue: readyDates.filter { $0 > now }.min(),

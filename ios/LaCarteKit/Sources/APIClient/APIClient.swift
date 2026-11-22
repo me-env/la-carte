@@ -8,6 +8,8 @@ public struct APIClient: Sendable {
   public var dueCards: @Sendable (_ limit: Int) async throws -> [Card]
   public var updateCard: @Sendable (_ id: Card.ID, _ front: String, _ back: String) async throws -> Card
   public var review: @Sendable (_ id: Card.ID, _ rating: Rating) async throws -> Card
+  /// Holds the card out of study until an agent closes the report (spec 015). A nil `comment` sends no key.
+  public var reportCard: @Sendable (_ id: Card.ID, _ reason: ReportReason, _ comment: String?) async throws -> Void
   public var stats: @Sendable () async throws -> DeckStats
   public var notes: @Sendable (_ query: String?) async throws -> [Note]
   public var addNote: @Sendable (_ draft: NoteDraft) async throws -> Note

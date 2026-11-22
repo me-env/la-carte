@@ -74,4 +74,9 @@ struct DecodingTests {
     let stats = try JSONDecoder.api.decode(DeckStats.self, from: Data(json.utf8))
     #expect(stats == DeckStats(total: 0, due: 0, new: 0, reviewedToday: 0, nextDue: nil, streak: 0))
   }
+
+  @Test func reportReasonsEncodeAsTheAPISpellsThem() throws {
+    let data = try JSONEncoder().encode(ReportReason.allCases)
+    #expect(String(decoding: data, as: UTF8.self) == #"["wrong","drop","doubt","rephrase","other","broken_photo"]"#)
+  }
 }

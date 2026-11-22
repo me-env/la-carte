@@ -160,8 +160,10 @@ enum StubJSON {
 // MARK: - Stateful stub deck (spec 002: list / search / add / edit / delete)
 
 /// An in-memory deck behind `StubAPIServer`, speaking the REST shape of `api/` for `/cards`, `/cards/due`,
-/// `/stats`, `POST /cards`, `POST /cards/{id}/review`, `PATCH /cards/{id}`, `DELETE /cards/{id}` and the notes routes
-/// (`GET/POST /notes`, `GET/PATCH/DELETE /notes/{id}`, spec 014), plus a made-up photo at `/photos/*.png`.
+/// `/stats`, `POST /cards`, `POST /cards/{id}/review`, `POST /cards/{id}/report` (spec 015: recorded in `reports`, the
+/// card is then held out of `/cards/due`), `PATCH /cards/{id}`, `DELETE /cards/{id}` and the notes routes
+/// (`GET/POST /notes`, `GET/PATCH/DELETE /notes/{id}`, spec 014), plus a made-up photo at `/photos/*.png`
+/// (`/photos/broken-*` answers 404: an unreachable photo).
 /// Writes can be delayed or failed.
 final class StubDeck: @unchecked Sendable {
   struct Card {
@@ -199,6 +201,20 @@ final class StubDeck: @unchecked Sendable {
   private var _writeDelay: TimeInterval = 0
   private var _listStatus = 200
   private var _readDelay: TimeInterval = 0
+  private var _reports: [Report] = []
+
+  /// A `POST /cards/{id}/report` as received (spec 015). `comment` is nil when the body has no `comment` key.
+  struct Report: Equatable {
+    var cardID: String
+    var reason: String
+    var comment: String?
+    var hasCommentKey: Bool
+    /// Answered with `writeStatus` (an error): the card isn't held.
+    var failed = false
+  }
+
+  /// Reports received, in order (failed writes included: `writeStatus` doesn't stop the recording).
+  var reports: [Report] { lock.withLock { _reports } }
 
   init(_ cards: [Card], notes: [Note] = []) {
     _cards = cards
@@ -253,8 +269,12 @@ final class StubDeck: @unchecked Sendable {
         .filter { query.isEmpty || $0.front.lowercased().contains(query) || $0.back.lowercased().contains(query) }
       return .init(body: StubJSON.cards(matches.map(Self.json)))
     case ("GET", "/cards/due"):
-      let due = _cards.filter { $0.due <= now }.map { ($0.due, Self.json($0)) }
-        + _notes.flatMap { n in n.cards.filter { $0.due <= now }.map { ($0.due, Self.cardJSON(n, $0)) } }
+      // Spec 015: a reported card is held out of study (every report here stays open).
+      let held = Set(_reports.filter { !$0.failed }.map(\.cardID))
+      let due = _cards.filter { $0.due <= now && !held.contains($0.id.lowercased()) }.map { ($0.due, Self.json($0)) }
+        + _notes.flatMap { n in
+          n.cards.filter { $0.due <= now && !held.contains($0.id.lowercased()) }.map { ($0.due, Self.cardJSON(n, $0)) }
+        }
       return .init(body: StubJSON.cards(due.sorted { $0.0 < $1.0 }.map(\.1)))
     case ("GET", "/stats"):
       let dues = _cards.map(\.due) + _notes.flatMap { $0.cards.map(\.due) }
@@ -266,6 +286,19 @@ final class StubDeck: @unchecked Sendable {
                       back: body["back"] as? String ?? "", due: now, createdAt: now)
       _cards.append(card)
       return .init(status: 201, body: Self.json(card), delay: _writeDelay)
+    case ("POST", let r) where r.hasPrefix("/cards/") && r.hasSuffix("/report"):
+      let id = String(r.dropFirst("/cards/".count).dropLast("/report".count)).lowercased()
+      let report = Report(cardID: id, reason: body["reason"] as? String ?? "", comment: body["comment"] as? String,
+                          hasCommentKey: body.keys.contains("comment"), failed: _writeStatus != 0)
+      _reports.append(report)
+      if report.failed { return .init(status: _writeStatus, body: #"{"detail":"boom"}"#, delay: _writeDelay) }
+      let object: [String: Any] = [
+        "id": _reports.count, "card_id": id, "note_id": id, "reason": report.reason,
+        "comment": report.comment ?? NSNull(), "status": "open", "resolution": NSNull(),
+        "created_at": StubJSON.iso(now), "updated_at": StubJSON.iso(now), "resolved_at": NSNull(), "card": NSNull(),
+      ]
+      let json = String(decoding: try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self)
+      return .init(status: 201, body: json, delay: _writeDelay)
     case ("POST", let r) where r.hasPrefix("/cards/") && r.hasSuffix("/review"):
       if _writeStatus != 0 { return .init(status: _writeStatus, body: #"{"detail":"boom"}"#, delay: _writeDelay) }
       let id = String(r.dropFirst("/cards/".count).dropLast("/review".count)).lowercased()
@@ -416,6 +449,9 @@ enum StubPhoto {
 
   static func response(_ request: StubAPIServer.Request) -> StubAPIServer.Response? {
     guard request.method == "GET", request.path.hasPrefix("/photos/") else { return nil }
+    if request.path.hasPrefix("/photos/broken-") {  // spec 015b #13/#14: a photo URL that fails to load
+      return .init(status: 404, body: #"{"detail":"Not Found"}"#)
+    }
     return .init(data: png, contentType: "image/png")
   }
 }

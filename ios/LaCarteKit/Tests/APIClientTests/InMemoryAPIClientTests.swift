@@ -33,6 +33,19 @@ struct InMemoryAPIClientTests {
     #expect(try await client.dueCards(100).map(\.front) == [cards[0].front, cards[2].front])
   }
 
+  @Test func aReportedCardIsHeldOutOfStudyButStillCounted() async throws {
+    let client = APIClient.inMemory(cards: .fixtures, now: now)
+    let cards = [Card].fixtures
+
+    try await client.reportCard(cards[0].id, .drop, nil)
+    #expect(try await client.dueCards(100).map(\.id) == [cards[1].id, cards[2].id])
+    let stats = try await client.stats()
+    #expect(stats.total == 3)
+    #expect(stats.due == 2)
+    #expect(stats.nextDue == nil)
+    await #expect(throws: APIError.self) { try await client.reportCard(UUID(), .wrong, nil) }
+  }
+
   @Test func mockDeckServesTheSameCardsAsBeforeNotes() async throws {
     let client = APIClient.inMemory(cards: .fixtures, now: now)
     #expect(try await client.notes(nil).map(\.id) == [Card].fixtures.map(\.id))

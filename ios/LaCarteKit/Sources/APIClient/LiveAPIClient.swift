@@ -74,6 +74,9 @@ extension APIClient: DependencyKey {
       review: { id, rating in
         try await http.send("POST", "cards/\(id)/review", body: ["rating": rating.rawValue])
       },
+      reportCard: { id, reason, comment in
+        _ = try await http.data("POST", "cards/\(id)/report", body: ReportBody(reason: reason, comment: comment))
+      },
       stats: {
         try await http.send("GET", "stats", query: ["tz": TimeZone.current.identifier])
       },
@@ -117,6 +120,12 @@ private struct NoteUpdate: Encodable {
     fields = Dictionary(uniqueKeysWithValues: draft.type.fields.map { ($0, draft.fields[$0] ?? "") })
     directions = draft.directions
   }
+}
+
+/// `POST /cards/{id}/report` body: a nil comment is left out, not sent as null.
+private struct ReportBody: Encodable {
+  var reason: ReportReason
+  var comment: String?
 }
 
 private struct HTTP: Sendable {
