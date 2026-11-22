@@ -46,9 +46,26 @@ The held drag must say, at a glance, **which grade a release gives and when a th
      spaced the same way to a gap of `1.5 + 6.5 × c` pt (so dots never touch mid-drag; Easy's lattice is untouched). So the
      negative side **scatters with varied sizes** (fully at Forgot) and the positive side **settles into the even
      3-ring lattice, all one size** (exactly at Easy); the finger's movement moves every dot continuously.
+   - **Grade cues** (amended 2026-11-22 per user: "hard to tell Got it from Easy, and Hard from Forgot, by the dots
+     alone; some Forgot dots in the accent; lines connecting the dots for Got it"). Each cue rides the disorder ramp
+     of its grade, so it is continuous with the drag (no pop) and complete exactly at the grade's bin edge; Hard
+     and the dead zone carry none. All three are state, not motion, so Reduce Motion keeps them.
+     - **Forgot**: `blush = (c − 0.45) / 0.55` (negative side). A seeded quarter of the dots (24, never the tiniest
+       scattered ones, scatter size ≥ 0.8×) fade from ink to `Theme.accent`, staggered over `blush` (each over half
+       of it), so the pink share grows in. Hard stays monochrome.
+     - **Got it**: `ringLinks = (0.3 − c) / 0.1` (positive side). Each dot links to its neighbour on its ring
+       (96 links, three closed loops), 1 pt lines in the dots' colour at 40 % × `ringLinks`, growing out of both
+       dots' edges to meet in the middle. Under the dots.
+     - **Easy**: `crossLinks = (0.2 − c) / 0.2`. On top of the loops, each dot links to its nearest lattice dot on
+       the next ring in and out (every dot gets at least one): the loops become one network, plus the perfect
+       order. Got it = three separate wobbly loops; Easy = one even mesh, so they differ in topology, not only in
+       precision.
+     - On release the cues stay as held (the settle doesn't grow Easy's network into a Got it reward).
+     - Cost: links are two stroked `Path`s and the dots one filled `Path` per frame (fewer draw calls than before);
+       pink dots are at most 24 extra fills.
    - **Ink**: before a grade (dead zone) all dots are `Theme.secondaryInk` at 60 % opacity; once Hard / Got it or
      Forgot / Easy is reached, all dots are `Theme.ink` at 100 %. No `Theme.accent` (the counter already holds
-     the screen's one pink element), no colour per grade.
+     the screen's one pink element), no colour per grade (amended 2026-11-22: Forgot's pink share, above).
    - **Threshold pulse**: when the grade stage rises (none → Hard/Got it → Forgot/Easy), every dot scales
      1 → 1.3 → 1 over 0.2 s (`KeyframeAnimator`, ease-out then ease-in; no spring), together with 011's haptic.
      This includes Hard → Forgot. None when the stage drops. Reduce Motion: no pulse (the order still follows the
@@ -104,5 +121,5 @@ Unchanged: `study.card`, `study.swipeRing` (label "Rating", value = grade or "No
 `study.rate.good`. While a drag is held the two buttons' labels follow the echo (VoiceOver users don't drag).
 
 ## Out of scope
-- Color per grade, text inside the dial, a second axis meaning anything else.
+- Color per grade (beyond Forgot's pink share, amended 2026-11-22), text inside the dial, a second axis meaning anything else.
 - Storing the continuous value (backlog 22).

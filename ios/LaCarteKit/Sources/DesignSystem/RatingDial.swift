@@ -4,7 +4,9 @@ import SwiftUI
 /// "Easy" they settle into three rings, evenly spaced along each ring, all one size (fully ordered at Easy); toward
 /// "Hard" / "Forgot" they scatter, with varied sizes (fully scattered at Forgot). The scatter is seeded per dot, so it
 /// never flickers, and follows `value` continuously with no animation of its own. Once a grade is reached the dots
-/// turn ink and pulse once. Ink tokens only, so it reads in grayscale. Drawn in a `Canvas` (96 dots per frame).
+/// turn ink and pulse once. Each outer grade has its own cue on top (2026-11-22): Got it links each ring's dots
+/// with thin lines, Easy also links across the rings into one network, Forgot turns a quarter of its dots pink
+/// (the accent; Hard stays ink). Drawn in a `Canvas`: two stroked paths, one filled path, at most 24 pink fills.
 ///
 /// Released on a positive grade (`release`), the dial plays its reward over the next card, which is already fading
 /// in: Got it settles into the rings and fades (0.5 s, success haptic); Easy settles, a ripple runs out through the
@@ -74,14 +76,45 @@ public struct RatingDial: View {
     let layout = RatingDialLayout(value: value, radius: radius, settle: frame.settle)
     let armed = layout.stage != .none
     let color = (armed ? Theme.ink : Theme.secondaryInk).resolve(in: environment)
+    let accent = Theme.accent.resolve(in: environment)
     let side = 2 * RatingDialLayout.extent(radius: radius)
+    let placed = frame.applied(to: layout.dots)
     return KeyframeAnimator(initialValue: 1.0, trigger: pulses) { pulse in
       Canvas { context, size in
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
-        for dot in frame.applied(to: layout.dots) {
-          let d = dot.diameter * (armed ? pulse : 1)
-          let rect = CGRect(x: center.x + dot.x - d / 2, y: center.y + dot.y - d / 2, width: d, height: d)
-          context.fill(Path(ellipseIn: rect), with: .color(color))
+        func point(_ i: Int) -> CGPoint { CGPoint(x: center.x + placed[i].x, y: center.y + placed[i].y) }
+        func disc(_ i: Int) -> CGRect {
+          let d = placed[i].diameter * (armed ? pulse : 1)
+          return CGRect(x: point(i).x - d / 2, y: point(i).y - d / 2, width: d, height: d)
+        }
+        // Links first, under the dots: each grows out of both dots' edges toward its middle, fading in as it grows.
+        func grow(_ path: inout Path, from i: Int, to j: Int, _ grown: CGFloat) {
+          let (a, b) = (point(i), point(j))
+          let length = max(hypot(b.x - a.x, b.y - a.y), 0.001)
+          let (ux, uy) = ((b.x - a.x) / length, (b.y - a.y) / length)
+          let edge = min(placed[i].diameter / 2, length / 2)
+          let tip = edge + grown * (length / 2 - edge)
+          path.move(to: CGPoint(x: a.x + ux * edge, y: a.y + uy * edge))
+          path.addLine(to: CGPoint(x: a.x + ux * tip, y: a.y + uy * tip))
+        }
+        for (pairs, grown) in [
+          (RatingDialLayout.ringLinkPairs, layout.ringLinks), (RatingDialLayout.crossLinkPairs, layout.crossLinks),
+        ] where grown > 0 {
+          var path = Path()
+          for (i, j) in pairs {
+            grow(&path, from: i, to: j, CGFloat(grown))
+            grow(&path, from: j, to: i, CGFloat(grown))
+          }
+          context.stroke(path, with: .color(color.opacity(Self.linkOpacity * grown)), lineWidth: Self.linkWidth)
+        }
+        var discs = Path()
+        for i in placed.indices { discs.addEllipse(in: disc(i)) }
+        context.fill(discs, with: .color(color))
+        if layout.blush > 0 {
+          for (i, start) in RatingDialLayout.accentDots {
+            let amount = layout.accent(start: start)
+            if amount > 0 { context.fill(Path(ellipseIn: disc(i)), with: .color(accent.opacity(amount))) }
+          }
         }
       }
       .opacity(armed ? 1 : 0.6)
@@ -96,6 +129,10 @@ public struct RatingDial: View {
       if new > old, !reduceMotion, release == nil { pulses += 1 }
     }
   }
+
+  /// The links: hairline-thin, quieter than the dots, so they read as structure, not as a second drawing.
+  static let linkWidth: CGFloat = 1
+  static let linkOpacity = 0.4
 }
 
 /// One frame of a positive release's reward, a pure function of the time since release (tested in
@@ -217,7 +254,51 @@ struct RatingDialLayout: Equatable {
   var stage: Stage
   /// 0 (ordered) ... 1 (scattered).
   var disorder: Double
+  /// Forgot's accent, 0 ... 1: how far `accentDots` have turned pink (0 everywhere but Hard → Forgot).
+  var blush: Double
+  /// Got it's connections along each ring, and Easy's across the rings, 0 ... 1 (grown in, then held).
+  var ringLinks: Double
+  var crossLinks: Double
   var dots: [Dot]
+
+  /// The share of dots that turn pink toward Forgot (a quarter, never the tiniest: a pink speck reads as noise),
+  /// seeded like the scatter, each with its start along `blush`, staggered so the share grows in rather than all
+  /// at once. Each fades in over `accentFade`.
+  static let accentFade = 0.5
+  static let accentDots: [(index: Int, start: Double)] = {
+    let picked = (0..<count).filter { scatter[$0].diameter >= diameter * 0.8 }.sorted { a, b in
+      var sa = SplitMix(seed: UInt64(a) &+ 1000), sb = SplitMix(seed: UInt64(b) &+ 1000)
+      return sa.unit() < sb.unit()
+    }.prefix(count / 4)
+    return picked.enumerated().map { k, i in (i, (1 - accentFade) * Double(k) / Double(count / 4 - 1)) }
+  }()
+
+  /// How pink accent dot `start` is at this `blush`, 0 ... 1.
+  func accent(start: Double) -> Double { min(max((blush - start) / Self.accentFade, 0), 1) }
+
+  /// Neighbours along each ring (closing every ring): Got it's three loops.
+  static let ringLinkPairs: [(Int, Int)] = (0..<count).map { i in
+    let (_, j, n) = slot(i)
+    return (i, i - j + (j + 1) % n)
+  }
+
+  /// Each dot to its nearest lattice dot on the next ring in and out (deduplicated): Easy's network across rings.
+  static let crossLinkPairs: [(Int, Int)] = {
+    var pairs = Set<[Int]>()
+    for i in 0..<count {
+      let (ring, _, _) = slot(i)
+      for other in [ring - 1, ring + 1] where ringCounts.indices.contains(other) {
+        let first = ringCounts[..<other].reduce(0, +)
+        let a = latticePoint(i)
+        let nearest = (first..<first + ringCounts[other]).min { p, q in
+          let (pp, qq) = (latticePoint(p), latticePoint(q))
+          return hypot(pp.x - a.x, pp.y - a.y) < hypot(qq.x - a.x, qq.y - a.y)
+        }!
+        pairs.insert([min(i, nearest), max(i, nearest)])
+      }
+    }
+    return pairs.sorted { $0.lexicographicallyPrecedes($1) }.map { ($0[0], $0[1]) }
+  }()
 
   /// Half the frame: the outer ring plus the furthest drift, the release ripple (6 pt) and the largest grown dot.
   static func extent(radius: CGFloat) -> CGFloat {
@@ -307,6 +388,11 @@ struct RatingDialLayout: Equatable {
     }
     let disorder = m < 0.3 ? hold(Self.rest, near, m / 0.3) : hold(near, far, (m - 0.3) / 0.45)
     self.disorder = disorder
+    // The grade cues ride the same ramps as the disorder, so they arrive exactly with their grade's look.
+    let unit = { (x: Double) in min(max(x, 0), 1) }
+    blush = value < 0.5 ? unit((disorder - Self.hard) / (Self.forgot - Self.hard)) : 0
+    ringLinks = value > 0.5 ? unit((Self.rest - disorder) / (Self.rest - Self.gotIt)) : 0
+    crossLinks = value > 0.5 ? unit((Self.gotIt - disorder) / (Self.gotIt - Self.easy)) : 0
     let c = CGFloat(disorder * (1 - settle)), k = radius / Self.referenceRadius
     let blend = (0..<Self.count).map { i in
       let a = Self.latticePoint(i), b = Self.scatter[i]

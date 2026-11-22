@@ -213,3 +213,63 @@ struct RatingDialRewardTests {
     }
   }
 }
+
+/// The grade cues added 2026-11-22 (spec 019 §3 amendment): Forgot's pink share, Got it's ring links, Easy's network.
+struct RatingDialCueTests {
+  typealias Layout = RatingDialLayout
+
+  @Test func forgotTurnsAQuarterOfTheVisibleDotsPink() {
+    #expect(Layout.accentDots.count == Layout.count / 4)
+    #expect(Layout.accentDots.allSatisfy { Layout.scatter[$0.index].diameter >= Layout.diameter * 0.8 })
+    for value in [0, 0.125] {
+      let layout = Layout(value: value)
+      #expect(layout.blush == 1)
+      #expect(Layout.accentDots.allSatisfy { layout.accent(start: $0.start) == 1 }, "value \(value)")
+    }
+  }
+
+  @Test func onlyForgotIsPink() {
+    for step in 0...200 {
+      let value = Double(step) / 200
+      // Hard (held from 0.25 up) and everything above it stays monochrome.
+      if value >= 0.2 { #expect(Layout(value: value).blush == 0, "value \(value)") }
+    }
+  }
+
+  @Test func gotItLinksTheRingsAndEasyLinksAcrossThem() {
+    for value in [0.0, 0.25, 0.5, 0.55] {
+      let layout = Layout(value: value)
+      #expect(layout.ringLinks == 0 && layout.crossLinks == 0, "value \(value)")
+    }
+    for value in [0.65, 0.76, 0.8] {
+      let layout = Layout(value: value)
+      #expect(layout.ringLinks == 1 && layout.crossLinks == 0, "value \(value)")
+    }
+    for value in [0.875, 1] {
+      let layout = Layout(value: value)
+      #expect(layout.ringLinks == 1 && layout.crossLinks == 1, "value \(value)")
+    }
+  }
+
+  /// No pop: every cue moves by at most a small step per 0.005 of value, and never backs off toward its grade.
+  @Test func theCuesFollowTheDragContinuously() {
+    var previous = Layout(value: 0)
+    for step in 1...200 {
+      let layout = Layout(value: Double(step) / 200)
+      #expect(layout.blush <= previous.blush)
+      #expect(layout.ringLinks >= previous.ringLinks && layout.crossLinks >= previous.crossLinks)
+      for (a, b) in [(layout.blush, previous.blush), (layout.ringLinks, previous.ringLinks), (layout.crossLinks, previous.crossLinks)] {
+        #expect(abs(a - b) <= 0.15, "value \(Double(step) / 200)")
+      }
+      previous = layout
+    }
+  }
+
+  @Test func ringLinksCloseEachRingAndCrossLinksJoinNeighbouringRings() {
+    #expect(Layout.ringLinkPairs.count == Layout.count)
+    #expect(Layout.ringLinkPairs.allSatisfy { Layout.slot($0.0).ring == Layout.slot($0.1).ring })
+    #expect(Layout.crossLinkPairs.allSatisfy { abs(Layout.slot($0.0).ring - Layout.slot($0.1).ring) == 1 })
+    let linked = Set(Layout.crossLinkPairs.flatMap { [$0.0, $0.1] })
+    #expect(linked.count == Layout.count)
+  }
+}

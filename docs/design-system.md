@@ -37,6 +37,9 @@ It may appear **only** in these places:
 2. The text cursor and selection in text fields (`.tint(Theme.accent)` on the field itself, not the screen): editor, Settings, deck search (spec 009), Study inline edit (spec 010). While a field is focused on Study, the counter (rule 4) is hidden, so only one pink element shows.
 3. The widget's streak number when the streak is ≥ 1 (spec 007).
 4. Study's "N to review" count in the counter text (`study.remaining`), just the number (spec 009).
+5. A quarter of the `RatingDial`'s dots while a drag is held toward Forgot (spec 019 §3, user request 2026-11-22):
+   the one colour cue that tells Forgot from Hard. It grows in with the scatter and is gone on release; the only
+   moment two pink elements share the screen (with rule 4), and it is transient.
 
 Never: backgrounds, fills bigger than the logo's line, card text, body text, buttons/icons/toolbars, the rating row,
 error or empty states. Swipe-delete stays the **system red** (hue 3°, vs the pink's 346°), so the pink never means
@@ -123,7 +126,7 @@ iPhone 17 Pro), `Theme.background`, radius 22, 16 pt padding, on a `Theme.surfac
 ## Screen patterns from the reference
 | Vyst | la-carte |
 |---|---|
-| Editor: single word centered, icons in corners (01, 02) | **Study**: card front centered; tap reveals back below in `secondaryInk`; "Show answer" then a quiet "Forgot / Got it" text row at the bottom (specs 001, 011); dragging the revealed card shows a 96-dot `RatingDial` around the finger whose order is the grade: the dots settle into 3 evenly spaced rings (29 / 32 / 35 dots), one size, toward Got it / Easy (up, right) and scatter with varied sizes toward Hard / Forgot (down, left), and the row echoes the grade (specs 011, 019) |
+| Editor: single word centered, icons in corners (01, 02) | **Study**: card front centered; tap reveals back below in `secondaryInk`; "Show answer" then a quiet "Forgot / Got it" text row at the bottom (specs 001, 011); dragging the revealed card shows a 96-dot `RatingDial` around the finger whose order is the grade: the dots settle into 3 evenly spaced rings (29 / 32 / 35 dots), one size, toward Got it / Easy (up, right) and scatter with varied sizes toward Hard / Forgot (down, left); Got it links each ring with thin lines, Easy also links across rings (a network), Forgot turns a quarter of the dots pink; the row echoes the grade (specs 011, 019) |
 | Notes list in dark (04) | **Deck**: list of cards, add + settings in the title row, search field below (spec 002) |
 | Detail sheet with title + word count + round actions (03) | **Card editor** and **Settings** sheets: title top-left, round `checkmark`/`xmark` top-right (specs 002, 003) |
 | Theme (05) | Settings → Appearance: System / Light / Dark / Forest (spec 004) |
@@ -136,7 +139,7 @@ Study screen catalogue: `scripts/ios-test.sh --render -only-testing:ScreenColorT
 `ios/LaCarteKit/Tests/ScreenColorTests/StudyRenders.swift` (docs/testing.md).
 
 - Background is `Theme.background` edge to edge, light **and** dark.
-- Nothing competes with the centered text; no default iOS blue tint (button tint = ink). Pink appears only in the 4 accent places.
+- Nothing competes with the centered text; no default iOS blue tint (button tint = ink). Pink appears only in the 5 accent places.
 - Buttons are the circle style, 44pt hit area, aligned to the same top margin.
 - Card text never truncates. Size and alignment follow its length (`CardText`, spec 017): a word or a short question is big and centred, a paragraph is smaller and leading-aligned, and the answer is always one tier below the question. Anything longer scrolls.
 - Dynamic Type at XL doesn't break layout.
