@@ -9,9 +9,9 @@
 # ///
 """Crop, contact-sheet and video-measure tool, so nobody writes ad-hoc PIL scripts for these jobs.
 
-    uv run scripts/image-ops.py crop    <png> x0,y0,x1,y1 [--zoom K] [--out FILE]
+    uv run scripts/image-ops.py crop    <png|svg> x0,y0,x1,y1 [--zoom K] [--svg-size N] [--out FILE]
     uv run scripts/image-ops.py montage <png|svg ...> [--sizes 1024,58,29] [--labels a,b] [--apple] [--mask]
-                                        [--bg HEX] [--out FILE]
+                                        [--cols N] [--bg HEX] [--out FILE]
     uv run scripts/image-ops.py frames  <mp4> [--from S] [--to S] [--every S] [--out DIR]
     uv run scripts/image-ops.py track   <mp4> x0,y0,x1,y1 [--from S] [--to S] [--min-change L] [--json]
     uv run scripts/image-ops.py --selftest
@@ -20,10 +20,13 @@ Coordinates are in points. The scale comes from the image/video width (1206 -> 3
 widths fail unless `--scale N` is given, or `--px` (coordinates are pixels). Inputs are only read; outputs
 default to $TMPDIR/image-ops/ and their paths are printed.
 
-- crop: the region, optionally upscaled K times with nearest neighbour (to inspect single pixels).
-- montage: one row per input, one column per size; each size is a LANCZOS downscale of the source shown at its
-  true pixel size, plus a 4x nearest-neighbour zoom for sizes < 100. `--mask`: iOS-like squircle mask.
-  `--apple`: extra rows with Apple's own app icons (cache shared with design-review.py). SVG needs rsvg-convert.
+- crop: the region, optionally upscaled K times: an integer K with nearest neighbour (to inspect single pixels), a
+  fractional K (e.g. 2.5) with LANCZOS. An SVG is rasterised at 1024 px (`--svg-size N`) with rsvg-convert and the
+  coordinates are pixels of that raster.
+- montage: one entry per input (label, then one column per size); each size is a LANCZOS downscale of the source
+  shown at its true pixel size, plus a 4x nearest-neighbour zoom for sizes < 100. Entries fill a grid of columns
+  so the sheet stays no taller than ~1.5x its width (`--cols N` to choose). `--mask`: iOS-like squircle mask.
+  `--apple`: extra entries with Apple's own app icons (cache shared with design-review.py). SVG needs rsvg-convert.
 - frames: PNG per decoded frame named by its real timestamp (t0001.234.png) + frames.tsv (index, time, file).
   `--every S`: the first frame at or after each multiple of S. Recordings are variable frame rate.
 - track: per frame the region's mean colour and luma (Rec. 709, 0-255); then each transition between two
@@ -87,12 +90,18 @@ def out_path(given, name: str) -> Path:
 # --- crop ------------------------------------------------------------------------------------------------
 
 def crop(args) -> Path:
-    im = Image.open(args.png).convert("RGB")
-    box = rect_px(args.rect, scale_for(im.width, args), *im.size)
+    svg = args.png.lower().endswith(".svg")
+    im = rasterise(args.png, args.svg_size).convert("RGB") if svg else Image.open(args.png).convert("RGB")
+    box = rect_px(args.rect, 1 if svg else scale_for(im.width, args), *im.size)   # SVG: px of the raster
     part = im.crop(box)
-    if args.zoom > 1:
-        part = part.resize((part.width * args.zoom, part.height * args.zoom), Image.NEAREST)
-    out = out_path(args.out, f"{Path(args.png).stem}-crop-{'_'.join(map(str, box))}-x{args.zoom}.png")
+    if args.zoom <= 0:
+        sys.exit("--zoom must be > 0")
+    if args.zoom != 1:
+        whole = float(args.zoom).is_integer()
+        part = part.resize((round(part.width * args.zoom), round(part.height * args.zoom)),
+                           Image.NEAREST if whole else Image.LANCZOS)
+    zoom = f"{args.zoom:g}".replace(".", "_")
+    out = out_path(args.out, f"{Path(args.png).stem}-crop-{'_'.join(map(str, box))}-x{zoom}.png")
     part.save(out)
     print(f"{out}  ({part.width}x{part.height}px, source px {box})")
     return out
@@ -100,13 +109,18 @@ def crop(args) -> Path:
 
 # --- montage ---------------------------------------------------------------------------------------------
 
+def rasterise(path: str, size: int = 1024) -> Image.Image:
+    """An SVG rendered by rsvg-convert, size px on its longer side."""
+    if not shutil.which("rsvg-convert"):
+        sys.exit("SVG input needs rsvg-convert on PATH (brew librsvg); or pass a PNG")
+    png = subprocess.run(["rsvg-convert", "-w", str(size), "-h", str(size), "--keep-aspect-ratio", path],
+                         check=True, capture_output=True).stdout
+    return Image.open(io.BytesIO(png))
+
+
 def load_icon(path: str) -> Image.Image:
     if path.endswith(".svg"):
-        if not shutil.which("rsvg-convert"):
-            sys.exit("SVG input needs rsvg-convert on PATH (brew librsvg); or pass a PNG")
-        png = subprocess.run(["rsvg-convert", "-w", "1024", "-h", "1024", "--keep-aspect-ratio", path],
-                             check=True, capture_output=True).stdout
-        im = Image.open(io.BytesIO(png)).convert("RGBA")
+        im = rasterise(path).convert("RGBA")
     else:
         im = Image.open(path).convert("RGBA")
     side = max(im.size)   # pad to a square, centred
@@ -155,17 +169,23 @@ def montage(args) -> Path:
     pad, label_w = 16, 150
     cols = [s + (pad + 4 * s if s < 100 else 0) for s in sizes]
     row_h = max(max(sizes), 4 * max([s for s in sizes if s < 100], default=0)) + 2 * pad
-    sheet = Image.new("RGB", (label_w + sum(cols) + pad * (len(cols) + 1), 28 + row_h * len(rows)), bg)
+    row_w = label_w + sum(cols) + pad * (len(cols) + 1)
+    n = len(rows)                      # grid: the fewest columns that keep the sheet <= 1.5x as tall as wide
+    ncol = args.cols or next(c for c in range(1, n + 1) if -(-n // c) * row_h + 28 <= 1.5 * c * row_w or c == n)
+    if ncol < 1:
+        sys.exit("--cols must be >= 1")
+    sheet = Image.new("RGB", (row_w * ncol, 28 + row_h * -(-n // ncol)), bg)
     draw = ImageDraw.Draw(sheet)
     ink = "#000000" if sum(sheet.getpixel((0, 0))) > 382 else "#FFFFFF"
-    x = label_w + pad
-    for s, w in zip(sizes, cols):
-        draw.text((x, 6), f"{s}px" + (" + 4x" if s < 100 else ""), fill=ink, font=font)
-        x += w + pad
+    for g in range(ncol):
+        x = g * row_w + label_w + pad
+        for s, w in zip(sizes, cols):
+            draw.text((x, 6), f"{s}px" + (" + 4x" if s < 100 else ""), fill=ink, font=font)
+            x += w + pad
     for r, (src, label) in enumerate(rows):
-        y = 28 + r * row_h
-        draw.text((pad, y + row_h // 2 - 8), label[:18], fill=ink, font=font)
-        x = label_w + pad
+        x0, y = (r % ncol) * row_w, 28 + (r // ncol) * row_h
+        draw.text((x0 + pad, y + row_h // 2 - 8), label[:18], fill=ink, font=font)
+        x = x0 + label_w + pad
         for s, w in zip(sizes, cols):
             icon = src.resize((s, s), Image.LANCZOS)
             if args.mask:
@@ -178,7 +198,7 @@ def montage(args) -> Path:
             x += w + pad
     out = out_path(args.out, "montage.png")
     sheet.save(out)
-    print(f"{out}  ({sheet.width}x{sheet.height}px, {len(rows)} rows x {len(sizes)} sizes)")
+    print(f"{out}  ({sheet.width}x{sheet.height}px, {len(rows)} entries in {ncol} column(s) x {len(sizes)} sizes)")
     return out
 
 
@@ -278,14 +298,26 @@ def selftest() -> int:
     with tempfile.TemporaryDirectory() as d:
         OUT = Path(d)
         ns = argparse.Namespace(px=False, scale=None, zoom=8, out=None, json=True, min_change=10.0,
-                                start=0.0, end=float("inf"), every=None)
+                                start=0.0, end=float("inf"), every=None, svg_size=1024)
         img = np.zeros((300, 402, 3), np.uint8); img[10:20, 10:20] = 255
         Image.fromarray(img).save(f"{d}/s.png")
         c = Image.open(crop(argparse.Namespace(**{**vars(ns), "png": f"{d}/s.png", "rect": "5,5,25,25"})))
         checks.append(("crop 20pt x8 = 160px", c.size == (160, 160) and c.getpixel((80, 80)) == (255, 255, 255)))
+        c = crop(argparse.Namespace(**{**vars(ns), "png": f"{d}/s.png", "rect": "5,5,25,25", "zoom": 2.5}))
+        checks.append(("crop x2.5 = 50px, LANCZOS, name x2_5", Image.open(c).size == (50, 50) and "-x2_5" in c.name))
+        if shutil.which("rsvg-convert"):
+            Path(f"{d}/s.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">'
+                                          '<rect width="100" height="100" fill="#fff"/><rect x="50" y="50" width="50" '
+                                          'height="50" fill="#000"/></svg>')
+            c = Image.open(crop(argparse.Namespace(**{**vars(ns), "png": f"{d}/s.svg", "rect": "520,520,540,540",
+                                                      "zoom": 2.5})))
+            checks.append(("crop SVG at 1024, coordinates in raster px", c.size == (50, 50) and c.getpixel((25, 25)) == (0, 0, 0)))
         m = Image.open(montage(argparse.Namespace(inputs=[f"{d}/s.png"], sizes="64,29", labels=None, apple=False,
-                                                  mask=True, bg="FFFFFF", out=None)))
+                                                  mask=True, bg="FFFFFF", out=None, cols=None)))
         checks.append(("montage size", m.size == (150 + 64 + 16 + 256 + 29 + 16 + 116 + 48, 28 + 256 + 32)))
+        m = Image.open(montage(argparse.Namespace(inputs=[f"{d}/s.png"] * 8, sizes="1024,58,29", labels=None,
+                                                  apple=False, mask=False, bg="FFFFFF", out=None, cols=None)))
+        checks.append((f"montage 8 x 1024: grid, {m.height / m.width:.2f}x as tall as wide (<= 1.5)", m.height <= 1.5 * m.width))
         # VFR synthetic video: 0.5 s hold (2 frames), linear 250 ms fade 20 -> 220 at 60 fps, 0.5 s hold.
         mp4, times = f"{d}/fade.mp4", [0.0, 0.3] + [0.5 + k / 60 for k in range(16)] + [0.8, 1.3]
         with av.open(mp4, "w") as c:
@@ -324,10 +356,13 @@ def main() -> int:
     parser.add_argument("--selftest", action="store_true")
     sub = parser.add_subparsers(dest="cmd")
     p = sub.add_parser("crop", parents=[common]); p.add_argument("png"); p.add_argument("rect")
-    p.add_argument("--zoom", type=int, default=1); p.add_argument("--out")
+    p.add_argument("--zoom", type=float, default=1, help="integer: nearest neighbour; fractional: LANCZOS")
+    p.add_argument("--svg-size", type=int, default=1024, help="SVG raster size (coordinates are its pixels)")
+    p.add_argument("--out")
     p = sub.add_parser("montage"); p.add_argument("inputs", nargs="+")
     p.add_argument("--sizes", default="1024,58,29"); p.add_argument("--labels")
     p.add_argument("--apple", action="store_true"); p.add_argument("--mask", action="store_true")
+    p.add_argument("--cols", type=int, help="grid columns (default: keep the sheet <= 1.5x as tall as wide)")
     p.add_argument("--bg", default="FFFFFF"); p.add_argument("--out")
     p = sub.add_parser("frames", parents=[window]); p.add_argument("mp4")
     p.add_argument("--every", type=float); p.add_argument("--out")

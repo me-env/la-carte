@@ -36,7 +36,7 @@ reference screenshots via `scripts/fetch-design-refs.sh`).
 - The same geometry exported as SVG (and PNG sizes) in `docs/design/brand/` for README, social and video.
 - The app icon derives from it. Clean and minimal like the reference app's mark: one idea, recognizable at 29 pt.
 - Before handing a mark to design-critic, run `uv run scripts/design-review.py` in the mode that fits it
-  (halftone default, `--mode outline --dots N`, `--mode flat`; see design-critic.md) and fix its FAILs; compare
+  (halftone default, `--mode outline --dots N`, `--mode flat`, `--mode line`; see design-critic.md) and fix its FAILs; compare
   variants with `scripts/image-ops.py montage` (docs/testing.md).
 
 ## Process

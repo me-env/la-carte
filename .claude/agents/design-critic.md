@@ -46,7 +46,7 @@ Run on each 1024 render (or its SVG), light and dark:
 vertical, `--region x0,y0,x1,y1` to isolate one part; `--watch` re-runs on every save with a one-line
 summary). **Pick the mode per kind of mark** (`--mode`, see the script's "Modes" docstring; halftone metrics
 don't apply to the others): halftone dots/holes ramping into a card → default `halftone`; a card outline of
-separate dots → `--mode outline --dots N --home`; a solid flat mark (one even-odd path) → `--mode flat --home`.
+separate dots → `--mode outline --dots N --home`; a solid flat mark (one even-odd path) → `--mode flat --home`; a forgetting-curve line (alone or XOR a card) → `--mode line --home`.
 For halftone, **pick the screen per proposal** from how the render is built (its render script / brief), and say
 which one you used in the verdict:
 - `--screen lattice` (default): marks settle onto a hex lattice (rounds 6-8b). Order must rise to the lattice.

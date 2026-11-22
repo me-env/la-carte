@@ -109,8 +109,10 @@ uv run scripts/screen-sample.py dots f0.png f1.png … x0,y0,x1,y1 --ring   # fr
 ```
 Image and video ops (`uv run scripts/image-ops.py --selftest`; same point/scale rules, outputs in `$TMPDIR/image-ops/`):
 ```bash
-uv run scripts/image-ops.py crop <png> x0,y0,x1,y1 --zoom 8                  # pixel-level inspection
-uv run scripts/image-ops.py montage a.svg b.png --apple --mask [--sizes 1024,58,29]   # icon contact sheet
+uv run scripts/image-ops.py crop <png|svg> x0,y0,x1,y1 --zoom 8             # pixel-level inspection (--zoom 2.5: LANCZOS;
+                                                                             # an SVG is rasterised at 1024, --svg-size N)
+uv run scripts/image-ops.py montage a.svg b.png --apple --mask [--sizes 1024,58,29] [--cols N]   # icon contact sheet,
+                                                                             # a grid no taller than ~1.5x its width
 uv run scripts/image-ops.py frames <mp4> --from 2 --to 4 [--every 0.1]       # PNGs named by real timestamp
 uv run scripts/image-ops.py track <mp4> x0,y0,x1,y1 [--from S --to S] [--json]  # luma per frame + 10-90 % transition times
 ```

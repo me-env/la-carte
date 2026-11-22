@@ -6,6 +6,8 @@
 #   "pillow==12.0.0",
 #   "scipy==1.16.3",
 #   "matplotlib==3.10.7",
+#   "scikit-image==0.26.0",
+#   "shapely==2.1.2",
 # ]
 # ///
 """Measured design review for logo / icon renders (design-critic runs it on every proposal).
@@ -18,6 +20,8 @@
     uv run scripts/design-review.py --frames round8/frames/  (or --frames 'round8/card-frame-*.png')   # an animation
     uv run scripts/design-review.py dotcard-light.svg dotcard-dark.svg --mode outline --dots 24 --home   # dotted outline
     uv run scripts/design-review.py forgetcurve/curve-*-ink.svg --mode flat [--home]   # solid flat marks (even-odd path)
+    uv run scripts/design-review.py forgetcurve/curve-93-ink.svg --mode line [--home] [--card x0,y0,x1,y1[,r]]   # the line
+    uv run scripts/design-review.py --mode line --make-synthetic DIR   # clean line mark + one SVG per defect (regression)
 
 Prints PASS/FAIL per metric (value vs limit, and WHERE: `at x 385, y 535 (band 5)` in the render's own 1024 px
 coordinates; band = 32 px band counted from where the ink starts rising) and writes an annotated sheet (render,
@@ -33,6 +37,9 @@ metric with nothing to measure (e.g. a ramp under 3 columns). Sheets go to $TMPD
 All lengths are in px of a 1024 tile; other sizes are resampled to 1024 first. SVGs go through rsvg-convert.
 
 Modes (`--mode`): `halftone` (default) is everything below this section: dots or holes ramping into a solid card.
+Without `--mode`, a still render with ink but fewer than 12 separate shapes (ink components + enclosed paper holes,
+each >= 20 px) is refused with exit 2 and a pointer to `--mode line` / `--mode flat` (curve-93 has 1 shape and got 14
+meaningless halftone FAILs); an explicit `--mode halftone` runs it after a WARNING line. Frames are not guarded.
 `outline` is for a card outline traced by separate dots (the dotcard logo, ideation-gen/dotcard.py; the halftone
 metrics, coverage ramp, front and overhang, don't apply to it). Dots come from the SVG's circles (exact) or, for a PNG,
 from the peaks of the ink's distance transform (two overlapping dots stay two). The halftone mode's marks stop at 0.2%
@@ -75,6 +82,50 @@ by the length they lose; runs under 10 px are corner pixels. Metrics (constants 
 Sheet: the render with the medial axis (tips, corners and crossings in orange), the thinnest stroke / gap cross-
 section ringed, what is lost at 29 px (red: stroke fades, blue: gap closes); 58 / 29 px previews with what is lost
 at that size; `--home` adds the home-screen mock. `--watch` works; the halftone-only options are as in outline.
+`line` is for the forgetting-curve LINE marks (forgetcurve curve-39..94, chart7 / line7: one stroke of plateaus,
+exponential decays and vertical resets, alone or XOR a rounded card; metric spec agreed with design-lead and
+design-critic 2026-11-22, constants LINE_*). An SVG is rendered at 4x (0.25 px); a PNG is used at 1024 (1 px). The card
+is found from the ink's longest straight edges (`--card` overrides); line region = ink XOR card. Its skeleton orders
+everything (arc length) and finds crossings and ends; the geometry comes from the outline (the SVG's own path when it
+is M/L/Z only): the stroke is its centreline buffered by s/2, except where line7's closing filled an inner corner
+(an arc), so every straight or smooth outline sample q gives a centre c = q + w/2 x the inward normal, with the
+outline's tangent as the line's direction. (The skeleton itself cuts filled corners: on curve-93 it runs 16 px off
+the centre in decay 1's U and slopes along plateau 2.) Samples are classified (plateau: < 5 deg and within s/4 of the
+peak; reset: within 20 deg of vertical, going up; decay: descending) and fitted (plateau y, reset x = a + b y, decay
+y = A - B exp(-x / tau)); junctions are where the fits intersect (R1); a skip zone of r tan(theta/2) + s/2 around
+each (r = the median arc radius, theta = the turn) is left out of width, smoothness and decay shape (R2). Metrics:
+- width: across the line between two straight / smooth edges: CV <= 1.5%, max deviation <= 4%.
+- smoothness: outline kinks (turning over 3 px chords > max(4 deg, 3 x its neighbours'), R4) and bends (> 15 deg within
+  s/4), away from junction arcs, ends, crossings and card corners; an arc with the same element on both sides is a
+  rounded kink and counts.
+- decay N: monotone (rise <= 0.5 px per edge), convex (the tangent turns back > 1.5 deg over s/2 on <= 5% of it),
+  exponential fit RMS <= 2% of its drop (R5; tau, k = width / tau, logistic RMS and an exponential / S-curve verdict;
+  a decay cut by the card edge reports k_visible and the fitted asymptote). INFO: worst curvature jump (G2).
+- cycles (R6): the drop in the first 2 s (from the fits) and the floor (lowest point, or the exit if cut) fall from
+  each decay to the next. resets: tilt <= 2 deg. peaks: plateau / reset-top levels within 2 px.
+- plateaus (R3): the straight top edge (y = peak - s/2, within 0.15 px, subpixel from the coverage, less the arcs'
+  overshoot) max / min <= 1.03.
+- fillets (R7): every outline arc of radius 0.2-1 s (caps, joins, inner fillets, fills; card corners excluded) within
+  5% of their median.
+- gaps (R8): line to each card side it does not cross within 3% of s; card wall: the thinnest card ink (medial axis,
+  tips and filleted tooth ends set aside) >= 0.95 s.
+- crossing (R9): angle between the line and the card edge >= 10 deg; the line's slope from horizontal where it crosses
+  a left / right edge >= 10 deg ("still falling", chart7's note; curve-93 exits at 8.6 deg: chart7 cuts decay 2 at
+  t = 0.554 at the card edge, its 5.6 deg is at the end of the drawn run, 72 px outside the card); a line edge within
+  s/4 of a card edge, parallel, for > s/2 (an element ON the edge, like curve-36's reset, is reported OK).
+- ends (R10, INFO): round cap (radius) or flush cut. corners (INFO): the widest fill in a skip zone.
+- small (58 / 29 px, perceived as in check 2): the line vs its flanks (1 icon px past its edges) inside the card (paper
+  on ink) and outside (ink on paper) >= 0.25, inside / outside medians >= 0.8; at each through crossing, the line's
+  centre either side of the edge within 0.25 icon px and width ratio 0.85-1.15. edge AA (R11, INFO): |2c - 1| of
+  straight H/V edges >= 3 icon px.
+- occupancy (R12): mark bbox long side / tile and ink share within the min-max (+-0.05) of the cached Apple icons with
+  a uniform border (how many is printed). palette: WCAG contrast, INFO.
+- the flat mode's metrics (thinnest stroke / gap, optical centre, margins, what fades / closes at 58 / 29 px).
+`--make-synthetic DIR` with `--mode line` writes a clean line mark (built like chart7 / line7) and one SVG per defect
+(20 deg kink, S-curve decay, width +-8%, reset tilted 6 deg, plateaus 1:1.5, steeper second cycle, mixed fillets,
+unequal gaps), reviews each and checks that the clean one passes every geometry metric and each defect fails its own
+(exit 1 otherwise). Sheet: centre samples by element, junctions and skip zones, fitted exponentials, arcs, kinks,
+crossings, width along x, 58 / 29 px previews. `--watch` and `--home` work.
 
 Screens (`--screen`, the critic picks it per proposal from the render's construction):
 - `lattice` (default): the marks settle onto a hex lattice; order must RISE (checks 3), touching from coverage 0.65.
@@ -298,6 +349,11 @@ EDGE_SPREAD_MAX = {58: 0.045, 29: 0.025}
 INK_MIN_CONTRAST = 0.1          # RGB distance 0..sqrt(3)
 MIN_MEASURE_MARKS = 8
 
+HALFTONE_MIN_SHAPES = 12        # default-mode guard: a still render with fewer separate shapes (ink components + paper
+                                # holes inside the ink, each >= 20 px) is not a halftone (curve-93: 1 ink + 0 holes;
+                                # a dotcard 25; the synthetic ramp thousands): exit 2 pointing to --mode line / flat
+SHAPE_MIN_PX = 20
+
 # ---- Outline mode (`--mode outline`): a card outline traced by separate dots (the dotcard logo, round 4, 2026-11-22).
 # Calibrated on the committed dotcard-light.svg / dotcard-round-light.svg (the intended design: PASS) and scratch
 # variants that must FAIL (two dots overlapping by ~9 px, a dot missing, a dot moved 1/4 pitch along the path).
@@ -355,6 +411,66 @@ FLAT_TIP_LOSS = {58: 140.0, 29: 140.0}   # max length of a sharp tip lost at ico
                                 # the tooth spikes of curve-01..20 lose 40-130 px at 29 (a point blunts), the XOR
                                 # slivers (a disc's edge running tangent into the curve) 160-250 px (a sliver vanishes)
 FLAT_EXACT = ("small: faded strokes", "small: closed gaps")   # metrics compared with ==
+
+# ---- Line mode (`--mode line`): the forgetting-curve LINE marks (round 5+, ideation-gen/forgetcurve curve-39..94: one
+# stroke of plateaus, exponential decays and vertical resets, alone or XOR a rounded card). Metric spec agreed by
+# design-lead and design-critic on 2026-11-22 (tooling-curve/line-mode-spec.md, revisions R1-R12). Limits marked
+# "agreed" are theirs; the others were calibrated on curve-93 / curve-36 and the synthetic set (`--make-synthetic`),
+# awaiting design-lead's OK. Lengths are px at 1024; s = the stroke's median width.
+LINE_SCALE = 4                  # an SVG is rendered at 4x (4096 px) for the geometry: 0.25 px precision. A PNG is used
+                                # at 1024 (1 px precision, said in the report header)
+LINE_SMOOTH_PX = 2.0            # Gaussian sigma along the centreline (the 4x skeleton's pixel steps are 0.25 px)
+LINE_CARD_RUN = 0.15            # a card edge candidate: straight boundary runs on one line summing to >= 15% of the
+                                # tile, the longest >= 6% (a crossing splits an edge: the synthetic's right edge 133 + 130)
+LINE_CARD_SUPPORT = 0.6         # ... and each side's middle 70% lies on the ink boundary for >= 60% of its length
+                                # (a crossing removes ~1 s: curve-93's right edge keeps 78%; a line alone has no 4 sides)
+LINE_OPEN_PX = 1.0              # px: an opening of the line region (ink XOR card) drops anti-aliasing slivers
+LINE_PLATEAU_DEG = 5.0          # plateau: |slope| < 5 deg and within s/4 of the peak level (agreed, R1)
+LINE_RESET_DEG = 20.0           # reset: within 20 deg of vertical, going up (agreed)
+LINE_WIDTH_CV = 0.015           # stroke width CV along the centreline, skip zones excluded (agreed)
+LINE_WIDTH_DEV = 0.04           # max |width - median| / median (agreed); curve-93 0.6%, synthetic +-8% fails
+LINE_KINK_CHORD = 3.0           # px: the outline's turning at a point = angle between the chords 3 px before and after
+                                # (the SVG path is rounded to 0.1 px, so single-vertex angles are noise: up to 22 deg on
+                                # curve-93's decays); a round arc of r = 36 turns 4.8 deg per sample
+LINE_KINK_DEG = 4.0             # R4 (agreed): a kink turns > max(4 deg, 3 x the median of its +-3 chord neighbours)
+LINE_KINK_RATIO = 3.0
+LINE_KINK_PNG = (6.0, 8.0)      # a PNG: chord 6 px, floor 8 deg (1 px precision)
+LINE_BEND_DEG = 15.0            # centreline turning within s/4 outside skip zones (draft 2): catches a kink that line7's
+                                # s/2 closing has rounded (the synthetic 20 deg kink turns ~19 deg in s/4; curve-93's
+                                # tightest decay ~6 deg)
+LINE_RISE_PX = 0.5              # decay monotone: no rise > 0.5 px (agreed)
+LINE_CONVEX_DEG = 1.5           # convex: the tangent may not turn back (steeper) by > 1.5 deg over s/2 (skeleton noise
+                                # ~0.5 deg; an S-curve turns back by 20+ deg over half its span)
+LINE_CONVEX_SHARE = 0.05        # ... on more than 5% of the decay (agreed)
+LINE_FIT_RMS = 0.02             # exponential fit RMS <= 2% of the decay's drop (agreed, R5); curve-93 0.3-0.6%
+LINE_RESET_TILT = 2.0           # deg from vertical (agreed)
+LINE_PEAK_SPREAD = 2.0          # px: peak levels (plateaus, reset tops) max - min (agreed)
+LINE_PLATEAU_RATIO = 1.03       # straight top edges (y = peak - s/2) max / min (agreed, R3); curve-93 72 / 72
+LINE_EDGE_TOL = 0.15            # px: a top edge is straight while within 0.15 px of its line (the r = s/2 join
+                                # leaves it by 0.15 px 3.3 px after the tangent point, equally at both ends)
+LINE_FILLET_RANGE = (0.2, 1.0)  # an outline arc is a fillet / cap / join if its radius is 0.2-1.0 s (the decays'
+                                # outlines bend at >= 1.2 s on curve-93; the card's corners are excluded by position)
+LINE_FILLET_TOL = 0.05          # every fillet radius within 5% of their median (agreed, R7)
+LINE_GAP_TOL = 0.03             # line-to-card gaps (sides not crossed) within 3% of s (agreed, R8)
+LINE_WALL_MIN = 0.95            # thinnest card ink wall >= 0.95 s (agreed, R8)
+LINE_CROSS_DEG = 10.0           # angle between the line and the card edge where it crosses (agreed, R9; the critic
+                                # would like 30)
+LINE_EXIT_DEG = 10.0            # the line still falls >= 10 deg where it leaves through a side edge (chart7's design
+                                # note "cut ... still falling (>= 10 deg)"; curve-93 5.6 = the finding the reviewers expect)
+LINE_PARALLEL = (0.25, 0.5)     # flag a line edge within s/4 of a card edge, parallel, for > s/2 (agreed, R9), unless
+                                # they coincide (<= 1.5 px)
+LINE_CONTRAST_MIN = 0.25        # at 58 / 29 px, the line vs its flanks, inside and outside the card (draft 7; as
+                                # FLAT_CONTRAST: ~1 icon px at any phase)
+LINE_CONTRAST_RATIO = 0.8       # median contrast inside / outside (or the reverse) >= 0.8 (draft 7)
+LINE_CONT_OFFSET = 0.25         # icon px: the line's centre either side of a crossing (draft 8)
+LINE_CONT_WIDTH = (0.85, 1.15)  # perceived width ratio either side of a crossing (draft 8)
+LINE_AA_LEN = 3.0               # icon px: straight H/V edges at least this long are checked for sharpness, INFO (R11)
+LINE_OCC_PAD = 0.05             # occupancy within [min - 0.05, max + 0.05] of the Apple icons with a uniform border (R10)
+LINE_BORDER_STD = 0.05          # an Apple icon has a uniform border if the band 3-6% in from its edge (middle 60% of
+                                # each side) has a colour std < 0.05: Reminders, Calendar 0.03; Clock 0.09, Notes,
+                                # Stocks, Maps 0.18-0.35 (full-bleed: skipped)
+LINE_APPLE_INK = 0.25           # an Apple glyph pixel differs from that border colour by > 0.25 (RGB distance)
+LINE_INFO = ("ends", "edge AA", "decay G2", "palette", "corners")   # INFO rows (no limit)
 
 ICON_IDS = [1110145109, 1108187841, 1108185179, 1069512882, 1584215688, 915056765]   # Notes, Reminders,
 # Calendar, Stocks, Clock, Maps: Apple's own apps via the public iTunes lookup API (no personal data).
@@ -1155,6 +1271,21 @@ def nothing_measured(path, quiet, why):
     return 0, None
 
 
+def shape_count(path):
+    """Separate shapes of a render: ink components and enclosed paper holes, each >= SHAPE_MIN_PX px at 1024."""
+    _, rgb, _ = load(path, "x")
+    solid = ink_map(rgb)[0] > 0.5
+    n = 0
+    for m in (solid, ~solid):
+        lab, k = ndimage.label(m)
+        if not k:
+            continue
+        size = ndimage.sum(m, lab, range(1, k + 1))
+        border = set(np.unique(np.r_[lab[0], lab[-1], lab[:, 0], lab[:, -1]]))
+        n += sum(1 for i in range(k) if size[i] >= SHAPE_MIN_PX and (m is solid or i + 1 not in border))
+    return n
+
+
 def frame_paths(spec):
     """--frames value: a directory (its *.png and *.svg, sorted) or a glob pattern."""
     import glob
@@ -1625,7 +1756,22 @@ def cross_contrast(small, size, m, stroke):
     return c - np.maximum(f1, f2) if stroke else np.minimum(f1, f2) - c
 
 
-def review_flat(path, out=None, home=False, quiet=False):
+def flat_necks(m):
+    """Sharp tips (is_tip: runs under FLAT_MIN_PX narrowing to a point) and corner runs, set aside (a bool mask), the tip
+    runs, and the necks: the thinnest neck or strip is a point no narrower than its neighbours (within its own width,
+    tips included), so the root of a tip, where the tip was cut off at FLAT_MIN_PX, is not reported as a stroke."""
+    tip = np.zeros(len(m["w"]), bool)
+    runs = axis_runs(m, m["w"] < FLAT_MIN_PX)
+    tips = [r for r in runs if is_tip(m, r)]
+    for r in tips + [r for r in runs if run_length(m, r) < FLAT_CORNER_PX]:
+        tip[r] = True
+    tree = cKDTree(np.column_stack([m["x"], m["y"]]))
+    rest = [q for q in np.nonzero(~tip)[0] if m["w"][q] <= 1 + min(
+        m["w"][n_] for n_ in tree.query_ball_point((m["x"][q], m["y"][q]), min(max(m["w"][q], 4), 2 * FLAT_MIN_PX)))]
+    return tip, tips, np.array(rest, int)
+
+
+def review_flat(path, out=None, home=False, quiet=False, sheet=True):
     """Flat mode: a solid flat mark (one even-odd path). Prints the report and writes the sheet; returns (fails, results)."""
     img, rgb, _ = load(path, "x")
     ink, bg, inkc = ink_map(rgb)
@@ -1642,17 +1788,8 @@ def review_flat(path, out=None, home=False, quiet=False):
     # at 1024: thinnest stroke / gap, sharp tips (is_tip: runs under the floor narrowing to a point) set aside
     tip, necks = {}, {}
     for kind, m in feats.items():
-        tip[kind] = np.zeros(len(m["w"]), bool)
-        runs = axis_runs(m, m["w"] < FLAT_MIN_PX)
-        tips = [r for r in runs if is_tip(m, r)]
-        for r in tips + [r for r in runs if run_length(m, r) < FLAT_CORNER_PX]:
-            tip[kind][r] = True
-        # the thinnest neck or strip: a point no narrower than its neighbours (within its own width, tips included),
-        # so the root of a tip, where the tip was cut off at FLAT_MIN_PX, is not reported as a stroke
-        tree = cKDTree(np.column_stack([m["x"], m["y"]]))
-        rest = [q for q in np.nonzero(~tip[kind])[0] if m["w"][q] <= 1 + min(
-            m["w"][n_] for n_ in tree.query_ball_point((m["x"][q], m["y"][q]), min(max(m["w"][q], 4), 2 * FLAT_MIN_PX)))]
-        necks[kind] = np.array(rest, int)
+        tip[kind], tips, necks[kind] = flat_necks(m)
+        rest = list(necks[kind])
         if not rest:
             results.append(na(f"{kind}: thinnest px", FLAT_MIN_PX, f"no {kind} neck or strip outside sharp tips"))
             continue
@@ -1720,7 +1857,8 @@ def review_flat(path, out=None, home=False, quiet=False):
     out = Path(out) if out else default_out(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     home_img = home_mock(img, out.with_name(f"{Path(path).stem}-home.png")) if home else None
-    flat_sheet(img, feats, tip, marks, lost, previews, results, out, home_img)
+    if sheet:
+        flat_sheet(img, feats, tip, marks, lost, previews, results, out, home_img)
     if quiet:
         return fails, results
     print(f"design-review {name}: mode flat, ink bbox x {x0}-{x1}, y {y0}-{y1}; medial axis: "
@@ -1773,6 +1911,1017 @@ def flat_sheet(img, feats, tip, marks, lost, previews, results, out, home_img):
                              for m, v, _, ok, note in results), fontsize=7, va="top", family="monospace")
     if home_img is not None:
         a = fig.add_subplot(gs[2, :]); a.imshow(home_img); a.axis("off")
+    fig.tight_layout(); fig.savefig(out, dpi=90); plt.close(fig)
+
+
+# ---------------------------------------------------------------- line mode
+def line_raster(path):
+    """(img 1024, ink coverage at F x 1024 as float32, F, outline rings in 1024 px or None, paper rgb, ink rgb).
+    An SVG of one even-odd path of M/L/Z commands (forgetcurve.py) gives its exact outline rings."""
+    path = Path(path)
+    img, rgb, _ = load(path, "x")
+    _, bg, inkc = ink_map(rgb)
+    rings, F = None, 1
+    if path.suffix.lower() == ".svg":
+        F = LINE_SCALE
+        text = path.read_text()
+        rings = svg_rings(text)
+        png = Path(tempfile.mkdtemp()) / "render4x.png"
+        subprocess.run(["rsvg-convert", "-w", str(TILE * F), "-h", str(TILE * F), str(path), "-o", str(png)], check=True)
+        hi = np.asarray(Image.open(png).convert("RGB"))
+    else:
+        hi = np.asarray(img)
+    v = (inkc - bg) * 255
+    cov = sum((hi[..., c].astype(np.float32) - np.float32(bg[c] * 255)) * np.float32(v[c] / (v @ v)) for c in range(3))
+    return img, np.clip(cov, 0, 1), F, rings, bg, inkc
+
+
+def svg_rings(text):
+    """The rings of an SVG made of absolute M/L/Z path commands only (no transform), in 1024 px; else None."""
+    if "transform" in text:
+        return None
+    ds = re.findall(r'\sd="([^"]+)"', text)
+    if not ds or re.search(r"[^MLZ\d.,\s-]", "".join(ds)):
+        return None
+    vb = re.search(r'viewBox="([\d.\s-]+)"', text)
+    k = TILE / float(vb.group(1).split()[2]) if vb else 1.0
+    rings = []
+    for d in ds:
+        for ring in re.findall(r"M([^Z]+)Z", d):
+            nums = np.array(re.findall(r"-?[\d.]+", ring), float).reshape(-1, 2) * k
+            if len(nums) >= 3:
+                rings.append(nums)
+    return rings or None
+
+
+def longest_run(row):
+    """Length of the longest run of True in a 1-D bool array."""
+    d = np.diff(np.r_[0, row.view(np.int8), 0])
+    s, e = np.nonzero(d == 1)[0], np.nonzero(d == -1)[0]
+    return int((e - s).max()) if len(s) else 0
+
+
+def card_find(B, F):
+    """The card: a rounded rectangle from the outermost long straight boundary runs of the ink (either polarity:
+    where the line crosses an edge the ink flips but the edge stays). (x0, y0, x1, y1, r) in 1024 px, or None."""
+    lmin = LINE_CARD_RUN * TILE * F
+    edges = []
+    for E in (B[1:] != B[:-1], (B[:, 1:] != B[:, :-1]).T):
+        rows = [i for i in np.nonzero(E.sum(1) >= lmin)[0] if longest_run(E[i]) >= 0.4 * lmin]   # crossings split edges
+        edges.append((E, rows))
+    (Eh, hs), (Ev, vs) = edges
+    if len(hs) < 2 or len(vs) < 2:
+        return None
+    y0, y1, x0, x1 = hs[0], hs[-1], vs[0], vs[-1]          # E index i = the edge between pixels i and i + 1
+    if min(y1 - y0, x1 - x0) < LINE_CARD_RUN * TILE * F:
+        return None
+    ends = []
+    for E, i, a, b in ((Eh, y0, x0, x1), (Eh, y1, x0, x1), (Ev, x0, y0, y1), (Ev, x1, y0, y1)):
+        band = E[max(i - 1, 0):i + 2].any(0)
+        m0, m1 = int(a + 0.15 * (b - a)), int(b - 0.15 * (b - a))
+        if band[m0:m1].mean() < LINE_CARD_SUPPORT:
+            return None
+        on = np.nonzero(E[i, a:b + 1])[0]               # where the straight run on this exact line starts and ends
+        ends += [on[0], b - a - on[-1]] if len(on) else []
+    c = [e for e in ends if e < 0.3 * min(x1 - x0, y1 - y0)]
+    d = float(np.median(c)) / F if c else 0.0
+    # the run ends where the corner arc leaves the pixel row (0.5 px at F): r - sqrt(r / F) = d
+    r = ((1 / math.sqrt(F) + math.sqrt(1 / F + 4 * d)) / 2) ** 2 if d > 0 else 0.0
+    return ((x0 + 1) / F, (y0 + 1) / F, (x1 + 1) / F, (y1 + 1) / F, r)
+
+
+def rrect_sd(x, y, card):
+    """Signed distance to a rounded rectangle (negative inside), and whether the nearest edge is a corner arc."""
+    x0, y0, x1, y1, r = card
+    qx = np.abs(x - (x0 + x1) / 2) - ((x1 - x0) / 2 - r)
+    qy = np.abs(y - (y0 + y1) / 2) - ((y1 - y0) / 2 - r)
+    sd = np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - r
+    return sd, (qx > 0) & (qy > 0)
+
+
+def skeleton_path(mask):
+    """The longest path through the skeleton of a mask: ordered (row, col) arrays. Spurs (into corners, caps)
+    are shorter than the ends of the line, so the double sweep (farthest from anywhere, then farthest from that)
+    keeps the line end to end."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import dijkstra
+    from skimage.morphology import skeletonize
+    sk = skeletonize(mask)
+    ys, xs = np.nonzero(sk)
+    n = len(ys)
+    if n < 3:
+        return ys, xs
+    idx = np.full((sk.shape[0] + 2, sk.shape[1] + 2), -1)
+    idx[ys + 1, xs + 1] = np.arange(n)
+    r, c, w = [], [], []
+    for dy, dx in ((0, 1), (1, 0), (1, 1), (1, -1)):
+        nb = idx[ys + 1 + dy, xs + 1 + dx]
+        ok = nb >= 0
+        r.append(np.nonzero(ok)[0]); c.append(nb[ok]); w.append(np.full(ok.sum(), math.hypot(dy, dx)))
+    g = coo_matrix((np.concatenate(w), (np.concatenate(r), np.concatenate(c))), shape=(n, n)).tocsr()
+    d = dijkstra(g, directed=False, indices=0)
+    a = int(np.argmax(np.where(np.isfinite(d), d, -1)))
+    d, pred = dijkstra(g, directed=False, indices=a, return_predecessors=True)
+    b = int(np.argmax(np.where(np.isfinite(d), d, -1)))
+    path = [b]
+    while path[-1] != a:
+        path.append(pred[path[-1]])
+    path = np.array(path)
+    return ys[path], xs[path]
+
+
+def resample(xy, step=1.0, sigma=0.0, closed=False):
+    """A polyline at uniform arc-length steps, optionally Gaussian-smoothed along it."""
+    if closed:
+        xy = np.vstack([xy, xy[:1]])
+    s = np.r_[0, np.cumsum(np.hypot(*np.diff(xy, axis=0).T))]
+    t = np.arange(0, s[-1], step)
+    p = np.column_stack([np.interp(t, s, xy[:, 0]), np.interp(t, s, xy[:, 1])])
+    if sigma:
+        p = ndimage.gaussian_filter1d(p, sigma / step, axis=0, mode="wrap" if closed else "nearest")
+    return p
+
+
+def ring_turning(ring, chord):
+    """A closed outline at 1 px steps and its signed turning (deg) between the chords `chord` px before and after."""
+    p = resample(ring, closed=True)
+    c = max(1, int(round(chord)))
+    a, b = p - np.roll(p, c, axis=0), np.roll(p, -c, axis=0) - p
+    return p, np.degrees(np.arctan2(a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0], (a * b).sum(1)))
+
+
+def circle_fit(p):
+    """Least-squares circle (Kasa): centre x, y, radius, RMS residual."""
+    A = np.column_stack([p[:, 0], p[:, 1], np.ones(len(p))])
+    D, E, G = np.linalg.lstsq(A, -(p ** 2).sum(1), rcond=None)[0]
+    cx, cy = -D / 2, -E / 2
+    r = math.sqrt(max(cx * cx + cy * cy - G, 0))
+    return cx, cy, r, float(np.sqrt(np.mean((np.hypot(p[:, 0] - cx, p[:, 1] - cy) - r) ** 2)))
+
+
+def outline_arcs(p, turn, chord, s, card):
+    """Circular arcs of one outline ring with a radius of 0.2-1.0 s (caps, joins, fillets), the card's corners excluded:
+    (cx, cy, r, sweep deg, ring indices)."""
+    sm = ndimage.uniform_filter1d(turn, 5, mode="wrap")     # the SVG's 0.1 px rounding: +-1 deg per sample
+    r = chord / (2 * np.maximum(np.sin(np.radians(np.abs(sm)) / 2), 1e-9))
+    cand = (r >= LINE_FILLET_RANGE[0] * s) & (r <= LINE_FILLET_RANGE[1] * s)
+    if cand.all() or not cand.any():
+        return []
+    k0 = int(np.argmin(cand))                             # roll so the ring starts outside an arc
+    sign = np.roll(np.sign(sm) * cand, -k0)
+    arcs = []
+    for run in np.split(np.arange(len(sign)), np.nonzero(np.diff(sign))[0] + 1):
+        if sign[run[0]] == 0 or len(run) < 4 * chord:
+            continue
+        idx = (run + k0) % len(p)
+        core = idx[int(chord):-int(chord)]
+        cx, cy, rr, res = circle_fit(p[core])
+        sweep = float(np.abs(turn[idx]).sum() / chord)
+        if res > 0.3 or sweep < 20:
+            continue
+        if card is not None and card[4] > 0:
+            x0, y0, x1, y1, rc = card
+            cc = [(x0 + rc, y0 + rc), (x1 - rc, y0 + rc), (x0 + rc, y1 - rc), (x1 - rc, y1 - rc)]
+            if any(math.hypot(cx - a, cy - b) < 0.1 * s for a, b in cc) and abs(rr - rc) < 0.1 * rc:
+                continue
+        twin = [a for a in arcs if math.hypot(a[0] - cx, a[1] - cy) < 0.1 * s]   # one arc split by noise
+        if twin and twin[0][3] >= sweep:
+            continue
+        arcs = [a for a in arcs if a not in twin] + [(cx, cy, rr, sweep, idx)]
+    return arcs
+
+
+def exp_fit(x, y):
+    """y = A - B exp(-(x - x[0]) / tau): (A, B, tau, x0, rms). Retention falls: image y grows towards the asymptote A."""
+    from scipy.optimize import curve_fit
+    x0 = x[0]
+    f = lambda x_, A, B, tau: A - B * np.exp(-(x_ - x0) / tau)
+    p0 = (y[-1] + 0.05 * (y[-1] - y[0]), max(y[-1] - y[0], 1), max((x[-1] - x0) / 3, 2))
+    try:
+        p = curve_fit(f, x, y, p0=p0, bounds=([-np.inf, 0, 1], [np.inf, np.inf, 1e6]), maxfev=5000)[0]
+    except Exception:
+        p = p0
+    return (*p, x0, float(np.sqrt(np.mean((f(x, *p) - y) ** 2))))
+
+
+def logistic_rms(x, y):
+    """RMS of the best logistic (S-curve) through the same points."""
+    from scipy.optimize import curve_fit
+    f = lambda x_, A, B, m, w: A + B / (1 + np.exp(-(x_ - m) / w))
+    p0 = (y[0], y[-1] - y[0], (x[0] + x[-1]) / 2, max((x[-1] - x[0]) / 8, 1))
+    try:
+        p = curve_fit(f, x, y, p0=p0, bounds=([-np.inf, -np.inf, -np.inf, 0.5], np.inf), maxfev=5000)[0]
+    except Exception:
+        p = p0
+    return float(np.sqrt(np.mean((f(x, *p) - y) ** 2)))
+
+
+def el_fit(el, c):
+    """Fit an element on its centre samples: plateau y = c, reset x = a + b y, decay exponential (x sorted)."""
+    x, y = c[el["idx"], 0], c[el["idx"], 1]
+    if el["kind"] == "P":
+        el["y"] = float(np.median(y))
+    elif el["kind"] == "R":
+        el["b"], el["a"] = np.polyfit(y, x, 1) if np.ptp(y) > 1 else (0.0, float(np.median(x)))
+    else:
+        o = np.argsort(x)
+        el["fit"] = exp_fit(x[o], y[o])
+
+
+def el_y(el, x):
+    A, B, tau, x0, _ = el["fit"]
+    return A - B * np.exp(np.minimum(-(x - x0) / tau, 50))      # (far-off extrapolation of a short decay)
+
+
+def el_dir(el, x):
+    """Unit direction of travel (left to right, resets upwards) of an element at x."""
+    if el["kind"] == "P":
+        v = np.array([1.0, 0.0])
+    elif el["kind"] == "R":
+        v = np.array([-el["b"], -1.0])
+    else:
+        A, B, tau, x0, _ = el["fit"]
+        v = np.array([1.0, min(B / tau * math.exp(min(-(x - x0) / tau, 50)), 1e9)])
+    return v / np.linalg.norm(v)
+
+
+def junction(e1, e2, c):
+    """R1: the corner between two elements = the intersection of their fitted lines (plateau y = c, reset x = a + b y,
+    decay extrapolated). Returns (x, y, turn deg)."""
+    k = e1["kind"] + e2["kind"]
+    if k in ("PD", "DP"):
+        P, D = (e1, e2) if k == "PD" else (e2, e1)
+        A, B, tau, x0, _ = D["fit"]
+        x, y = (x0 - tau * math.log((A - P["y"]) / B) if B > 0 and A > P["y"] else c[D["idx"], 0].min()), P["y"]
+    elif k in ("DR", "RD"):
+        R, D = (e2, e1) if k == "DR" else (e1, e2)
+        x = R["a"] + R["b"] * float(np.median(c[R["idx"], 1]))
+        for _ in range(8):
+            x = R["a"] + R["b"] * float(el_y(D, x))
+        y = float(el_y(D, x))
+    elif k in ("RP", "PR"):
+        R, P = (e1, e2) if k == "RP" else (e2, e1)
+        x, y = R["a"] + R["b"] * P["y"], P["y"]
+    else:
+        x, y = (c[e1["idx"][-1]] + c[e2["idx"][0]]) / 2
+    d1, d2 = el_dir(e1, x), el_dir(e2, x)
+    return float(x), float(y), math.degrees(math.acos(np.clip(d1 @ d2, -1, 1)))
+
+
+def elements(t, cls, s):
+    """Elements of one stroke from its centre samples (t = the skeleton's arc length of each): per kind (P plateau,
+    D decay, R reset), samples closer than s/2 in t form one element if there are >= s/4 of them (fewer are corner
+    noise); elements in order of t, neighbours of one kind merged. Returns [(kind, t0, t1)]."""
+    els = []
+    for kind in "PDR":
+        tk = np.sort(t[cls == kind])
+        for g in np.split(tk, np.nonzero(np.diff(tk) > s / 2)[0] + 1) if len(tk) else []:
+            if len(g) >= s / 4:
+                els.append([kind, g[0], g[-1]])
+    els.sort(key=lambda e: e[1] + e[2])
+    out = []
+    for e in els:
+        if out and out[-1][0] == e[0]:
+            out[-1][2] = max(out[-1][2], e[2])
+        else:
+            out.append(e)
+    return [tuple(e) for e in out]
+
+
+def zone_mask(pts, zones):
+    """Points within any (x, y, radius) zone."""
+    m = np.zeros(len(pts), bool)
+    for x, y, r in zones:
+        m |= np.hypot(pts[:, 0] - x, pts[:, 1] - y) < r
+    return m
+
+
+def runs_of(mask):
+    """Index arrays of the True runs of a 1-D mask."""
+    d = np.diff(np.r_[0, mask.astype(np.int8), 0])
+    return [np.arange(a, b) for a, b in zip(np.nonzero(d == 1)[0], np.nonzero(d == -1)[0])]
+
+
+def across(small, size, x, y, ux, uy, w):
+    """Perceived profile across the line at icon size: (centre offset along u, width), px at 1024."""
+    k = TILE / size
+    t = np.arange(-1.5 * w - k, 1.5 * w + k + 0.01, k / 4)
+    v = ndimage.map_coordinates(small, [(y + uy * t) / k - 0.5, (x + ux * t) / k - 0.5], order=1, mode="nearest")
+    sig = np.abs(v - (v[:4].mean() + v[-4:].mean()) / 2)
+    if sig.max() <= 1e-6:
+        return float("nan"), float("nan")
+    return float((t * sig).sum() / sig.sum()), float(sig.sum() * k / 4 / sig.max())
+
+
+def apple_occupancy():
+    """(bbox long side / tile, ink share) per Apple icon whose border (the middle 60% of each side's outer 3%, the
+    artwork's rounded corners left out) is one colour; full-bleed icons are skipped."""
+    vals = []
+    for im, _ in fetch_icons():
+        if im is None:
+            continue
+        a = np.asarray(im.resize((256, 256), Image.BOX), dtype=float) / 255
+        m0, m1, e = 51, 205, 16                            # the artwork's shaded rim and corners: the outer 6%
+        ring = np.concatenate([a[e // 2:e, m0:m1].reshape(-1, 3), a[-e:-e // 2, m0:m1].reshape(-1, 3),
+                               a[m0:m1, e // 2:e].reshape(-1, 3), a[m0:m1, -e:-e // 2].reshape(-1, 3)])
+        if ring.std(0).max() >= LINE_BORDER_STD:
+            continue
+        mark = np.linalg.norm(a - np.median(ring, 0), axis=2) > LINE_APPLE_INK
+        mark[:e] = mark[-e:] = False
+        mark[:, :e] = mark[:, -e:] = False
+        ys, xs = np.nonzero(mark)
+        if len(ys):
+            vals.append((max(np.ptp(xs), np.ptp(ys)) / 256, mark.mean()))
+    return vals
+
+
+def wcag(c):
+    c = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def at_f(a, pts, F, cval=0.0):
+    """Bilinear sample of an F x 1024 array at points in 1024 px."""
+    return ndimage.map_coordinates(a, [pts[..., 1].ravel() * F - 0.5, pts[..., 0].ravel() * F - 0.5], order=1,
+                                   mode="constant", cval=cval).reshape(pts.shape[:-1])
+
+
+def review_line(path, out=None, home=False, quiet=False, card=None):
+    """Line mode: the forgetting-curve line, alone or XOR a card. Prints the report and writes the sheet; returns
+    (fails, results). The skeleton of the line region orders things (arc length t), finds crossings and ends; the
+    geometry comes from the outline: the stroke is its centreline buffered by s/2, except where line7's closing filled
+    an inner corner (an arc), so every outline sample that is not an arc or the card's edge gives a centre point
+    c = q + s/2 x the inward normal, with the outline's tangent as the line's direction."""
+    import time
+    t_start = time.time()
+    img, cov, F, rings, bgc, inkc = line_raster(path)
+    B = cov > 0.5
+    if B.sum() < 100 * F * F:
+        return nothing_measured(path, quiet, f"{int(B.sum() / F / F)} ink px")
+    card = card or card_find(B, F)
+    if card:
+        yy, xx = np.mgrid[:B.shape[0], :B.shape[1]]
+        inside = rrect_sd((xx + 0.5) / F, (yy + 0.5) / F, card)[0] < 0
+        del yy, xx
+        line, lcov = B ^ inside, np.where(inside, 1 - cov, cov)
+    else:
+        inside, line, lcov = np.zeros_like(B), B, cov
+    line = ndimage.binary_opening(line, iterations=max(1, int(round(LINE_OPEN_PX * F / 2))))
+    lab, n = ndimage.label(line)
+    if not n:
+        return nothing_measured(path, quiet, "no line apart from the card")
+    sizes = ndimage.sum(line, lab, range(1, n + 1))
+    objs = ndimage.find_objects(lab)
+
+    # skeleton per stroke (component): ordered, smoothed, 1 px steps; its width only seeds s
+    strokes = []
+    for c_ in [int(i) + 1 for i in np.argsort(-sizes) if sizes[i] >= 0.1 * sizes.max()]:
+        sl = objs[c_ - 1]
+        sub = np.pad(lab[sl] == c_, 1)
+        oy, ox = sl[0].start - 1, sl[1].start - 1
+        ys, xs = skeleton_path(sub)
+        if len(ys) < 3 * F:
+            continue
+        raw = np.column_stack([(xs + ox + 0.5) / F, (ys + oy + 0.5) / F])
+        p = resample(raw[::-1] if raw[0, 0] > raw[-1, 0] else raw, sigma=LINE_SMOOTH_PX)
+        edt = ndimage.distance_transform_edt(sub)
+        w = (2 * ndimage.map_coordinates(edt, [p[:, 1] * F - 0.5 - oy, p[:, 0] * F - 0.5 - ox], order=1) - 1) / F
+        d = np.gradient(p, axis=0)
+        strokes.append(dict(p=p, w=w, tan=d / np.maximum(np.hypot(*d.T), 1e-9)[:, None], mask=(sl, c_)))
+    if not strokes:
+        return nothing_measured(path, quiet, "no line long enough")
+    strokes.sort(key=lambda st: st["p"][0, 0])
+    s0 = float(np.median(np.concatenate([st["w"][len(st["w"]) // 5: -(len(st["w"]) // 5) or None] for st in strokes])))
+
+    # outline samples at 1 px: turning, arcs (fillets, joins, caps), inward normal
+    if rings is None:
+        from skimage.measure import find_contours
+        c1024 = np.asarray(Image.fromarray(cov).resize((TILE, TILE), Image.BOX)) if F > 1 else cov
+        rings = [c[:, ::-1] - 0.5 for c in find_contours(np.pad(c1024, 1), 0.5) if len(c) > 20]
+        chord, kink_floor = LINE_KINK_PNG
+    else:
+        chord, kink_floor = LINE_KINK_CHORD, LINE_KINK_DEG
+    cc = max(1, int(round(chord)))
+    Q, T, TU, RING, ARC = [], [], [], [], []
+    arcs = []
+    for k, ring in enumerate(rings):
+        p, turn = ring_turning(ring, chord)
+        if len(p) < 6 * cc:
+            continue
+        tg = np.roll(p, -cc, axis=0) - np.roll(p, cc, axis=0)
+        member = np.zeros(len(p), bool)
+        for a in outline_arcs(p, turn, chord, s0, card):
+            member[a[4]] = True
+            arcs.append((*a[:4], len(np.concatenate(Q)) if Q else 0, a[4]))
+        member = ndimage.binary_dilation(member, iterations=cc) if member.any() else member
+        Q.append(p); T.append(tg / np.maximum(np.hypot(*tg.T), 1e-9)[:, None]); TU.append(turn)
+        RING.append(np.full(len(p), k)); ARC.append(member)
+    Q, T, TU, RING, ARC = map(np.concatenate, (Q, T, TU, RING, ARC))
+    arcs = [(cx, cy, r, sw, off + idx) for cx, cy, r, sw, off, idx in arcs]
+    N = np.column_stack([-T[:, 1], T[:, 0]])
+    N *= np.where(at_f(lcov, Q + 1.5 * N, F) >= at_f(lcov, Q - 1.5 * N, F), 1, -1)[:, None]
+    sdq, cornq = rrect_sd(Q[:, 0], Q[:, 1], card) if card else (np.full(len(Q), 1e9), np.zeros(len(Q), bool))
+    on_card = np.abs(sdq) < 1.5
+    rad = chord / (2 * np.maximum(np.sin(np.radians(np.abs(TU)) / 2), 1e-9))
+    intact = ~ARC & ~on_card & (rad > LINE_FILLET_RANGE[1] * s0)
+
+    # width: a ray from each intact sample across the line to the other edge, kept when it lands on an intact edge
+    qi = np.nonzero(intact)[0]
+    dd = np.arange(0.5, 2.5 * s0, 0.25)
+    v = at_f(lcov, Q[qi, None, :] + dd[None, :, None] * N[qi, None, :], F)
+    below = v < 0.5
+    has = below.any(1)
+    j = np.argmax(below, axis=1)
+    j0 = np.maximum(j - 1, 0)
+    v0, v1 = v[np.arange(len(qi)), j0], v[np.arange(len(qi)), j]
+    wid = dd[j0] + 0.25 * np.clip((v0 - 0.5) / np.maximum(v0 - v1, 1e-6), 0, 1)
+    tree_q = cKDTree(Q)
+    ex = tree_q.query(Q[qi] + wid[:, None] * N[qi])[1]
+    width = np.full(len(Q), np.nan)
+    good = has & intact[ex]
+    width[qi[good]] = wid[good]
+    s = float(np.nanmedian(width)) if np.isfinite(width).any() else s0
+    half = np.full(len(Q), s / 2)                           # the local half width: measured, else from the edge's
+    for k in np.unique(RING):                               # neighbours within 10 px, else s / 2
+        ix = np.nonzero(RING == k)[0]
+        v = np.nonzero(np.abs(width[ix] / s - 1) < 0.15)[0]
+        if len(v):
+            near = np.abs(np.arange(len(ix))[:, None] - v[None, :]).min(1) <= 10 if len(v) < 5000 else np.ones(len(ix), bool)
+            half[ix] = np.where(near, np.interp(np.arange(len(ix)), v, width[ix][v]) / 2, s / 2)
+    C = Q + half[:, None] * N                               # centre points (meaningful where intact)
+
+    # samples -> stroke and arc length t (nearest skeleton point); direction along the stroke; phi
+    allp = np.vstack([st["p"] for st in strokes])
+    sid = np.concatenate([np.full(len(st["p"]), i) for i, st in enumerate(strokes)])
+    tid = np.concatenate([np.arange(len(st["p"])) for st in strokes])
+    alltan = np.vstack([st["tan"] for st in strokes])
+    dist, nn = cKDTree(allp).query(C)
+    intact &= dist < s                                      # (the skeleton cuts filled corners: only for order)
+    STK, TT = sid[nn], tid[nn]
+    T *= np.where((T * alltan[nn]).sum(1) >= 0, 1, -1)[:, None]
+    PHI = np.degrees(np.arctan2(T[:, 1], T[:, 0]))
+    ci = np.nonzero(intact)[0]
+    if len(ci) < 20:
+        return nothing_measured(path, quiet, "no straight or smooth outline to measure the line on")
+    top = C[ci, 1].min()
+    flat = ci[(np.abs(PHI[ci]) < LINE_PLATEAU_DEG) & (C[ci, 1] < top + s / 4)]
+    peak = float(np.median(C[flat, 1])) if len(flat) else float(top)
+
+    # classify centre samples, elements per stroke, fits, junctions (R1), skip zones (R2)
+    up = np.abs(PHI + 90) <= LINE_RESET_DEG
+    flt = (np.abs(PHI) < LINE_PLATEAU_DEG) & (np.abs(C[:, 1] - peak) < s / 4)
+    down = ~up & ~flt & (np.abs(PHI) < 90) & ((PHI > 0) | (np.abs(PHI) < LINE_PLATEAU_DEG))
+    CLS = np.where(up, "R", np.where(flt, "P", np.where(down, "D", "O")))
+    rf = float(np.median([a[2] for a in arcs])) if arcs else s / 2
+    junctions = []
+    for si, st in enumerate(strokes):
+        mine = ci[STK[ci] == si]
+        mine = mine[np.argsort(TT[mine], kind="stable")]
+        st["els"] = []
+        for kind, t0, t1 in elements(TT[mine], CLS[mine], s):
+            idx = mine[(TT[mine] >= t0) & (TT[mine] <= t1) & (CLS[mine] == kind)]
+            if len(idx) >= 4:
+                st["els"].append(dict(kind=str(kind), t0=int(t0), t1=int(t1), idx=idx))
+        for el in st["els"]:
+            el_fit(el, C)
+        st["junc"] = [junction(a, b, C) for a, b in zip(st["els"], st["els"][1:])]
+        st["zones"] = [(x, y, rf * math.tan(math.radians(min(t, 150)) / 2) + s / 2) for x, y, t in st["junc"]]
+        junctions += st["junc"]
+    jzones = [z for st in strokes for z in st["zones"]]
+
+    # crossings of the card edge along the skeleton, coincident / near-parallel stretches (R9), ends (R10)
+    crossings, along, ends_info = [], [], []
+    for si, st in enumerate(strokes):
+        p = st["p"]
+        for e, i in (("start", 0), ("end", len(p) - 1)):
+            en = dict(stroke=si, which=e, i=i, x=p[i, 0], y=p[i, 1], kind="round cap", r=float("nan"))
+            cap = [a for a in arcs if math.hypot(a[0] - p[i, 0], a[1] - p[i, 1]) < s / 3 and a[3] > 120]
+            if cap:
+                en.update(x=cap[0][0], y=cap[0][1], r=cap[0][2])
+            ends_info.append(en)
+        if not card:
+            continue
+        sd, _ = rrect_sd(p[:, 0], p[:, 1], card)
+        x0, y0, x1, y1, rc = card                           # an element whose centreline or edge lies on a card edge
+        for el in st["els"]:
+            q = C[el["idx"]]
+            if el["kind"] == "R":
+                pos, edges_, inspan = el["a"] + el["b"] * np.median(q[:, 1]), (x0, x1), q[:, 1].min() < y1 and q[:, 1].max() > y0
+            elif el["kind"] == "P":
+                pos, edges_, inspan = el["y"], (y0, y1), q[:, 0].min() < x1 and q[:, 0].max() > x0
+            else:
+                continue
+            if inspan and min(abs(pos + o - e) for e in edges_ for o in (0, -s / 2, s / 2)) <= 1.5:
+                j_ = el["idx"][len(el["idx"]) // 2]
+                along.append(dict(stroke=si, kind="coincide", t0=el["t0"], t1=el["t1"], x=C[j_, 0], y=C[j_, 1],
+                                  len=float(np.ptp(q[:, 1] if el["kind"] == "R" else q[:, 0])), pts=q[::max(1, int(s / 4))]))
+        state = np.where(sd < -s / 4, -1, np.where(sd > s / 4, 1, 0))
+        last, li = 0, None
+        for i in np.nonzero(state)[0]:
+            if last and state[i] != last:
+                j_ = li + int(np.argmin(np.abs(sd[li:i + 1])))
+                if not any(a["stroke"] == si and a["t0"] - s <= j_ <= a["t1"] + s for a in along):
+                    crossings.append(dict(stroke=si, i=j_, x=p[j_, 0], y=p[j_, 1], kind="through"))
+            last, li = state[i], i
+        sl, c_ = st["mask"]                                 # flush ends: the region stops on the card edge
+        ys_, xs_ = np.nonzero(lab[sl] == c_)
+        px, py = (xs_ + sl[1].start + 0.5) / F, (ys_ + sl[0].start + 0.5) / F
+        for en in ends_info[-2:]:
+            near = np.hypot(px - p[en["i"], 0], py - p[en["i"], 1]) < s
+            if not near.any():
+                continue
+            sdn = rrect_sd(px[near], py[near], card)[0]
+            if (sdn.max() < 1.0 or sdn.min() > -1.0) and (np.abs(sdn) < 1.0).sum() / F >= s / 2:
+                en["kind"] = "flush cut"
+                crossings.append(dict(stroke=si, i=en["i"], x=en["x"], y=en["y"], kind="exit"))
+    if card:                                                # a line edge within s/4 of a card edge, parallel (R9)
+        g = np.column_stack([rrect_sd(Q[:, 0] + 0.5, Q[:, 1], card)[0] - rrect_sd(Q[:, 0] - 0.5, Q[:, 1], card)[0],
+                             rrect_sd(Q[:, 0], Q[:, 1] + 0.5, card)[0] - rrect_sd(Q[:, 0], Q[:, 1] - 0.5, card)[0]])
+        par = np.abs(T[:, 0] * g[:, 1] - T[:, 1] * g[:, 0]) / np.maximum(np.hypot(*g.T), 1e-9) > math.cos(math.radians(10))
+        m = intact & par & (np.abs(sdq) > 1.5) & (np.abs(sdq) <= LINE_PARALLEL[0] * s)
+        for k in np.unique(RING):
+            ix = np.nonzero(RING == k)[0]
+            for run in runs_of(m[ix]):
+                if len(run) > LINE_PARALLEL[1] * s:
+                    j_ = ix[run[len(run) // 2]]
+                    along.append(dict(stroke=-1, kind="near-parallel", t0=-1, t1=-1, x=Q[j_, 0], y=Q[j_, 1],
+                                      len=float(len(run)), pts=Q[ix[run[::max(1, int(s / 4))]]], gap=float(abs(sdq[j_]))))
+    # valid centre samples for width, smoothness and decay shape: outside skip zones, ends and crossings
+    czones = [(c["x"], c["y"], s / 2) for c in crossings] + [
+        (x, y, s / 2) for a in along if a["kind"] == "coincide" for x, y in a["pts"]]
+    endz = [(e["x"], e["y"], s / 2 if e["kind"] == "round cap" else s) for e in ends_info]
+    ok = intact & ~zone_mask(C, jzones) & ~zone_mask(C, czones) & ~zone_mask(C, endz)
+    results = []
+
+    # 1. width (agreed limits): across the line between two intact edges
+    wv, wq = width[ok & np.isfinite(width)], C[ok & np.isfinite(width)]
+    if len(wv) > 10:
+        med = float(np.median(wv))
+        j_ = int(np.argmax(np.abs(wv - med)))
+        cv, dev = float(wv.std() / wv.mean()), abs(wv[j_] - med) / med
+        results.append(("width: CV along the line", cv, LINE_WIDTH_CV, cv <= LINE_WIDTH_CV,
+                        f"median {med:.2f} px over {len(wv)} edge px (corners, fills, ends, crossings excluded)"))
+        results.append(("width: max deviation / median", dev, LINE_WIDTH_DEV, dev <= LINE_WIDTH_DEV,
+                        f"{wv[j_]:.1f} px at x {wq[j_, 0]:.0f}, y {wq[j_, 1]:.0f}"))
+    else:
+        results += [na("width: CV along the line", LINE_WIDTH_CV, "no straight or smooth edge pair"),
+                    na("width: max deviation / median", LINE_WIDTH_DEV, "no straight or smooth edge pair")]
+    fills = [(w_, x, y) for w_, (x, y) in zip(width[intact & ~ok & np.isfinite(width)], C[intact & ~ok & np.isfinite(width)])]
+
+    # 2. smoothness (R4 + draft 2) on the outline: kinks (one sample turning > max(4 deg, 3 x its neighbours'));
+    # bends (> 15 deg within s/4). Corners are expected near junctions (their arcs too), ends, crossings, card corners
+    EL = np.full(len(Q), -1)
+    for e_, el in enumerate(el_ for st in strokes for el_ in st["els"]):
+        EL[el["idx"]] = e_
+    near_arc = np.zeros(len(Q), bool)
+    for cx, cy, r, sw, idx in arcs:
+        # an arc between two elements (a join, an inner fillet, a fill) or a cap is expected; an arc with the same
+        # element on both sides along the outline is a rounded kink inside that element
+        ix = np.nonzero(RING == RING[idx[0]])[0]
+        r0, n_ = ix[0], len(ix)
+        side = []
+        for start, step in ((idx[0] - r0, -1), (idx[-1] - r0, 1)):
+            hit = [EL[r0 + (start + step * d) % n_] for d in range(1, int(2 * s)) if EL[r0 + (start + step * d) % n_] >= 0]
+            side.append(hit[0] if hit else -1)
+        cap = sw > 120 and any(math.hypot(cx - e["x"], cy - e["y"]) < s / 3 for e in ends_info)
+        if cap or side[0] != side[1] or side[0] < 0:
+            near_arc[idx] = True
+    near_arc = ndimage.binary_dilation(near_arc, iterations=cc)
+    expected = (near_arc | on_card | zone_mask(Q, [(x, y, z + s / 2) for x, y, z in jzones])
+                | zone_mask(Q, [(x, y, s) for x, y, _ in czones + endz]) | (cornq & (np.abs(sdq) < 3)))
+    kinks, bends = [], []
+    at_ = np.abs(TU)
+    hw = max(1, int(s / 8))
+    for k in np.unique(RING):
+        ix = np.nonzero(RING == k)[0]
+        a = at_[ix]
+        nb = np.stack([np.roll(a, o) for o in (-3 * cc, -2 * cc, -cc, cc, 2 * cc, 3 * cc)])
+        lim = np.maximum(kink_floor, LINE_KINK_RATIO * np.median(nb, axis=0))
+        peakm = (a >= np.roll(a, 1)) & (a >= np.roll(a, -1))
+        for i in np.nonzero((a > lim) & peakm & ~expected[ix])[0]:
+            kinks.append((Q[ix[i], 0], Q[ix[i], 1], float(a[i])))
+        win = np.abs(ndimage.uniform_filter1d(TU[ix], 2 * hw + 1, mode="wrap") * (2 * hw + 1) / chord)
+        for run in runs_of((win > LINE_BEND_DEG) & ~ndimage.binary_dilation(expected[ix], iterations=hw)):
+            i = run[np.argmax(win[run])]
+            bends.append((Q[ix[i], 0], Q[ix[i], 1], float(win[i])))
+    results.append(("smoothness: outline kinks", len(kinks), 0, not kinks,
+                    "; ".join(f"{t:.0f} deg at x {x:.0f}, y {y:.0f}" for x, y, t in kinks[:5]) if kinks else
+                    f"none (turning > max({kink_floor:g} deg, {LINE_KINK_RATIO:g} x its neighbours') over {chord:g} px chords)"))
+    results.append(("smoothness: outline bends", len(bends), 0, not bends,
+                    "; ".join(f"{t:.0f} deg within s/4 at x {x:.0f}, y {y:.0f}" for x, y, t in bends[:5]) if bends else
+                    f"none (turning > {LINE_BEND_DEG:g} deg within s/4 away from corners)"))
+
+    # 3-4. decays: monotone, convex (steepest first), exponential fit (R5); cycles later flatter (R6)
+    decays = []
+    exits = {(c["stroke"], c["i"]) for c in crossings if c["kind"] == "exit"}
+    for si, st in enumerate(strokes):
+        for q, el in enumerate(st["els"]):
+            if el["kind"] == "D":
+                cut = q == len(st["els"]) - 1 and (si, len(st["p"]) - 1) in exits
+                decays.append(dict(st=st, si=si, el=el, prev=st["junc"][q - 1] if q else None, cut=cut, n=len(decays) + 1, q=q))
+    g2 = (0.0, 0.0, 0.0)
+    for dc in decays:
+        st, el, nm = dc["st"], dc["el"], f"decay {dc['n']}"
+        A, B_, tau, x0, _ = el["fit"]
+        xa = dc["prev"][0] if dc["prev"] else C[el["idx"], 0].min()
+        ya = dc["prev"][1] if dc["prev"] else ends_info[2 * dc["si"]]["y"]
+        nxt = st["junc"][dc["q"]] if dc["q"] < len(st["junc"]) else None
+        xb = card[2] if dc["cut"] else nxt[0] if nxt else C[el["idx"], 0].max()
+        floor = float(el_y(el, xb)) if dc["cut"] or nxt else float(C[el["idx"], 1].max())
+        dc.update(xa=xa, ya=ya, floor=floor - ya, drop2s=float(el_y(el, xa + 2 * s)) - ya)
+        i = el["idx"][ok[el["idx"]]]
+        if len(i) < 8:
+            for m_, lim in (("monotone, max rise px", LINE_RISE_PX), ("convex, wrong-turn share", LINE_CONVEX_SHARE),
+                            ("exp fit RMS / drop", LINE_FIT_RMS)):
+                results.append(na(f"{nm}: {m_}", lim, "under 8 samples outside the skip zones"))
+            continue
+        o = np.argsort(C[i, 0])
+        x, y, ph = C[i, 0][o], C[i, 1][o], PHI[i][o]
+        rise = 0.0                                          # per edge: a width change shifts the two edges' centres apart
+        for sd_ in (-1, 1):
+            j = np.sort(i[np.sign(T[i, 0] * N[i, 1] - T[i, 1] * N[i, 0]) == sd_])
+            if len(j) > 1:
+                yy_ = C[j[np.argsort(C[j, 0])], 1]
+                rise = max(rise, float((np.maximum.accumulate(yy_) - yy_).max()))
+        results.append((f"{nm}: monotone, max rise px", rise, LINE_RISE_PX, rise <= LINE_RISE_PX,
+                        f"x {x[0]:.0f}-{x[-1]:.0f} (outside the skip zones)"))
+        gx = np.arange(x[0], x[-1], 1.0)
+        gp = ndimage.uniform_filter1d(np.interp(gx, x, ph), max(1, int(s / 8)), mode="nearest")
+        h = max(1, int(s / 4))
+        if len(gx) > 2 * h + 2:
+            tb = gp[2 * h:] - gp[:-2 * h]                        # convex: the angle only falls along x
+            share = float((tb > LINE_CONVEX_DEG).mean())
+            wj = int(np.argmax(tb)) + h
+            results.append((f"{nm}: convex, wrong-turn share", share, LINE_CONVEX_SHARE, share <= LINE_CONVEX_SHARE,
+                            f"steepest first, no inflection: worst {tb.max():+.1f} deg over s/2 at x {gx[wj]:.0f}"))
+            kap = np.gradient(np.radians(gp)) * s
+            jump = np.abs(kap[2 * h:] - kap[:-2 * h])
+            if jump.max() > g2[0]:
+                g2 = (float(jump.max()), float(gx[int(np.argmax(jump)) + h]), nm)
+        else:
+            results.append(na(f"{nm}: convex, wrong-turn share", LINE_CONVEX_SHARE, "under s/2 of decay outside the zones"))
+        drop = max(floor - ya, 1.0)
+        rms = float(np.sqrt(np.mean((el_y(el, x) - y) ** 2))) / drop
+        lrms = logistic_rms(x, y) / drop
+        verdict = "exponential" if rms <= LINE_FIT_RMS else "S-curve" if lrms < 0.5 * rms else "neither"
+        kvis = (xb - xa) / tau
+        results.append((f"{nm}: exp fit RMS / drop", rms, LINE_FIT_RMS, rms <= LINE_FIT_RMS,
+                        f"{verdict}: tau {tau:.1f} px, k {kvis:.2f} (width {xb - xa:.0f} / tau), drop {drop:.0f} px, "
+                        f"logistic RMS {lrms:.3f}" + (f"; cut by the card edge at x {xb:.0f}: k_visible {kvis:.2f}, "
+                                                      f"fitted asymptote {A - ya:.0f} px below the start" if dc["cut"] else "")))
+    results.append(("decay G2: curvature jump x s", g2[0], float("nan"), True,
+                    f"INFO: worst change of curvature (x s) within s/2 inside a decay ({g2[2] or 'none'}, x {g2[1]:.0f})"))
+    if len(decays) >= 2:
+        r1 = max(b["drop2s"] / max(a["drop2s"], 1e-6) for a, b in zip(decays, decays[1:]))
+        r2 = max(b["floor"] / max(a["floor"], 1e-6) for a, b in zip(decays, decays[1:]))
+        results.append(("cycles: later flatter (drop at 2 s ratio)", r1, 1.0, r1 < 1.0,
+                        "drop in the first 2 s of each decay (fit): " + ", ".join(f"{d['drop2s']:.0f}" for d in decays) + " px"))
+        results.append(("cycles: later shallower (depth ratio)", r2, 1.0, r2 < 1.0,
+                        "each decay's floor below its start (exit y if cut): "
+                        + ", ".join(f"{d['floor']:.0f}{' (cut)' if d['cut'] else ''}" for d in decays) + " px"))
+    else:
+        results += [na("cycles: later flatter (drop at 2 s ratio)", 1.0, f"{len(decays)} decay"),
+                    na("cycles: later shallower (depth ratio)", 1.0, f"{len(decays)} decay")]
+
+    # 5. resets: tilt from vertical; peak levels (plateaus, reset tops, a stroke starting on a decay: its cap centre)
+    resets = [(st, el) for st in strokes for el in st["els"] if el["kind"] == "R"]
+    if resets:
+        tilts = [(math.degrees(math.atan(abs(el["b"]))), el["a"] + el["b"] * peak) for _, el in resets]
+        t, xr = max(tilts)
+        results.append(("resets: max tilt from vertical deg", t, LINE_RESET_TILT, t <= LINE_RESET_TILT,
+                        f"{len(resets)} reset(s): " + ", ".join(f"{a:.2f} deg at x {b:.0f}" for a, b in tilts)))
+    else:
+        results.append(na("resets: max tilt from vertical deg", LINE_RESET_TILT, "no reset"))
+    levels = []
+    for si, st in enumerate(strokes):
+        for q, el in enumerate(st["els"]):
+            if el["kind"] == "P":
+                levels.append(("plateau", el["y"]))
+            elif el["kind"] == "D" and q and st["els"][q - 1]["kind"] == "R":
+                levels.append(("reset top", st["junc"][q - 1][1]))
+            elif el["kind"] == "D" and q == 0:
+                levels.append(("start", ends_info[2 * si]["y"]))
+    if len(levels) >= 2:
+        ly = [v_ for _, v_ in levels]
+        spread = max(ly) - min(ly)
+        results.append(("peaks: level spread px", spread, LINE_PEAK_SPREAD, spread <= LINE_PEAK_SPREAD,
+                        ", ".join(f"{a} y {b:.1f}" for a, b in levels)))
+    else:
+        results.append(na("peaks: level spread px", LINE_PEAK_SPREAD, f"{len(levels)} peak level"))
+
+    # 6. plateaus (R3): the straight top edge (y = peak - s/2), subpixel from the line coverage
+    tops = []
+    for st in strokes:
+        for el in st["els"]:
+            if el["kind"] != "P":
+                continue
+            xs_ = C[el["idx"], 0]
+            X = np.arange(max(0, int((xs_.min() - 2 * s) * F)), min(TILE * F, int((xs_.max() + 2 * s) * F)))
+            Y0 = int(round((el["y"] - s / 2) * F)) - 3 * F
+            if Y0 < 0 or Y0 + 6 * F > lcov.shape[0] or not len(X):
+                continue
+            band = lcov[Y0:Y0 + 6 * F][:, X]
+            e = (Y0 + 6 * F - band.sum(0)) / F
+            valid = (band[0] < 0.1) & (band[-1] > 0.9)
+            mid = int(np.argmin(np.abs((X + 0.5) / F - np.median(xs_))))
+            e0 = float(np.median(e[max(0, mid - 2 * F):mid + 2 * F + 1]))
+            run = [r_ for r_ in runs_of(valid & (np.abs(e - e0) <= LINE_EDGE_TOL)) if r_[0] <= mid <= r_[-1]]
+            if run:
+                # each end of the run overshoots the tangent point by sqrt(2 r tol): the join arc leaves the line slowly
+                tops.append((len(run[0]) / F - 2 * math.sqrt(2 * rf * LINE_EDGE_TOL), X[run[0][0]] / F,
+                             (X[run[0][-1]] + 1) / F, e0))
+    if len(tops) >= 2:
+        ln = [t[0] for t in tops]
+        ratio = max(ln) / min(ln)
+        results.append(("plateaus: top-edge length max/min", ratio, LINE_PLATEAU_RATIO, ratio <= LINE_PLATEAU_RATIO,
+                        f"straight top edge (within {LINE_EDGE_TOL} px, less the arcs' overshoot): "
+                        + ", ".join(f"{a:.1f} px (x {b:.0f}-{c:.0f}, y {e:.1f})" for a, b, c, e in tops)))
+    else:
+        results.append(na("plateaus: top-edge length max/min", LINE_PLATEAU_RATIO, f"{len(tops)} plateau"))
+
+    # 7. corner family (R7): every arc of radius 0.2-1 s on the outline (caps, joins, fillets)
+    if len(arcs) >= 2:
+        rr = np.array([a[2] for a in arcs])
+        med = float(np.median(rr))
+        j_ = int(np.argmax(np.abs(rr - med)))
+        dev = abs(rr[j_] - med) / med
+        groups = {}
+        for a in arcs:
+            groups.setdefault(round(a[2]), []).append(a)
+        results.append(("fillets: max radius deviation / median", dev, LINE_FILLET_TOL, dev <= LINE_FILLET_TOL,
+                        f"{len(arcs)} arcs (caps, joins, fillets), median r {med:.1f} px; worst r {rr[j_]:.1f} at x "
+                        f"{arcs[j_][0]:.0f}, y {arcs[j_][1]:.0f}; radii: "
+                        + ", ".join(f"{k_} x{len(v_)}" for k_, v_ in sorted(groups.items()))))
+    else:
+        results.append(na("fillets: max radius deviation / median", LINE_FILLET_TOL, f"{len(arcs)} arc"))
+
+    # 8. line-to-card gaps (R8) on the sides the line does not cross; the thinnest card ink wall
+    side_names = ("left", "top", "right", "bottom")
+    if card:
+        x0, y0, x1, y1, rc = card
+        touched = {int(np.argmin([abs(c["x"] - x0), abs(c["y"] - y0), abs(c["x"] - x1), abs(c["y"] - y1)]))
+                   for c in [*crossings, *[a for a in along if a["kind"] == "coincide"]]}
+        lin = line & inside
+        rows, cols = np.nonzero(lin.any(1))[0], np.nonzero(lin.any(0))[0]
+        gaps = []
+        if len(rows):
+            ext = (cols[0] / F - x0, rows[0] / F - y0, x1 - (cols[-1] + 1) / F, y1 - (rows[-1] + 1) / F)
+            gaps = [(side_names[k_], ext[k_]) for k_ in range(4) if k_ not in touched]
+        if gaps:
+            worst = max(gaps, key=lambda g: abs(g[1] / s - 1))
+            v_ = abs(worst[1] / s - 1)
+            results.append(("gaps: line to card |gap/s - 1|", v_, LINE_GAP_TOL, v_ <= LINE_GAP_TOL,
+                            ", ".join(f"{a} {b:.1f} px" for a, b in gaps) + f" (s = {s:.1f}; crossed: "
+                            + (", ".join(side_names[k_] for k_ in sorted(touched)) or "none") + ")"))
+        else:
+            results.append(na("gaps: line to card |gap/s - 1|", LINE_GAP_TOL, "every side is crossed"))
+        ink1024 = np.asarray(Image.fromarray(cov).resize((TILE, TILE), Image.BOX)) > 0.5 if F > 1 else B
+        yy, xx = np.mgrid[:TILE, :TILE]
+        m = medial_points(ink1024 & (rrect_sd(xx + 0.5, yy + 0.5, card)[0] < 0))
+        # a rounded ink corner (the tip of a filleted tooth) ends its medial axis at the fillet's centre, 2r wide: not a wall
+        keep = ~zone_mask(np.column_stack([m["x"], m["y"]]), [(a[0], a[1], s / 2) for a in arcs])
+        m = {k_: v_[keep] for k_, v_ in m.items()}
+        necks = flat_necks(m)[2] if len(m["w"]) else []
+        if len(necks):
+            j_ = necks[int(np.argmin(m["w"][necks]))]
+            v_ = float(m["w"][j_]) / s
+            results.append(("card wall: thinnest ink / s", v_, LINE_WALL_MIN, v_ >= LINE_WALL_MIN,
+                            f"{m['w'][j_]:.0f} px at x {m['x'][j_]}, y {m['y'][j_]} (tips and filleted tooth ends set aside)"))
+        else:
+            results.append(na("card wall: thinnest ink / s", LINE_WALL_MIN, "no ink wall inside the card"))
+    else:
+        results += [na("gaps: line to card |gap/s - 1|", LINE_GAP_TOL, "no card"),
+                    na("card wall: thinnest ink / s", LINE_WALL_MIN, "no card")]
+
+    # 9. crossings (R9): angle to the edge; the line still falling at a side edge; near-parallel edges
+    angs, sides_ = [], []
+    for c in crossings:
+        st = strokes[c["stroke"]]
+        x0, y0, x1, y1, rc = card
+        side = int(np.argmin([abs(c["x"] - x0), abs(c["y"] - y0), abs(c["x"] - x1), abs(c["y"] - y1)]))
+        edge = np.array([0.0, 1.0]) if side in (0, 2) else np.array([1.0, 0.0])
+        els = [el for el in st["els"] if el["t0"] - s <= c["i"] <= el["t1"] + s]
+        el = min(els, key=lambda e_: min(abs(e_["t0"] - c["i"]), abs(e_["t1"] - c["i"]))) if els else None
+        if el is not None and el["kind"] == "D" and side in (0, 2):
+            xe = x1 if side == 2 else x0
+            v_, c["x"], c["y"] = el_dir(el, xe), xe, float(el_y(el, xe))
+        else:
+            near = ci[(STK[ci] == c["stroke"]) & (np.hypot(*(C[ci] - [c["x"], c["y"]]).T) < s / 2)]
+            ph = math.radians(float(np.median(PHI[near]))) if len(near) else math.atan2(*st["tan"][c["i"]][::-1])
+            v_ = np.array([math.cos(ph), math.sin(ph)])
+        angs.append((math.degrees(math.acos(min(1.0, abs(float(v_ @ edge))))), c, side_names[side]))
+        if side in (0, 2):
+            sides_.append((math.degrees(math.atan2(abs(v_[1]), abs(v_[0]))), c, side_names[side]))
+    if angs:
+        a = min(t[0] for t in angs)
+        results.append(("crossing: min angle to the card edge deg", a, LINE_CROSS_DEG, a >= LINE_CROSS_DEG,
+                        "; ".join(f"{t[1]['kind']} {t[2]} edge at x {t[1]['x']:.0f}, y {t[1]['y']:.0f}: {t[0]:.1f}" for t in angs)))
+    else:
+        results.append(na("crossing: min angle to the card edge deg", LINE_CROSS_DEG, "no crossing" if card else "no card"))
+    if sides_:
+        a = min(t[0] for t in sides_)
+        results.append(("crossing: line slope at a side edge deg", a, LINE_EXIT_DEG, a >= LINE_EXIT_DEG,
+                        "from horizontal, where the line crosses the left/right edge (still falling): "
+                        + "; ".join(f"{t[1]['kind']} {t[2]} at y {t[1]['y']:.0f}: {t[0]:.1f}" for t in sides_)))
+    else:
+        results.append(na("crossing: line slope at a side edge deg", LINE_EXIT_DEG, "no crossing through a side edge"))
+    par = [a for a in along if a["kind"] == "near-parallel"]
+    coin = [a for a in along if a["kind"] == "coincide"]
+    results.append(("crossing: near-parallel edge stretches", len(par), 0, not par,
+                    "; ".join([f"{a['len']:.0f} px long, {a['gap']:.1f} px off the card edge at x {a['x']:.0f}, y {a['y']:.0f}" for a in par]
+                              + [f"coincide (OK): an element {a['len']:.0f} px long on the card edge at x {a['x']:.0f}, y {a['y']:.0f}"
+                                 for a in coin]) or "none"))
+    results.append(("ends: kinds", len(ends_info), float("nan"), True,
+                    "INFO: " + "; ".join(f"{e['which']} {e['kind']}" + (f" r {e['r']:.1f}" if e["r"] == e["r"] else "")
+                                         + f" at x {e['x']:.0f}, y {e['y']:.0f}" for e in ends_info)))
+    if fills:
+        w_, x, y = max(fills)
+        results.append(("corners: widest fill / s", w_ / s, float("nan"), True,
+                        f"INFO: the line is {w_ / s:.2f} s across at x {x:.0f}, y {y:.0f}, inside a skip zone (a corner; "
+                        "line7's closing fills an inner corner far beyond r tan(theta/2) where a decay meets a reset at a "
+                        "shallow angle)"))
+
+    # 10. at 58 / 29 px: contrast of the line vs its flanks inside / outside the card (draft 7), continuity either
+    # side of each through crossing (draft 8), straight-edge sharpness (R11, INFO)
+    ink1 = np.asarray(Image.fromarray(cov).resize((TILE, TILE), Image.BOX)) if F > 1 else cov
+    work = Image.fromarray((np.clip(ink1, 0, 1) * 255).astype(np.uint8))
+    previews, lows = {}, {}
+    oi = np.nonzero(ok & (np.abs(width / s - 1) < LINE_WIDTH_DEV))[0]   # where the line is s wide (not in a fill)
+    for size in (58, 29):
+        k = TILE / size
+        previews[size] = img.resize((size, size), Image.BOX)
+        small = ndimage.gaussian_filter(np.asarray(work.resize((size, size), Image.BOX), dtype=float) / 255, PERCEIVED_BLUR)
+        m = dict(cx=C[oi, 0], cy=C[oi, 1], ux=N[oi, 0], uy=N[oi, 1], w=np.full(len(oi), s))
+        off = s / 2 + k
+        if card:
+            sds = [rrect_sd(m["cx"] + sg * m["ux"] * off, m["cy"] + sg * m["uy"] * off, card)[0] for sg in (-1, 0, 1)]
+            ins, outs = np.all([v_ < 0 for v_ in sds], 0), np.all([v_ > 0 for v_ in sds], 0)
+        else:
+            ins, outs = np.zeros(len(oi), bool), np.ones(len(oi), bool)
+        vals = {}
+        for nm, sel_, stroke_ in (("inside", ins, False), ("outside", outs, True)):
+            if sel_.any():
+                vals[nm] = (cross_contrast(small, size, {a: v_[sel_] for a, v_ in m.items()}, stroke_), C[oi[sel_]])
+        if vals:
+            nm0, (v0_, p0_) = min(vals.items(), key=lambda kv: kv[1][0].min())
+            j_ = int(np.argmin(v0_))
+            lows[size] = p0_[j_]
+            lo = float(v0_[j_])
+            results.append((f"small: line contrast min at {size:>2} px", lo, LINE_CONTRAST_MIN, lo >= LINE_CONTRAST_MIN,
+                            f"lowest {nm0} at x {p0_[j_, 0]:.0f}, y {p0_[j_, 1]:.0f}; " + "; ".join(
+                                f"{nm} (line {'paper on ink' if nm == 'inside' else 'ink on paper'}) min {v_.min():.2f}, "
+                                f"median {np.median(v_):.2f}" for nm, (v_, _) in vals.items())))
+        else:
+            results.append(na(f"small: line contrast min at {size:>2} px", LINE_CONTRAST_MIN, "no line outside the zones"))
+        if len(vals) == 2:
+            a_, b_ = np.median(vals["inside"][0]), np.median(vals["outside"][0])
+            ratio = float(min(a_ / b_, b_ / a_)) if a_ > 0 and b_ > 0 else 0.0
+            results.append((f"small: in/out contrast ratio at {size:>2} px", ratio, LINE_CONTRAST_RATIO,
+                            ratio >= LINE_CONTRAST_RATIO, f"medians inside {a_:.2f}, outside {b_:.2f}"))
+        else:
+            results.append(na(f"small: in/out contrast ratio at {size:>2} px", LINE_CONTRAST_RATIO,
+                              f"the line is only {next(iter(vals))} the card" if vals else "no line outside the zones"))
+        cont = []
+        for c in crossings:
+            if c["kind"] != "through":
+                continue
+            st = strokes[c["stroke"]]
+            prof = []
+            for sg in (-1, 1):
+                i = int(np.clip(c["i"] + sg * k, 0, len(st["p"]) - 1))
+                tx, ty = st["tan"][i]
+                prof.append(across(small, size, st["p"][i, 0], st["p"][i, 1], -ty, tx, s))
+            if all(v_ == v_ for v_, _ in prof):
+                cont.append((abs(prof[0][0] - prof[1][0]) / k, prof[0][1] / prof[1][1], c))
+        if cont:
+            off_, wr, c = max(cont, key=lambda t: max(t[0] / LINE_CONT_OFFSET, abs(math.log(t[1])) / math.log(1 / LINE_CONT_WIDTH[0])))
+            okc = off_ <= LINE_CONT_OFFSET and LINE_CONT_WIDTH[0] <= wr <= LINE_CONT_WIDTH[1]
+            results.append((f"small: crossing offset icon px at {size:>2} px", off_, LINE_CONT_OFFSET, okc,
+                            f"worst crossing at x {c['x']:.0f}, y {c['y']:.0f}: width ratio {wr:.2f} "
+                            f"(limits {LINE_CONT_WIDTH[0]}-{LINE_CONT_WIDTH[1]})"))
+        else:
+            results.append(na(f"small: crossing offset icon px at {size:>2} px", LINE_CONT_OFFSET,
+                              "no through crossing (an exit into the background has one side)"))
+        edges = []
+        if card:
+            x0, y0, x1, y1, rc = card
+            edges += [("card left", x0, y1 - y0 - 2 * rc), ("card right", x1, y1 - y0 - 2 * rc),
+                      ("card top", y0, x1 - x0 - 2 * rc), ("card bottom", y1, x1 - x0 - 2 * rc)]
+        edges += [("plateau top", e, ln) for ln, a, b, e in tops]
+        for st, el in resets:
+            ln = float(np.ptp(C[el["idx"], 1]))
+            edges += [(nm, el["a"] + el["b"] * peak + sg * s / 2, ln) for sg, nm in ((-1, "reset left"), (1, "reset right"))]
+        sharp = [(abs(2 * ((e / k) % 1) - 1), nm, e) for nm, e, ln in edges if ln / k >= LINE_AA_LEN]
+        if sharp:
+            v_, nm, e = min(sharp)
+            results.append((f"edge AA: min sharpness at {size:>2} px", v_, float("nan"), True,
+                            f"INFO: {nm} at {e:.1f} px = {e / k:.2f} icon px (|2c - 1|: 1 = on a pixel boundary, 0 = half "
+                            f"a pixel of blur; snapping is an export step); {len(sharp)} straight edges >= {LINE_AA_LEN:g} icon px"))
+
+    # 11. occupancy (R12) vs Apple's icons with a uniform border; palette contrast
+    ys_, xs_ = np.nonzero(ink1 > 0.5)
+    occ = (max(np.ptp(xs_), np.ptp(ys_)) / TILE, float(ink1.mean()))
+    ref = apple_occupancy()
+    for q, nm in enumerate(("occupancy: bbox long side / tile", "occupancy: ink share")):
+        if ref:
+            lo_, hi_ = min(r_[q] for r_ in ref), max(r_[q] for r_ in ref)
+            results.append((nm, occ[q], float("nan"), lo_ - LINE_OCC_PAD <= occ[q] <= hi_ + LINE_OCC_PAD,
+                            f"Apple range {lo_:.2f}-{hi_:.2f} (+-{LINE_OCC_PAD}) over {len(ref)} of {len(ICON_IDS)} "
+                            "icons with a uniform border"))
+        else:
+            results.append(na(nm, float("nan"), "no cached Apple icon with a uniform border"))
+    cr = (max(wcag(bgc), wcag(inkc)) + 0.05) / (min(wcag(bgc), wcag(inkc)) + 0.05)
+    results.append(("palette: WCAG contrast", float(cr), float("nan"), True, "INFO: ink vs paper"))
+
+    # kept from flat mode: thinnest stroke / gap, optical centre, margins, what fades or closes at 58 / 29 px
+    _, flat = review_flat(path, quiet=True, sheet=False)
+    results += flat or []
+
+    name = Path(path).name
+    fails = sum(not x[3] for x in results)
+    out = Path(out) if out else default_out(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    home_img = home_mock(img, out.with_name(f"{Path(path).stem}-home.png")) if home else None
+    line_sheet(img, strokes, C, CLS, ok, junctions, jzones, kinks + bends, crossings, decays, arcs, card, width,
+               previews, lows, results, out, home_img)
+    if quiet:
+        return fails, results
+    els = " ".join("".join(el["kind"] for el in st["els"]) for st in strokes)
+    print(f"design-review {name}: mode line, {'SVG at 4x (0.25 px)' if F > 1 else 'PNG at 1024 (1 px precision)'}; "
+          + (f"card x {card[0]:.1f}-{card[2]:.1f}, y {card[1]:.1f}-{card[3]:.1f}, r {card[4]:.1f}" if card else "no card")
+          + f"; s = {s:.2f} px, peak y {peak:.1f}; elements {els} (P plateau, D decay, R reset); {time.time() - t_start:.1f} s")
+    print(f"{'METRIC':<42}{'VALUE':>8}{'LIMIT':>8}  RESULT")
+    for m_, v_, lim, ok_, note in results:
+        cmp = ("==" if m_.startswith(FLAT_EXACT + ("smoothness", "crossing: near")) else
+               ">=" if higher_is_better(m_) or m_.startswith(("card wall", "crossing: min", "crossing: line", "small: line",
+                                                              "small: in/out")) else "<=")
+        lims = "-" if lim != lim else f"{lim:.3g}"
+        res = "INFO" if m_.startswith(LINE_INFO) else "N/A " if v_ != v_ else "PASS" if ok_ else "FAIL"
+        print(f"{m_:<42}{fmt(v_)}{cmp:>4}{lims:<5} {res}  {note}")
+    print(f"RESULT: {'FAIL' if fails else 'PASS'} ({fails} of {len(results)} metrics failed)")
+    print(f"sheet: {out}" + (f"\nhome:  {out.with_name(Path(path).stem + '-home.png')}" if home else ""))
+    return fails, results
+
+
+def line_sheet(img, strokes, C, CLS, ok, junctions, jzones, marks, crossings, decays, arcs, card, width, previews, lows,
+               results, out, home_img):
+    """The render with the centre samples by element (green plateau, blue decay, orange reset; grey = in a skip zone),
+    junctions (+) and skip zones (dotted), fitted exponentials (dashed), arcs (thin rings), kinks / bends (red),
+    crossings (magenta x); width along the line; 58 / 29 px previews with the lowest-contrast spot; the results."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    colors = {"P": "tab:green", "D": "tab:blue", "R": "tab:orange", "O": "0.6"}
+    fig = plt.figure(figsize=(14, 14 + (6 if home_img is not None else 0)))
+    gs = fig.add_gridspec(3 + (home_img is not None), 4, height_ratios=[3, 0.8, 2.2] + ([2.0] if home_img is not None else []))
+    ax = fig.add_subplot(gs[0, :3])
+    ax.imshow(img, extent=(0, TILE, TILE, 0), alpha=0.5)
+    for st in strokes:
+        ax.plot(st["p"][:, 0], st["p"][:, 1], color="0.6", lw=0.5)
+        for el in st["els"]:
+            q = C[el["idx"]]
+            ax.scatter(q[:, 0], q[:, 1], s=0.8, c=np.where(ok[el["idx"]], colors[el["kind"]], "0.55"))
+    for x, y, r in jzones:
+        ax.add_patch(matplotlib.patches.Circle((x, y), r, fill=False, color="0.4", lw=0.6, ls=":"))
+    for x, y, _ in junctions:
+        ax.plot(x, y, "k+", ms=8)
+    for cx, cy, r, sw, _ in arcs:
+        ax.add_patch(matplotlib.patches.Circle((cx, cy), r, fill=False, color="tab:purple", lw=0.4))
+    for dc in decays:
+        xs = np.linspace(dc["xa"], card[2] if dc["cut"] else C[dc["el"]["idx"], 0].max() + 40, 100)
+        ax.plot(xs, el_y(dc["el"], xs), "k--", lw=0.8)
+    for x, y, t in marks:
+        ax.add_patch(matplotlib.patches.Circle((x, y), 14, fill=False, color="red", lw=1.5))
+    for c in crossings:
+        ax.plot(c["x"], c["y"], "mx", ms=10, mew=2)
+    if card:
+        x0, y0, x1, y1, r = card
+        ax.add_patch(matplotlib.patches.FancyBboxPatch((x0 + r, y0 + r), x1 - x0 - 2 * r, y1 - y0 - 2 * r,
+                                                       boxstyle=f"round,pad={r}", fill=False, ec="tab:purple", lw=0.8, ls="--"))
+    ax.set_xlim(0, TILE); ax.set_ylim(TILE, 0)
+    ax.set_title("centre samples: green plateau, blue decay, orange reset (grey: skip zone); + junction, dotted = skip "
+                 "zone; dashed = fitted exponential; purple rings = arcs, dashed = card found; red = kink / bend; "
+                 "magenta x = crossing", fontsize=8)
+    pv = gs[0, 3].subgridspec(2, 1)
+    for k_, size in enumerate((58, 29)):
+        a = fig.add_subplot(pv[k_])
+        a.imshow(previews[size].resize((232, 232), Image.NEAREST), extent=(0, TILE, TILE, 0))
+        for c in crossings:
+            a.plot(c["x"], c["y"], "mx", ms=6)
+        if size in lows:
+            a.add_patch(matplotlib.patches.Circle(lows[size], 30, fill=False, color="red", lw=1.2))
+        a.set_title(f"{size} px, enlarged (red: lowest line contrast)", fontsize=8); a.axis("off")
+    a = fig.add_subplot(gs[1, :3])
+    fin = np.isfinite(width)
+    a.scatter(C[fin, 0], width[fin], s=0.5, c=np.where(ok[fin], "black", "0.75"))
+    a.set_xlim(0, TILE)
+    a.set_title("stroke width across the line vs x (black: measured; grey: skip zones, ends, crossings)", fontsize=9, loc="left")
+    txt = fig.add_subplot(gs[2, :]); txt.axis("off")
+    txt.text(0, 1, "\n".join(f"{'INFO' if m.startswith(LINE_INFO) else 'N/A ' if v != v else 'PASS' if ok_ else 'FAIL'} "
+                             f"{m}: {v:.3f}  {note[:140]}" for m, v, _, ok_, note in results),
+             fontsize=6.5, va="top", family="monospace")
+    if home_img is not None:
+        a = fig.add_subplot(gs[3, :]); a.imshow(home_img); a.axis("off")
     fig.tight_layout(); fig.savefig(out, dpi=90); plt.close(fig)
 
 
@@ -2062,6 +3211,120 @@ def synthetic_stochastic(out, seed=7):
     print(f"synthetic stochastic ramp: {out} ({len(pts)} points, full density at coverage {C_D:.2f})")
 
 
+# ---------------------------------------------------------------- synthetic line marks (regression set)
+LINE_DEFECTS = {                 # defect: (what it changes, the metric that must FAIL)
+    "clean": ("chart7 / line7 grid: exact exponentials, equal plateaus and gaps, uniform stroke, exit ~14 deg", None),
+    "kink": ("a 20 deg kink 30% into decay 1 (the tail mapped linearly, its end kept)", "smoothness"),
+    "scurve": ("decay 2 a logistic (S-curve): 7 deg at its start, steepest mid-run, 20 deg at the exit", "decay 2:"),
+    "width": ("stroke width +8% on decay 1, -8% on decay 2 (smooth bumps)", "width"),
+    "reset": ("the reset tilted 6 deg (decay 1 ends earlier)", "resets"),
+    "plateaus": ("plateau 2 = 1.5 s, the lead 1 s", "plateaus"),
+    "steeper": ("decay 2 drops faster and lower than decay 1", "cycles"),
+    "fillets": ("inner fillets s/2 left of mid plateau 2, s/3 right of it", "fillets"),
+    "gaps": ("the card's top edge 0.25 s higher (top gap 1.25 s)", "gaps"),
+}
+
+
+def line_mark(defect="clean"):
+    """The synthetic line mark built like forgetcurve.py chart7 + line7 (round 7b): a W x W/1.5 card (corner 0.09 W),
+    stroke s = 72, every margin 1 s (the line's centre 1.5 s in), round start cap, a lead plateau of 1 s, decay 1
+    (k 3.6, 172 px) down to the low line, a vertical reset, a plateau of 1 s, decay 2 (tau 240 px) cut by the right
+    edge while still falling ~14 deg; inner corners closed at s/2; card minus line. One defect at a time."""
+    from shapely import affinity
+    from shapely.geometry import LineString, box
+    from shapely.ops import unary_union
+    W, s = 696.0, 72.0
+    H, top = W / 1.5, (-0.25 * s if defect == "gaps" else 0.0)
+    y100, ylow = 1.5 * s, H - 1.5 * s
+    sig = lambda v: 1 / (1 + np.exp(-v))
+    x = 1.5 * s
+    pts = [(x, y100)]
+    x += s
+    w1, d1 = 172.0, (160.0 if defect == "steeper" else ylow - y100)
+    w1d = w1 - (d1 * math.tan(math.radians(6)) if defect == "reset" else 0)
+    t = np.linspace(0, 1, 129)
+    y = y100 + d1 * (1 - np.exp(-3.6 * t)) / (1 - math.exp(-3.6))
+    dec = np.column_stack([x + w1d * t, y])
+    if defect == "kink":                                   # rotate the tail's start by 20 deg, keep its end: M v = v
+        m = 38
+        t0 = dec[m + 1] - dec[m - 1]
+        a = math.atan2(t0[1], t0[0]) - math.radians(20)
+        t1 = np.array([math.cos(a), math.sin(a)]) * np.linalg.norm(t0)
+        v = dec[-1] - dec[m]
+        M = np.column_stack([v, t1]) @ np.linalg.inv(np.column_stack([v, t0]))
+        dec[m:] = dec[m] + (dec[m:] - dec[m]) @ M.T
+    pts += [tuple(p) for p in dec]
+    x += w1
+    p2 = 1.5 * s if defect == "plateaus" else s
+    pts += [(x, y100), (x + p2, y100)]
+    x += p2
+    D2, tau2 = ((294.0, 150.0) if defect == "steeper" else (185.0, 240.0))
+    xx = np.linspace(x, W + s, 160)
+    if defect == "scurve":                                 # a logistic over the drawn run: 7 deg at the start, 20 at the exit
+        u = (xx - x) / (W + s - x)
+        pts += [(a_, y100 + 150 * (sig(6 * (u_ - 0.5)) - sig(-3)) / (sig(3) - sig(-3))) for a_, u_ in zip(xx[1:], u[1:])]
+    else:
+        pts += [(a_, y100 + D2 * (1 - math.exp(-(a_ - x) / tau2))) for a_ in xx[1:]]
+    if defect == "width":                                  # smooth bumps: +8% on decay 1, -8% on decay 2's middle
+        P = np.array(pts)
+        L = np.r_[0, np.cumsum(np.hypot(*np.diff(P, axis=0).T))]
+        def bump(u):
+            return np.where((u > 0) & (u < 1), np.sin(np.pi * np.clip(u, 0, 1)) ** 2, 0.0)
+        i1, j1 = 2, len(P) - 159                           # decay 1's and decay 2's first points
+        wid = s * (1 + 0.08 * bump((L - L[i1 + 30]) / (L[i1 + 100] - L[i1 + 30]))
+                   - 0.08 * bump((L - L[j1 + 20]) / (L[j1 + 110] - L[j1 + 20])))
+        g = unary_union([LineString(P[i:i + 2]).buffer((wid[i] + wid[i + 1]) / 4, quad_segs=32) for i in range(len(P) - 1)])
+    else:
+        g = LineString(pts).buffer(s / 2, cap_style="round", join_style="round", quad_segs=32)
+    close = lambda r: g.buffer(r, quad_segs=32).buffer(-r, quad_segs=32)
+    if defect == "fillets":
+        xs = 1.5 * s + s + w1 + p2 / 2
+        line = unary_union([close(s / 2).intersection(box(-200, -200, xs, H + 200)),
+                            close(s / 3).intersection(box(xs, -200, W + 200, H + 200))])
+    else:
+        line = close(s / 2)
+    rc = 0.09 * W
+    card = box(rc, top + rc, W - rc, H - rc).buffer(rc, quad_segs=64)
+    g = card.difference(line)
+    x0, y0, x1, y1 = g.bounds
+    return affinity.translate(g, (TILE - (x1 - x0)) / 2 - x0, (TILE - (y1 - y0)) / 2 - y0)
+
+
+def line_svg(g):
+    """One even-odd path of M/L/Z rings (as forgetcurve.py writes it), ink #1C1C1E on paper #F4F1EA."""
+    from shapely.geometry import MultiPolygon, Polygon
+    polys = list(g.geoms) if isinstance(g, MultiPolygon) else [g] if isinstance(g, Polygon) else []
+    d = " ".join("M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in list(r.coords)[:-1]) + "Z"
+                 for p in polys for r in [p.exterior, *p.interiors])
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{TILE}" height="{TILE}" viewBox="0 0 {TILE} {TILE}">\n'
+            f'  <rect width="{TILE}" height="{TILE}" fill="#F4F1EA"/>\n'
+            f'  <path fill="#1C1C1E" fill-rule="evenodd" d="{d}"/>\n</svg>\n')
+
+
+def synthetic_line(out_dir):
+    """--mode line --make-synthetic DIR: the clean mark and one SVG per defect, each reviewed; the regression check is
+    that the clean mark passes every geometry metric and each defect fails its own metric. Returns the exit code."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows, bad = [], 0
+    geometry = lambda m: not m.startswith(("small:", "occupancy", "optical", "bbox", "stroke:", "gap:"))
+    for name, (what, expect) in LINE_DEFECTS.items():
+        f = out_dir / f"line-{name}.svg"
+        f.write_text(line_svg(line_mark(name)))
+        _, res = review_line(f, out=out_dir / f"line-{name}-review.png", quiet=True)
+        failed = [m for m, v, _, ok, _ in res if not ok and geometry(m)]
+        okk = not failed if expect is None else any(m.startswith(expect) for m in failed)
+        bad += not okk
+        rows.append((name, expect or "(none)", failed, okk, what))
+    print(f"design-review --mode line --make-synthetic {out_dir}: the clean mark must pass every geometry metric, each "
+          "defect must fail its own (other failures are listed)")
+    print(f"{'SVG':<16}{'MUST FAIL':<18}{'RESULT':<8}GEOMETRY METRICS FAILED")
+    for name, expect, failed, okk, what in rows:
+        print(f"line-{name + '.svg':<11}{expect:<18}{'OK' if okk else 'BROKEN':<8}{', '.join(failed) or 'none'}   [{what}]")
+    print(f"RESULT: {'PASS' if not bad else 'FAIL'} ({bad} of {len(rows)} broken); SVGs and sheets in {out_dir}")
+    return 1 if bad else 0
+
+
 # ---------------------------------------------------------------- main
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -2082,17 +3345,26 @@ if __name__ == "__main__":
                     help="lattice (default): order must rise to a hex lattice; stochastic: blue noise, order must "
                          "stay even (NN floor, no clumps or voids), touching allowed from coverage "
                          f"{TOUCH_OK_COVERAGE_STOCHASTIC}")
-    ap.add_argument("--mode", choices=("halftone", "outline", "flat"), default="halftone",
-                    help="halftone (default): the dots-into-a-card ramp checks above; outline: a card outline traced "
-                         "by separate dots (count, spacing, edge gaps, size rhythm, symmetry, 58/29 px legibility); "
-                         "flat: a solid flat mark (thinnest stroke / gap, what fades or closes at 58/29 px)")
+    ap.add_argument("--mode", choices=("halftone", "outline", "flat", "line"), default=None,
+                    help="halftone (default): the dots-into-a-card ramp checks above (a still with < "
+                         f"{HALFTONE_MIN_SHAPES} shapes is refused unless --mode halftone is explicit); outline: a card "
+                         "outline traced by separate dots (count, spacing, edge gaps, size rhythm, symmetry, 58/29 px "
+                         "legibility); flat: a solid flat mark (thinnest stroke / gap, what fades or closes at 58/29 px); "
+                         "line: the forgetting-curve line, alone or XOR a card (width, kinks, decay shape, cycles, resets, "
+                         "plateaus, fillets, gaps, crossings, 58/29 px contrast, occupancy)")
     ap.add_argument("--dots", type=int, metavar="N", help="outline mode: the expected dot count (default: report only)")
-    ap.add_argument("--make-synthetic", metavar="OUT.png", help="write the smooth reference ramp (of --screen) and review it")
+    ap.add_argument("--card", metavar="x0,y0,x1,y1[,r]", help="line mode: the card in 1024 px (default: found from the "
+                                                              "longest straight edges of the ink)")
+    ap.add_argument("--make-synthetic", metavar="OUT.png|DIR",
+                    help="write the smooth reference ramp (of --screen) and review it; with --mode line: a DIR of a clean "
+                         "line mark + one SVG per defect, reviewed as a regression check")
     ap.add_argument("--watch", action="store_true", help="re-run when a render changes; one PASS/FAIL line per run")
     ap.add_argument("--frames", action="append", metavar="DIR|GLOB",
                     help="an animation's frames (a directory or a quoted glob): every metric on every frame, worst "
                          "frame per metric; repeatable")
     a = ap.parse_args()
+    if a.mode == "line" and a.make_synthetic:
+        sys.exit(synthetic_line(a.make_synthetic))
     if a.make_synthetic:
         (synthetic_ramp if a.screen == "lattice" else synthetic_stochastic)(a.make_synthetic)
         a.render = a.render or [a.make_synthetic]
@@ -2102,12 +3374,30 @@ if __name__ == "__main__":
         ap.error("--out takes one render (frame sheets go to $TMPDIR/design-review/<frames' folders>/)")
     if a.watch and a.frames:
         ap.error("--watch takes renders, not --frames")
-    if a.mode != "halftone" and (a.frames or a.make_synthetic):
+    if a.mode not in (None, "halftone") and (a.frames or a.make_synthetic):
         ap.error(f"--mode {a.mode} takes renders (no --frames, no --make-synthetic)")
+    if a.card and a.mode != "line":
+        ap.error("--card is for --mode line")
     region = tuple(int(v) for v in a.region.split(",")) if a.region else None
-    if a.mode != "halftone":
-        run = ((lambda p, quiet=False: review_outline(p, a.out, a.home, quiet=quiet, expected=a.dots))
-               if a.mode == "outline" else (lambda p, quiet=False: review_flat(p, a.out, a.home, quiet=quiet)))
+    if not a.make_synthetic and a.mode in (None, "halftone"):        # guard: a mark of a few shapes is not a halftone
+        for path in a.render:
+            n = shape_count(path)
+            if n >= HALFTONE_MIN_SHAPES:
+                continue
+            if a.mode is None:
+                print(f"design-review {Path(path).name}: {n} separate shape(s), not a halftone (>= {HALFTONE_MIN_SHAPES}): "
+                      "use --mode line (a forgetting-curve line) or --mode flat (any solid flat mark); "
+                      "--mode halftone forces it")
+                sys.exit(2)
+            print(f"WARNING: {Path(path).name} has {n} separate shape(s): the halftone metrics below don't apply to it "
+                  "(--mode line / --mode flat)")
+    card = tuple(float(v) for v in a.card.split(",")) if a.card else None
+    if card and len(card) == 4:
+        card += (0.0,)
+    if a.mode not in (None, "halftone"):
+        run = {"outline": lambda p, quiet=False: review_outline(p, a.out, a.home, quiet=quiet, expected=a.dots),
+               "flat": lambda p, quiet=False: review_flat(p, a.out, a.home, quiet=quiet),
+               "line": lambda p, quiet=False: review_line(p, a.out, a.home, quiet=quiet, card=card)}[a.mode]
         if a.watch:
             watch(a.render, lambda p: run(p, quiet=True))
             sys.exit(0)
