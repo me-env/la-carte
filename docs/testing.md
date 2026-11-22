@@ -72,6 +72,8 @@ the selected test methods into N shards (balanced by the last measured durations
 `<results dir>/ui-test-durations.tsv`, else by count) and runs them at once, one UI pool simulator each. Output is
 the same as a plain run: screenshots in `qa/screenshots/<run>/`, one merged `<run>.xcresult`, one `TESTS: …` line
 (wall time), exit code non-zero if any shard fails. Shard lines are prefixed `[k]`.
+- **Logs:** each shard's (and the retry's) runner output is exported from its own bundle, before the merge:
+  `logs/<k>-console.txt`, `logs/retry-console.txt`, plus `logs/<Class>_<test>.txt` per test (see Screenshots).
 - **Not run:** a crash can end a shard early. Selected tests with no result in any shard are retried once in one
   extra run (lines `[retry]`); any still missing are counted as `N not run` and listed `⊘ <test>: not run`, and the
   exit code is non-zero (65 if nothing else failed).
@@ -99,7 +101,13 @@ sends a token for the same reason.
 qa/screenshots/<run>/home-light.png
 qa/screenshots/<run>/home-dark.png
 qa/screenshots/<run>/recordings/<test>.mp4   # Xcode's screen recording: failed tests only, every test with --record
+qa/screenshots/<run>/logs/console.txt        # the test runner's output: tests' print(), XCTest's "t = …" steps
+qa/screenshots/<run>/logs/<Class>_<test>.txt # the same, one test (a retried test has one block per attempt)
 ```
+The run prints `📝 logs: …` under the `📸 screenshots:` line. Logs come from the bundle's action log
+(`xcresulttool get log --type action`, per-test sections; its `--type console` log is empty for these runs); an export
+failure only warns. `print` is for debugging: anything a test asserts on or a QA report cites also goes in an
+`XCTContext.runActivity` note or an attachment, which stay in the `.xcresult` and in Xcode's report.
 `scripts/ios-ui-test.sh --record <run> …` (or `UI_RECORD=1`; with `--split` too) keeps the recordings of passing
 tests as well, for that run only: it sets the attachment lifetime to `keepAlways` in the run's own copy of the test
 products, never in the scheme. The run ends with `🎬 recordings: N files, SIZE`; about 1–10 MB per test, so record
@@ -126,6 +134,12 @@ uv run scripts/image-ops.py montage a.svg b.png --apple --mask [--sizes 1024,58,
                                                                              # without --apple a grid <= ~1.5x as tall as wide
 uv run scripts/image-ops.py frames <mp4> --from 2 --to 4 [--every 0.1]       # PNGs named by real timestamp
 uv run scripts/image-ops.py track <mp4> x0,y0,x1,y1 [--from S --to S] [--json]  # luma per frame + 10-90 % transition times
+#   track … --match HEX[:TOL] (repeatable)   # + per frame the region's share of pixels near that colour
+#   track … --scroll-indicator              # + per frame whether an iOS scroll indicator shows at the right edge
+uv run scripts/image-ops.py grid 'dir/{col}-{row}.png' --cols a,b,c --rows x,y [--col-label a=TEXT]  # variants (cols)
+                                                                             # x cases (rows) sheet with headers
+uv run scripts/image-ops.py strip <mp4> [x0,y0,x1,y1] (--every S | --at t1,t2,…) [--height PX]   # frames side by
+                                                                             # side, each labelled with its timestamp
 ```
 Ad-hoc capture of a running simulator, only when the user is at the Mac (macOS privacy prompt):
 `xcrun simctl io booted screenshot qa/screenshots/adhoc.png`.

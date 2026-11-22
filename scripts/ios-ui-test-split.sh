@@ -19,10 +19,11 @@
 # into qa/screenshots/<run-name>/recordings/ (same test name in two classes: <Class>-<test>.mp4).
 # A shard whose simulator refuses the test runner before any test ran is run once more (scripts/_ui-retry.sh,
 # `infra-retry: yes` in the TESTS line); refused again, its tests are "not run (simulator refused the runner)".
-# Results: screenshots merged into qa/screenshots/<run-name>/, shard bundles merged into <run-name>.xcresult, one
+# Results: screenshots merged into qa/screenshots/<run-name>/, runner output in its logs/ (<shard>-console.txt per
+# shard incl. retry, <Class>_<test>.txt per test), shard bundles merged into <run-name>.xcresult, one
 # `TESTS: …` line (wall time, "not run" count) plus the failed and not-run tests.
 # Exit code = first failing shard's code (xcodebuild's, 75 for no simulator) or the build's, else 65 if a test was
-# still not run; merge/summary failures only warn.
+# still not run; log export/merge/summary failures only warn.
 set -euo pipefail
 source "$(dirname "$0")/_ios-env.sh"
 source "$(dirname "$0")/_ui-retry.sh"
@@ -213,6 +214,7 @@ for test in json.load(open(manifest)) if os.path.exists(manifest) else []:
             os.rename(src, os.path.join(out, re.sub(r"_\d+_[0-9A-F-]{36}$", "", name) + ext))
 PY
   rm -rf "$EXP"
+  ui_export_logs "$b" "$OUT/logs" "$(basename "$b" .xcresult)-console"  # per shard, before the merge
 done
 if [ -f "$ROOT/scripts/contact-sheet.py" ] && command -v uv >/dev/null; then
   uv run "$ROOT/scripts/contact-sheet.py" "$OUT" || warn "contact sheet"
@@ -220,6 +222,7 @@ fi
 if [ ${#BUNDLES[@]} -eq 1 ]; then mv "${BUNDLES[0]}" "$RESULT"; BUNDLES=("$RESULT")
 else xcrun xcresulttool merge "${BUNDLES[@]}" --output-path "$RESULT" >/dev/null || warn "xcresult merge"; fi
 echo "📸 screenshots: $OUT  (xcresult: $RESULT)"
+ui_logs_summary "$OUT"
 ls -R "$OUT" || true
 ui_recordings_summary "$OUT"
 # TESTS: 22 passed, 0 failed, 1 skipped, 1 not run, 4 not run (no simulator within 3600s) (3.1 min wall, 3 shards,

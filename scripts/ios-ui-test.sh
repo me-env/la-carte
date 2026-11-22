@@ -6,7 +6,8 @@
 # --smoke: only the SMOKE tests below (one per screen/flow, for PR feedback).
 # --record (or UI_RECORD=1): keep Xcode's screen recordings of passing tests too (default: failed tests only), in
 # qa/screenshots/<run-name>/recordings/; the run ends with their count and size.
-# Screenshots (XCTAttachments named in the tests) land in qa/screenshots/<run-name>/.
+# Screenshots (XCTAttachments named in the tests) land in qa/screenshots/<run-name>/; the test runner's output (tests'
+# print(), XCTest steps) in its logs/: console.txt (whole run) and <Class>_<test>.txt per test (scripts/_ui-retry.sh).
 # Builds under the app's DerivedData lock into a private copy of the test products, then tests that copy
 # on the first free UI simulator of a pool (scripts/_sim-pool.sh), so other builds and UI runs go meanwhile
 # (docs/dev-velocity.md).
@@ -114,7 +115,9 @@ PY
 if [ -f "$ROOT/scripts/contact-sheet.py" ] && command -v uv >/dev/null; then
   uv run "$ROOT/scripts/contact-sheet.py" "$OUT" || warn "contact sheet"  # → $OUT/contact-sheet.png
 fi
+ui_export_logs "$RESULT" "$OUT/logs" console  # tests' print() → logs/console.txt + logs/<Class>_<test>.txt
 echo "📸 screenshots: $OUT  (xcresult: $RESULT)"
+ui_logs_summary "$OUT"
 ls -R "$OUT" || true
 ui_recordings_summary "$OUT"
 # TESTS: 69 passed, 0 failed, 6 skipped (49.3 min[, infra-retry: yes]), then one line per failed test.
