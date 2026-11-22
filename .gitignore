@@ -60,3 +60,6 @@ docs/design/brand/explorations/round15/**
 !docs/design/brand/explorations/round15/render.py
 !docs/design/brand/explorations/round15/README.md
 docs/design/brand/explorations/*/contact-sheet*.png
+
+# SQLite backups the migrations write next to the deck (user data)
+*.db.*
