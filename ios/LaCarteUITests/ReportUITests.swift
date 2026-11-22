@@ -157,6 +157,39 @@ final class ReportUITests: XCTestCase {
     XCTAssertTrue(commentHasID, "the alert's text field has no study.report.comment id (015b ids)")
   }
 
+  // MARK: - Last card (015b #6, #8)
+
+  /// Reporting the only due card: "Reported" shows, then "All caught up" (not "Your deck is empty": the deck holds
+  /// the held-out card).
+  @MainActor
+  func testReport_lastCardShowsReportedThenCaughtUp() throws {
+    XCUIDevice.shared.appearance = .light
+    let (server, _) = try stub([
+      .init(id: "aaaaaaaa-0000-0000-0000-000000000001", front: Self.front, back: Self.back, due: Self.base)
+    ])
+    let app = launch(api: .live(server.url))
+    reveal(app)
+    openMenu(app)
+    menuButton(app, "drop", "I don't want this card").tap()
+    var sawReported = false
+    let caughtUp = poll(timeout: 10) {
+      let n = self.el(app, "study.reportNotice")
+      if n.exists && n.label == "Reported" {
+        if !sawReported { Thread.sleep(forTimeInterval: 0.5); self.snapshot("study-report-last-reported", appearance: .light) }
+        sawReported = true
+      }
+      return self.el(app, "study.message").exists
+    }
+    XCTAssertTrue(caughtUp, "no message screen after reporting the last card")
+    XCTAssertTrue(sawReported, "'Reported' never shown after reporting the last card")
+    XCTAssertEqual(el(app, "study.message").label, "All caught up")
+    XCTAssertFalse(app.staticTexts["Your deck is empty"].exists, "empty-deck subtitle instead of caught-up")
+    Thread.sleep(forTimeInterval: 0.5)
+    snapshot("study-report-last-caught-up", appearance: .light)
+    app.terminate()
+    server.stop()
+  }
+
   // MARK: - Failure (015b #9)
 
   /// 015b #9 (stub 500): the card stays revealed, the ratings stay enabled, the counter slot says

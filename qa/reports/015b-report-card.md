@@ -1,6 +1,6 @@
 # QA: 015b Report a card (iOS, incl. broken_photo auto-report)
 
-Verdict: **FAIL**
+Verdict: **PASS** (re-validated at ab5f164, see Recheck)
 Date: 2026-11-22 · Simulator: iPhone 17 Pro / iOS 27 · Branch `worktree-agent-acb62b7c558f65dcb` (50ff9a7 + main 82df9d3)
 Runs: `qa/screenshots/report/` (requested selection), `qa/screenshots/015b-full/` (full suite), `qa/screenshots/015b-e2e/`
 Commands:
@@ -71,3 +71,11 @@ Haptics and the VoiceOver "Report" action: not checkable / deferred.
 ## Notes
 - `testReport_doubleTapTextStillEdits` failed once in the first split run ("study.back missing" after a double tap
   on the unrevealed card) and passed in every other run (incl. 4/4 with `-test-iterations 4` and the full suite). Not filed; watch it.
+
+## Recheck (ab5f164): PASS
+All 4 bugs fixed. New test `testReport_lastCardShowsReportedThenCaughtUp`: "Reported" shown, then "All caught up"
+(subtitle "Next card in 1 day", not "Your deck is empty"). Screenshots: `qa/screenshots/report-recheck/study-report-last-reported-light.png`,
+`study-report-last-caught-up-light.png`.
+- `UI_WORKERS=1 scripts/ios-ui-test.sh --split 2 report-recheck` (ReportUITests + StudyUITests): 13 passed, 0 failed, 3 skipped
+- `scripts/e2e.sh report-recheck-e2e`: 10 passed, 0 failed (`qa/screenshots/report-recheck-e2e/`)
+- `scripts/ios-test.sh`: all passed
