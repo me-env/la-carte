@@ -34,6 +34,8 @@ how many milestones the user reached today and how many new cards wait. Nothing 
 2. **Queue order: started cards first, then new cards, oldest first.** The servable queue sorts by
    `(never reviewed, due if reviewed, _card_order)`:
    - Cards already reviewed (`learning`, `review`, `relearning`), most overdue first. That's the order today.
+     **Refined by spec 022:** (re)learning cards first by `due`, then `review` cards lowest FSRS retrievability
+     first. New-card placement below is unchanged.
    - Then never-reviewed cards in `_card_order`: oldest `created_at`, and a batch keeps its insertion order and
      field order.
 
@@ -133,7 +135,7 @@ API criteria are pytest with `now` injected. iOS criteria are TestStore / Decodi
 | # | Criterion (observable) | Validated by |
 |---|---|---|
 | 1 | No hold: fresh DB, add 60 one-card notes. `due_cards(limit=200)` returns all 60 and `stats.due = 60`. After reviewing 15 of them, the other 45 are still servable at `t + 1 min` | pytest |
-| 2 | Order: a `review` card due 1 h ago, a `relearning` card due now and 3 new cards (one created 2 days before the review card's due) give `/cards/due` = reviewed cards first (most overdue first), then the 3 new cards oldest first, in insertion order within a batch | pytest |
+| 2 | Order: a `review` card due 1 h ago, a `relearning` card due now and 3 new cards (one created 2 days before the review card's due) give `/cards/due` = reviewed cards first (in spec 022's order: the `relearning` card, then the `review` card), then the 3 new cards oldest first, in insertion order within a batch | pytest |
 | 3 | Siblings: a person note with 3 new directions serves one (field order). After it is reviewed, the next one is buried only per spec 014 (until `min(t + 6 h, its due)`), not 24 h | pytest |
 | 4 | `next_due` follows 014/015 only: with only new cards left, `due > 0` and the app is never "caught up" while a new card exists. With nothing servable, `next_due` = the earliest ready time of a started card | pytest |
 | 5 | `new_today` uses the local day: with `tz=Europe/Paris`, a card first reviewed at 23:30 local yesterday and again today doesn't count; a card first reviewed at 00:10 local today does; a card introduced today and then deleted still counts; `tz=UTC` can give a different value for the same data | pytest |
