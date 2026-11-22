@@ -61,7 +61,8 @@ verdict on them. Accessibility identifiers stay: they are how UI tests find elem
 
 ## Splitting a run
 
-`scripts/ios-ui-test.sh --split [N] <run> [-only-testing:LaCarteUITests/<Class>[/<test>] …]` builds once, deals
+`scripts/ios-ui-test.sh --split [N] [--wait] <run> [-only-testing:LaCarteUITests/<Class>[/<test>] …]` builds once, lists
+the tests from the built bundle on a pool simulator (no filter or `-only-testing:LaCarteUITests` = all), deals
 the selected test methods into N shards (balanced by the last measured durations in
 `<results dir>/ui-test-durations.tsv`, else by count) and runs them at once, one UI pool simulator each. Output is
 the same as a plain run: screenshots in `qa/screenshots/<run>/`, one merged `<run>.xcresult`, one `TESTS: …` line
@@ -71,6 +72,10 @@ the same as a plain run: screenshots in `qa/screenshots/<run>/`, one merged `<ru
   exit code is non-zero (65 if nothing else failed).
 - **When:** 8+ tests or about 4 min of runtime; below that run plainly (each shard costs ~1 min of fixed overhead).
 - **N** defaults to, and is capped by, the free UI simulators; with one free (busy pool) it is a plain run.
+- **`--wait`:** N defaults to `UI_POOL_SIZE` and is capped only by it and the test count; the `🔀 N shards, W waiting`
+  line says how many start without a simulator. Those wait for a slot (up to `LOCK_TIMEOUT`, one `[k] 🔒` line each).
+  A shard that gets none counts as `N not run (no simulator within <s>s)`, is not retried, and the exit code is 75.
+  `--split 1 --wait`, or a caller already holding a simulator, is a plain run.
 
 Full parallel runs use `--split` (`UI_WORKERS=N` is shorthand for `--split N`). Xcode's parallel-testing clones are
 not used: they boot cold each run and trigger PosterBoard crash pop-ups.

@@ -14,7 +14,7 @@
 # Each finished test prints as it finishes (also into a file), then a `TESTS: …` summary line.
 # Exit code = xcodebuild's (65 test failure, 75 lock timeout); export/summary/contact-sheet failures only warn.
 set -euo pipefail
-if [ "${1:-}" = --split ]; then  # one run over several pool simulators: scripts/ios-ui-test-split.sh
+if [ "${1:-}" = --split ]; then  # --split [N] [--wait] <run> …: one run over several pool simulators (ios-ui-test-split.sh)
   exec "$(dirname "$0")/ios-ui-test-split.sh" "$@"
 fi
 source "$(dirname "$0")/_ios-env.sh"
