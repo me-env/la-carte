@@ -337,13 +337,186 @@ final class StudyEditUITests: XCTestCase {
     XCTAssertEqual(restored?["back"] as? String, "hello", "deck not restored")
   }
 
+  // MARK: - Tap-away recognizer (QA follow-ups to the bug B fix)
+
+  /// #5 on a card that scrolls: a downward swipe that starts off the field (on the answer, above the keyboard) ends
+  /// the edit and saves it, while the card's scroll view also takes the drag. An upward drag (reading on) is noted.
+  @MainActor
+  func testStudyEdit_swipeDownOnScrollingCardCommits() throws {
+    XCUIDevice.shared.appearance = .light
+    let front = "Which treaty, signed in 1648, ended the Thirty Years' War?"
+    let back = String(repeating: "Spaced repetition schedules each review just before you would forget. ", count: 14)
+      .trimmingCharacters(in: .whitespaces)
+    let (server, deck) = try startStub(front: front, back: back)
+    let app = launch(api: .live(server.url))
+    reveal(app, front: front, back: back)
+    let rateTop = el(app, "study.rate.good").frame.minY
+    XCTAssertGreaterThan(el(app, "study.back").frame.maxY, rateTop, "card does not overflow: \(el(app, "study.back").frame)")
+
+    let field = startEditing(app, .front)
+    field.typeText("!")
+    XCTAssertTrue(poll(timeout: 3) { (field.value as? String)?.contains("!") == true }, "draft: \(field.value ?? "")")
+    let draft = field.value as? String ?? ""
+    let window = app.windows.firstMatch
+    let keyboardTop = app.keyboards.firstMatch.frame.minY
+    let answer = el(app, "study.back").frame
+    // Start on the answer, between the field and the keyboard.
+    let startY = min(max(field.frame.maxY + 20, answer.minY + 10), keyboardTop - 20)
+    XCTAssertGreaterThan(startY, field.frame.maxY + 5, "no answer visible between field \(field.frame) and keyboard \(keyboardTop)")
+    snapshot("study-edit-scrolling-card-editing", appearance: .light)
+
+    // Upward drag first (scrolling to read on): behaviour noted, the test asserts nothing about it.
+    let origin = window.coordinate(withNormalizedOffset: .zero)
+    origin.withOffset(CGVector(dx: 201, dy: startY))
+      .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 201, dy: startY - 120)))
+    Thread.sleep(forTimeInterval: 1)
+    note("QA tap-away: after an upward drag on the answer, field exists=\(field.exists) focused=\(hasFocus(field)) "
+         + "keyboard=\(app.keyboards.firstMatch.exists)")
+    if !field.exists {
+      // The upward drag ended the edit: restart it for the downward swipe.
+      _ = startEditing(app, .front)
+    }
+
+    let startY2 = min(max(field.frame.maxY + 20, el(app, "study.back").frame.minY + 10), app.keyboards.firstMatch.frame.minY - 20)
+    origin.withOffset(CGVector(dx: 201, dy: startY2))
+      .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 201, dy: startY2 + 200)))
+    waitForAbsence(field, timeout: 3, "a downward swipe on the scrolling card's answer did not end the edit")
+    waitForAbsence(app.keyboards.firstMatch, timeout: 3, "keyboard still up after the downward swipe")
+    let saved = field.exists ? "" : el(app, "study.front").label
+    XCTAssertEqual(saved, draft, "front after the swipe: '\(saved)' (draft was '\(draft)')")
+    assertRatingsShown(app)
+    let patch = try waitForPatch(server, count: 1)
+    XCTAssertTrue(patch.body.contains("!"), "PATCH body: \(patch.body)")
+    XCTAssertEqual(deck.cards.first?.front, draft, "saved front: \(deck.cards.first?.front ?? "nil")")
+    snapshot("study-edit-scrolling-card-swiped", appearance: .light)
+  }
+
+  /// A drag that starts in the field never ends the edit: moving the caret (long press + drag, sideways and down a
+  /// line), and dragging a selection's end after a double-tap selects a word.
+  @MainActor
+  func testStudyEdit_caretAndSelectionDragKeepEditing() throws {
+    XCUIDevice.shared.appearance = .light
+    let long = String(repeating: "a long answer that keeps going ", count: 4).trimmingCharacters(in: .whitespaces)
+    let (server, deck) = try startStub(back: long)
+    let app = launch(api: .live(server.url))
+    reveal(app, back: long)
+    let field = startEditing(app, .back)
+    XCTAssertGreaterThan(field.frame.height, 60, "back field should wrap to 2+ lines: \(field.frame)")
+
+    func assertStillEditing(_ what: String) {
+      Thread.sleep(forTimeInterval: 1)
+      note("QA tap-away: after \(what): field exists=\(field.exists) focused=\(hasFocus(field)) "
+           + "keyboard=\(app.keyboards.firstMatch.exists)")
+      if !field.exists || !hasFocus(field) { snapshot("study-edit-drag-ended-\(what)", appearance: .light) }
+      XCTAssertTrue(field.exists, "\(what) ended the edit")
+      XCTAssertTrue(hasFocus(field), "\(what): field lost focus")
+      XCTAssertFalse(el(app, "study.rate.good").exists, "\(what): ratings back while editing")
+      XCTAssertEqual(server.requests.filter { $0.method == "PATCH" }.count, 0, "\(what): a PATCH was sent")
+    }
+
+    // Caret drag sideways on the first line.
+    field.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.15))
+      .press(forDuration: 0.8, thenDragTo: field.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.15)))
+    assertStillEditing("caret-drag-sideways")
+    // Caret drag down from the first line to the last (> 30 pt down: the swipe-down threshold).
+    let lineDrop = field.frame.height * 0.7
+    XCTAssertGreaterThan(lineDrop, 30, "field too short to test a > 30 pt downward caret drag")
+    field.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.15))
+      .press(forDuration: 0.8, thenDragTo: field.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.85)))
+    assertStillEditing("caret-drag-down")
+    snapshot("study-edit-caret-dragged", appearance: .light)
+
+    // Select a word (double-tap in the field), then drag from its end handle down and right.
+    field.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.15)).doubleTap()
+    Thread.sleep(forTimeInterval: 0.6)
+    snapshot("study-edit-word-selected", appearance: .light)
+    assertStillEditing("double-tap-select")
+    field.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.2))
+      .press(forDuration: 0.3, thenDragTo: field.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.85)))
+    assertStillEditing("selection-drag")
+    snapshot("study-edit-selection-dragged", appearance: .light)
+
+    // Still a working edit: type, Done → saved.
+    replaceText(field, with: "edited after drags")
+    tapDone(app)
+    waitForLabel(el(app, "study.back"), "edited after drags", timeout: 3)
+    _ = try waitForPatch(server, count: 1)
+    XCTAssertEqual(deck.cards.first?.back, "edited after drags")
+  }
+
+  /// A tap on the field right after the double-tap opened it (keyboard and card still animating), at several delays.
+  /// Expected: the edit stays open every time. Timings are noted.
+  @MainActor
+  func testStudyEdit_tapFieldRightAfterOpen() throws {
+    XCUIDevice.shared.appearance = .light
+    let (server, _) = try startStub()
+    let app = launch(api: .live(server.url))
+    reveal(app)
+    var failures: [String] = []
+    for (side, delay) in [(Side.back, 0.0), (.back, 0.15), (.back, 0.3), (.front, 0.0), (.front, 0.15), (.back, 0.6)] {
+      let start = Date()
+      el(app, "study.\(side.rawValue)").doubleTap()
+      let field = el(app, "study.\(side.rawValue)Field")
+      XCTAssertTrue(field.waitFor(timeout: 5), "\(side)Field missing")
+      if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+      let tapAt = Date().timeIntervalSince(start)
+      field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+      Thread.sleep(forTimeInterval: 1)
+      let open = field.exists && hasFocus(field)
+      note(String(format: "QA tap-away: %@ delay %.2f s, tap %.2f s after the double-tap → edit %@",
+                  side.rawValue, delay, tapAt, open ? "still open" : "ENDED"))
+      if !open {
+        failures.append(String(format: "%@ +%.2fs", side.rawValue, tapAt))
+        snapshot("study-edit-tap-right-after-open-ended", appearance: .light)
+      } else {
+        tapDone(app)
+        waitForAbsence(field, timeout: 3)
+      }
+      assertRatingsShown(app)
+      Thread.sleep(forTimeInterval: 0.5)
+    }
+    XCTAssertTrue(failures.isEmpty, "a tap on the field right after it opened ended the edit: \(failures)")
+
+    // Fastest XCUITest can do: no query between the double-tap and the tap, at the text's pre-edit position (where
+    // the field is first drawn, before the keyboard lifts the card). XCUITest waits for the app to idle after the
+    // double-tap, so the tap lands ~0.65 s later, after the keyboard has lifted the card (QA recording, 2026-11-22):
+    // the point is then empty card area and ending the edit is correct; a tap during the move would be ignored.
+    // Either outcome is acceptable, so this part only notes what happened.
+    let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+    for side in [Side.back, .front, .back] {
+      let text = el(app, "study.\(side.rawValue)").frame
+      let start = Date()
+      el(app, "study.\(side.rawValue)").doubleTap()
+      let tapAt = Date().timeIntervalSince(start)
+      origin.withOffset(CGVector(dx: text.midX, dy: text.midY)).tap()
+      let field = el(app, "study.\(side.rawValue)Field")
+      Thread.sleep(forTimeInterval: 1)
+      let open = field.exists && hasFocus(field)
+      note(String(format: "QA tap-away: %@ immediate tap at the pre-edit text position %.2f s after the double-tap "
+                  + "returned → edit %@ (field now %@)", side.rawValue, tapAt, open ? "still open" : "ENDED",
+                  String(describing: field.exists ? field.frame : .zero)))
+      if open {
+        tapDone(app)
+        waitForAbsence(field, timeout: 3)
+      }
+      assertRatingsShown(app)
+      Thread.sleep(forTimeInterval: 0.5)
+    }
+  }
+
+  private func note(_ line: String) {
+    print(line)
+    XCTContext.runActivity(named: line) { _ in }
+  }
+
   // MARK: - Helpers
 
   enum Side: String { case front, back }
 
-  private func startStub(back: String = StudyEditUITests.back) throws -> (StubAPIServer, StubDeck) {
+  private func startStub(front: String = StudyEditUITests.front, back: String = StudyEditUITests.back)
+    throws -> (StubAPIServer, StubDeck) {
     let deck = StubDeck([
-      .init(id: Self.idA, front: Self.front, back: back, due: Self.base, createdAt: Self.base),
+      .init(id: Self.idA, front: front, back: back, due: Self.base, createdAt: Self.base),
       .init(id: Self.idB, front: "gratitude", back: "thank you", due: Self.base.addingTimeInterval(60),
             createdAt: Self.base.addingTimeInterval(60)),
     ])
@@ -363,8 +536,9 @@ final class StudyEditUITests: XCTestCase {
   }
 
   @MainActor
-  private func reveal(_ app: XCUIApplication, back: String = StudyEditUITests.back, file: StaticString = #filePath, line: UInt = #line) {
-    waitForLabel(el(app, "study.front"), Self.front, file: file, line: line)
+  private func reveal(_ app: XCUIApplication, front: String = StudyEditUITests.front, back: String = StudyEditUITests.back,
+                      file: StaticString = #filePath, line: UInt = #line) {
+    waitForLabel(el(app, "study.front"), front, file: file, line: line)
     el(app, "study.reveal").tap()
     waitForLabel(el(app, "study.back"), back, file: file, line: line)
     assertRatingsShown(app, file: file, line: line)
