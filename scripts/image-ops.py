@@ -26,7 +26,9 @@ default to $TMPDIR/image-ops/ and their paths are printed.
 - montage: one entry per input (label, then one column per size); each size is a LANCZOS downscale of the source
   shown at its true pixel size, plus a 4x nearest-neighbour zoom for sizes < 100. Entries fill a grid of columns
   so the sheet stays no taller than ~1.5x its width (`--cols N` to choose). `--mask`: iOS-like squircle mask.
-  `--apple`: extra entries with Apple's own app icons (cache shared with design-review.py). SVG needs rsvg-convert.
+  `--apple`: ONE ROW PER CANDIDATE (`--cols N` still wraps): sizes >= 100 are shown scaled to 256 px (the header
+  says so), then Apple's own app icons (cache shared with design-review.py) at the sizes < 100, true size, in the
+  same row. SVG needs rsvg-convert.
 - frames: PNG per decoded frame named by its real timestamp (t0001.234.png) + frames.tsv (index, time, file).
   `--every S`: the first frame at or after each multiple of S. Recordings are variable frame rate.
 - track: per frame the region's mean colour and luma (Rec. 709, 0-255); then each transition between two
@@ -159,46 +161,70 @@ def squircle(size: int) -> Image.Image:
 
 
 def montage(args) -> Path:
+    """Without --apple: one entry per input, in a grid. With --apple: one row per candidate with the Apple icons
+    beside it at the small sizes (a 1024 is shown at 256 px so rows stay short)."""
     sizes = [int(s) for s in args.sizes.split(",")]
     labels = args.labels.split(",") if args.labels else [Path(p).stem for p in args.inputs]
     if len(labels) != len(args.inputs):
         sys.exit(f"--labels has {len(labels)} names for {len(args.inputs)} inputs")
-    rows = [(load_icon(p), l) for p, l in zip(args.inputs, labels)] + (fetch_icons() if args.apple else [])
+    rows = [(load_icon(p), l) for p, l in zip(args.inputs, labels)]
+    refs = (getattr(args, "apple_icons", None) or fetch_icons()) if args.apple else []
+    if args.apple:                                  # row mode: Apple refs at the small sizes inside each row
+        shown, small = [min(s, 256) for s in sizes], [s for s in sizes if s < 100]
+    else:                                           # grid mode: every size at its true pixel size
+        shown, small = sizes, []
     bg = "#" + args.bg.lstrip("#")
     font = ImageFont.load_default(size=14)
     pad, label_w = 16, 150
-    cols = [s + (pad + 4 * s if s < 100 else 0) for s in sizes]
-    row_h = max(max(sizes), 4 * max([s for s in sizes if s < 100], default=0)) + 2 * pad
+    cols = [d + (pad + 4 * s if s < 100 else 0) for s, d in zip(sizes, shown)]
+    ref_w = max(sum(small) + pad * (len(small) - 1), 80) if small else 0
+    cols += [ref_w] * len(refs) if small else []
+    row_h = max(max(shown), 4 * max([s for s in sizes if s < 100], default=0)) + 2 * pad
     row_w = label_w + sum(cols) + pad * (len(cols) + 1)
     n = len(rows)                      # grid: the fewest columns that keep the sheet <= 1.5x as tall as wide
-    ncol = args.cols or next(c for c in range(1, n + 1) if -(-n // c) * row_h + 28 <= 1.5 * c * row_w or c == n)
-    if ncol < 1:
+    if args.cols is not None and args.cols < 1:
         sys.exit("--cols must be >= 1")
+    ncol = args.cols or (1 if args.apple else
+                         next(c for c in range(1, n + 1) if -(-n // c) * row_h + 28 <= 1.5 * c * row_w or c == n))
     sheet = Image.new("RGB", (row_w * ncol, 28 + row_h * -(-n // ncol)), bg)
     draw = ImageDraw.Draw(sheet)
     ink = "#000000" if sum(sheet.getpixel((0, 0))) > 382 else "#FFFFFF"
+    heads = [f"{s}px" + (f" (shown at {d})" if d != s else "") + (" + 4x" if s < 100 else "")
+             for s, d in zip(sizes, shown)] + [f"{name[:10]} {'/'.join(map(str, small))}" for _, name in (refs if small else [])]
     for g in range(ncol):
         x = g * row_w + label_w + pad
-        for s, w in zip(sizes, cols):
-            draw.text((x, 6), f"{s}px" + (" + 4x" if s < 100 else ""), fill=ink, font=font)
+        for h, w in zip(heads, cols):
+            draw.text((x, 6), h, fill=ink, font=font)
             x += w + pad
+
+    def put(src: Image.Image, s: int, d: int, x: int, y: int, zoom: bool):
+        icon = src.resize((s, s), Image.LANCZOS)
+        if args.mask:
+            icon.putalpha(Image.fromarray(np.minimum(np.asarray(icon.getchannel("A")), np.asarray(squircle(s)))))
+        if d != s:
+            icon = icon.resize((d, d), Image.LANCZOS)
+        sheet.paste(icon, (x, y), icon)
+        if zoom and s < 100:
+            big = sheet.crop((x, y, x + s, y + s)).resize((4 * s, 4 * s), Image.NEAREST)
+            sheet.paste(big, (x + s + pad, y))
+
     for r, (src, label) in enumerate(rows):
         x0, y = (r % ncol) * row_w, 28 + (r // ncol) * row_h
         draw.text((x0 + pad, y + row_h // 2 - 8), label[:18], fill=ink, font=font)
         x = x0 + label_w + pad
-        for s, w in zip(sizes, cols):
-            icon = src.resize((s, s), Image.LANCZOS)
-            if args.mask:
-                icon.putalpha(Image.fromarray(np.minimum(np.asarray(icon.getchannel("A")),
-                                                         np.asarray(squircle(s)))))
-            sheet.paste(icon, (x, y + pad), icon)
-            if s < 100:
-                big = sheet.crop((x, y + pad, x + s, y + pad + s)).resize((4 * s, 4 * s), Image.NEAREST)
-                sheet.paste(big, (x + s + pad, y + pad))
+        for s, d, w in zip(sizes, shown, cols):
+            put(src, s, d, x, y + pad, zoom=True)
             x += w + pad
+        for ref, _ in refs if small else []:   # each Apple icon at the small sizes, true size, side by side
+            for s in small:
+                put(ref, s, s, x, y + pad, zoom=False)
+                x += s + pad
+            x += ref_w - (sum(small) + pad * (len(small) - 1))
     out = out_path(args.out, "montage.png")
     sheet.save(out)
-    print(f"{out}  ({sheet.width}x{sheet.height}px, {len(rows)} entries in {ncol} column(s) x {len(sizes)} sizes)")
+    layout = (f"{n} rows (one per candidate, {len(refs)} Apple icons beside each at {'/'.join(map(str, small))} px)"
+              if args.apple else f"{n} entries in {ncol} column(s) x {len(sizes)} sizes")
+    print(f"{out}  ({sheet.width}x{sheet.height}px, {layout})")
     return out
 
 
@@ -318,6 +344,15 @@ def selftest() -> int:
         m = Image.open(montage(argparse.Namespace(inputs=[f"{d}/s.png"] * 8, sizes="1024,58,29", labels=None,
                                                   apple=False, mask=False, bg="FFFFFF", out=None, cols=None)))
         checks.append((f"montage 8 x 1024: grid, {m.height / m.width:.2f}x as tall as wide (<= 1.5)", m.height <= 1.5 * m.width))
+        cached = (ICON_CACHE / "icons.json").exists()   # the cache only, never the network; else stand-ins
+        icons = fetch_icons() if cached else [(Image.new("RGBA", (512, 512), c), n) for c, n in
+                                              [("#FF3B30", "A"), ("#34C759", "B"), ("#007AFF", "C")]]
+        m = Image.open(montage(argparse.Namespace(inputs=[f"{d}/s.png"] * 3, sizes="1024,58,29", labels=None,
+                                                  apple=True, apple_icons=icons, mask=True, bg="FFFFFF", out=None,
+                                                  cols=None)))
+        rows = (m.height - 28) / (256 + 32)            # row height: the 256 px stand-in for 1024 + 2 x pad
+        checks.append((f"montage 3 + --apple ({len(icons)} {'cached' if cached else 'stand-in'} icons): {rows:g} rows",
+                       rows == 3))
         # VFR synthetic video: 0.5 s hold (2 frames), linear 250 ms fade 20 -> 220 at 60 fps, 0.5 s hold.
         mp4, times = f"{d}/fade.mp4", [0.0, 0.3] + [0.5 + k / 60 for k in range(16)] + [0.8, 1.3]
         with av.open(mp4, "w") as c:

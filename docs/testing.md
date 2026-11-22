@@ -111,8 +111,10 @@ Image and video ops (`uv run scripts/image-ops.py --selftest`; same point/scale 
 ```bash
 uv run scripts/image-ops.py crop <png|svg> x0,y0,x1,y1 --zoom 8             # pixel-level inspection (--zoom 2.5: LANCZOS;
                                                                              # an SVG is rasterised at 1024, --svg-size N)
-uv run scripts/image-ops.py montage a.svg b.png --apple --mask [--sizes 1024,58,29] [--cols N]   # icon contact sheet,
-                                                                             # a grid no taller than ~1.5x its width
+uv run scripts/image-ops.py montage a.svg b.png --apple --mask [--sizes 1024,58,29] [--cols N]   # icon contact sheet:
+                                                                             # one row per candidate (1024 shown at 256,
+                                                                             # 58/29 + 4x zoom, Apple icons at 58/29 beside);
+                                                                             # without --apple a grid <= ~1.5x as tall as wide
 uv run scripts/image-ops.py frames <mp4> --from 2 --to 4 [--every 0.1]       # PNGs named by real timestamp
 uv run scripts/image-ops.py track <mp4> x0,y0,x1,y1 [--from S --to S] [--json]  # luma per frame + 10-90 % transition times
 ```

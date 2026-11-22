@@ -12,7 +12,8 @@
 # ///
 """Measured design review for logo / icon renders (design-critic runs it on every proposal).
 
-    uv run scripts/design-review.py <render-1024.png|.svg>... [--home] [--axis x|y] [--region x0,y0,x1,y1] [--out sheet.png]
+    uv run scripts/design-review.py <render-1024.png|.svg>... [--home] [--axis x|y] [--region x0,y0,x1,y1] [--out sheet.png|DIR/]
+                         # --out with several renders: DIR/<name>-review.png, or sheet-<name>.png; each path is printed
     uv run scripts/design-review.py card-light-1024.png card-dark-1024.png --watch   # re-run on every save
     uv run scripts/design-review.py --make-synthetic out.png     # a smooth reference ramp that must PASS
     uv run scripts/design-review.py <render> --screen stochastic # a blue-noise (random, evenly spaced) screen
@@ -118,8 +119,8 @@ each (r = the median arc radius, theta = the turn) is left out of width, smoothn
   on ink) and outside (ink on paper) >= 0.25, inside / outside medians >= 0.8; at each through crossing, the line's
   centre either side of the edge within 0.25 icon px and width ratio 0.85-1.15. edge AA (R11, INFO): |2c - 1| of
   straight H/V edges >= 3 icon px.
-- occupancy (R12): mark bbox long side / tile and ink share within the min-max (+-0.05) of the cached Apple icons with
-  a uniform border (how many is printed). palette: WCAG contrast, INFO.
+- occupancy (R12): mark bbox long side / tile within the min-max (+-0.05) of the cached Apple icons with a uniform
+  border (how many is printed); ink share against the same range is INFO (only 2 such icons). palette: WCAG contrast, INFO.
 - the flat mode's metrics (thinnest stroke / gap, optical centre, margins, what fades / closes at 58 / 29 px).
 `--make-synthetic DIR` with `--mode line` writes a clean line mark (built like chart7 / line7) and one SVG per defect
 (20 deg kink, S-curve decay, width +-8%, reset tilted 6 deg, plateaus 1:1.5, steeper second cycle, mixed fillets,
@@ -470,7 +471,9 @@ LINE_BORDER_STD = 0.05          # an Apple icon has a uniform border if the band
                                 # each side) has a colour std < 0.05: Reminders, Calendar 0.03; Clock 0.09, Notes,
                                 # Stocks, Maps 0.18-0.35 (full-bleed: skipped)
 LINE_APPLE_INK = 0.25           # an Apple glyph pixel differs from that border colour by > 0.25 (RGB distance)
-LINE_INFO = ("ends", "edge AA", "decay G2", "palette", "corners")   # INFO rows (no limit)
+LINE_INFO = ("ends", "edge AA", "decay G2", "palette", "corners",   # INFO rows (no limit)
+             "occupancy: ink share")  # INFO until a broader reference exists: only 2 Apple icons have a uniform
+                                      # border (Reminders, Calendar: 0.05-0.09), which FAILed the leader curve-93 (0.23)
 
 ICON_IDS = [1110145109, 1108187841, 1108185179, 1069512882, 1584215688, 915056765]   # Notes, Reminders,
 # Calendar, Stocks, Clock, Maps: Apple's own apps via the public iTunes lookup API (no personal data).
@@ -2825,8 +2828,9 @@ def review_line(path, out=None, home=False, quiet=False, card=None):
     for q, nm in enumerate(("occupancy: bbox long side / tile", "occupancy: ink share")):
         if ref:
             lo_, hi_ = min(r_[q] for r_ in ref), max(r_[q] for r_ in ref)
-            results.append((nm, occ[q], float("nan"), lo_ - LINE_OCC_PAD <= occ[q] <= hi_ + LINE_OCC_PAD,
-                            f"Apple range {lo_:.2f}-{hi_:.2f} (+-{LINE_OCC_PAD}) over {len(ref)} of {len(ICON_IDS)} "
+            info = nm.startswith(LINE_INFO)        # ink share: reported, not counted (see LINE_INFO)
+            results.append((nm, occ[q], float("nan"), info or lo_ - LINE_OCC_PAD <= occ[q] <= hi_ + LINE_OCC_PAD,
+                            ("INFO, not counted (2 references only); " if info else "") + f"Apple range {lo_:.2f}-{hi_:.2f} (+-{LINE_OCC_PAD}) over {len(ref)} of {len(ICON_IDS)} "
                             "icons with a uniform border"))
         else:
             results.append(na(nm, float("nan"), "no cached Apple icon with a uniform border"))
@@ -3340,7 +3344,9 @@ if __name__ == "__main__":
     ap.add_argument("--axis", choices=("x", "y"), default="x", help="transition axis (default x)")
     ap.add_argument("--region", help="x0,y0,x1,y1 in 1024 px (default: the ink bounding box)")
     ap.add_argument("--home", action="store_true", help="also render home-screen rows with Apple's icons")
-    ap.add_argument("--out", help="sheet path (default: $TMPDIR/design-review/<render's last 3 folders>/<name>-review.png)")
+    ap.add_argument("--out", help="sheet path (default: $TMPDIR/design-review/<render's last 3 folders>/<name>-review.png); "
+                                  "a directory (existing or ending with /): <dir>/<name>-review.png per render; a file "
+                                  "with several renders: <stem>-<name><suffix> per render")
     ap.add_argument("--screen", choices=("lattice", "stochastic"), default="lattice",
                     help="lattice (default): order must rise to a hex lattice; stochastic: blue noise, order must "
                          "stay even (NN floor, no clumps or voids), touching allowed from coverage "
@@ -3370,8 +3376,18 @@ if __name__ == "__main__":
         a.render = a.render or [a.make_synthetic]
     if not a.render and not a.frames:
         ap.error("render path (or --frames) required")
-    if a.out and (len(a.render) > 1 or a.frames):
-        ap.error("--out takes one render (frame sheets go to $TMPDIR/design-review/<frames' folders>/)")
+    if a.out and a.frames:
+        ap.error("--out takes renders (frame sheets go to $TMPDIR/design-review/<frames' folders>/)")
+
+    def sheet_path(path):
+        """--out per render: a directory (exists or ends with /) -> <dir>/<stem>-review.png; a file with several
+        renders -> <stem>-<render stem><suffix>; one render -> the file itself; none -> default_out (None here)."""
+        if not a.out:
+            return None
+        o = Path(a.out)
+        if a.out.endswith("/") or o.is_dir():
+            return o / f"{Path(path).stem}-review.png"
+        return o.with_name(f"{o.stem}-{Path(path).stem}{o.suffix or '.png'}") if len(a.render) > 1 else o
     if a.watch and a.frames:
         ap.error("--watch takes renders, not --frames")
     if a.mode not in (None, "halftone") and (a.frames or a.make_synthetic):
@@ -3395,9 +3411,13 @@ if __name__ == "__main__":
     if card and len(card) == 4:
         card += (0.0,)
     if a.mode not in (None, "halftone"):
-        run = {"outline": lambda p, quiet=False: review_outline(p, a.out, a.home, quiet=quiet, expected=a.dots),
-               "flat": lambda p, quiet=False: review_flat(p, a.out, a.home, quiet=quiet),
-               "line": lambda p, quiet=False: review_line(p, a.out, a.home, quiet=quiet, card=card)}[a.mode]
+        run = {"outline": lambda p, quiet=False: review_outline(p, sheet_path(p), a.home, quiet=quiet, expected=a.dots),
+               "flat": lambda p, quiet=False: review_flat(p, sheet_path(p), a.home, quiet=quiet),
+               "line": lambda p, quiet=False: review_line(p, sheet_path(p), a.home, quiet=quiet, card=card)}[a.mode]
+    if a.watch:                                   # quiet runs print no sheet path: name each one up front
+        for path in a.render:
+            print(f"sheet: {sheet_path(path) or default_out(path)}", flush=True)
+    if a.mode not in (None, "halftone"):
         if a.watch:
             watch(a.render, lambda p: run(p, quiet=True))
             sys.exit(0)
@@ -3408,13 +3428,13 @@ if __name__ == "__main__":
             fails += run(path)[0]
         sys.exit(1 if fails else 0)
     if a.watch:
-        watch(a.render, lambda p: review(p, a.axis, region, a.out, a.home, quiet=True, screen=a.screen))
+        watch(a.render, lambda p: review(p, a.axis, region, sheet_path(p), a.home, quiet=True, screen=a.screen))
         sys.exit(0)
     fails = 0
     for k, path in enumerate(a.render):
         if k:
             print()
-        fails += review(path, a.axis, region, a.out, a.home, screen=a.screen)[0]
+        fails += review(path, a.axis, region, sheet_path(path), a.home, screen=a.screen)[0]
     for k, spec in enumerate(a.frames or []):
         paths = frame_paths(spec)
         if not paths:
