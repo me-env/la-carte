@@ -165,7 +165,8 @@ extension XCTestCase {
     }
     XCTAssertEqual(current(), "", "\(field.identifier) not cleared", file: file, line: line)
     field.typeText(text)
-    let typed = poll(timeout: 5) { secure ? current().count == text.count : current() == text }
+    // 15 s: on a loaded CI runner the keystrokes land late, not lost (recording: "fe" for ~10 s, then "feline").
+    let typed = poll(timeout: 15) { secure ? current().count == text.count : current() == text }
     XCTAssertTrue(typed, "\(field.identifier) is '\(current())' after typing '\(text)'", file: file, line: line)
   }
 
