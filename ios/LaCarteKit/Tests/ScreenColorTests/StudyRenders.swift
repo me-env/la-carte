@@ -69,7 +69,10 @@ struct StudyRenders {
     for (name, state, withSystem) in Self.catalogue {
       for look in Self.looks + (withSystem ? [Self.system] : []) {
         // Writes screen-study-<name>-<theme>-<scheme>.png.
-        _ = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), look, name: "study-\(name)")
+        // Reduce Motion: the logo as it lands (this render drops 3D transforms, so it can't draw the tilt).
+        let view = StudyView(store: Store(initialState: state) { EmptyReducer() })
+          .environment(\._accessibilityReduceMotion, true)
+        _ = try Screen(view, look, name: "study-\(name)")
         count += 1
       }
     }
