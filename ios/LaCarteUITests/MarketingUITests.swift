@@ -90,7 +90,7 @@ final class MarketingUITests: XCTestCase {
   @MainActor
   func testMarketing_2_dragRing() throws {
     XCUIDevice.shared.appearance = .light
-    for (name, f) in [("forgot", -0.22), ("gotit", 0.13), ("easy", 0.22)] {
+    for (name, f) in [("forgot", -0.3), ("gotit", 0.13), ("easy", 0.3)] {
       let (server, _) = try demoDeck()
       let app = launch(api: .live(server.url), arguments: ["-studySwipePreview", " \(f)"])
       reveal(app, "petrichor", "the smell of rain on dry earth")

@@ -46,7 +46,7 @@ struct RatingDialTests {
     #expect(RatingDialLayout(value: 0.5).dots.count == 96)
   }
 
-  @Test(arguments: [0.875, 1.0])
+  @Test(arguments: [RatingBands.easy, 1.0])
   func easyIsFullyOrderedOnThreeEvenRingsAllOneSize(value: Double) {
     let layout = RatingDialLayout(value: value)
     #expect(layout.stage == .second)
@@ -56,7 +56,7 @@ struct RatingDialTests {
     #expect(layout.dots[0].diameter == RatingDialLayout.diameter)
   }
 
-  @Test(arguments: [0.125, 0.0])
+  @Test(arguments: [RatingBands.forgot, 0.0])
   func forgotIsFullyScatteredWithVariedSizes(value: Double) {
     let layout = RatingDialLayout(value: value)
     #expect(layout.stage == .second)
@@ -67,14 +67,14 @@ struct RatingDialTests {
 
   @Test func eachGradeEdgeHasItsDisorder() {
     let edges: [(Double, Double)] = [
-      (0.125, RatingDialLayout.forgot), (0.35, RatingDialLayout.hard), (0.5, RatingDialLayout.rest),
-      (0.65, RatingDialLayout.gotIt), (0.875, RatingDialLayout.easy),
+      (RatingBands.forgot, RatingDialLayout.forgot), (RatingBands.hard, RatingDialLayout.hard),
+      (0.5, RatingDialLayout.rest), (RatingBands.gotIt, RatingDialLayout.gotIt), (RatingBands.easy, RatingDialLayout.easy),
     ]
     for (value, disorder) in edges {
       #expect(abs(RatingDialLayout(value: value).disorder - disorder) < 1e-9, "value \(value)")
     }
-    #expect(RatingDialLayout(value: 0.35).stage == .first)
-    #expect(RatingDialLayout(value: 0.65).stage == .first)
+    #expect(RatingDialLayout(value: RatingBands.hard).stage == .first)
+    #expect(RatingDialLayout(value: RatingBands.gotIt).stage == .first)
     #expect(RatingDialLayout(value: 0.5).stage == .none)
   }
 
@@ -120,9 +120,10 @@ struct RatingDialTests {
   }
 
   @Test func eachGradeHoldsItsLookDeepInItsBin() {
-    #expect(RatingDialLayout(value: 0.25).disorder == RatingDialLayout.hard)
-    #expect(RatingDialLayout(value: 0.8).disorder == RatingDialLayout.gotIt)
-    #expect(RatingDialLayout(value: 0.45).disorder == RatingDialLayout.rest)
+    let (bands, mid) = (RatingBands.self, { (a: Double, b: Double) in (a + b) / 2 })
+    #expect(RatingDialLayout(value: mid(bands.forgot, bands.hard)).disorder == RatingDialLayout.hard)
+    #expect(RatingDialLayout(value: mid(bands.gotIt, bands.easy)).disorder == RatingDialLayout.gotIt)
+    #expect(RatingDialLayout(value: mid(bands.hard, 0.5)).disorder == RatingDialLayout.rest)
   }
 
   @Test func theScatterIsDeterministic() {
@@ -142,11 +143,11 @@ struct RatingDialTests {
 
 struct RatingDialRewardTests {
   @Test func gotItSettlesAndEasyBursts() {
-    #expect(RatingDial.Release(value: 0.65) == .settle)
-    #expect(RatingDial.Release(value: 0.8) == .settle)
-    #expect(RatingDial.Release(value: 0.875) == .burst)
+    #expect(RatingDial.Release(value: RatingBands.gotIt) == .settle)
+    #expect(RatingDial.Release(value: (RatingBands.gotIt + RatingBands.easy) / 2) == .settle)
+    #expect(RatingDial.Release(value: RatingBands.easy) == .burst)
     #expect(RatingDial.Release(value: 1) == .burst)
-    #expect(RatingDial.Release(value: 0.64) == nil)
+    #expect(RatingDial.Release(value: RatingBands.gotIt - 0.01) == nil)
     #expect(RatingDial.Release(value: 0) == nil)
   }
 
@@ -211,5 +212,97 @@ struct RatingDialRewardTests {
       }
       #expect(smallest >= RatingDialLayout.minGap - 0.05, "t \(Double(step) / 100)")
     }
+  }
+}
+
+/// The grade cues added 2026-11-22 (spec 019 §3 amendment): Forgot's pink share and Easy's chains
+/// (Got it's pairs removed the same day: no line before the Got it → Easy midpoint).
+struct RatingDialCueTests {
+  typealias Layout = RatingDialLayout
+
+  @Test func forgotTurnsAFifthOfTheVisibleDotsPink() {
+    #expect(Layout.accentDots.count == 20)
+    #expect(Set(Layout.accentDots.map(\.index)).count == 20)
+    #expect(Layout.accentDots.allSatisfy { Layout.scatter[$0.index].diameter >= Layout.diameter * 0.8 })
+    for value in [0, RatingBands.forgot] {
+      let layout = Layout(value: value)
+      #expect(layout.blush == 1)
+      #expect(Layout.accentDots.allSatisfy { layout.accent(start: $0.start) == 1 }, "value \(value)")
+    }
+  }
+
+  @Test func onlyForgotIsPink() {
+    for step in 0...200 {
+      let value = Double(step) / 200
+      // Hard (its look held for 70 % of its stretch) and everything above it stays monochrome.
+      if value >= RatingBands.forgot + 0.31 * (RatingBands.hard - RatingBands.forgot) { #expect(Layout(value: value).blush == 0, "value \(value)") }
+    }
+  }
+
+  /// Got it never shows a line: nothing from rest through Got it up to `linkStart` of the way to Easy (at least
+  /// the midpoint); the full chains exactly at Easy's bin edge and beyond.
+  @Test func noLinksBeforeTheGotItToEasyMidpoint() {
+    #expect(Layout.linkStart >= 0.5)
+    let (gotIt, easy) = (RatingBands.gotIt, RatingBands.easy)
+    let start = gotIt + (easy - gotIt) * Layout.linkStart
+    for step in 0...400 {
+      let value = Double(step) / 400
+      if value < start - 1e-9 { #expect(Layout(value: value).links == 0, "value \(value)") }
+    }
+    for value in [easy, (easy + 1) / 2, 1] { #expect(Layout(value: value).links == 1, "value \(value)") }
+  }
+
+  /// Lines may show in Got it, never connected (user, 2026-11-22): at every ease short of Easy the two halves of every
+  /// link stop a clear break apart (≥ 1.5 pt once 1 pt butt caps' antialiasing, half a point each side, eats into
+  /// it); from Easy's bin edge on, every link is closed.
+  @Test func linksStayOpenUntilEasy() {
+    let (gotIt, easy) = (RatingBands.gotIt, RatingBands.easy)
+    let values = (0...400).map { gotIt + (easy - gotIt) * Double($0) / 400 }.filter { $0 < easy }
+      + [easy.nextDown, easy - 1e-6, easy, (easy + 1) / 2, 1]
+    for value in values {
+      let layout = Layout(value: value)
+      let dots = layout.dots
+      var smallest = CGFloat.infinity
+      for (i, j) in Layout.ringLinks {
+        let length = hypot(dots[j].x - dots[i].x, dots[j].y - dots[i].y)
+        func reach(_ k: Int) -> CGFloat {
+          Layout.linkReach(length: length, edge: dots[k].diameter / 2, grown: layout.links, joined: layout.linksJoined)
+        }
+        smallest = min(smallest, length - reach(i) - reach(j))
+      }
+      if value < easy {
+        #expect(smallest - 1 >= 1.5, "value \(value): gap \(smallest)")
+      } else {
+        #expect(abs(smallest) < 1e-9, "value \(value): gap \(smallest)")
+      }
+    }
+  }
+
+  /// No pop: every cue moves by at most a small step per 0.005 of value, and never backs off toward its grade; the
+  /// links grow strictly from their start to Easy.
+  @Test func theCuesFollowTheDragContinuously() {
+    var previous = Layout(value: 0)
+    for step in 1...200 {
+      let value = Double(step) / 200
+      let layout = Layout(value: value)
+      #expect(layout.blush <= previous.blush)
+      #expect(layout.links >= previous.links)
+      if previous.links > 0 && value <= RatingBands.easy { #expect(layout.links > previous.links, "value \(value)") }
+      for (a, b) in [(layout.blush, previous.blush), (layout.links, previous.links)] {
+        #expect(abs(a - b) <= 0.15, "value \(value)")
+      }
+      previous = layout
+    }
+  }
+
+  /// Easy: each ring closed into one chain, every neighbour pair linked once, never across rings.
+  @Test func linksCloseEachRing() {
+    let links = Layout.ringLinks
+    #expect(links.count == Layout.count)
+    #expect(Set(links.map { [$0.0, $0.1].sorted() }).count == Layout.count)
+    #expect(links.allSatisfy { Layout.slot($0.0).ring == Layout.slot($0.1).ring })
+    var degree = [Int](repeating: 0, count: Layout.count)
+    for (i, j) in links { degree[i] += 1; degree[j] += 1 }
+    #expect(degree.allSatisfy { $0 == 2 })
   }
 }

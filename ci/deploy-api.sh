@@ -8,11 +8,15 @@ cd "$(dirname "$0")/.."
 : "${DOKPLOY_URL:?}" "${DOKPLOY_API_KEY:?}" "${DOKPLOY_COMPOSE_ID:?}" "${LA_CARTE_LIVE_URL:?}" "${GITHUB_SHA:?}"
 dokploy() { curl -fsS --max-time 30 -H "x-api-key: $DOKPLOY_API_KEY" "$@"; }
 
-# 1. Dokploy builds the head of main, not a given commit: only the newest commit deploys (a newer run follows).
+# 1. Dokploy builds the head of main, not a given commit. Deploy only if the head's image inputs (api/,
+#    docker-compose.yml) are the ones tested here; otherwise a newer run tests and deploys them.
 head=$(git ls-remote origin refs/heads/main | cut -f1)
 if [[ "$head" != "$GITHUB_SHA" ]]; then
-  echo "main moved on to $head: its own run deploys it. Skipping."
-  exit 0
+  if ! git fetch --quiet origin "$head" || ! git diff --quiet "$GITHUB_SHA" "$head" -- api docker-compose.yml; then
+    echo "main moved on to $head with other API changes: its own run deploys them. Skipping."
+    exit 0
+  fi
+  echo "main moved on to $head, same api/ + docker-compose.yml as this tested commit: deploying."
 fi
 
 # 2. Anything to deploy? The live source hash differs (also catches commits whose runs were cancelled),

@@ -2,8 +2,10 @@ import XCTest
 
 /// Spec 011: two rating buttons ("Forgot", "Got it") + a horizontal drag on the revealed card that draws a ring of
 /// confidence dots and, on release, sends one of the four grades.
-/// Drag unit: `f` = card-width fraction from the card's center (spec: +0.13 good, +0.22 easy, -0.13 hard,
-/// -0.22 again, +0.04 cancel). Held states come from the DEBUG launch argument `-studySwipePreview " <f>"`.
+/// Drag unit: `f` = card-width fraction from the card's center, projected on the up-right diagonal. Ring radius
+/// R = 0.25 w; bands (spec 019, amended 2026-11-22): |f| < 0.075 w (0.3 R) cancels, 0.075–0.235 w (to 0.94 R) is
+/// Got it / Hard, ≥ 0.235 w is Easy / Forgot. Tests use ±0.13 and ±0.2 for the middle grades, ±0.3 for the
+/// extremes, ±0.04 to cancel. Held states come from the DEBUG launch argument `-studySwipePreview " <f>"`.
 final class RatingsUITests: XCTestCase {
   /// (file suffix, system appearance, `-theme` value). Forest forces its own dark palette.
   static let variants: [(name: String, appearance: XCUIDevice.Appearance, theme: String)] = [
@@ -11,12 +13,12 @@ final class RatingsUITests: XCTestCase {
   ]
   /// Held drag states (spec 019 #5, #6): (screenshot state, launch argument, f, ring value, left label, right label).
   static let held: [(state: String, arg: String, f: Double, grade: String, left: String, right: String)] = [
-    ("again", "-studySwipePreview", -0.22, "Forgot", "Forgot", "Got it"),
+    ("again", "-studySwipePreview", -0.3, "Forgot", "Forgot", "Got it"),
     ("hard", "-studySwipePreview", -0.13, "Hard", "Hard", "Got it"),
     ("neutral", "-studySwipePreview", 0.04, "None", "Forgot", "Got it"),
     ("good", "-studySwipePreview", 0.13, "Got it", "Forgot", "Got it"),
-    ("easy", "-studySwipePreview", 0.22, "Easy", "Forgot", "Easy"),
-    ("easy-up", "-studySwipePreviewUp", 0.22, "Easy", "Forgot", "Easy"),
+    ("easy", "-studySwipePreview", 0.3, "Easy", "Forgot", "Easy"),
+    ("easy-up", "-studySwipePreviewUp", 0.3, "Easy", "Forgot", "Easy"),
   ]
   /// AX-XL text (the language list is pinned to English suite-wide in `launch()`).
   static let longCardArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"]
@@ -103,13 +105,39 @@ final class RatingsUITests: XCTestCase {
     XCTAssertTrue(issues.isEmpty, "spec 019 #3/#5:\n" + Set(issues).sorted().joined(separator: "\n"))
   }
 
+  /// Held just inside the wider middle band (±0.2 w, m = 0.8): still Got it / Hard, light + dark. Screenshots show
+  /// which grade cues (links, pink) already appear near the Easy / Forgot edge.
+  @MainActor
+  func testRatings_swipeHeldMiddleBandEdge() {
+    for appearance in [XCUIDevice.Appearance.light, .dark] {
+      XCUIDevice.shared.appearance = appearance
+      for (state, f, grade, left, right) in [("good-far", 0.2, "Got it", "Forgot", "Got it"),
+                                             ("hard-far", -0.2, "Hard", "Hard", "Got it")] {
+        let app = launch(api: .mock, arguments: ["-studySwipePreview", " \(f)"])
+        waitForLabel(el(app, "study.front"), Self.mockFront)
+        el(app, "study.reveal").tap()
+        waitForLabel(el(app, "study.back"), Self.mockBack)
+        let r = ring(app)
+        XCTAssertTrue(r.waitFor(timeout: 5), "no ring (\(state))")
+        XCTAssertEqual(r.value as? String, grade, "ring value at \(f) w")
+        waitForLabel(el(app, "study.rate.again"), left)
+        waitForLabel(el(app, "study.rate.good"), right)
+        Thread.sleep(forTimeInterval: 0.4)  // let the threshold pulse settle
+        snapshot("study-drag-\(state)", appearance: appearance)
+        app.terminate()
+      }
+    }
+  }
+
   // MARK: - #2, #6 buttons and drags send the right grade (stub records bodies)
 
   @MainActor
   func testRatings_buttonsAndDragsSendGrade() throws {
     XCUIDevice.shared.appearance = .light
     let plan: [(action: String, rating: String)] = [
-      ("forgot", "again"), ("gotit", "good"), ("+0.13", "good"), ("+0.22", "easy"), ("-0.13", "hard"), ("-0.22", "again"),
+      ("forgot", "again"), ("gotit", "good"), ("+0.13", "good"), ("+0.3", "easy"), ("-0.13", "hard"), ("-0.3", "again"),
+      // Just inside the wider middle band (ends at 0.235 w): still Got it / Hard.
+      ("+0.2", "good"), ("-0.2", "hard"),
     ]
     let cards = plan.indices.map { i in
       StubDeck.Card(id: "0000000\(i)-1111-1111-1111-111111111111", front: "front \(i)", back: "back \(i)",
@@ -311,7 +339,7 @@ final class RatingsUITests: XCTestCase {
     continueAfterFailure = true
     XCUIDevice.shared.appearance = .light
     let plan: [(dx: Double, dy: Double, rating: String)] = [
-      (0, -0.13, "good"), (0, -0.22, "easy"), (0, 0.22, "again"), (0.22, 0, "easy"),
+      (0, -0.13, "good"), (0, -0.3, "easy"), (0, 0.3, "again"), (0.3, 0, "easy"),
     ]
     let cards = plan.indices.map { i in
       StubDeck.Card(id: "DDDDDDD\(i)-1111-1111-1111-111111111111", front: "front \(i)", back: "back \(i)",
@@ -360,8 +388,8 @@ final class RatingsUITests: XCTestCase {
     continueAfterFailure = true
     XCUIDevice.shared.appearance = .light
     let plan: [(dx: Double, dy: Double, rating: String)] = [
-      (0, -0.13, "good"), (0, -0.22, "easy"), (0, 0.22, "again"), (0, -0.13, "good"), (0, -0.22, "easy"),
-      (0, 0.22, "again"), (0, -0.13, "good"), (0, -0.22, "easy"), (0, 0.22, "again"),
+      (0, -0.13, "good"), (0, -0.3, "easy"), (0, 0.3, "again"), (0, -0.13, "good"), (0, -0.3, "easy"),
+      (0, 0.3, "again"), (0, -0.13, "good"), (0, -0.3, "easy"), (0, 0.3, "again"),
     ]
     let cards = plan.indices.map { i in
       StubDeck.Card(id: "FFFFFFF\(i)-1111-1111-1111-111111111111", front: "front \(i)", back: "back \(i)",
@@ -406,14 +434,14 @@ final class RatingsUITests: XCTestCase {
 
   // MARK: - 019 #7 real drags on a fitting card: up, down, up-left
 
-  /// Fitting card: a vertical drag starts the rating pan (no scroll view in the way). Up 0.22 w → easy,
-  /// down 0.22 w → again, up-left (projection ~0) → nothing, card stays revealed and the row returns to rest.
+  /// Fitting card: a vertical drag starts the rating pan (no scroll view in the way). Up 0.3 w → easy,
+  /// down 0.3 w → again, up 0.2 w → good, down 0.2 w → hard (wider middle band), up-left (projection ~0) → nothing, card stays revealed and the row returns to rest.
   @MainActor
   func testRatings_realDragsAnyDirection() throws {
     XCUIDevice.shared.appearance = .light
     let plan: [(name: String, dx: Double, dy: Double, rating: String?)] = [
-      ("up", 0, -0.22, "easy"), ("down", 0, 0.22, "again"), ("upleft", -0.2, -0.2, nil),
-      ("upright", 0.1, -0.1, "good"), ("left", -0.22, 0, "again"),
+      ("up", 0, -0.3, "easy"), ("down", 0, 0.3, "again"), ("upleft", -0.2, -0.2, nil),
+      ("upright", 0.1, -0.1, "good"), ("left", -0.3, 0, "again"), ("up-mid", 0, -0.2, "good"), ("down-mid", 0, 0.2, "hard"),
     ]
     let cards = plan.indices.map { i in
       StubDeck.Card(id: "EEEEEEE\(i)-1111-1111-1111-111111111111", front: "front \(i)", back: "back \(i)",
@@ -443,6 +471,40 @@ final class RatingsUITests: XCTestCase {
         snapshot("study-drag-cancelled-\(step.name)", appearance: .light)
       }
     }
+    server.stop()
+  }
+
+  // MARK: - 019 §3 grade cues: slow sweep for a screen recording (design review frame strips)
+
+  /// Slow drags (60 pt/s, ~0.3 w) so a `--record` run shows the dial passing dead zone → Got it → Easy
+  /// (up) and → Hard → Forgot (down), light then dark. Asserts only the grade each release sends.
+  @MainActor
+  func testRatings_dialSweepRecording() throws {
+    XCUIDevice.shared.appearance = .light
+    let plan: [(dy: Double, rating: String, dark: Bool)] = [
+      (-0.3, "easy", false), (0.3, "again", false), (-0.3, "easy", true), (0.3, "again", true),
+    ]
+    let cards = plan.indices.map { i in
+      StubDeck.Card(id: "FFFFFFF\(i)-1111-1111-1111-111111111111", front: "front \(i)", back: "back \(i)",
+                    due: Date(timeIntervalSince1970: 1_767_225_600 + Double(i) * 60))
+    }
+    let (server, _) = try startReviewStub(cards)
+    let app = launch(api: .live(server.url))
+    for (i, step) in plan.enumerated() {
+      if step.dark { XCUIDevice.shared.appearance = .dark }
+      waitForLabel(el(app, "study.front"), "front \(i)")
+      if el(app, "study.reveal").exists { el(app, "study.card").tap() }
+      waitForLabel(el(app, "study.back"), "back \(i)")
+      Thread.sleep(forTimeInterval: 1)  // a still frame before each sweep
+      let card = el(app, "study.card"), w = card.frame.width
+      let start = card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+      start.press(forDuration: 0.3, thenDragTo: start.withOffset(CGVector(dx: 0, dy: step.dy * w)),
+                  withVelocity: XCUIGestureVelocity(rawValue: 20), thenHoldForDuration: 1.5)
+      let post = try waitForPost(server, count: i + 1)
+      let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(post.body.utf8)) as? [String: Any])
+      XCTAssertEqual(body["rating"] as? String, step.rating, "sweep \(i) sent \(post.body)")
+    }
+    XCUIDevice.shared.appearance = .light
     server.stop()
   }
 

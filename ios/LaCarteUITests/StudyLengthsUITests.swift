@@ -503,7 +503,7 @@ final class StudyLengthsUITests: XCTestCase {
     var bar = barPoints(app, strip, "easy-next") {
       let card = el(app, "study.card"), w = card.frame.width
       let start = card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-      start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0.22 * w, dy: 0)))
+      start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0.3 * w, dy: 0)))
     }
     waitForLabel(front, fronts[1])
     XCTAssertEqual(bar, 0, "scroll bar shown as the next card came in after an Easy drag")

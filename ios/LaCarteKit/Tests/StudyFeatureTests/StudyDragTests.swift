@@ -36,8 +36,8 @@ struct StudyDragTests {
     let down = [(-1.0, 0.0), (0, 1), (-0.5.squareRoot(), 0.5.squareRoot())]
     let across = [(-0.5.squareRoot(), -0.5.squareRoot()), (0.5.squareRoot(), 0.5.squareRoot())]
     let cases: [(Double, [(Double, Double)], Rating?)] = [
-      (0.13, up, .good), (0.22, up, .easy), (0.13, down, .hard), (0.22, down, .again),
-      (0.05, across, nil), (0.13, across, nil), (0.22, across, nil), (0.6, across, nil),
+      (0.13, up, .good), (0.24, up, .easy), (0.13, down, .hard), (0.24, down, .again),
+      (0.05, across, nil), (0.13, across, nil), (0.24, across, nil), (0.6, across, nil),
     ]
     for (length, directions, expected) in cases {
       for (x, y) in directions {
@@ -103,10 +103,10 @@ struct StudyDragTests {
       (0, nil),
       (0.04, .init(rating: .good, isArmed: false)),
       (0.13, .init(rating: .good, isArmed: true)),
-      (0.22, .init(rating: .easy, isArmed: true)),
+      (0.24, .init(rating: .easy, isArmed: true)),
       (-0.04, .init(rating: .hard, isArmed: false)),
       (-0.13, .init(rating: .hard, isArmed: true)),
-      (-0.22, .init(rating: .again, isArmed: true)),
+      (-0.24, .init(rating: .again, isArmed: true)),
     ]
     for (fraction, echo) in expected {
       state.swipeEase = StudyFeature.ease(forSwipe: fraction)
@@ -117,7 +117,7 @@ struct StudyDragTests {
   @Test func theCardTextFadesTo30PercentAcrossTheDeadZone() {
     var state = revealed()
     #expect(state.cardTextOpacity == 1)
-    let expected: [(Double, Double)] = [(0, 1), (0.0375, 0.65), (-0.0375, 0.65), (0.075, 0.3), (0.22, 0.3)]
+    let expected: [(Double, Double)] = [(0, 1), (0.0375, 0.65), (-0.0375, 0.65), (0.075, 0.3), (0.24, 0.3)]
     for (fraction, opacity) in expected {
       state.swipeEase = StudyFeature.ease(forSwipe: fraction)
       #expect(abs(state.cardTextOpacity - opacity) < 1e-9, "f = \(fraction)")
@@ -131,10 +131,10 @@ struct StudyDragTests {
       $0.apiClient.review = { _, _ in cards[0] }
     }
 
-    await store.send(.swipeChanged(fraction: 0.22)) {
-      $0.swipeEase = StudyFeature.ease(forSwipe: 0.22)
+    await store.send(.swipeChanged(fraction: 0.24)) {
+      $0.swipeEase = StudyFeature.ease(forSwipe: 0.24)
     }
-    await store.send(.swipeEnded(fraction: 0.22)) {
+    await store.send(.swipeEnded(fraction: 0.24)) {
       $0.swipeEase = nil
       $0.releasedRating = .easy
       $0.isReviewing = true

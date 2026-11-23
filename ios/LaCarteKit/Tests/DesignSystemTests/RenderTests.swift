@@ -70,6 +70,21 @@ struct RenderTests {
     }
   }
 
+  /// The held dial across the drag (spec 019 §3): `dial-held-<value × 1000>-<theme>.png`, the five grades and the
+  /// ramps between them, at the study size on a 300 pt square.
+  @Test func dialHeld() throws {
+    for value in [0, 0.03, 0.06, 0.1, 0.25, 0.5, 0.62, 0.635, 0.7, 0.81, 0.84, 0.86, 0.9, 0.93, 0.95, 0.96, 0.965, 0.969, 0.97, 1] {
+      for (name, theme, scheme) in Self.themes where name != "forest" {
+        let view = RatingDial(value: value, radius: 108)
+          .frame(width: 300, height: 300)
+          .background(Theme.background)
+          .environment(\.appTheme, theme)
+          .environment(\.colorScheme, scheme)
+        try write(view, scale: 3, to: String(format: "dial-held-%04d-%@.png", Int((value * 1000).rounded()), name), expectedPixels: nil)
+      }
+    }
+  }
+
   private func write(_ view: some View, scale: CGFloat, to file: String, expectedPixels: CGSize?) throws {
     let renderer = ImageRenderer(content: view)
     renderer.scale = scale

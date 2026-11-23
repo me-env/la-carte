@@ -38,6 +38,8 @@ app turns that continuous value into one of the four ratings the API already tak
 - **Quantization on release** (FSRS takes only 4 grades). With `d = |v - 0.5| x 2` (0 at the touch-down point, 1 on
   the ring):
 
+  Amended 2026-11-22: the bin edges are now 0.03 / 0.35 / 0.65 / 0.97, see [019](019-explicit-drag-feedback.md) §1.
+
   | `v` | `d` | Distance (iPhone 17 Pro) | Rating on release |
   |---|---|---|---|
   | `v <= 0.125` | `>= 0.75`, left | 69 pt or more | `again` |
