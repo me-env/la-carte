@@ -151,9 +151,23 @@ enum StubJSON {
 
   static func cards(_ cards: [String]) -> String { "[" + cards.joined(separator: ",") + "]" }
 
+  /// Spec 024: `/stats` also carries `new_today`, `milestone`, `due_new` and the streak history (one letter per
+  /// local day since `history_start`): here a single pending today ("p"), streak 0.
   static func stats(total: Int, nextDue: Date?) -> String {
     let next = nextDue.map { "\"\(iso($0))\"" } ?? "null"
-    return #"{"total":\#(total),"due":0,"new":0,"reviewed_today":\#(total),"next_due":\#(next),"streak":0}"#
+    return #"{"total":\#(total),"due":0,"new":0,"reviewed_today":\#(total),"next_due":\#(next),"streak":0,"#
+      + #""new_today":0,"milestone":15,"due_new":0,"history":"p","history_start":"\#(localDay(.now))","#
+      + #""streak_start":null}"#
+  }
+
+  /// `yyyy-MM-dd` in the device zone (the app decodes `/stats` days as device-zone calendar days).
+  static func localDay(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = .current
+    formatter.dateFormat = "yyyy-MM-dd"
+    return formatter.string(from: date)
   }
 }
 

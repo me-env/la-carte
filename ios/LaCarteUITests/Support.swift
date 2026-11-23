@@ -427,6 +427,14 @@ extension XCTestCase {
       + "luminance \(Int(minL))…\(Int(maxL))", file: file, line: line)
   }
 
+  /// A fresh simulator shows iOS's one-time "slide to type" tip over the keyboard on first use; tap its Continue so
+  /// the real keys (Done, Return) are reachable. No-op when the tip isn't there.
+  @MainActor
+  func dismissKeyboardTip(_ app: XCUIApplication) {
+    let tip = app.buttons["Continue"].firstMatch
+    if tip.waitFor(timeout: 1.5) { tip.tap() }
+  }
+
   /// Average luminance of the keyboard: dark keyboard < 110, light keyboard > 150.
   @MainActor
   func assertKeyboard(_ app: XCUIApplication, dark: Bool, _ context: String,
