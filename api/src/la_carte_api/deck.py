@@ -9,7 +9,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from itertools import islice
-from math import ceil
 from random import Random
 from typing import Literal
 from urllib.parse import urlsplit
@@ -24,7 +23,6 @@ from la_carte_api.models import (
     ACTIVE_REPORT,
     AddCardsResult,
     AddNotesResult,
-    AgentDeckStats,
     Card,
     CardCreate,
     CardRead,
@@ -32,7 +30,6 @@ from la_carte_api.models import (
     CardUpdate,
     DeckStats,
     Direction,
-    NewCardsStatus,
     Note,
     NoteCreate,
     NoteRead,
@@ -60,11 +57,14 @@ _DAY = timedelta(days=1)
 SIBLING_BURY = timedelta(hours=6)
 LEARNING = (CardState.learning, CardState.relearning)  # never buried; wins within its note
 
-# `Settings.new_cards_per_day` is a daily target for new cards, not a limit (spec 021, user
-# decision 2026-11-22): nothing is held back. A card is introduced at its first review.
-NEW_CARD_WINDOW = timedelta(hours=24)
-MAX_NEW_CARDS_PER_DAY = 200
-DEFAULT_MILESTONE = 15  # `/stats.milestone` when the stored value is 0 (spec 021 decision 3)
+# Spec 021: `Settings.new_cards_per_day` is the size M of the new-card steps the app shows
+# (display only: nothing is held back). A stored 0 reads as the default.
+MAX_MILESTONE = 200
+DEFAULT_MILESTONE = 15
+# The day's "At risk" step: started cards whose recall at local midnight was below
+# AT_RISK_RECALL; the step exists only with at least AT_RISK_MIN of them (spec 021 decision 5.1).
+AT_RISK_RECALL = 0.8
+AT_RISK_MIN = 10
 
 Side = tuple[str, ...]  # field names, in the type's field order
 Way = tuple[Side, Side]  # (prompt, answer): a direction, normalized
@@ -130,7 +130,7 @@ class InvalidNote(ValueError):
 
 
 class InvalidSetting(ValueError):
-    """A deck setting outside its range (e.g. `new_cards_per_day` not in 0-200)."""
+    """A deck setting outside its range (e.g. the new-card milestone not in 1-200)."""
 
 
 class UnknownTimeZone(ValueError):
@@ -521,20 +521,6 @@ def delete_card(session: Session, card_id: UUID) -> None:
 # --- Studying ----------------------------------------------------------------------------------
 
 
-def _introductions(session: Session, now: datetime) -> list[tuple[UUID, datetime]]:
-    """(card id, first review) of the cards first reviewed in `(now - NEW_CARD_WINDOW, now]`,
-    oldest first. From `ReviewLog`, so a deleted card still counts."""
-    first = func.min(ReviewLog.reviewed_at)
-    return list(
-        session.exec(
-            select(ReviewLog.card_id, first)
-            .group_by(col(ReviewLog.card_id))
-            .having(first > now - NEW_CARD_WINDOW, first <= now)
-            .order_by(first)
-        ).all()
-    )
-
-
 def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], datetime | None]:
     """The servable queue and the next time a card not servable now becomes servable.
 
@@ -618,11 +604,19 @@ def review_card(
     Its siblings are then buried until its new due, at most `SIBLING_BURY` (see `_queue`)."""
     now = now or utcnow()
     card = _card(session, card_id)
+    log = ReviewLog(
+        card_id=card.id,
+        rating=rating,
+        reviewed_at=now,
+        confidence=confidence,
+        stability_before=card.stability,  # the memory state before this review: null when new
+        last_review_before=card.last_review,
+    )
     scheduled, _ = _scheduler.review_card(card.to_fsrs(), rating.to_fsrs(), review_datetime=now)
     if scheduled.state == fsrs.State.Review:
         scheduled.due = _balanced_due(session, card.id, scheduled.due, now, rng or _rng)
     card.apply_fsrs(scheduled)
-    session.add(ReviewLog(card_id=card.id, rating=rating, reviewed_at=now, confidence=confidence))
+    session.add(log)
     session.commit()
     return get_card(session, card_id)
 
@@ -670,8 +664,9 @@ def _balanced_due(
 
 def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> DeckStats:
     """Deck counts at `now`. `due` / `next_due` / `due_new` follow the servable queue (burying
-    applied); `total` / `new` count cards; `reviewed_today`, `new_today`, `streak` and `history`
-    use calendar days in `tz` (specs 007, 021, 024)."""
+    applied); `total` / `new` count cards; `reviewed_today`, `new_today`, the ladder counts
+    (`at_risk_*`, `reviews_*`), `streak` and `history` use calendar days in `tz` (specs 007, 021,
+    024)."""
     now = now or utcnow()
     today = now.astimezone(tz).date()
     start_of_day, end_of_day = _local_midnight(today, tz), _local_midnight(today + _DAY, tz)
@@ -679,12 +674,7 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
     def count(*where) -> int:
         return session.exec(select(func.count()).select_from(Card).where(*where)).one()
 
-    reviewed_today = session.exec(
-        select(func.count(func.distinct(ReviewLog.card_id))).where(
-            col(ReviewLog.reviewed_at) >= start_of_day,
-            col(ReviewLog.reviewed_at) < end_of_day,
-        )
-    ).one()
+    first_today = _first_reviews_between(session, start_of_day, end_of_day)
     first_reviews = (
         select(func.min(ReviewLog.reviewed_at).label("first"))
         .group_by(col(ReviewLog.card_id))
@@ -701,68 +691,100 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
     history_start, history = _history({t.astimezone(tz).date() for t in review_times}, today)
     streak, streak_start = _streak(history, history_start)
     queue, next_due = _queue(session, now)
+    at_risk_total, at_risk_done = _at_risk(session, first_today, start_of_day)
+    reviews_done = len(first_today) - new_today
     return DeckStats(
         total=count(),
         due=len(queue),
-        new=count(col(Card.last_review).is_(None)),
-        reviewed_today=reviewed_today,
+        new=new_card_count(session),
+        reviewed_today=len(first_today),
         next_due=next_due,
         new_today=new_today,
-        milestone=get_settings(session).new_cards_per_day or DEFAULT_MILESTONE,
+        milestone=get_milestone(session),
         streak=streak,
         streak_start=streak_start,
         history_start=history_start,
         history=history,
         due_new=sum(card.last_review is None for card, _ in queue),
+        at_risk_total=at_risk_total,
+        at_risk_done=at_risk_done,
+        reviews_total=reviews_done
+        + sum(c.last_review is not None and c.last_review < start_of_day for c, _ in queue),
+        reviews_done=reviews_done,
     )
 
 
-def agent_stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> AgentDeckStats:
-    """`stats` plus the new-card target's status (MCP `deck_stats`)."""
-    now = now or utcnow()
-    return AgentDeckStats(**dict(stats(session, now, tz)), new_cards=new_cards_status(session, now))
-
-
-# --- Daily new-card target (spec 021) ------------------------------------------------------------
-
-
-def get_settings(session: Session) -> Settings:
-    return session.get(Settings, 1) or Settings()
-
-
-def new_cards_status(session: Session, now: datetime | None = None) -> NewCardsStatus:
-    """Today's new-card target and where the deck stands against it. Counters only: every new
-    card stays in the queue (user decision 2026-11-22). Report-held cards are not counted."""
-    now = now or utcnow()
-    per_day = get_settings(session).new_cards_per_day
-    introduced = len(_introductions(session, now))
-    held = select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))
-    new = session.exec(
-        select(func.count())
-        .select_from(Card)
-        .where(col(Card.last_review).is_(None), col(Card.id).not_in(held))
+def new_card_count(session: Session) -> int:
+    """Never-reviewed cards (report-held ones included)."""
+    return session.exec(
+        select(func.count()).select_from(Card).where(col(Card.last_review).is_(None))
     ).one()
-    available = min(max(per_day - introduced, 0), new)
-    return NewCardsStatus(
-        per_day=per_day,
-        introduced=introduced,
-        available=available,
-        waiting=new - available,
-        days=ceil((new - available) / per_day) if per_day else None,
+
+
+def _first_reviews_between(
+    session: Session, start: datetime, end: datetime
+) -> dict[UUID, ReviewLog]:
+    """card id -> its first review in `[start, end)`, deleted cards included."""
+    logs = session.exec(
+        select(ReviewLog)
+        .where(col(ReviewLog.reviewed_at) >= start, col(ReviewLog.reviewed_at) < end)
+        .order_by(col(ReviewLog.reviewed_at), col(ReviewLog.id))
     )
+    first: dict[UUID, ReviewLog] = {}
+    for log in logs:
+        first.setdefault(log.card_id, log)
+    return first
 
 
-def set_new_cards_per_day(
-    session: Session, value: int, now: datetime | None = None
-) -> NewCardsStatus:
-    """Sets the daily new-card target and returns the status under it."""
-    if not 0 <= value <= MAX_NEW_CARDS_PER_DAY:
-        raise InvalidSetting(f"new_cards_per_day must be between 0 and {MAX_NEW_CARDS_PER_DAY}.")
-    settings = get_settings(session)
+def _was_at_risk(stability: float | None, last_review: datetime | None, at: datetime) -> bool:
+    """A started card whose FSRS recall at `at` was below `AT_RISK_RECALL`."""
+    if stability is None or last_review is None:
+        return False
+    memory = fsrs.Card(card_id=0, stability=stability, last_review=last_review)
+    return _scheduler.get_card_retrievability(memory, at) < AT_RISK_RECALL
+
+
+def _at_risk(
+    session: Session, first_today: dict[UUID, ReviewLog], start_of_day: datetime
+) -> tuple[int, int]:
+    """(at_risk_total, at_risk_done) of the day's snapshot (spec 021 decision 5.1): the cards at
+    risk at `start_of_day`. A card reviewed today is judged by the state stored with its first
+    review today (done, even if deleted since); any other card by its current state (waiting,
+    unless held by a report). (0, 0) when fewer than `AT_RISK_MIN`."""
+    done = sum(
+        _was_at_risk(log.stability_before, log.last_review_before, start_of_day)
+        for log in first_today.values()
+    )
+    held = select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))
+    started = session.exec(
+        select(Card).where(col(Card.last_review).is_not(None), col(Card.id).not_in(held))
+    )
+    waiting = sum(
+        card.id not in first_today and _was_at_risk(card.stability, card.last_review, start_of_day)
+        for card in started
+    )
+    total = done + waiting
+    return (total, done) if total >= AT_RISK_MIN else (0, 0)
+
+
+# --- New-card milestone (spec 021) ---------------------------------------------------------------
+
+
+def get_milestone(session: Session) -> int:
+    """The size M of the new-card steps the app shows: the stored setting, 15 when missing or 0."""
+    settings = session.get(Settings, 1)
+    return (settings and settings.new_cards_per_day) or DEFAULT_MILESTONE
+
+
+def set_milestone(session: Session, value: int) -> int:
+    """Stores the new-card milestone size (1-200) for every client and returns it."""
+    if not 1 <= value <= MAX_MILESTONE:
+        raise InvalidSetting(f"new_card_milestone must be between 1 and {MAX_MILESTONE}.")
+    settings = session.get(Settings, 1) or Settings()
     settings.new_cards_per_day = value
     session.add(settings)  # inserts row 1 the first time
     session.commit()
-    return new_cards_status(session, now)
+    return value
 
 
 # --- Reports (spec 015) -----------------------------------------------------------------------
