@@ -114,18 +114,37 @@ DerivedData: plug it in, or `defaults delete com.apple.dt.Xcode IDECustomDerived
 
 Set per machine in `scripts/.local.env` (gitignored, never read on CI):
 `LA_CARTE_SIM_DEVICES="${LA_CARTE_SIM_DEVICES:-/Volumes/<ssd>/la-carte/simulators}"`.
-Mechanism: **one symlink per device**, `~/Library/Developer/CoreSimulator/Devices/<UDID> -> $LA_CARTE_SIM_DEVICES/<UDID>`.
-CoreSimulator lists, boots, erases (link kept) and tests them like local devices; device names are unchanged, so
-agents change nothing. Linking the whole `Devices` folder needs CoreSimulatorService stopped and was rolled back
-once (2026-11-22, `simctl` listed no devices); per-device links need neither.
-
+Mechanism: **one APFS disk image per device**, `$LA_CARTE_SIM_DEVICES/<UDID>.sparsebundle`, mounted *at* the
+device's own folder `~/Library/Developer/CoreSimulator/Devices/<UDID>` (`hdiutil attach -nobrowse -mountpoint`).
+CoreSimulator lists, boots, erases and tests them like local devices; device names are unchanged, so agents change
+nothing. `_ios-env.sh` mounts any image that isn't (after a reboot or replug; ~0.1 s each) before every iOS script.
+- **Why not symlinks** (the first version, 2026-11-23, d511eb4): a linked device folder has two paths, and the
+  simulator's processes use both. `XCUIDevice.shared.appearance = .dark` is written by `testmanagerd` through
+  `~/Library/…/<UDID>/data/…` while SpringBoard's style arbiter reads the same preferences domain through
+  `/Volumes/…/<UDID>/data/…`; cfprefsd keys domains by path, so SpringBoard never saw the change and every dark
+  screenshot rendered light (#F9FAF5 instead of #1A1A1A, no error). A mount has one path. Linking the whole
+  `Devices` folder would have the same problem. (The images are also APFS like the internal disk; the SSD is HFS+.)
+- **Dark mode also needs the appearance preference at boot.** SpringBoard's style arbiter only follows
+  `XCUIDevice.appearance` if `data/Library/Preferences/com.apple.uikitservices.userInterfaceStyleMode.plist`
+  existed when it started. A new or erased device has no such file, so its first boot ignores every switch (sim log:
+  `testmanagerd … Updating appearance mode to: 2` with no `Arbiter changing style` after it); old devices had it
+  from earlier runs. `sim_prewarm` writes it (`simctl spawn … defaults write`), and `_sim-pool.sh` runs
+  `sim_appearance_ready` before each run: file missing → one boot to write it, then shut down (~30 s, once). This
+  hits any fresh simulator, not only the SSD ones (CI's included).
+- Moving a used device into an image (`sim_to_image`) keeps only `device.plist` and **erases** it: its databases
+  (LaunchServices, containers, nsurlsessiond) store absolute paths, and a copied device kept writing app data to the
+  old folder.
+- An image can't be detached while CoreSimulatorService has the device open (`hdiutil detach` says busy): leave
+  them mounted. A sparse bundle doesn't shrink when the device is erased (measured: 2.25 GB before and after),
+  so each image stays at its high-water mark, about `SIM_TRIM_GB` + one run (~10 GB, ~100 GB for 10 devices).
 - `scripts/sim-devices.sh` creates the team's devices if missing (iOS 27: `iPhone 17 Pro`, `iPhone 17`,
-  `la-carte-ui-2..5`, `la-carte-unit-2..3`; iOS 26.5: `iPhone 17 Pro`, `iPhone 17`), moves each folder to the SSD,
-  links it and boots it once. `_sim-pool.sh` creates missing pool devices the same way (`sim_create` in
-  `_ios-env.sh`). A device created by hand or by Xcode lands on the internal disk: prefer the scripts.
+  `la-carte-ui-2..5`, `la-carte-unit-2..3`; iOS 26.5: `iPhone 17 Pro`, `iPhone 17`), each in its image, and boots
+  it once; devices still linked the old way are moved into images. `_sim-pool.sh` creates missing pool devices the
+  same way (`sim_create` in `_ios-env.sh`). A device created by hand or by Xcode lands on the internal disk: prefer
+  the scripts.
 - **SSD not mounted:** every iOS script stops at once with exit **78** and "❌ The simulators live in … not mounted":
   nothing runs and nothing is recreated on the internal disk. Plug the SSD in and rerun. (Xcode by hand would show
-  the linked devices missing; don't recreate them, plug the SSD in.)
+  the devices missing or empty; don't recreate them, plug the SSD in.)
 - Measured, `LaunchUITests` (4 tests) and full `ios-test.sh`, under heavy load from other agents (load 200–600):
   internal disk, warm device: 53.0 s and 5.3 min (283 tests). SSD: 54.2 s and 5.2 min (289 tests); per test
   7.0–7.7 s vs 6.6–6.8 s. The very first UI run after the migration took 114.6 s (one-off: its device had only been

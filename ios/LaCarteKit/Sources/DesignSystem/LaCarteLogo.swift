@@ -40,8 +40,9 @@ public struct LaCarteLogo: View, Animatable {
 /// The logo's shapes in a 100×100 box, as a pure function of `progress` (tested in `LaCarteLogoTests`).
 /// The constants (card, curve, stroke, reset bar) are in the generated `LaCarteLogoGeometry.swift`.
 struct LogoGeometry: Equatable {
-  /// 0–0.3: the card fades and settles in. 0.3–1: the curve is drawn.
-  static let cardPhase = 0.0...0.3
+  /// 0–0.05: the card fades and settles in (≈135 ms of `logoDrawIn`, so the launch mark's tilt plays on a solid card).
+  /// 0.3–1: the curve is drawn.
+  static let cardPhase = 0.0...0.05
   static let linePhase = 0.3...1.0
 
   var cardOpacity: Double
@@ -157,20 +158,48 @@ private struct UnitShape: Shape {
   }
 }
 
-/// The logo drawing itself in once, e.g. on a launch or empty screen. With Reduce Motion it's static: the finished
-/// mark fades in.
+/// The logo drawing itself in once, e.g. on the "All caught up" screen. The card arrives tilted in 3D about its
+/// diagonal and lays itself flat (`logoTilt`) while the curve starts drawing (`logoDrawIn`); the line is in the
+/// card's plane, so the mark moves as one object. With Reduce Motion it's the finished mark, static. Never shown
+/// at app launch: nothing may delay the first card.
 public struct LaCarteLaunchMark: View {
+  /// The tilt the card arrives with, about the bottom-left → top-right diagonal.
+  static let tilt = Angle.degrees(40)
+  static let tiltAxis: (x: CGFloat, y: CGFloat, z: CGFloat) = (1, 1, 0)
+
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var shown = false
 
   public init() {}
 
   public var body: some View {
-    LaCarteLogo(progress: reduceMotion || shown ? 1 : 0)
-      .opacity(reduceMotion && !shown ? 0 : 1)
-      .onAppear {
-        withAnimation(reduceMotion ? Theme.Motion.standard : Theme.Motion.logoDrawIn) { shown = true }
-      }
+    if reduceMotion {
+      LaCarteLogo()
+    } else {
+      LaCarteLogo(progress: shown ? 1 : 0)
+        .animation(Theme.Motion.logoTilt) { $0.launchTilt(shown ? 0 : 1) }
+        .onAppear {
+          withAnimation(Theme.Motion.logoDrawIn) { shown = true }
+        }
+    }
+  }
+
+  /// The mark `time` seconds into its draw-in, on the same curves as the live one (for renders and reviews).
+  static func frame(at time: Double) -> some View {
+    func value(_ timing: (curve: UnitCurve, duration: Double)) -> Double {
+      timing.curve.value(at: min(max(time / timing.duration, 0), 1))
+    }
+    return LaCarteLogo(progress: value(Theme.Motion.logoDrawInCurve))
+      .launchTilt(1 - value(Theme.Motion.logoTiltCurve))
+  }
+}
+
+extension View {
+  /// `amount` of the launch mark's tilt: 1 = arriving, 0 = flat. Logo and line turn together, as one card.
+  fileprivate func launchTilt(_ amount: Double) -> some View {
+    rotation3DEffect(
+      .degrees(LaCarteLaunchMark.tilt.degrees * amount), axis: LaCarteLaunchMark.tiltAxis, perspective: 0.6
+    )
   }
 }
 

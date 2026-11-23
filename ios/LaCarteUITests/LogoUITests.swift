@@ -1,7 +1,8 @@
 import XCTest
 
 /// The la-carte mark (logo 131: a card crossed by the forgetting curve, pink outside the card) as the device draws
-/// it: the gallery's logo tiles in light/dark/forest, the launch mark drawing in once, the loading mark looping.
+/// it: the gallery's logo tiles in light/dark/forest, the launch mark (`LaCarteLaunchMark`, shown above Study's
+/// "All caught up", never at app launch) drawing in once with its card tilt, the loading mark looping.
 /// Geometry and progress maths are unit-tested in LaCarteKit (`LaCarteLogoTests`); here only what needs the screen.
 final class LogoUITests: XCTestCase {
   /// `Theme.accent` per scheme (light #B8325A, dark/forest #ED6E8C).
@@ -105,6 +106,139 @@ final class LogoUITests: XCTestCase {
       app.terminate()
     }
   }
+
+  // MARK: - Study "All caught up" (study.logo)
+
+  /// The launch mark sits centred above "All caught up" and draws in once: the frames change (line growth + tilt),
+  /// then the mark stays still and shows the ink card and the pink line. The line never loses a piece it has drawn
+  /// (pink count per frame never falls far below its running maximum). Frames: `study-logo-t<ms>-<scheme>`.
+  @MainActor
+  func testStudy_caughtUpLogoDrawIn() {
+    for appearance in [XCUIDevice.Appearance.light, .dark] {
+      XCUIDevice.shared.appearance = appearance
+      let suffix = appearance == .dark ? "dark" : "light"
+      let app = launch(api: .mock)
+      for index in 0..<3 {
+        waitForLabel(el(app, "study.front"), StudyUITests.fixtures[index].front)
+        el(app, "study.reveal").tap()
+        let rate = el(app, "study.rate.good")
+        XCTAssertTrue(rate.waitFor(timeout: 5), "study.rate.good missing")
+        rate.tap()
+      }
+      let logo = el(app, "study.logo")
+      XCTAssertTrue(logo.waitFor(timeout: 10), "study.logo missing on All caught up")
+      let start = Date()
+      var frames: [(ms: Int, image: CGImage)] = []
+      while Date().timeIntervalSince(start) < 2 {
+        let shot = XCUIScreen.main.screenshot()
+        let ms = Int(Date().timeIntervalSince(start) * 1000)
+        frames.append((ms, shot.image.cgImage!))
+        attach(shot, "study-logo-t\(String(format: "%04d", ms))-\(suffix)")
+      }
+      waitForLabel(el(app, "study.message"), "All caught up")
+      let rect = logo.frame
+      let message = el(app, "study.message").frame
+      let window = app.windows.firstMatch.frame
+      XCTAssertEqual(rect.width, 64, accuracy: 1, "study.logo not 64 pt: \(rect)")
+      XCTAssertEqual(rect.midX, window.midX, accuracy: 1, "study.logo not centred")
+      XCTAssertLessThanOrEqual(rect.maxY, message.minY, "study.logo not above study.message")
+
+      settle(1)
+      let settledA = XCUIScreen.main.screenshot().image.cgImage!
+      settle(1.5)
+      let settledB = XCUIScreen.main.screenshot().image.cgImage!
+      XCTAssertEqual(changedPoints(settledA, settledB, in: rect), 0, "study.logo still moving after draw-in (\(suffix))")
+      let changes = frames.map { changedPoints($0.image, settledB, in: rect) }
+      XCTAssertGreaterThan(changes.first ?? 0, 20, "study.logo didn't animate (\(suffix)): \(changes)")
+
+      let accent = appearance == .dark ? Self.accentDark : Self.accentLight
+      let pinks = frames.map { ColorProbe(at3x: $0.image).colors(in: rect, step: 0.5)
+        .filter { $0.isClose(to: accent, tolerance: 40) }.count }
+      XCTContext.runActivity(named: "pink samples per frame (\(suffix)): \(zip(frames.map(\.ms), pinks).map { "\($0)ms:\($1)" })") { _ in }
+      var peak = 0
+      for (frame, pink) in zip(frames, pinks) {
+        XCTAssertGreaterThanOrEqual(Double(pink), Double(peak) * 0.7 - 5,
+                                    "line lost a drawn piece at t=\(frame.ms) ms (\(suffix)): \(pinks)")
+        peak = max(peak, pink)
+      }
+      assertMark(ColorProbe(at3x: settledB), rect, ink: Palette.of(appearance).ink, accent: accent,
+                 "study.logo settled (\(suffix))")
+      snapshot("study-caught-up-logo", appearance: appearance)
+      app.terminate()
+    }
+  }
+
+  /// Nothing at launch shows the logo or delays the first card: with cards due, `study.front` is there right after
+  /// launch and `study.logo` never appears while it loads.
+  @MainActor
+  func testStudy_launchShowsFirstCardNoLogo() {
+    for appearance in [XCUIDevice.Appearance.light, .dark] {
+      XCUIDevice.shared.appearance = appearance
+      let app = launch(api: .mock)
+      let start = Date()
+      var sawLogo = false
+      let front = el(app, "study.front")
+      let shown = poll(timeout: 5) {
+        if el(app, "study.logo").exists { sawLogo = true }
+        return front.exists
+      }
+      let elapsed = Date().timeIntervalSince(start)
+      snapshot("study-launch-first-card", appearance: appearance)
+      XCTContext.runActivity(named: "study.front after \(String(format: "%.2f", elapsed)) s (\(appearance))") { _ in }
+      XCTAssertTrue(shown, "study.front missing after launch")
+      XCTAssertLessThan(elapsed, 1.5, "first card took \(elapsed) s after launch")
+      XCTAssertFalse(sawLogo, "study.logo shown at launch")
+      XCTAssertFalse(el(app, "study.logo").exists, "study.logo shown with the first card")
+      app.terminate()
+    }
+  }
+
+  /// Auto-refresh doesn't replay the draw-in: caught up (next card in 1 h), mark settled → foreground reload and the
+  /// 30 s timer reload both leave the mark pixel-identical.
+  @MainActor
+  func testStudy_caughtUpLogoNoReplayOnRefresh() throws {
+    XCUIDevice.shared.appearance = .light
+    let deck = StubDeck([.init(id: "aaaaaaaa-0000-0000-0000-000000000001", front: "canine", back: "dog",
+                               due: Date().addingTimeInterval(3600), createdAt: Date())])
+    let server = StubAPIServer(handler: deck.handle)
+    try server.start()
+    defer { server.stop() }
+    let app = launch(api: .live(server.url))
+    waitForLabel(el(app, "study.message"), "All caught up")
+    let logo = el(app, "study.logo")
+    XCTAssertTrue(logo.waitFor(timeout: 5), "study.logo missing")
+    settle(2.5)
+    let rect = logo.frame
+    let reference = XCUIScreen.main.screenshot().image.cgImage!
+    snapshot("study-caught-up-logo-before-refresh", appearance: .light)
+
+    func assertStillDuringReload(_ what: String, within timeout: TimeInterval, trigger: () -> Void) {
+      let before = server.requests.count
+      trigger()
+      XCTAssertTrue(poll(timeout: timeout) { server.requests.count > before }, "no reload after \(what)")
+      // The system's app-open zoom moves the whole window for ~0.4 s: wait until the message is back in place
+      // (a replayed draw-in lasts 1 s, so it would still be running when sampling starts).
+      let message = el(app, "study.message").frame
+      XCTAssertTrue(poll(timeout: 3) {
+        changedPoints(reference, XCUIScreen.main.screenshot().image.cgImage!, in: message) == 0
+      }, "screen not back in place after \(what)")
+      let start = Date()
+      var worst = 0
+      while Date().timeIntervalSince(start) < 2 {
+        worst = max(worst, changedPoints(reference, XCUIScreen.main.screenshot().image.cgImage!, in: rect))
+      }
+      XCTAssertTrue(logo.exists, "study.logo gone after \(what)")
+      XCTAssertEqual(worst, 0, "study.logo changed after \(what) (\(worst) points): draw-in replayed?")
+    }
+    assertStillDuringReload("foreground", within: 5) { backgroundAndReactivate(app) }
+    snapshot("study-caught-up-logo-after-foreground", appearance: .light)
+    assertStillDuringReload("30 s auto-refresh", within: 35) {}
+    snapshot("study-caught-up-logo-after-autorefresh", appearance: .light)
+  }
+
+  // Reduce Motion (static, finished mark) isn't covered here: XCUITest can't turn the setting on (launch arguments
+  // `-ReduceMotionEnabled` / `-UIAccessibilityReduceMotionEnabled` don't reach SwiftUI's environment, QA 2026-11-23).
+  // It's checked by `ScreenColorTests/caughtUpReduceMotion` in LaCarteKit.
 
   // MARK: - Helpers
 

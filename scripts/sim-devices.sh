@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Create the team's simulators if missing, each booted once so no test run pays a first boot. With LA_CARTE_SIM_DEVICES
-# set (scripts/.local.env) their folders go to that volume, linked from ~/Library/Developer/CoreSimulator/Devices.
-# Safe to rerun: it only creates what is missing. Run it while holding the simulator locks (docs/dev-velocity.md).
+# set (scripts/.local.env) each lives in a disk image on that volume, mounted at ~/Library/Developer/CoreSimulator/Devices/<UDID>;
+# devices still linked there the old way (symlink, breaks dark mode) are moved into images.
+# Safe to rerun: it only creates or moves what is missing. Run it while holding the simulator locks (docs/dev-velocity.md).
 #
 #   scripts/sim-devices.sh
 set -euo pipefail
@@ -38,5 +39,11 @@ for os in ${SIM_DEVICES_EXTRA_OS-26.5}; do
   ensure "$UNIT_SIMULATOR" "$UNIT_SIMULATOR" "$rt"
 done
 
+if [ -n "${LA_CARTE_SIM_DEVICES:-}" ]; then
+  for link in "$SIM_DEVICES_DIR"/*; do
+    [ -L "$link" ] || continue
+    case "$(readlink "$link")" in "$LA_CARTE_SIM_DEVICES"/*) (sim_to_image "$(basename "$link")" && echo "💽 $(basename "$link") moved into its image") & ;; esac
+  done
+fi
 wait
 echo "✅ devices ready${LA_CARTE_SIM_DEVICES:+ in $LA_CARTE_SIM_DEVICES}"
