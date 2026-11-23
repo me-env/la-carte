@@ -94,10 +94,8 @@ def _log(session: Session, card_id: UUID) -> ReviewLog:
 def test_review_log_stores_the_state_before_the_review(session):
     [new] = _new(session, 1)
     deck.review_card(session, new, Rating.good, now=at(9))
-    assert (_log(session, new).stability_before, _log(session, new).last_review_before) == (
-        None,
-        None,
-    )
+    log = _log(session, new)
+    assert (log.stability_before, log.last_review_before) == (None, None)
 
     before = session.get(Card, new)
     stability, last_review = before.stability, before.last_review

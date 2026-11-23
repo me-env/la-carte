@@ -671,9 +671,6 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
     today = now.astimezone(tz).date()
     start_of_day, end_of_day = _local_midnight(today, tz), _local_midnight(today + _DAY, tz)
 
-    def count(*where) -> int:
-        return session.exec(select(func.count()).select_from(Card).where(*where)).one()
-
     first_today = _first_reviews_between(session, start_of_day, end_of_day)
     first_reviews = (
         select(func.min(ReviewLog.reviewed_at).label("first"))
@@ -693,8 +690,11 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
     queue, next_due = _queue(session, now)
     at_risk_total, at_risk_done = _at_risk(session, first_today, start_of_day)
     reviews_done = len(first_today) - new_today
+    reviews_waiting = sum(
+        c.last_review is not None and c.last_review < start_of_day for c, _ in queue
+    )
     return DeckStats(
-        total=count(),
+        total=session.exec(select(func.count()).select_from(Card)).one(),
         due=len(queue),
         new=new_card_count(session),
         reviewed_today=len(first_today),
@@ -708,8 +708,7 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
         due_new=sum(card.last_review is None for card, _ in queue),
         at_risk_total=at_risk_total,
         at_risk_done=at_risk_done,
-        reviews_total=reviews_done
-        + sum(c.last_review is not None and c.last_review < start_of_day for c, _ in queue),
+        reviews_total=reviews_done + reviews_waiting,
         reviews_done=reviews_done,
     )
 
@@ -740,6 +739,7 @@ def _was_at_risk(stability: float | None, last_review: datetime | None, at: date
     """A started card whose FSRS recall at `at` was below `AT_RISK_RECALL`."""
     if stability is None or last_review is None:
         return False
+    # A fixed card_id: without one, `fsrs.Card` sleeps 1 ms to make a unique id (unused here).
     memory = fsrs.Card(card_id=0, stability=stability, last_review=last_review)
     return _scheduler.get_card_retrievability(memory, at) < AT_RISK_RECALL
 
