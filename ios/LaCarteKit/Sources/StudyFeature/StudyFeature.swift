@@ -23,6 +23,9 @@ public struct StudyFeature {
     /// The grade a drag released: the rating row keeps echoing it until the next card (spec 019).
     var releasedRating: Rating?
     var isReportMenuShown = false
+    /// The day's steps from the last `/stats` (spec 021); nil until the first load answers.
+    var ladder: Ladder?
+    var isMilestonesShown = false
     var isReportCommentShown = false
     var reportComment = ""
     /// Shown in the counter slot: a report's or a copy's outcome (specs 015, 016).
@@ -87,6 +90,12 @@ public struct StudyFeature {
 
     enum Notice: Equatable {
       case reported, failed, copied, copiedNotInstalled(String)
+      /// A ladder step a rating just completed: its label ("At risk", "15 new").
+      case stepDone(String)
+
+      var isStepDone: Bool {
+        if case .stepDone = self { true } else { false }
+      }
     }
 
     enum Phase: Equatable {
@@ -115,8 +124,10 @@ public struct StudyFeature {
     case scenePhaseChanged(ScenePhase)
     /// The caught-up / empty / offline timer elapsed (spec 018).
     case autoRefreshFired
-    case cardsResponse(Result<[Card], any Error>)
-    case statsResponse(Result<DeckStats, any Error>)
+    case remainingTapped
+    case queueResponse(Result<Queue, any Error>, afterRating: Bool)
+    /// The stats fetched after a rating that left cards in the batch.
+    case ladderResponse(Result<DeckStats, any Error>)
     case reviewResponse(Result<Card, any Error>)
     case editSaveResponse(Result<Card, any Error>, previous: Card)
     case cardDoubleTapped
@@ -142,7 +153,13 @@ public struct StudyFeature {
   @Dependency(\.continuousClock) var clock
   @Dependency(\.date) var date
 
-  private enum CancelID { case load, notice, autoRefresh }
+  /// One queue load: the due cards and the stats, fetched together (spec 021 decision 7).
+  public struct Queue: Sendable {
+    var cards: [Card]
+    var stats: DeckStats
+  }
+
+  private enum CancelID { case load, ladder, notice, autoRefresh }
 
   /// How often Study checks for new cards while there is nothing to study (spec 018).
   static let autoRefreshInterval: Duration = .seconds(30)
@@ -208,14 +225,14 @@ public struct StudyFeature {
         return endEdit(&state)
 
       case .onAppear, .deckChanged:
-        return fetchDueCards(&state)
+        return fetchQueue(&state)
 
       case .autoRefreshFired, .scenePhaseChanged(.active):
         // The review's or the edit's response updates the queue; a list fetched meanwhile could undo it.
         // While editing, a new list could replace the card under the user's fingers.
         // Dropped, the timer starts over from the current phase (none while studying).
         guard !state.isReviewing, state.editing == nil, !state.isSavingEdit else { return armAutoRefresh(state) }
-        return fetchDueCards(&state)
+        return fetchQueue(&state)
 
       case .scenePhaseChanged(.background):
         return .cancel(id: CancelID.autoRefresh)
@@ -225,7 +242,7 @@ public struct StudyFeature {
 
       case .retryButtonTapped:
         state.phase = .loading
-        return .merge(.cancel(id: CancelID.autoRefresh), fetchDueCards(&state))
+        return .merge(.cancel(id: CancelID.autoRefresh), fetchQueue(&state))
 
       case .revealTapped:
         state.isRevealed = true
@@ -284,7 +301,14 @@ public struct StudyFeature {
       case .openSettingsTapped:
         return .send(.delegate(.settingsRequested))
 
-      case var .cardsResponse(.success(cards)):
+      case .remainingTapped:
+        guard state.ladder != nil else { return .none }
+        state.isMilestonesShown = true
+        return .none
+
+      case let .queueResponse(.success(queue), afterRating):
+        var cards = queue.cards
+        let notice = updateLadder(&state, stats: queue.stats, afterRating: afterRating)
         // The report may not have landed yet (or failed): a skipped card must not come back.
         cards.removeAll { $0.id != state.cards.first?.id && state.reportedBrokenPhotos.contains($0.id) }
         // Never yank the visible card: while the server still serves it, it stays first.
@@ -296,25 +320,27 @@ public struct StudyFeature {
           state.swipeEase = nil
         }
         state.cards = IdentifiedArray(uniqueElements: cards)
-        guard cards.isEmpty else {
+        if cards.isEmpty {
+          state.phase = queue.stats.total == 0 ? .empty : .caughtUp(nextDue: queue.stats.nextDue)
+        } else {
           state.phase = .studying
-          return armAutoRefresh(state)
         }
-        return fetchStats()
+        return .merge(notice, armAutoRefresh(state))
 
-      case let .statsResponse(.success(stats)):
-        state.phase = stats.total == 0 ? .empty : .caughtUp(nextDue: stats.nextDue)
-        return armAutoRefresh(state)
+      case let .ladderResponse(.success(stats)):
+        return updateLadder(&state, stats: stats, afterRating: true)
+
+      case .ladderResponse(.failure):
+        return .none
 
       case let .reviewResponse(.success(card)):
         state.isReviewing = false
         state.releasedRating = nil
         state.isRevealed = false
         state.cards.remove(id: card.id)
-        return state.cards.isEmpty ? fetchDueCards(&state) : .none
+        return state.cards.isEmpty ? fetchQueue(&state, afterRating: true) : fetchLadder()
 
-      case let .cardsResponse(.failure(error)), let .statsResponse(.failure(error)),
-        let .reviewResponse(.failure(error)):
+      case let .queueResponse(.failure(error), _), let .reviewResponse(.failure(error)):
         state.isReviewing = false
         // The card and its pan leave the screen, so a held drag may never send its release.
         state.swipeEase = nil
@@ -363,7 +389,7 @@ public struct StudyFeature {
         state.isRevealed = false
         state.cards.remove(id: cardID)
         state.notice = .reported
-        return .merge(expireNotice(), state.cards.isEmpty ? fetchDueCards(&state) : .none)
+        return .merge(expireNotice(), state.cards.isEmpty ? fetchQueue(&state) : .none)
 
       case .reportResponse(.failure, _):
         state.isReviewing = false
@@ -382,7 +408,7 @@ public struct StudyFeature {
           state.swipeEase = nil
         }
         guard state.reportedBrokenPhotos.insert(cardID).inserted else {
-          return state.cards.isEmpty && state.phase == .studying ? fetchDueCards(&state) : .none
+          return state.cards.isEmpty && state.phase == .studying ? fetchQueue(&state) : .none
         }
         // Until the report lands the API still serves this card instead of its sibling: the refetch waits for it.
         if state.cards.isEmpty, state.phase == .studying { state.phase = .loading }
@@ -394,13 +420,17 @@ public struct StudyFeature {
         }
 
       case .brokenPhotoReportResponse(.success, _):
-        return state.cards.isEmpty && state.phase == .loading ? fetchDueCards(&state) : .none
+        return state.cards.isEmpty && state.phase == .loading ? fetchQueue(&state) : .none
 
       case let .brokenPhotoReportResponse(.failure, cardID):
         // Not held by the API, so it may come back on the next load; refetching now would only loop on it.
         state.reportedBrokenPhotos.remove(cardID)
         guard state.cards.isEmpty, state.phase == .loading else { return .none }
-        return fetchStats().cancellable(id: CancelID.load, cancelInFlight: true)
+        // Stats only, for caught up: refetching the cards would serve the broken photo again.
+        return .run { [apiClient] send in
+          await send(.queueResponse(Result { try await Queue(cards: [], stats: apiClient.stats()) }, afterRating: false))
+        }
+        .cancellable(id: CancelID.load, cancelInFlight: true)
 
       case .delegate:
         return .none
@@ -457,10 +487,22 @@ public struct StudyFeature {
     .cancellable(id: CancelID.autoRefresh, cancelInFlight: true)
   }
 
-  private func fetchStats() -> Effect<Action> {
+  /// Only the latest post-rating stats land.
+  private func fetchLadder() -> Effect<Action> {
     .run { [apiClient] send in
-      await send(.statsResponse(Result { try await apiClient.stats() }))
+      await send(.ladderResponse(Result { try await apiClient.stats() }))
     }
+    .cancellable(id: CancelID.ladder, cancelInFlight: true)
+  }
+
+  /// Stores the new ladder; after a rating, a step it completed shows its notice (spec 021 decision 8).
+  private func updateLadder(_ state: inout State, stats: DeckStats, afterRating: Bool) -> Effect<Action> {
+    let ladder = Ladder(stats: stats)
+    let step = afterRating ? state.ladder.flatMap { ladder.notice(after: $0) } : nil
+    state.ladder = ladder
+    guard let step else { return .none }
+    state.notice = .stepDone(step)
+    return expireNotice()
   }
 
   private func expireNotice() -> Effect<Action> {
@@ -499,18 +541,25 @@ public struct StudyFeature {
   }
 
   /// Without a server URL and a token there is nothing to ask, so no request is made (spec 008).
-  /// Every load shares one cancel id, so a slow response never overwrites a newer one.
-  private func fetchDueCards(_ state: inout State) -> Effect<Action> {
+  /// Every load shares one cancel id, so a slow response never overwrites a newer one; it also cancels a pending
+  /// post-rating ladder, whose older stats would overwrite the load's.
+  private func fetchQueue(_ state: inout State, afterRating: Bool = false) -> Effect<Action> {
     guard apiClient.isConfigured() else {
       state.phase = .notSetUp
       state.cards = []
       state.isRevealed = false
       return .merge(.cancel(id: CancelID.load), .cancel(id: CancelID.autoRefresh))
     }
-    return .run { [apiClient] send in
-      await send(.cardsResponse(Result { try await apiClient.dueCards(100) }))
+    let load: Effect<Action> = .run { [apiClient] send in
+      let queue = await Result {
+        async let cards = apiClient.dueCards(100)
+        async let stats = apiClient.stats()
+        return try await Queue(cards: cards, stats: stats)
+      }
+      await send(.queueResponse(queue, afterRating: afterRating))
     }
     .cancellable(id: CancelID.load, cancelInFlight: true)
+    return .merge(.cancel(id: CancelID.ladder), load)
   }
 }
 

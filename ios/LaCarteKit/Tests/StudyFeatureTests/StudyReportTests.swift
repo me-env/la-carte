@@ -201,8 +201,8 @@ struct StudyReportTests {
       $0.cards = []
       $0.notice = .reported
     }
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.phase = .caughtUp(nextDue: nil)
     }
     await clock.advance(by: .seconds(2))
@@ -217,6 +217,7 @@ struct StudyReportTests {
     let store = TestStore(initialState: revealed(cards)) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.continuousClock = clock
       $0.apiClient.reportCard = { _, _, _ in throw Offline() }
       $0.apiClient.review = { _, _ in cards[0] }
@@ -238,6 +239,9 @@ struct StudyReportTests {
       $0.isReviewing = false
       $0.isRevealed = false
       $0.cards.removeFirst()
+    }
+    await store.receive(\.ladderResponse.success) {
+      $0.ladder = Ladder(stats: .plain)
     }
   }
 
@@ -331,6 +335,7 @@ struct StudyReportTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.review = { _, _ in cards[0] }
       $0.apiClient.reportCard = { _, _, _ in throw Offline() }
     }
@@ -376,7 +381,9 @@ struct StudyReportTests {
     #expect(sent.value.map(\.2) == [String(repeating: "x", count: 500)])
 
     // The report may not have landed: the card is not served again this session, nor reported twice.
-    await store.send(.cardsResponse(.success([photoCard, cards[0]])))
+    await store.send(.queueResponse(.success(.init(cards: [photoCard, cards[0]], stats: .plain)), afterRating: false)) {
+      $0.ladder = Ladder(stats: .plain)
+    }
     await store.send(.photoLoadFailed(cardID: photoCard.id, url: url, side: .front))
     #expect(sent.value.count == 1)
   }
@@ -388,6 +395,7 @@ struct StudyReportTests {
     let store = TestStore(initialState: studying([photoCard])) {
       StudyFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.reportCard = { _, _, _ in held.setValue(true) }
       // Sibling burying: the API serves the sibling only once the photo card is held.
@@ -400,7 +408,8 @@ struct StudyReportTests {
       $0.phase = .loading
     }
     await store.receive(\.brokenPhotoReportResponse)
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [sibling]
       $0.phase = .studying
     }
@@ -426,11 +435,13 @@ struct StudyReportTests {
     await store.receive(\.brokenPhotoReportResponse) {
       $0.reportedBrokenPhotos = []
     }
-    await store.receive(\.statsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.phase = .caughtUp(nextDue: nil)
     }
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [photoCard]
       $0.phase = .studying
     }
@@ -449,7 +460,9 @@ struct StudyReportTests {
       $0.reportedBrokenPhotos = [nameCard.id]
     }
     await store.receive(\.brokenPhotoReportResponse)
-    await store.send(.cardsResponse(.success([nameCard, cards[0]])))
+    await store.send(.queueResponse(.success(.init(cards: [nameCard, cards[0]], stats: .plain)), afterRating: false)) {
+      $0.ladder = Ladder(stats: .plain)
+    }
     await store.send(.photoLoadFailed(cardID: nameCard.id, url: "https://example.org/a.jpg", side: .back))
     #expect(sent.value.map(\.0) == [nameCard.id])
     #expect(sent.value.map(\.1) == [.brokenPhoto])

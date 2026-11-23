@@ -60,7 +60,7 @@ public struct StudyView: View {
     }
     .sensoryFeedback(.selection, trigger: store.editing) { _, new in new != nil }
     .sensoryFeedback(.error, trigger: store.editFailed) { _, new in new }
-    .sensoryFeedback(.success, trigger: store.notice) { _, new in new == .reported }
+    .sensoryFeedback(.success, trigger: store.notice) { _, new in new == .reported || new?.isStepDone == true }
     .sensoryFeedback(trigger: store.swipeRating) { _, new in
       switch new {
       case .hard, .good: .selection
@@ -86,11 +86,10 @@ public struct StudyView: View {
               .transition(.opacity)
           } else if let notice = store.notice {
             counterText(Self.text(notice))
-              .accessibilityIdentifier("study.reportNotice")
+              .accessibilityIdentifier(notice.isStepDone ? "study.milestoneNotice" : "study.reportNotice")
               .transition(.opacity)
           } else if store.phase == .studying, !store.cards.isEmpty {
-            counterText(Text("\(Text(store.cards.count, format: .number).foregroundStyle(Theme.accent)) to review"))
-              .accessibilityIdentifier("study.remaining")
+            counter
           }
         }
       }
@@ -111,6 +110,37 @@ public struct StudyView: View {
     case .failed: "Couldn't send the report"
     case .copied: "Copied"
     case let .copiedNotInstalled(app): "Copied · \(app) isn't installed"
+    case let .stepDone(step): "\(step) done"
+    }
+  }
+
+  /// "8 at risk", "22 to review", "6 new": the ladder's current step, else the loaded batch (spec 021).
+  private var counterValue: (count: Int, unit: String) {
+    store.ladder?.counter ?? (store.cards.count, "to review")
+  }
+
+  /// A glass capsule, the peer of the two circles, that opens the ladder.
+  private var counter: some View {
+    let (count, unit) = counterValue
+    return Button {
+      store.send(.remainingTapped)
+    } label: {
+      counterText(Text("\(Text(count, format: .number).foregroundStyle(Theme.accent)) \(unit)"))
+        .monospacedDigit()
+        .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(count)))
+        .animation(Theme.Motion.standard, value: count)
+        .padding(.horizontal, Theme.Spacing.m)
+        .frame(minHeight: 44)
+        .contentShape(.capsule)
+    }
+    .buttonStyle(.plain)
+    .glassEffect(.regular.interactive(), in: .capsule)
+    .accessibilityLabel("Milestones")
+    .accessibilityValue("\(count) \(unit)")
+    .accessibilityIdentifier("study.remaining")
+    .popover(isPresented: $store.isMilestonesShown, arrowEdge: .top) {
+      MilestonesList(rows: store.ladder?.rows ?? [])
+        .presentationCompactAdaptation(.popover)
     }
   }
 
@@ -831,6 +861,57 @@ extension TextAlignment {
   }
 }
 
+/// The milestones popover: the ladder's rows only, no title, no buttons, no sentences (spec 021).
+struct MilestonesList: View {
+  let rows: [Ladder.Row]
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+        ForEach(rows) { row($0) }
+      }
+      .padding(Theme.Spacing.m)
+    }
+    .scrollBounceBehavior(.basedOnSize)
+    .frame(idealWidth: 220)
+    .fixedSize(horizontal: false, vertical: true)
+    .accessibilityIdentifier("study.milestones")
+  }
+
+  @ViewBuilder private func row(_ row: Ladder.Row) -> some View {
+    if row.isDone {
+      HStack {
+        Text(row.label)
+        Spacer()
+        Image(systemName: "checkmark")
+          .fontWeight(.medium)
+      }
+      .font(.body)
+      .foregroundStyle(Theme.secondaryInk)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("\(row.label), done")
+      .accessibilityIdentifier("study.milestone.\(row.kind.rawValue)")
+    } else {
+      VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        HStack {
+          Text(row.label)
+            .foregroundStyle(Theme.ink)
+          Spacer()
+          Text("\(row.done)/\(row.total)")
+            .foregroundStyle(Theme.secondaryInk)
+            .monospacedDigit()
+        }
+        .font(.body)
+        ProgressView(value: Double(row.done), total: Double(row.total))
+          .tint(Theme.ink)
+      }
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("\(row.label), \(row.done) of \(row.total)")
+      .accessibilityIdentifier("study.milestone.\(row.kind.rawValue)")
+    }
+  }
+}
+
 extension View {
   /// Centred text fills the column; leading text fills it too, or is a block centred on its widest line. A given
   /// `width` is the side's own column (layout D's answer), centred.
@@ -869,6 +950,19 @@ extension View {
   StudyView(store: Store(initialState: StudyFeature.State()) { StudyFeature() } withDependencies: {
     $0.apiClient = .inMemory(cards: .lengthFixtures)
   })
+}
+
+#Preview("Milestones") {
+  let stats = DeckStats(
+    total: 120, due: 64, new: 40, reviewedToday: 52, nextDue: nil, newToday: 9, dueNew: 40, atRiskTotal: 14,
+    atRiskDone: 14, reviewsTotal: 52, reviewsDone: 52
+  )
+  var state = StudyFeature.State()
+  state.cards = IdentifiedArray(uniqueElements: [Card].fixtures)
+  state.phase = .studying
+  state.ladder = Ladder(stats: stats)
+  state.isMilestonesShown = true
+  return StudyView(store: Store(initialState: state) { StudyFeature() })
 }
 
 #Preview("Rating drag held") {

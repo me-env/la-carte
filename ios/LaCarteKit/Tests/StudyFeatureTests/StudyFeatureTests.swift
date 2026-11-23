@@ -14,6 +14,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { limit in
         #expect(limit == 100)
@@ -22,7 +23,8 @@ struct StudyFeatureTests {
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = IdentifiedArray(uniqueElements: self.cards)
       $0.phase = .studying
     }
@@ -44,6 +46,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.review = { id, rating in
         reviewed.withValue { $0.append((id, rating)) }
@@ -58,6 +61,9 @@ struct StudyFeatureTests {
       $0.isReviewing = false
       $0.isRevealed = false
       $0.cards.removeFirst()
+    }
+    await store.receive(\.ladderResponse.success) {
+      $0.ladder = Ladder(stats: .plain)
     }
     #expect(reviewed.value.map(\.0) == [cards[0].id])
     #expect(reviewed.value.map(\.1) == [.good])
@@ -86,8 +92,8 @@ struct StudyFeatureTests {
       $0.isRevealed = false
       $0.cards = []
     }
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.phase = .caughtUp(nextDue: nextDue)
     }
     await store.send(.scenePhaseChanged(.background))
@@ -99,6 +105,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.review = { _, _ in cards[0] }
       $0.apiClient.dueCards = { _ in [cards[1]] }
@@ -112,7 +119,8 @@ struct StudyFeatureTests {
       $0.isRevealed = false
       $0.cards = []
     }
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [self.cards[1]]
     }
   }
@@ -128,8 +136,8 @@ struct StudyFeatureTests {
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.phase = .empty
     }
     await store.send(.scenePhaseChanged(.background))
@@ -143,13 +151,14 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in throw Offline() }
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.failure) {
+    await store.receive(\.queueResponse) {
       $0.phase = .offline
     }
     await store.send(.scenePhaseChanged(.background))
@@ -166,8 +175,7 @@ struct StudyFeatureTests {
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.failure) {
+    await store.receive(\.queueResponse) {
       $0.phase = .offline
     }
     await store.send(.scenePhaseChanged(.background))
@@ -179,6 +187,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.review = { _, _ in throw Offline() }
@@ -202,6 +211,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.review = { _, _ in
         reviewCount.withValue { $0 += 1 }
@@ -220,6 +230,9 @@ struct StudyFeatureTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
+    await store.receive(\.ladderResponse.success) {
+      $0.ladder = Ladder(stats: .plain)
+    }
     #expect(reviewCount.value == 1)
   }
 
@@ -229,6 +242,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.review = { _, _ in throw Offline() }
@@ -245,7 +259,8 @@ struct StudyFeatureTests {
     await store.send(.retryButtonTapped) {
       $0.phase = .loading
     }
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.phase = .studying
     }
   }
@@ -256,6 +271,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in cards }
     }
@@ -263,7 +279,8 @@ struct StudyFeatureTests {
     await store.send(.retryButtonTapped) {
       $0.phase = .loading
     }
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = IdentifiedArray(uniqueElements: self.cards)
       $0.phase = .studying
     }
@@ -284,12 +301,14 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in [cards[0], cards[2]] }
     }
 
     await store.send(.deckChanged)
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [self.cards[0], self.cards[2]]
     }
   }
@@ -300,12 +319,14 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in [cards[1], cards[2]] }
     }
 
     await store.send(.deckChanged)
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [self.cards[1], self.cards[2]]
       $0.isRevealed = false
     }
@@ -317,12 +338,14 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in [cards[0]] }
     }
 
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [self.cards[0]]
       $0.phase = .studying
     }
@@ -334,12 +357,14 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in [cards[0], cards[1]] }
     }
 
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [self.cards[0], self.cards[1]]
     }
   }
@@ -350,12 +375,14 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in [cards[1], cards[2]] }
     }
 
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [self.cards[1], self.cards[2]]
       $0.isRevealed = false
     }
@@ -375,6 +402,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: studying(cards)) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in cards }
     }
@@ -382,7 +410,9 @@ struct StudyFeatureTests {
     await store.send(.scenePhaseChanged(.inactive))
     await store.send(.scenePhaseChanged(.background))
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.success)
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
+    }
   }
 
   @Test func aNewLoadCancelsTheOneInFlight() async {
@@ -390,6 +420,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       // Only cancellation ends the first load: if the refresh didn't cancel it, the store would finish with it in flight.
       $0.apiClient.dueCards = { _ in
@@ -401,7 +432,8 @@ struct StudyFeatureTests {
 
     await store.send(.onAppear)
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [self.cards[1]]
       $0.phase = .studying
     }
@@ -412,6 +444,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: studying(cards)) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       // Only cancellation ends this load: if rating didn't cancel it, the store would finish with it in flight.
       $0.apiClient.dueCards = { _ in
@@ -431,6 +464,9 @@ struct StudyFeatureTests {
       $0.isReviewing = false
       $0.isRevealed = false
       $0.cards.removeFirst()
+    }
+    await store.receive(\.ladderResponse.success) {
+      $0.ladder = Ladder(stats: .plain)
     }
   }
 
@@ -470,6 +506,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { configured.value }
       $0.apiClient.dueCards = { _ in cards }
     }
@@ -477,7 +514,8 @@ struct StudyFeatureTests {
     await store.send(.scenePhaseChanged(.active))
     configured.setValue(true)
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = IdentifiedArray(uniqueElements: self.cards)
       $0.phase = .studying
     }
@@ -494,12 +532,13 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in throw APIError(statusCode: 401, message: "Unauthorized") }
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.failure) {
+    await store.receive(\.queueResponse) {
       $0.phase = .unauthorized
     }
   }
@@ -514,8 +553,7 @@ struct StudyFeatureTests {
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.failure) {
+    await store.receive(\.queueResponse) {
       $0.phase = .unauthorized
     }
   }
@@ -526,6 +564,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.apiClient.review = { _, _ in throw APIError(statusCode: 403, message: "Forbidden") }
     }
 
@@ -542,13 +581,14 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in throw APIError(statusCode: 500, message: "Internal Server Error") }
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.failure) {
+    await store.receive(\.queueResponse) {
       $0.phase = .offline
     }
     await store.send(.scenePhaseChanged(.background))
@@ -773,6 +813,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.updateCard = { _, _, _ in throw APIError(statusCode: 500, message: "Internal Server Error") }
       $0.apiClient.review = { _, _ in cards[0] }
     }
@@ -814,6 +855,9 @@ struct StudyFeatureTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
+    await store.receive(\.ladderResponse.success) {
+      $0.ladder = Ladder(stats: .plain)
+    }
   }
 
   @Test func refreshIsSkippedWhileEditing() async {
@@ -829,6 +873,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: revealed(cards)) {
       StudyFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       // Only cancellation ends this load: if the edit didn't cancel it, the store would finish with it in flight.
       $0.apiClient.dueCards = { _ in try await Task.never() }
@@ -880,6 +925,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.updateCard = { _, _, _ in
         for await card in saves { return card }
         throw CancellationError()
@@ -900,6 +946,9 @@ struct StudyFeatureTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
+    await store.receive(\.ladderResponse.success) {
+      $0.ladder = Ladder(stats: .plain)
+    }
     var saved = cards[0]
     saved.setText("a happy accident", for: .back)
     respondToSave.yield(saved)
@@ -916,6 +965,7 @@ struct StudyFeatureTests {
       let store = TestStore(initialState: revealed(cards)) {
         StudyFeature()
       } withDependencies: { [cards] in
+        $0.apiClient.stats = { .plain }
         $0.apiClient.review = { _, rating in
           reviewed.withValue { $0.append(rating) }
           return cards[0]
@@ -929,6 +979,9 @@ struct StudyFeatureTests {
         $0.isReviewing = false
         $0.isRevealed = false
         $0.cards.removeFirst()
+      }
+      await store.receive(\.ladderResponse.success) {
+        $0.ladder = Ladder(stats: .plain)
       }
       #expect(reviewed.value == [rating])
     }
@@ -982,6 +1035,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: revealed(cards)) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.review = { id, rating in
         reviewed.withValue { $0.append((id, rating)) }
         return cards[0]
@@ -1001,6 +1055,9 @@ struct StudyFeatureTests {
       $0.releasedRating = nil
       $0.isRevealed = false
       $0.cards.removeFirst()
+    }
+    await store.receive(\.ladderResponse.success) {
+      $0.ladder = Ladder(stats: .plain)
     }
     #expect(reviewed.value.map(\.0) == [cards[0].id])
     #expect(reviewed.value.map(\.1) == [rating])
@@ -1056,6 +1113,7 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: revealed(cards)) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.review = { _, _ in throw Offline() }
@@ -1078,7 +1136,8 @@ struct StudyFeatureTests {
     await store.send(.retryButtonTapped) {
       $0.phase = .loading
     }
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.phase = .studying
     }
     #expect(store.state.isRevealed && store.state.swipeEase == nil)
@@ -1090,12 +1149,14 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in [cards[1], cards[2]] }
     }
 
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [self.cards[1], self.cards[2]]
       $0.isRevealed = false
       $0.swipeEase = nil
@@ -1108,12 +1169,14 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in [cards[0], cards[2]] }
     }
 
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [self.cards[0], self.cards[2]]
     }
   }
@@ -1124,13 +1187,14 @@ struct StudyFeatureTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.continuousClock = TestClock()
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in throw Offline() }
     }
 
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.failure) {
+    await store.receive(\.queueResponse) {
       $0.phase = .offline
       $0.swipeEase = nil
     }
@@ -1160,4 +1224,9 @@ struct StudyFeatureTests {
     state.phase = .studying
     return state
   }
+}
+
+extension DeckStats {
+  /// The stats of a load whose test isn't about the ladder: no step, so no counter and no notice.
+  static let plain = DeckStats(total: 3, due: 3, new: 3, reviewedToday: 0, nextDue: nil)
 }

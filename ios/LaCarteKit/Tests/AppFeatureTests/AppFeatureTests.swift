@@ -17,12 +17,14 @@ struct AppFeatureTests {
     let store = TestStore(initialState: AppFeature.State()) {
       AppFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in [card] }
     }
 
     await store.send(\.study.onAppear)
-    await store.receive(\.study.cardsResponse.success) {
+    await store.receive(\.study.queueResponse) {
+      $0.study.ladder = Ladder(stats: .plain)
       $0.study.cards = [card]
       $0.study.phase = .studying
     }
@@ -50,6 +52,7 @@ struct AppFeatureTests {
     let store = TestStore(initialState: state) {
       AppFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.addNote = { _ in note }
       $0.apiClient.dueCards = { _ in [new] }
@@ -77,7 +80,8 @@ struct AppFeatureTests {
     await store.receive(\.destination.dismiss) {
       $0.destination = nil
     }
-    await store.receive(\.study.cardsResponse.success) {
+    await store.receive(\.study.queueResponse) {
+      $0.study.ladder = Ladder(stats: .plain)
       $0.study.cards = [new]
       $0.study.phase = .studying
     }
@@ -94,6 +98,7 @@ struct AppFeatureTests {
     let store = TestStore(initialState: state) {
       AppFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.deleteNote = { _ in }
       // The deck's reload waits for the test's go so the two reloads arrive in a fixed order.
@@ -110,7 +115,8 @@ struct AppFeatureTests {
     await store.receive(\.destination.deck.deleteResponse.success)
     await store.receive(\.destination.deck.delegate.deckChanged)
     await store.receive(\.study.deckChanged)
-    await store.receive(\.study.cardsResponse.success) {
+    await store.receive(\.study.queueResponse) {
+      $0.study.ladder = Ladder(stats: .plain)
       $0.study.cards = IdentifiedArray(uniqueElements: cards.dropFirst())
     }
     releaseDeckReload.yield()
@@ -142,6 +148,7 @@ struct AppFeatureTests {
     let store = TestStore(initialState: state) {
       AppFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { configured.value }
       $0.apiClient.dueCards = { _ in [card] }
     }
@@ -161,7 +168,8 @@ struct AppFeatureTests {
       $0.destination = nil
     }
     await store.receive(\.study.deckChanged)
-    await store.receive(\.study.cardsResponse.success) {
+    await store.receive(\.study.queueResponse) {
+      $0.study.ladder = Ladder(stats: .plain)
       $0.study.cards = [card]
       $0.study.phase = .studying
     }
@@ -188,7 +196,8 @@ struct AppFeatureTests {
     }
     await store.receive(\.destination.settings.delegate.serverChanged)
     await store.receive(\.study.deckChanged)
-    await store.receive(\.study.cardsResponse.success) {
+    await store.receive(\.study.queueResponse) {
+      $0.study.ladder = Ladder(stats: .plain)
       $0.study.cards = [card]
       $0.study.phase = .studying
     }
@@ -206,4 +215,9 @@ struct AppFeatureTests {
       $0.$theme.withLock { $0 = .dark }
     }
   }
+}
+
+extension DeckStats {
+  /// Study's stats when the test isn't about its ladder: no step.
+  static let plain = DeckStats(total: 3, due: 3, new: 3, reviewedToday: 0, nextDue: nil)
 }

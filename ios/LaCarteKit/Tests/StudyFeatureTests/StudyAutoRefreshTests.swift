@@ -28,15 +28,16 @@ struct StudyAutoRefreshTests {
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.phase = .caughtUp(nextDue: self.now.addingTimeInterval(10))
     }
     await clock.advance(by: .milliseconds(9_900))
     #expect(loads.value == 1)
     await clock.advance(by: .milliseconds(100))
     await store.receive(\.autoRefreshFired)
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [self.cards[0]]
       $0.phase = .studying
     }
@@ -66,8 +67,8 @@ struct StudyAutoRefreshTests {
     let phase: StudyFeature.State.Phase = stats.total == 0 ? .empty : .caughtUp(nextDue: stats.nextDue)
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.phase = phase
     }
     for check in 1...3 {
@@ -75,8 +76,7 @@ struct StudyAutoRefreshTests {
       #expect(loads.value == check)
       await clock.advance(by: .milliseconds(100))
       await store.receive(\.autoRefreshFired)
-      await store.receive(\.cardsResponse.success)
-      await store.receive(\.statsResponse.success)
+      await store.receive(\.queueResponse)
     }
     #expect(loads.value == 1 + 3)
     await store.send(.scenePhaseChanged(.background))
@@ -99,16 +99,15 @@ struct StudyAutoRefreshTests {
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.phase = .caughtUp(nextDue: self.now.addingTimeInterval(-5))
     }
     await clock.advance(by: .milliseconds(900))
     #expect(loads.value == 1)
     await clock.advance(by: .milliseconds(100))
     await store.receive(\.autoRefreshFired)
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.success)
+    await store.receive(\.queueResponse)
     await store.send(.scenePhaseChanged(.background))
   }
 
@@ -118,6 +117,7 @@ struct StudyAutoRefreshTests {
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.continuousClock = clock
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in
@@ -127,15 +127,16 @@ struct StudyAutoRefreshTests {
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.failure) {
+    await store.receive(\.queueResponse) {
       $0.phase = .offline
     }
     await clock.advance(by: .seconds(30))
     await store.receive(\.autoRefreshFired)
-    await store.receive(\.cardsResponse.failure)
+    await store.receive(\.queueResponse)
     await clock.advance(by: .seconds(30))
     await store.receive(\.autoRefreshFired)
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = IdentifiedArray(uniqueElements: self.cards)
       $0.phase = .studying
     }
@@ -150,6 +151,7 @@ struct StudyAutoRefreshTests {
     let store = TestStore(initialState: StudyFeature.State()) {
       StudyFeature()
     } withDependencies: {
+      $0.apiClient.stats = { .plain }
       $0.continuousClock = clock
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in
@@ -160,7 +162,7 @@ struct StudyAutoRefreshTests {
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.failure) {
+    await store.receive(\.queueResponse) {
       $0.phase = .offline
     }
     await store.send(.retryButtonTapped) {
@@ -168,7 +170,8 @@ struct StudyAutoRefreshTests {
     }
     await clock.advance(by: .seconds(300))
     respond.yield(cards)
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = IdentifiedArray(uniqueElements: self.cards)
       $0.phase = .studying
     }
@@ -190,13 +193,14 @@ struct StudyAutoRefreshTests {
 
     // Caught up, then a card arrives: `.studying` cancels the armed timer.
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.phase = .caughtUp(nextDue: nil)
     }
     response.setValue(.success([cards[0]]))
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [self.cards[0]]
       $0.phase = .studying
     }
@@ -204,7 +208,7 @@ struct StudyAutoRefreshTests {
 
     response.setValue(.failure(APIError(statusCode: 403, message: "Forbidden")))
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.failure) {
+    await store.receive(\.queueResponse) {
       $0.phase = .unauthorized
     }
     await clock.advance(by: .seconds(300))
@@ -233,27 +237,24 @@ struct StudyAutoRefreshTests {
     }
 
     await store.send(.onAppear)
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.phase = .caughtUp(nextDue: nil)
     }
     await store.send(.scenePhaseChanged(.inactive))
     await clock.advance(by: .seconds(30))
     await store.receive(\.autoRefreshFired)
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.success)
+    await store.receive(\.queueResponse)
 
     await store.send(.scenePhaseChanged(.background))
     await clock.advance(by: .seconds(300))
     #expect(loads.value == 2)
 
     await store.send(.scenePhaseChanged(.active))
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.success)
+    await store.receive(\.queueResponse)
     await clock.advance(by: .seconds(30))
     await store.receive(\.autoRefreshFired)
-    await store.receive(\.cardsResponse.success)
-    await store.receive(\.statsResponse.success)
+    await store.receive(\.queueResponse)
     #expect(loads.value == 4)
     await store.send(.scenePhaseChanged(.background))
   }
@@ -266,12 +267,14 @@ struct StudyAutoRefreshTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.isConfigured = { true }
       $0.apiClient.dueCards = { _ in [cards[2], cards[1], cards[0]] }
     }
 
     await store.send(.deckChanged)
-    await store.receive(\.cardsResponse.success) {
+    await store.receive(\.queueResponse) {
+      $0.ladder = Ladder(stats: .plain)
       $0.cards = [self.cards[0], self.cards[2], self.cards[1]]
     }
   }

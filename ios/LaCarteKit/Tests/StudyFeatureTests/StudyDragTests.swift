@@ -128,6 +128,7 @@ struct StudyDragTests {
     let store = TestStore(initialState: revealed()) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.apiClient.review = { _, _ in cards[0] }
     }
 
@@ -145,6 +146,9 @@ struct StudyDragTests {
       $0.releasedRating = nil
       $0.isRevealed = false
       $0.cards.removeFirst()
+    }
+    await store.receive(\.ladderResponse.success) {
+      $0.ladder = Ladder(stats: .plain)
     }
     #expect(store.state.rowEcho == nil)
   }

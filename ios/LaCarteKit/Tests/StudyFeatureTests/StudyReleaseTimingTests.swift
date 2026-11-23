@@ -22,6 +22,7 @@ struct StudyReleaseTimingTests {
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: { [cards] in
+      $0.apiClient.stats = { .plain }
       $0.continuousClock = clock
       $0.apiClient.review = { _, _ in cards[0] }
     }
@@ -42,6 +43,9 @@ struct StudyReleaseTimingTests {
       $0.releasedRating = nil
       $0.isRevealed = false
       $0.cards.removeFirst()
+    }
+    await store.receive(\.ladderResponse.success) {
+      $0.ladder = Ladder(stats: .plain)
     }
     #expect(store.state.cards.first?.id == cards[1].id)
   }

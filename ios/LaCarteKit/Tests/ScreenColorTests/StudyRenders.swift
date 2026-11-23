@@ -1,5 +1,6 @@
 import APIClient
 import ComposableArchitecture
+import DesignSystem
 import Foundation
 import SwiftUI
 import Testing
@@ -10,7 +11,8 @@ import Testing
 /// Off by default; `scripts/ios-test.sh --render -only-testing:ScreenColorTests/StudyRenders` turns it on and writes
 /// `screen-study-<state>-<theme>-<scheme>.png` (docs/testing.md). To add a state, add a line to `catalogue`.
 ///
-/// Uses only `cards`, `phase`, `isRevealed`, `swipeEase`, `editing` and `draft`, so feature branches merge cheaply.
+/// Uses only `cards`, `phase`, `isRevealed`, `swipeEase`, `editing`, `draft`, `ladder` and `notice`, so feature branches
+/// merge cheaply.
 /// Not here: the next card's fade-in (spec 017) is view animation, not store state, so it has no state to render.
 @MainActor
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["LA_CARTE_RENDER_DIR"] != nil), .serialized)
@@ -49,6 +51,17 @@ struct StudyRenders {
     var done = StudyFeature.State()
     done.phase = .caughtUp(nextDue: .now + 3.5 * 3600)  // "Next card in 3 hours"
     shots.append(("done", done, true))
+    // Spec 021's milestone ladder: the mockup's five counters and the three step notices.
+    for (name, stats) in Ladders.states {
+      var state = studying(Fixture.short)
+      state.ladder = Ladder(stats: stats)
+      shots.append(("ladder-\(name)", state, false))
+    }
+    for (name, step) in [("atrisk", "At risk"), ("reviews", "Reviews"), ("new", "15 new")] {
+      var state = studying(Fixture.short)
+      state.notice = .stepDone(step)
+      shots.append(("notice-\(name)", state, false))
+    }
     return shots
   }
 
@@ -75,6 +88,20 @@ struct StudyRenders {
     }
     print("StudyRenders: \(count) PNGs in \(dir)")
     print("StudyRenders: Liquid Glass hidden in these renders; judge glass on UI-test screenshots")
+  }
+
+  /// Spec 021's popover rows, on a surface stand-in for the system glass: `screen-study-milestones-<state>-…png`.
+  @Test func milestones() throws {
+    for (name, stats) in Ladders.states {
+      for look in Self.looks {
+        let list = MilestonesList(rows: Ladder(stats: stats).rows)
+          .frame(width: 220)
+          .background(Theme.surface, in: .rect(cornerRadius: 20))
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .background(Theme.background)
+        _ = try Screen(list, look, pointHeight: 300, name: "study-milestones-\(name)")
+      }
+    }
   }
 
   /// Spec 017's candidate layouts side by side, revealed, light: `screen-study-layout-<A-D>-q<question>-a<lines>.png`
@@ -107,6 +134,24 @@ struct StudyRenders {
                      name: "study-d-wrapped-\(name)")
     }
   }
+}
+
+/// Spec 021's mockup states (`docs/design/renders/021/milestone-ladder.png`).
+private enum Ladders {
+  static func stats(atRisk: (Int, Int), reviews: (Int, Int), newToday: Int, dueNew: Int) -> DeckStats {
+    DeckStats(
+      total: 120, due: 64, new: 40, reviewedToday: 0, nextDue: nil, newToday: newToday, dueNew: dueNew,
+      atRiskTotal: atRisk.1, atRiskDone: atRisk.0, reviewsTotal: reviews.1, reviewsDone: reviews.0
+    )
+  }
+
+  static let states = [
+    ("1-backlog", stats(atRisk: (6, 14), reviews: (6, 52), newToday: 0, dueNew: 40)),
+    ("2-reviews", stats(atRisk: (14, 14), reviews: (30, 52), newToday: 0, dueNew: 40)),
+    ("3-first-new", stats(atRisk: (14, 14), reviews: (52, 52), newToday: 9, dueNew: 40)),
+    ("4-many-new", stats(atRisk: (14, 14), reviews: (52, 52), newToday: 49, dueNew: 30)),
+    ("5-normal", stats(atRisk: (0, 0), reviews: (12, 20), newToday: 0, dueNew: 0)),
+  ]
 }
 
 /// Questions and answers of known rendered line counts on an iPhone 17 Pro at the default text size (spec 017).
