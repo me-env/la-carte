@@ -40,6 +40,7 @@ final class MarketingUITests: XCTestCase {
     let field = el(app, "study.backField")
     XCTAssertTrue(field.waitFor(timeout: 5), "no study.backField after double-tap")
     XCTAssertTrue(app.keyboards.firstMatch.waitFor(timeout: 5), "no keyboard")
+    dismissKeyboardTip(app)
     settle(0.8)
     field.typeText(" and peaceful")
     settle()
@@ -121,11 +122,11 @@ final class MarketingUITests: XCTestCase {
     for appearance in [XCUIDevice.Appearance.light, .dark] {
       XCUIDevice.shared.appearance = appearance
       let app = launch(api: .mock, screen: "widget")
-      let tile = el(app, "widgetGallery.tile.due")
+      let tile = el(app, "widgetGallery.tile.small.nine")
       XCTAssertTrue(tile.waitFor(timeout: 10), "no widget tile")
       settle()
       let attachment = XCTAttachment(screenshot: tile.screenshot())
-      attachment.name = "widget-due-\(appearance == .dark ? "dark" : "light")"
+      attachment.name = "widget-small-nine-\(appearance == .dark ? "dark" : "light")"
       attachment.lifetime = .keepAlways
       add(attachment)
       app.terminate()

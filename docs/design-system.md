@@ -35,8 +35,9 @@ It may appear **only** in these places:
 1. The logo's line outside the card (`LaCarteLogo`, launch/loading marks, app icon, brand files): the one larger
    pink use, by the user's choice of logo.
 2. The text cursor and selection in text fields (`.tint(Theme.accent)` on the field itself, not the screen): editor, Settings, deck search (spec 009), Study inline edit (spec 010). While a field is focused on Study, the counter (rule 4) is hidden, so only one pink element shows.
-3. The widget's streak number when the streak is ≥ 1 (spec 007).
-4. Study's "N to review" count in the counter text (`study.remaining`), just the number (spec 009).
+3. The widget's today mark only: the ring while today is pending, the solid mark once studied (spec 024).
+4. The number in Study's counter (`study.remaining`), whatever the unit ("8 to review", "1 at risk", "15 new"):
+   the number only, never the unit, the milestones popover, its bars and checkmarks, or the "… done" notices (specs 009, 021).
 5. A fifth of the `RatingDial`'s dots while a drag is held toward Forgot (spec 019 §3, user request 2026-11-22):
    the one colour cue that tells Forgot from Hard. It grows in with the scatter and is gone on release; the only
    moment two pink elements share the screen (with rule 4), and it is transient.
@@ -82,7 +83,13 @@ Uniform by **layer**, not by material: glass where Apple's own apps put it, nowh
   `.pickerStyle(.menu)`, `.contextMenu`, `.alert`, `.confirmationDialog`, sheets at a *partial* detent. Never
   `.presentationBackground(...)` on a partial-detent sheet, and no opaque row fills on it (rows sit on the glass,
   `.listRowBackground(Color.clear)`). Custom glass only where there is no system bar: `CircleIconButton`
-  (`.glassEffect(.regular.interactive(), in: .circle)`), Study's top bar only.
+  (`.glassEffect(.regular.interactive(), in: .circle)`) and its peer, Study's milestone counter (`study.remaining`,
+  `.buttonStyle(.glass)`: the system glass capsule, 44 pt tall, `.meta` secondary ink with only the number pink),
+  Study's top bar only. The milestones popover (`study.milestones`) is system glass: `.popover` +
+  `.presentationCompactAdaptation(.popover)`, no `.presentationBackground`, no fills; rows only (no title, buttons or
+  sentences): done = `.body` secondary ink + `checkmark`, current = `.body` ink + "done/total" + an ink `ProgressView`.
+  Step notices ("At risk done", "Reviews done", "15 new done") are plain notice-slot text like "Reported": secondary
+  ink, no accent (spec 021).
 - **Content layer = opaque tokens**: the card face, "Show answer" and the rating row (quiet text, not glass),
   messages and their actions ("Open Settings", "Try again": quiet text), deck rows, form rows (`Theme.surface`), full-height sheets (`Theme.background`; the system makes large
   detents opaque anyway). Never `.glassEffect` or materials on content.
@@ -106,22 +113,44 @@ nothing pops in or out at the start of a draw or the end of an erase (a round ca
 Sources, SVG/PNG exports and the app icon: `docs/design/brand/` (regenerate with `uv run docs/design/brand/render.py`). Usage rules for
 everyone, marketing included: `docs/design/brand.md`. Native-feel audit: `docs/design/native-audit.md`.
 
-## Widget (`DeckWidget`, spec 007)
-systemSmall only, system content margins, leading-aligned, no borders or icons, `Theme.background` via
-`containerBackground(for: .widget)`:
+## Widget (`DeckWidget`, specs 007, 024)
+systemSmall and systemMedium, one kind. System content margins, leading-aligned, no borders or icons,
+`Theme.background` via `containerBackground(for: .widget)`:
 ```
-┌───────────────────┐
-│ 8                 │   hero      .cardFace ink, monospaced digits ("All caught up" / "No cards yet": .body medium)
-│ to review         │   detail    .meta secondaryInk ("Next at 18:40", "Next on 24 Nov", "Ask your agent to add some")
-│                   │
-│ 12-day streak     │   streak    .meta ink, the number in Theme.accent ("No streak yet" in secondaryInk)
-└───────────────────┘
+small                        medium: left = 007's block, right = small's grid + label, both bottom-aligned
+┌───────────────────┐        ┌──────────────────────────────────────┐
+│ 8 to review       │ .body  │ 8                ■ ■ ■ ■ ■ ■ ●       │ hero .cardFace ink, monospaced digits
+│ ■ ■ ■ ■ ■ ■ ●     │ medium │ to review        ● ● ● ● ● ● ●       │ ("All caught up" / "No cards yet": .body
+│ ● ● ● ● ● ● ●     │ ink    │                  ● ● ● ● ● ● ●       │  medium, detail .meta secondaryInk)
+│ ● ● ● ● ○ ● ◎     │        │                  ● ● ● ● ○ ● ◎       │
+│ 60-day streak     │ .meta semibold ink ("Start a streak today": .meta secondaryInk)
+└───────────────────┘        └──────────────────────────────────────┘
 ```
+**Grid** (`StreakGrid` maths, `StreakGridView` draws): 4 × 7, always full, oldest top-left, today last, 19 pt pitch
+(133 × 76 pt). Older periods coarsen by unit; every shape has the same ink area (~64 pt²):
+
+| Unit | Mark |
+|---|---|
+| day | circle Ø 9 |
+| week | rounded square 8.5, radius 2 |
+| month | rounded pentagon, point up, circumradius 5.5, corner 1.2 (0.25 pt low) |
+| year | rounded 5-point star, radii 7.4 / 3.7, corner 1.2 (0.5 pt low) |
+
+| Status | Look (all themes) |
+|---|---|
+| run | `ink`, solid |
+| older | `secondaryInk` 60 %, solid |
+| missed | `secondaryInk` 35 %, solid |
+| frozen (day only) | hollow circle, 1.5 pt inside stroke: `ink` in the run, `secondaryInk` 60 % before it |
+| today, pending | 2 pt `accent` ring over a `secondaryInk` 35 % fill |
+| today, studied | `accent`, solid |
+
 Unavailable: only "Can't reach your deck" (`.meta`, `secondaryInk`). The theme comes from the App Group: System
 follows the Home Screen, Light/Dark force it, Forest = forest palette + dark. Tinted/clear Home Screens
-(`widgetRenderingMode != .fullColor`): the hero and the streak number are `.widgetAccentable()` and the ink tokens
-become `.primary`/`.secondary`. Gallery (`LA_CARTE_SCREEN=widget`): 170 × 170 pt tiles (a systemSmall widget on
-iPhone 17 Pro), `Theme.background`, radius 22, 16 pt padding, on a `Theme.surface` screen so the tiles stand out.
+(`widgetRenderingMode != .fullColor`): `ink` → `.primary`, `secondaryInk` → `.secondary` (the 35 % and 60 % opacities
+kept), and only today's mark is `.widgetAccentable()`; frozen and today stay distinct by stroke. Gallery
+(`LA_CARTE_SCREEN=widget`) and renders (`ScreenColorTests/WidgetRenders`): 170 × 170 / 364 × 170 pt tiles,
+`Theme.background`, radius 22.
 
 ## Screen patterns from the reference
 | Vyst | la-carte |

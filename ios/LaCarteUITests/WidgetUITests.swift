@@ -1,28 +1,30 @@
 import XCTest
 
-/// Spec 007: the Home Screen widget, validated through its debug gallery (`LA_CARTE_SCREEN=widget`, #23).
-/// Widgets aren't reachable from XCUITest; the gallery renders `DeckWidgetView` from fixed entries in 170 pt tiles.
-/// Each state is a tile with its own id; the snapshots are the review (no VoiceOver checks for now, docs/testing.md).
+/// Specs 007 and 024: the Home Screen widget, validated through its debug gallery (`LA_CARTE_SCREEN=widget`, 007 #23,
+/// 024 #17). Widgets aren't reachable from XCUITest; the gallery renders `DeckWidgetView` from the spec 024 scenario
+/// fixtures, in small (170 × 170) and medium (364 × 170) tiles. Each tile has its own id; the snapshots are the review
+/// (no VoiceOver checks for now, docs/testing.md).
 final class WidgetUITests: XCTestCase {
   /// Spec 004 #4 tokens (Support.swift `Palette`): tile = `background`, gallery wallpaper = `surface`.
   static let palettes: [String: Palette] = ["light": .light, "dark": .dark, "forest": .forest]
   static let appearances: [XCUIDevice.Appearance] = [.light, .dark]
 
-  /// state id, snapshot name (spec: "Accessibility identifiers", #16–#20).
-  static let tiles: [(state: String, shot: String)] = [
-    ("due", "widget-due"),
-    ("caughtUp", "widget-caught-up"),
-    ("caughtUpLater", "widget-caught-up-later"),
-    ("empty", "widget-empty"),
-    ("unavailable", "widget-unavailable"),
-    ("long", "widget-long"),
-  ]
+  /// Spec 024 Scenarios table ids.
+  static let scenarios = ["zero", "three", "nine", "freezes", "broken", "lone", "sixty", "sixtyFrozen", "twoHundred",
+                          "eightHundred"]
+
+  /// Tile id suffix, snapshot name, width (spec 024 "Accessibility identifiers" and "Screenshots"): small tiles in a
+  /// 2-column grid, then `unavailable`, then the medium tiles.
+  static let tiles: [(id: String, shot: String, width: CGFloat)] =
+    scenarios.map { ("small.\($0)", "widget-small-\($0)", 170) }
+      + [("unavailable", "widget-unavailable", 170)]
+      + scenarios.map { ("medium.\($0)", "widget-medium-\($0)", 364) }
 
   override func setUp() {
     continueAfterFailure = false
   }
 
-  // MARK: - #16–#20, #23 gallery in light and dark (system theme follows the device)
+  // MARK: - 024 #17 (007 #23) gallery in light and dark (system theme follows the device)
 
   @MainActor
   func testWidget_galleryAllStates() {
@@ -54,6 +56,8 @@ final class WidgetUITests: XCTestCase {
       let app = launch(api: .mock, screen: "widget", theme: theme)
       assertGallery(app, palette: theme, context: "-theme \(theme), device \(device)")
       snapshot("widget-gallery-forced-\(theme)", appearance: device)
+      // Spec 024 dark tiles from the forced theme too, so they don't depend on the device appearance.
+      if theme == "dark" { snapshotTiles(app, suffix: "forced-dark") }
       app.terminate()
     }
   }
@@ -75,8 +79,8 @@ final class WidgetUITests: XCTestCase {
 
   // MARK: - Helpers
 
-  /// Title, every tile (170×170), tile background = `background`, wallpaper =
-  /// `surface` for the palette.
+  /// Title, every tile (small 170 × 170, medium 364 × 170), tile background = `background`, wallpaper = `surface`
+  /// for the palette.
   @MainActor
   private func assertGallery(_ app: XCUIApplication, palette name: String, context: String,
                              file: StaticString = #filePath, line: UInt = #line) {
@@ -84,31 +88,43 @@ final class WidgetUITests: XCTestCase {
     waitForLabel(title, "Widget", file: file, line: line)
     let palette = Self.palettes[name]!
     for tile in Self.tiles {
-      let e = el(app, "widgetGallery.tile.\(tile.state)")
-      scrollIntoView(app, e)
-      XCTAssertTrue(e.waitFor(timeout: 5), "[\(context)] tile \(tile.state) missing", file: file, line: line)
-      XCTAssertEqual(e.frame.width, 170, accuracy: 0.5, "[\(context)] \(tile.state) width", file: file, line: line)
-      XCTAssertEqual(e.frame.height, 170, accuracy: 0.5, "[\(context)] \(tile.state) height", file: file, line: line)
+      let e = el(app, "widgetGallery.tile.\(tile.id)")
+      scrollFullyIntoView(app, e)
+      XCTAssertTrue(e.waitFor(timeout: 5), "[\(context)] tile \(tile.id) missing", file: file, line: line)
+      XCTAssertEqual(e.frame.width, tile.width, accuracy: 0.5, "[\(context)] \(tile.id) width", file: file, line: line)
+      XCTAssertEqual(e.frame.height, 170, accuracy: 0.5, "[\(context)] \(tile.id) height", file: file, line: line)
       let f = e.frame
-      // Bottom-right inner corner of the tile (inside the 22 pt radius) is empty background in every state;
-      // just outside the tile is the wallpaper.
+      // The top-right corner (inside the 22 pt radius) and the right content margin are empty background in every
+      // state (the status line and the grid are leading / trailing on the 16 pt margin); just outside is wallpaper.
       waitForColors(app, [
-        ("\(tile.state) tile background", CGPoint(x: f.maxX - 20, y: f.maxY - 20), palette.background),
-        ("\(tile.state) tile center-right", CGPoint(x: f.maxX - 8, y: f.midY), palette.background),
-        ("wallpaper right of \(tile.state)", CGPoint(x: f.maxX + 3, y: f.midY), palette.surface),
+        ("\(tile.id) tile top-right", CGPoint(x: f.maxX - 10, y: f.minY + 10), palette.background),
+        ("\(tile.id) tile right margin", CGPoint(x: f.maxX - 6, y: f.midY), palette.background),
+        ("wallpaper right of \(tile.id)", CGPoint(x: f.maxX + 3, y: f.midY), palette.surface),
       ], context: context, file: file, line: line)
     }
     // Return to the top for the full-gallery screenshot.
-    app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
-      .press(forDuration: 0.05, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+    scrollBackIntoView(app, title, maxSwipes: 20)
   }
 
-  /// One cropped screenshot per tile: `<shot>-<suffix>` (e.g. `widget-due-light`, `widget-due-forest`).
+  /// Scrolls until the whole tile is on screen (a hittable tile can still be cut by the bottom edge).
+  @MainActor
+  private func scrollFullyIntoView(_ app: XCUIApplication, _ tile: XCUIElement) {
+    scrollIntoView(app, tile)
+    let window = app.windows.firstMatch
+    var drags = 0
+    while tile.frame.maxY > window.frame.maxY - 40, drags < 6 {
+      window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+        .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+      drags += 1
+    }
+  }
+
+  /// One cropped screenshot per tile: `<shot>-<suffix>` (e.g. `widget-small-nine-light`, `widget-medium-zero-forest`).
   @MainActor
   private func snapshotTiles(_ app: XCUIApplication, suffix: String) {
     for tile in Self.tiles {
-      let e = el(app, "widgetGallery.tile.\(tile.state)")
-      scrollIntoView(app, e)
+      let e = el(app, "widgetGallery.tile.\(tile.id)")
+      scrollFullyIntoView(app, e)
       attach(e.screenshot(), "\(tile.shot)-\(suffix)")
     }
   }
