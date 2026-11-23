@@ -59,20 +59,60 @@ struct DecodingTests {
     #expect(note.updatedAt == Date(timeIntervalSince1970: 1_795_212_892))
   }
 
-  @Test func decodesStatsWithNextDue() throws {
-    let json = #"{"total":2,"due":0,"new":0,"reviewed_today":2,"next_due":"2026-11-20T23:24:08.477041Z","streak":12}"#
-    let stats = try JSONDecoder.api.decode(DeckStats.self, from: Data(json.utf8))
-    #expect(stats.total == 2)
-    #expect(stats.reviewedToday == 2)
-    #expect(stats.streak == 12)
+  /// A real `/stats?tz=Europe/Paris` reply (spec 024 step 1).
+  static let statsPayload = """
+    {"total":120,"due":64,"new":45,"reviewed_today":30,"next_due":"2026-11-20T23:24:08.477041Z",
+     "new_today":19,"milestone":15,"streak":25,"streak_start":"2026-10-29",
+     "history_start":"2026-10-26","history":"smmsssssssssfssssssssssfssss","due_new":45}
+    """
+
+  @Test func decodesStats() throws {
+    let stats = try JSONDecoder.api.decode(DeckStats.self, from: Data(Self.statsPayload.utf8))
+    #expect(stats.total == 120)
+    #expect(stats.reviewedToday == 30)
+    #expect(stats.newToday == 19)
+    #expect(stats.milestone == 15)
+    #expect(stats.streak == 25)
+    #expect(stats.dueNew == 45)
+    #expect(stats.history.count == 28)
     let nextDue = try #require(stats.nextDue)
     #expect(abs(nextDue.timeIntervalSince1970 - 1_795_217_048.477) < 0.001)
+    let calendar = DeckStats.calendar
+    #expect(stats.historyStart == calendar.date(from: DateComponents(year: 2026, month: 10, day: 26)))
+    #expect(stats.streakStart == calendar.date(from: DateComponents(year: 2026, month: 10, day: 29)))
   }
 
-  @Test func decodesStatsWithoutNextDue() throws {
-    let json = #"{"total":0,"due":0,"new":0,"reviewed_today":0,"next_due":null,"streak":0}"#
+  /// No reviews yet: no streak start. `new_today` / `milestone` absent read as 0 / 15 (the hand-off's defaults).
+  @Test func decodesStatsWithoutStreakOrBatch() throws {
+    let json = """
+      {"total":0,"due":0,"new":0,"reviewed_today":0,"next_due":null,"streak":0,"streak_start":null,
+       "history_start":"2026-11-22","history":"p","due_new":0}
+      """
     let stats = try JSONDecoder.api.decode(DeckStats.self, from: Data(json.utf8))
-    #expect(stats == DeckStats(total: 0, due: 0, new: 0, reviewedToday: 0, nextDue: nil, streak: 0))
+    let today = try #require(DeckStats.calendar.date(from: DateComponents(year: 2026, month: 11, day: 22)))
+    #expect(stats == DeckStats(total: 0, due: 0, new: 0, reviewedToday: 0, nextDue: nil, history: "p", historyStart: today))
+  }
+
+  @Test func rejectsAMalformedDay() {
+    let json = Self.statsPayload.replacingOccurrences(of: "2026-10-26", with: "26/10/2026")
+    #expect(throws: DecodingError.self) { try JSONDecoder.api.decode(DeckStats.self, from: Data(json.utf8)) }
+  }
+
+  /// The widget caches the last stats with a plain encoder (spec 007): it must read back the same days.
+  @Test func statsRoundTripThroughTheWidgetCache() throws {
+    let stats = try JSONDecoder.api.decode(DeckStats.self, from: Data(Self.statsPayload.utf8))
+    let cached = try JSONDecoder().decode(DeckStats.self, from: JSONEncoder().encode(stats))
+    #expect(cached == stats)
+  }
+
+  /// Spec 024 #9: Study's count, from `/stats` alone.
+  @Test func toReviewCountsNewCardsUpToTheEndOfTodaysBatch() {
+    var stats = DeckStats(total: 120, due: 64, new: 45, reviewedToday: 30, nextDue: nil, newToday: 19, dueNew: 45)
+    #expect(stats.toReview == 19 + 11)
+    stats.dueNew = 0
+    #expect(stats.toReview == 64)
+    stats.dueNew = 5
+    #expect(stats.toReview == 59 + 5)
   }
 
   @Test func reportReasonsEncodeAsTheAPISpellsThem() throws {

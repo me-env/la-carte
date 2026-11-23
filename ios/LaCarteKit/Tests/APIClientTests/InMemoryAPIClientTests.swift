@@ -17,12 +17,24 @@ struct InMemoryAPIClientTests {
     #expect(try await client.stats().nextDue == now.addingTimeInterval(600))
   }
 
-  @Test func streakIsOneOnceACardWasReviewedToday() async throws {
+  /// Spec 024 #19: a one-day history that starts today, studied once a card was reviewed.
+  @Test func historyIsTodayPendingUntilACardIsReviewed() async throws {
     let client = APIClient.inMemory(cards: .fixtures, now: .now)
-    #expect(try await client.stats().streak == 0)
+    let today = DeckStats.calendar.startOfDay(for: .now)
+    let before = try await client.stats()
+    #expect(before.streak == 0)
+    #expect(before.history == "p")
+    #expect(before.historyStart == today)
+    #expect(before.streakStart == nil)
+    #expect(before.dueNew == 3)
 
     _ = try await client.review([Card].fixtures[0].id, .good)
-    #expect(try await client.stats().streak == 1)
+    let after = try await client.stats()
+    #expect(after.streak == 1)
+    #expect(after.history == "s")
+    #expect(after.historyStart == today)
+    #expect(after.streakStart == today)
+    #expect(after.dueNew == 2)
   }
 
   @Test func dueCardsKeepFixtureOrderAfterAReview() async throws {
