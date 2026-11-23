@@ -24,7 +24,7 @@ async def test_agent_can_add_and_review_cards(engine):
             "add_cards", "list_cards", "update_card", "delete_card",
             "due_cards", "review_card", "deck_stats",
             "add_notes", "find_notes", "update_note", "add_direction", "remove_direction",
-            "delete_note", "list_reports", "update_report", "new_cards_per_day",
+            "delete_note", "list_reports", "update_report", "new_card_milestone",
         }  # fmt: skip
 
         added = await client.call_tool(
@@ -212,9 +212,7 @@ async def test_deck_stats_takes_a_time_zone(client):
         await mcp.call_tool("review_card", {"card_id": card["id"], "rating": "good"})
 
         stats = await mcp.call_tool("deck_stats", {"tz": "UTC"})
-        agent = dict(stats.structured_content)
-        assert agent.pop("new_cards")["introduced"] == 1  # MCP only (spec 021)
-        assert agent == client.get("/stats").json()
+        assert stats.structured_content == client.get("/stats").json()
         assert stats.structured_content["streak"] == 1
 
         paris = await mcp.call_tool("deck_stats", {"tz": "Europe/Paris"})

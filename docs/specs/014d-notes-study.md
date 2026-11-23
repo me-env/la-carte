@@ -136,36 +136,52 @@ centred, after reveal the whole composition is centred. Basic cards and the phot
   - **Name prompt:** the same `Text` (same identity), its font driven by `isRevealed` (`.cardFace` tier →
     `.cardFaceSmall`, ink both): it moves and morphs (one line; SwiftUI interpolates a `Text` font change inside
     an animation transaction).
-  - **Description prompt:** always moves as one view and switches style with `.contentTransition(.opacity)`
-    (017 tier, ink, 017 alignment → caption style and caption block): a multi-line text that re-wraps and changes
-    colour can't morph cleanly, so it cross-fades its style while its frame moves. Not an engineer's option: the rule.
+  - **Description prompt:** moves as one frame and cross-fades its style on it: the prompt style (017 tier, ink,
+    017 alignment) and the caption style (caption block) are laid over each other in a `CrossFadeStack` (a private
+    `Layout`: both centred in one frame, sized by the one shown, each at the offered width so neither re-wraps while
+    fading). Prompt style fades out `.easeOut(0.15)`, caption style fades in `.easeOut(0.2)`. Not
+    `.contentTransition(.opacity)`: it drew the old style at its old place, a copy left behind.
+  - **Hint:** stays inside the prompt row (`study.front` container + hint); on reveal it fades out `.easeOut(0.1)` and
+    its frame folds to height 0, so it is gone before the prompt passes over it.
   - **Identifiers:** the prompt keeps `study.front` in its new row (the name row on a name prompt, the description
     row on a description prompt); the inserted rows are `study.back` (container) and `study.photo`.
+- **Centring:** a person card centres itself with `.frame(minHeight:)` = the scroll view's visible height (from
+  scroll geometry), not through the scroll view's `.center` anchor (which shifted all content at once on reveal).
+  Basic cards keep the anchor.
 - **Motion:** one transaction on reveal, from every path that sets `isRevealed` (the reveal button, the
-  VoiceOver action, any other), driven in the view by `.animation(Theme.Motion.reveal, value: store.isRevealed)` on the card
-  stack, false → true only (the next card's reset rides its `.id` swap, unanimated, as today); `Theme.Motion.reveal` = `.smooth(duration: 0.35)` (no bounce; new token,
-  ios-engineer adds it next to `Theme.Motion.standard` in `Theme.swift`): the prompt's move, the name's font morph and the
-  space opening for the photo (layout follows the transaction: add no second animation for it). Inserted rows (photo, name or description) use `.transition(.opacity.animation(.easeOut(duration:
-  0.25).delay(0.1)))`: they fade in as room opens, so nothing overlaps the moving text. The hint leaves with
-  `.transition(.opacity.animation(.easeIn(duration: 0.15)))`. Total ≈ 0.35 s, the same feel as the photo prompt's
-  0.25 s cross-fade. The rating row and top bar don't move (outside the scroll view, as today).
-- **Reduce Motion** (`accessibilityReduceMotion`): no move and no morph. The question group and the revealed
-  composition are separate `if/else` branches, each with `.transition(.opacity)`, under `Theme.Motion.standard`: the
-  question fades out and the composition fades in, in its final place.
+  VoiceOver action, any other), false → true only (the next card's reset rides its `.id` swap, unanimated);
+  `Theme.Motion.reveal` = `.smooth(duration: 0.35)`: the prompt's move, the name's font morph and the space opening
+  for the photo (layout follows the transaction). Inserted rows (photo, name or description) fade in
+  `.easeOut(0.2)` after the prompt has moved past them: delay 0.2 s on a name prompt, 0.3 s on a description prompt
+  (it travels further, under the name's row). Total ≈ 0.38 s (name prompt), ≈ 0.45 s (description prompt). These
+  timings are spec values, not tokens. The rating row and top bar don't move (outside the scroll view).
+- **Reduce Motion** (`accessibilityReduceMotion`): nothing moves, no layout animation. The question and the
+  composition are laid out in one `CrossFadeStack`; only their opacity animates (`Theme.Motion.standard`), the
+  hidden one `accessibilityHidden`. The answer photo therefore loads while hidden, before reveal.
 - **Photo prompt (`photo → name + description`):** unchanged from the table above: the answer slot is reserved,
   the photo never moves, the hint cross-fades into the name in place. It already ends as the same composition.
-- **Scrolling:** a composition taller than the card scrolls as today (017 rule 5); on reveal it keeps the scroll
-  view's existing anchoring, no extra scroll.
+- **Scrolling:** a composition taller than the card scrolls as today (017 rule 5); no extra scroll on reveal.
 - **Unchanged:** wording of the hint, photo sizes (AX: `cardCompact`), ids (`study.answerHint`, `study.back`,
   `study.photo`), VoiceOver follows the visual order (before reveal: prompt, hint; after: photo, name, description), dark and forest (same tokens).
-- **Acceptance (QA):** before reveal, `study.answerHint`'s midX equals `study.card`'s midX (± 1 pt) for every
-  direction, short and long descriptions; after reveal on a short-description card, `study.back`'s midX equals `study.photo`'s and
-  `study.card`'s midX (± 1 pt); on a photo prompt `study.photo`'s frame is identical before and after reveal; on a text prompt the prompt
-  group (`study.front` + hint) is vertically centred in `study.card` before reveal (± 1 pt) and the revealed group (photo top
-  to `study.back`/`study.front` bottom) after it, the order is photo, name, description, and the reveal is animated (recording); after reveal the hint is gone (not hittable, hidden from VoiceOver); on a photo prompt only,
-  `study.back`'s top equals the hint's former top (± 1 pt); a 3+-line answer description's lines start at one x, inside a block
-  centred on `study.photo` (block midX = photo midX ± 1 pt, width ≤ photo width + 48 pt). Screenshots: the existing `study-person-*` set, light + dark, plus a long-description card. Motion: a `--record` clip
-  of the name-prompt and long-description-prompt reveals (normal and Reduce Motion), for design-critic's final check.
+- **Acceptance (QA):**
+  1. Before reveal, `study.answerHint`'s midX = `study.card`'s midX (± 1 pt), every direction, short and long descriptions.
+  2. On a text prompt, the prompt group (`study.front` + hint) is vertically centred in `study.card` before reveal
+     (± 1 pt), and the revealed group (photo top to the last row's bottom) after it (± 1 pt); order photo, name,
+     description.
+  3. After reveal on a short-description card, `study.back`'s midX = `study.photo`'s = `study.card`'s (± 1 pt).
+  4. On a photo prompt, `study.photo`'s frame is identical before and after reveal, and `study.back`'s top equals
+     the hint's former top (± 1 pt).
+  5. After reveal the hint is gone (not hittable, hidden from VoiceOver); under Reduce Motion the question layer is
+     hidden from VoiceOver after reveal and the answer layer before it.
+  6. A 3+-line answer description's lines start at one x, in a block centred on `study.photo` (midX ± 1 pt, width
+     ≤ photo width + 48 pt).
+  7. Motion (recording, `--record`, frame by frame) of the name-prompt and long-description-prompt reveals: on no
+     frame does the hint or an inserted row overlap the moving prompt, does a second copy of the prompt text show,
+     or does content jump (any row's position changes monotonically from start to end, no one-frame shift). Under
+     Reduce Motion no element's frame changes between the first and last frame; only opacity changes. The reveal ends
+     by ≈ 0.4 s (name) / ≈ 0.5 s (description).
+  Screenshots: the existing `study-person-*` set, light + dark, plus a long-description card. The #7 clips (normal
+  and Reduce Motion) go to design-critic for the final check.
 
 ## API / MCP changes
 None.

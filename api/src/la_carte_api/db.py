@@ -55,7 +55,8 @@ def _migrate(engine: Engine) -> None:
       id holding its front/back, and `card` is rebuilt without front/back.
     - Spec 014a amendment: person `role` and `context` fold into `description` (data only).
     - Spec 015: the `report` table is created (with a backup, like the rebuilds).
-    - Spec 021: the `settings` table is created, without a row (a missing row = the defaults).
+    - Spec 021: the `settings` table is created, without a row (a missing row = the defaults);
+      `reviewlog.stability_before` / `last_review_before` (nullable) are added; old rows read NULL.
     """
     raw = engine.raw_connection()
     db = raw.driver_connection  # sqlite3: explicit BEGIN/COMMIT, so DDL is transactional too
@@ -64,8 +65,10 @@ def _migrate(engine: Engine) -> None:
         _rebuild_if(
             db, engine, "012", lambda: _has_foreign_key(db, "reviewlog"), _rebuild_reviewlog
         )
-        if (columns := _columns(db, "reviewlog")) and "confidence" not in columns:
-            db.execute("ALTER TABLE reviewlog ADD COLUMN confidence FLOAT")
+        _add_columns(
+            db, "reviewlog",
+            {"confidence": "FLOAT", "stability_before": "FLOAT", "last_review_before": "DATETIME"},
+        )  # fmt: skip
         _rebuild_if(db, engine, "014", lambda: "front" in _columns(db, "card"), _cards_to_notes)
         _rebuild_if(db, engine, "014a", lambda: _has_person_roles(db), _fold_person_roles)
         _rebuild_if(
@@ -104,6 +107,14 @@ def _rebuild_if(db, engine: Engine, spec: str, needed, rebuild) -> None:
 
 def _has_foreign_key(db, table: str) -> bool:
     return bool(db.execute(f"PRAGMA foreign_key_list({table})").fetchall())
+
+
+def _add_columns(db, table: str, columns: dict[str, str]) -> None:
+    """`ALTER TABLE … ADD COLUMN` for each missing nullable column (name -> SQL type)."""
+    if existing := _columns(db, table):
+        for name, sql_type in columns.items():
+            if name not in existing:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
 
 
 def _columns(db, table: str) -> set[str]:

@@ -202,6 +202,12 @@ final class SetupUITests: SettingsTestCase {
   @MainActor
   func closeSettingsSheet(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     el(app, "settings.close").tap()
+    // On a loaded CI runner the synthesized tap was once lost: the button highlighted, the sheet never moved in the
+    // next 30 s (run 45071709294, recording). One more tap; a Close that really doesn't work still fails below.
+    if !poll(timeout: 5, { !sheetBar(app, "Settings").exists }) {
+      print("closeSettingsSheet: Settings still open 5 s after Close; tapping Close once more")
+      el(app, "settings.close").tap()
+    }
     waitForAbsence(sheetBar(app, "Settings"), file: file, line: line)
     assertNoSavePasswordPrompt(app, file: file, line: line)
   }

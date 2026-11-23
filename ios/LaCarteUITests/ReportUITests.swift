@@ -287,8 +287,10 @@ final class ReportUITests: XCTestCase {
       let before = server.requests.count
       openMenu(app)
       menuButton(app, "ask", "Ask about this card").tap()
-      // 016b #6: default Vibe isn't installed on the simulator.
-      waitForLabel(el(app, "study.reportNotice"), "Copied · Vibe isn't installed", timeout: 5)
+      // 016b #6: default Vibe isn't installed on the simulator. The notice waits for the system's universal-link
+      // lookup (`UIApplication.open(_:options: [.universalLinksOnly: true])`): usually ~1 s, but ~58 s once on a
+      // loaded CI runner (run 45071709294, recording), hence the long timeout.
+      waitForLabel(el(app, "study.reportNotice"), "Copied · Vibe isn't installed", timeout: 90)
       XCTAssertTrue(el(app, "study.reportNotice").label.hasPrefix("Copied"))
       XCTAssertFalse(el(app, "study.remaining").exists, "counter shown next to the Copied notice")
       Thread.sleep(forTimeInterval: 0.5)  // counter cross-fade (Theme.Motion.standard) settled
