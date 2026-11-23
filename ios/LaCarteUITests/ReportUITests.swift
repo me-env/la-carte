@@ -363,7 +363,10 @@ final class ReportUITests: XCTestCase {
     let app = launch(api: .live(server.url))
 
     // #13: watch the screen until the next card shows; the broken prompt must never be on screen as broken.
-    let photo = el(app, "study.photo"), lee = el(app, "study.front").staticTexts["Lee Park"]
+    // Since 014d `study.front` on a name prompt is the prompt Text itself, so match its label, not a descendant.
+    let photo = el(app, "study.photo")
+    let lee = app.descendants(matching: .any)
+      .matching(NSPredicate(format: "identifier == 'study.front' AND label == 'Lee Park'")).firstMatch
     var sawBrokenPrompt = false, sawNotice = false
     let skipped = poll(timeout: 15) {
       // A snapshot, not `photo.label`: the card can be skipped between the check and the read (seen on CI), and
@@ -388,7 +391,7 @@ final class ReportUITests: XCTestCase {
     el(app, "study.reveal").tap()
     XCTAssertTrue(photo.waitFor(timeout: 5), "no study.photo in the answer")
     waitForLabel(photo, "Photo, not loaded", timeout: 15)
-    XCTAssertTrue(el(app, "study.front").staticTexts["Lee Park"].exists, "answer-broken card not shown normally")
+    XCTAssertTrue(lee.exists, "answer-broken card not shown normally")
     assertRatingsEnabled(app)
     XCTAssertFalse(el(app, "study.reportNotice").exists, "a notice was shown for the answer photo report")
     snapshot("study-broken-photo-answer", appearance: .light)
