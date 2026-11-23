@@ -83,41 +83,45 @@ struct AppFeatureTests {
     }
   }
 
+  // TestStore's send and receive wait by hopping through background-priority tasks, which a loaded CI
+  // runner left unscheduled for 45-80 s here; the main serial executor runs those hops on the main actor.
   @Test func deletingFromTheDeckRefreshesStudy() async {
-    let cards = [Card].fixtures
-    let notes = [Note].fixtures
-    let (deckReload, releaseDeckReload) = AsyncStream.makeStream(of: Void.self)
-    var state = AppFeature.State()
-    state.study.cards = IdentifiedArray(uniqueElements: cards)
-    state.study.phase = .studying
-    state.destination = .deck(DeckFeature.State())
-    let store = TestStore(initialState: state) {
-      AppFeature()
-    } withDependencies: {
-      $0.apiClient.isConfigured = { true }
-      $0.apiClient.deleteNote = { _ in }
-      // The deck's reload waits for the test's go so the two reloads arrive in a fixed order.
-      $0.apiClient.notes = { _ in
-        for await _ in deckReload { break }
-        return Array(notes.dropFirst())
+    await withMainSerialExecutor {
+      let cards = [Card].fixtures
+      let notes = [Note].fixtures
+      let (deckReload, releaseDeckReload) = AsyncStream.makeStream(of: Void.self)
+      var state = AppFeature.State()
+      state.study.cards = IdentifiedArray(uniqueElements: cards)
+      state.study.phase = .studying
+      state.destination = .deck(DeckFeature.State())
+      let store = TestStore(initialState: state) {
+        AppFeature()
+      } withDependencies: {
+        $0.apiClient.isConfigured = { true }
+        $0.apiClient.deleteNote = { _ in }
+        // The deck's reload waits for the test's go so the two reloads arrive in a fixed order.
+        $0.apiClient.notes = { _ in
+          for await _ in deckReload { break }
+          return Array(notes.dropFirst())
+        }
+        $0.apiClient.dueCards = { _ in Array(cards.dropFirst()) }
       }
-      $0.apiClient.dueCards = { _ in Array(cards.dropFirst()) }
-    }
 
-    await store.send(\.destination.deck.rowSwipedToDelete, notes[0].id) {
-      $0.destination?.modify(\.deck) { $0.deletions = 1 }
-    }
-    await store.receive(\.destination.deck.deleteResponse.success)
-    await store.receive(\.destination.deck.delegate.deckChanged)
-    await store.receive(\.study.deckChanged)
-    await store.receive(\.study.cardsResponse.success) {
-      $0.study.cards = IdentifiedArray(uniqueElements: cards.dropFirst())
-    }
-    releaseDeckReload.yield()
-    await store.receive(\.destination.deck.notesResponse.success) {
-      $0.destination?.modify(\.deck) {
-        $0.notes = IdentifiedArray(uniqueElements: notes.dropFirst())
-        $0.phase = .loaded
+      await store.send(\.destination.deck.rowSwipedToDelete, notes[0].id) {
+        $0.destination?.modify(\.deck) { $0.deletions = 1 }
+      }
+      await store.receive(\.destination.deck.deleteResponse.success)
+      await store.receive(\.destination.deck.delegate.deckChanged)
+      await store.receive(\.study.deckChanged)
+      await store.receive(\.study.cardsResponse.success) {
+        $0.study.cards = IdentifiedArray(uniqueElements: cards.dropFirst())
+      }
+      releaseDeckReload.yield()
+      await store.receive(\.destination.deck.notesResponse.success) {
+        $0.destination?.modify(\.deck) {
+          $0.notes = IdentifiedArray(uniqueElements: notes.dropFirst())
+          $0.phase = .loaded
+        }
       }
     }
   }
