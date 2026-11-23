@@ -23,6 +23,13 @@ done also in system. Liquid Glass is hidden (`layer.render` blanks on it; `drawH
 process), so judge glass on UI-test screenshots. Add a state as one line in `catalogue` in
 `ios/LaCarteKit/Tests/ScreenColorTests/StudyRenders.swift`, using only store state.
 
+**Main serial executor.** `AppFeatureTests`, `DeckFeatureTests` and `SettingsFeatureTests` set the global
+`uncheckedUseMainSerialExecutor = true` in `init()`: `TestStore` waits by hopping through background-priority
+tasks, which a loaded CI runner left unscheduled past the suite's time limit; the main serial executor runs them on
+the main actor. The global switch is safe only because each suite is the only one in its test bundle and xcodebuild
+runs each bundle in its own process, so it can't leak into other suites. Keep such a suite alone in its bundle, or
+switch it to the scoped `withMainSerialExecutor { … }`.
+
 **Widget renders** (spec 024). `scripts/ios-test.sh --render -only-testing:ScreenColorTests/WidgetRenders` draws the
 real `DeckWidgetView` with `ImageRenderer` (plain SwiftUI) and writes 68 PNGs,
 `widget-<small|medium>-<id>-<light|dark|forest>.png` (170 × 170 / 364 × 170 pt at 3×, `background`, radius 22): every

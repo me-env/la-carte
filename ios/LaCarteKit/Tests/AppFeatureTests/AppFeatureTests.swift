@@ -12,6 +12,9 @@ import Testing
 @MainActor
 @Suite(.timeLimit(.minutes(1)))
 struct AppFeatureTests {
+  // Alone in its test bundle; see "Main serial executor" in docs/testing.md.
+  init() { uncheckedUseMainSerialExecutor = true }
+
   @Test func studyIsTheHomeScreen() async {
     let card = [Card].fixtures[0]
     let store = TestStore(initialState: AppFeature.State()) {

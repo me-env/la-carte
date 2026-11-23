@@ -287,9 +287,15 @@ final class ReportUITests: XCTestCase {
       let before = server.requests.count
       openMenu(app)
       menuButton(app, "ask", "Ask about this card").tap()
-      // 016b #6: default Vibe isn't installed on the simulator. The notice waits for the system's universal-link
-      // lookup (`UIApplication.open(_:options: [.universalLinksOnly: true])`): usually ~1 s, but ~58 s once on a
-      // loaded CI runner (run 45071709294, recording), hence the long timeout.
+      // 016 #4: "Copied" shows at once, without waiting for the open call (the universal-link lookup can stall:
+      // ~58 s once on a loaded CI runner, run 45071709294). XCUITest's tap waits for the app to idle, which can
+      // outlast a fast "not installed" answer, so the first label seen may already be the second notice; the
+      // stalled-open ordering is the unit test's job (copiedShowsAtOnceAndASlowOpenAddsNotInstalledWhenItReturns).
+      let notice = el(app, "study.reportNotice")
+      XCTAssertTrue(notice.waitForExistence(timeout: 2), "no notice right after the Ask tap")
+      XCTAssertTrue(notice.label.hasPrefix("Copied"), "first notice: \(notice.label)")
+      if notice.label == "Copied" { snapshot("study-ask-copied", appearance: appearance) }
+      // 016b #6: default Vibe isn't installed on the simulator; when the open call returns, the notice says so.
       waitForLabel(el(app, "study.reportNotice"), "Copied · Vibe isn't installed", timeout: 90)
       XCTAssertTrue(el(app, "study.reportNotice").label.hasPrefix("Copied"))
       XCTAssertFalse(el(app, "study.remaining").exists, "counter shown next to the Copied notice")
@@ -357,7 +363,10 @@ final class ReportUITests: XCTestCase {
     let app = launch(api: .live(server.url))
 
     // #13: watch the screen until the next card shows; the broken prompt must never be on screen as broken.
-    let photo = el(app, "study.photo"), lee = el(app, "study.front").staticTexts["Lee Park"]
+    // Since 014d `study.front` on a name prompt is the prompt Text itself, so match its label, not a descendant.
+    let photo = el(app, "study.photo")
+    let lee = app.descendants(matching: .any)
+      .matching(NSPredicate(format: "identifier == 'study.front' AND label == 'Lee Park'")).firstMatch
     var sawBrokenPrompt = false, sawNotice = false
     let skipped = poll(timeout: 15) {
       // A snapshot, not `photo.label`: the card can be skipped between the check and the read (seen on CI), and
@@ -382,7 +391,7 @@ final class ReportUITests: XCTestCase {
     el(app, "study.reveal").tap()
     XCTAssertTrue(photo.waitFor(timeout: 5), "no study.photo in the answer")
     waitForLabel(photo, "Photo, not loaded", timeout: 15)
-    XCTAssertTrue(el(app, "study.front").staticTexts["Lee Park"].exists, "answer-broken card not shown normally")
+    XCTAssertTrue(lee.exists, "answer-broken card not shown normally")
     assertRatingsEnabled(app)
     XCTAssertFalse(el(app, "study.reportNotice").exists, "a notice was shown for the answer photo report")
     snapshot("study-broken-photo-answer", appearance: .light)

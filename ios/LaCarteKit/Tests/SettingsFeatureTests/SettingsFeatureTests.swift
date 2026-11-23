@@ -10,6 +10,9 @@ import Testing
 @MainActor
 @Suite(.timeLimit(.minutes(1)))
 struct SettingsFeatureTests {
+  // Alone in its test bundle; see "Main serial executor" in docs/testing.md.
+  init() { uncheckedUseMainSerialExecutor = true }
+
   struct Offline: Error {}
   let stats = DeckStats(total: 42, due: 3, new: 1, reviewedToday: 0, nextDue: nil)
 
