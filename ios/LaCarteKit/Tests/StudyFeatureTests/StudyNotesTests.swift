@@ -25,6 +25,10 @@ struct StudyNotesTests {
     var photoToName = photoToNameAndDescription
     photoToName.answer = ["name"]
     #expect(!revealed(photoToName).canEditInline)
+    var nameToDescription = photoToNameAndDescription
+    nameToDescription.prompt = ["name"]
+    nameToDescription.answer = ["description"]
+    #expect(!revealed(nameToDescription).canEditInline)  // a person card is never edited in place (014d #9)
   }
 
   @Test func doubleTappingAPersonCardDoesNothing() async {

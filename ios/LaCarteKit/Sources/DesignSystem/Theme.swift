@@ -44,6 +44,8 @@ public enum Theme {
   public enum Motion {
     /// Fades, reveals, row changes.
     public static let standard = Animation.easeInOut(duration: 0.25)
+    /// A person card's text prompt moving into its revealed composition (spec 014d).
+    public static let reveal = Animation.smooth(duration: 0.35)
     /// The logo drawing itself in (launch, empty screens).
     public static let logoDrawIn = Animation.easeInOut(duration: 0.9)
     /// One half of the loading mark's loop (write, then erase).
