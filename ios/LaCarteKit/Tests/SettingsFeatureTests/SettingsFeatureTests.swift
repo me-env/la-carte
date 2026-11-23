@@ -10,6 +10,11 @@ import Testing
 @MainActor
 @Suite(.timeLimit(.minutes(1)))
 struct SettingsFeatureTests {
+  // TestStore waits by hopping through background-priority tasks, which a loaded CI runner left
+  // unscheduled past the time limit; the main serial executor runs them on the main actor. This suite is
+  // alone in its test process, so the switch stays on.
+  init() { uncheckedUseMainSerialExecutor = true }
+
   struct Offline: Error {}
   let stats = DeckStats(total: 42, due: 3, new: 1, reviewedToday: 0, nextDue: nil)
 
