@@ -16,6 +16,8 @@ if [ -n "${CI:-}" ]; then UI_POOL_SIZE="${UI_POOL_SIZE:-1}"; else UI_POOL_SIZE="
 # Parallel-testing workers inside one UI run. Each worker is one more simulator (Xcode clones it), so the default is 1;
 # raise it only when UI slots are idle. Budget: about 8 booted simulators in all (docs/dev-velocity.md).
 UI_WORKERS="${UI_WORKERS:-1}"
+# A pool device grown past this many GB is erased (and booted once) when a run releases it (_sim-pool.sh).
+SIM_TRIM_GB="${SIM_TRIM_GB:-8}"
 
 # Locks (scripts/_lock.sh, rules in docs/dev-velocity.md). Always take the DerivedData lock before the
 # simulator lock, so two scripts can never deadlock. DerivedData is per checkout (Xcode hashes the path).
@@ -56,3 +58,25 @@ else
   LA_CARTE_SCRATCH=""
   RESULTS_DIR="$ROOT/qa/.results"
 fi
+
+# Simulator devices on another volume (docs/dev-velocity.md): set LA_CARTE_SIM_DEVICES in scripts/.local.env. Each device
+# folder lives there, linked from ~/Library/Developer/CoreSimulator/Devices/<UDID>. Fail fast if that volume isn't
+# mounted, rather than let a script recreate devices on the internal disk. Never on CI.
+SIM_DEVICES_DIR="$HOME/Library/Developer/CoreSimulator/Devices"
+if [ -n "${CI:-}" ]; then LA_CARTE_SIM_DEVICES=""; fi
+if [ -n "${LA_CARTE_SIM_DEVICES:-}" ] && ! [ -d "$LA_CARTE_SIM_DEVICES" ]; then
+  echo "❌ The simulators live in $LA_CARTE_SIM_DEVICES (LA_CARTE_SIM_DEVICES, scripts/.local.env) and that disk is not mounted. Plug it in and rerun; nothing ran." >&2
+  exit 78
+fi
+# Create a simulator (prints its UDID), move its folder to LA_CARTE_SIM_DEVICES (if set) and boot it once, so its
+# first-boot work happens now and not in a test run. Call it while holding the device's lock.
+sim_create() {  # <name> <device type> <runtime id>
+  local udid
+  udid="$(xcrun simctl create "$1" "$2" "$3")" || return 1
+  if [ -n "${LA_CARTE_SIM_DEVICES:-}" ] && [ ! -L "$SIM_DEVICES_DIR/$udid" ]; then
+    mv "$SIM_DEVICES_DIR/$udid" "$LA_CARTE_SIM_DEVICES/" && ln -s "$LA_CARTE_SIM_DEVICES/$udid" "$SIM_DEVICES_DIR/$udid"
+  fi
+  sim_prewarm "$udid"
+  echo "$udid"
+}
+sim_prewarm() { xcrun simctl bootstatus "$1" -b >/dev/null 2>&1 || true; xcrun simctl shutdown "$1" >/dev/null 2>&1 || true; }

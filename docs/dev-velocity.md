@@ -76,7 +76,11 @@ resolves to the same lock as `latest` when 27.0 is the newest runtime.
   workers + unit runs ≤ 8. All three numbers are env-tunable: `UI_POOL_SIZE`, `UNIT_POOL_SIZE`, `UI_WORKERS`.
   `UI_WORKERS=N` makes `ios-ui-test.sh` run `--split N` on the warm pool simulators. Xcode's own parallel clones
   (`-parallel-testing-enabled`) are never used: they boot cold every run and Apple's PosterBoard crashes in them
-  (a macOS crash pop-up each). A new pool slot is booted once when created, so that happens at most once per slot.
+  (a macOS crash pop-up each). A missing pool device (slot 1 included) is created and booted once, under its lock,
+  so no test run pays a first boot.
+- **Regrowth trim:** when a run releases a pool device bigger than `SIM_TRIM_GB` (default 8; used devices had grown
+  to 10–17 GB), `_sim-pool.sh` erases it and boots it once more (about 20 s, still under its lock), then the
+  waiter gets it. Not on CI.
 - **Bound a run** with `scripts/_timeout.sh <seconds> <command…>` (macOS has no `timeout`): kills the command's
   whole process group (xcodebuild included) and exits 124; its locks drop with it.
 
@@ -106,8 +110,32 @@ Machine-wide setting, not in the repo (CI and other Macs are unaffected):
 DerivedData: plug it in, or `defaults delete com.apple.dt.Xcode IDECustomDerivedDataLocation` to go back to
 `~/Library/Developer/Xcode/DerivedData`.
 
-Simulator devices stay in `~/Library/Developer/CoreSimulator/Devices`: a symlink to another volume makes
-Xcode 27's `simctl` list no devices (tried and rolled back 2026-11-22). Don't move them.
+### This Mac: simulator devices live on the external SSD (2026-11-23)
+
+Set per machine in `scripts/.local.env` (gitignored, never read on CI):
+`LA_CARTE_SIM_DEVICES="${LA_CARTE_SIM_DEVICES:-/Volumes/<ssd>/la-carte/simulators}"`.
+Mechanism: **one symlink per device**, `~/Library/Developer/CoreSimulator/Devices/<UDID> -> $LA_CARTE_SIM_DEVICES/<UDID>`.
+CoreSimulator lists, boots, erases (link kept) and tests them like local devices; device names are unchanged, so
+agents change nothing. Linking the whole `Devices` folder needs CoreSimulatorService stopped and was rolled back
+once (2026-11-22, `simctl` listed no devices); per-device links need neither.
+
+- `scripts/sim-devices.sh` creates the team's devices if missing (iOS 27: `iPhone 17 Pro`, `iPhone 17`,
+  `la-carte-ui-2..5`, `la-carte-unit-2..3`; iOS 26.5: `iPhone 17 Pro`, `iPhone 17`), moves each folder to the SSD,
+  links it and boots it once. `_sim-pool.sh` creates missing pool devices the same way (`sim_create` in
+  `_ios-env.sh`). A device created by hand or by Xcode lands on the internal disk: prefer the scripts.
+- **SSD not mounted:** every iOS script stops at once with exit **78** and "❌ The simulators live in … not mounted":
+  nothing runs and nothing is recreated on the internal disk. Plug the SSD in and rerun. (Xcode by hand would show
+  the linked devices missing; don't recreate them, plug the SSD in.)
+- Measured, `LaunchUITests` (4 tests) and full `ios-test.sh`, under heavy load from other agents (load 200–600):
+  internal disk, warm device: 53.0 s and 5.3 min (283 tests). SSD: 54.2 s and 5.2 min (289 tests); per test
+  7.0–7.7 s vs 6.6–6.8 s. The very first UI run after the migration took 114.6 s (one-off: its device had only been
+  booted once; per-test times were normal). No steady-state penalty.
+- Migration 2026-11-23: all 59 old devices deleted (98 GB on the internal disk, including the iOS 17/18 sets and an
+  iOS 18.2 `iPhone 16 Pro` of 17 GB), the 10 above recreated fresh on the SSD and booted once (125 s in parallel).
+  Free space on the internal disk: 6.2 GB before, 103 GB after (APFS freed the deleted data over ~15 min).
+- Changing devices machine-wide: hold every `sim-*` lock **only for the steps that need it** (the migration held
+  them 2.5 h because its "all held" watcher, `tail -f | grep -m1`, never exited: `tail -f` only notices the closed
+  pipe on its next write. Wait on a command that ends by itself instead).
 
 ### Xcode update mid-session (recovery, 2026-11-22: 27.0 -> 27.2)
 

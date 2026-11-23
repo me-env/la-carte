@@ -146,9 +146,9 @@ Ad-hoc capture of a running simulator, only when the user is at the Mac (macOS p
 
 ## Simulator
 
-Defaults to `iPhone 17 Pro` (same as the user's phone) on the latest installed iOS (27). Xcode 27 doesn't
-create that simulator by default; create it once with:
-`xcrun simctl create "iPhone 17 Pro" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimRuntime.iOS-27-0`.
+Defaults to `iPhone 17 Pro` (same as the user's phone) on the latest installed iOS (27). The scripts create it (and
+the pool devices) when missing; `scripts/sim-devices.sh` creates the whole set at once. On this Mac the devices live
+on the external SSD (docs/dev-velocity.md): if a script stops with exit 78 "not mounted", the SSD is unplugged.
 Override with `SIMULATOR=… OS=…` (CI uses `iPhone 17`).
 
 **Dark on a local iOS 26.5 simulator** (docs/tooling.md P9): the device appearance can't be switched unattended
