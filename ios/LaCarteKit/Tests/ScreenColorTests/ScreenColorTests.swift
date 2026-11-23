@@ -127,6 +127,30 @@ struct ScreenColorTests {
     #expect(abs(answerInk.midX - ink.midX) <= 3, "answer off the question's centre: \(answerInk) vs \(ink)")
   }
 
+  /// "All caught up" shows the logo centred above the message. With Reduce Motion it's the finished mark from the
+  /// first frame (pink line, ink card), no tilt or draw-in. The animated path is in `RenderTests/launchMark`: this
+  /// window render drops 3D transforms, so it can't draw the tilt.
+  @Test(arguments: looks)
+  func caughtUpReduceMotion(_ look: Look) throws {
+    var state = StudyFeature.State()
+    state.phase = .caughtUp(nextDue: nil)
+    let view = StudyView(store: Store(initialState: state) { EmptyReducer() })
+      .environment(\._accessibilityReduceMotion, true)
+    let screen = try Screen(view, look)
+
+    screen.expectBackground()
+    // The logo (64 pt) is the top of the centred content, the message under it.
+    let content = try #require(screen.inkBounds(in: screen.band(0.3, 0.7, x: 0.1, 0.9)), "no content")
+    let logo = try #require(
+      screen.inkBounds(in: CGRect(x: 0, y: content.minY, width: screen.size.width, height: 70)), "no logo"
+    )
+    #expect(abs(logo.midX - screen.size.width / 2) < 8, "logo off centre: \(logo)")
+    #expect(logo.height > 50, "logo not full size: \(logo)")
+    #expect(screen.share(of: screen.palette.accent, in: logo) > 0.02, "logo line not drawn")
+    #expect(screen.share(of: screen.palette.ink, in: logo) > 0.1, "logo card missing")
+    screen.expectNoBlue()
+  }
+
   /// Native screens (spec 009a/b): system navigation title and glass buttons, so only our fills are checked.
   @Test(arguments: looks)
   func deck(_ look: Look) throws {

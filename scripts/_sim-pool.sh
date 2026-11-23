@@ -44,12 +44,15 @@ print(next((d["udid"] for d in devices if d["name"] == sys.argv[2] and d["isAvai
     echo "📱 creating simulator $NAME ($MODEL, $RUNTIME), about 2 GB once used" >&2
     UDID="$(sim_create "$NAME" "$MODEL" "$RUNTIME")"
   fi
+  sim_appearance_ready "$UDID"
   if [ "$SLOT" -eq 1 ]; then export POOL_DESTINATION="$FIRST_DEST"; else export POOL_DESTINATION="platform=iOS Simulator,id=$UDID"; fi
   [ -z "${CI:-}" ] || exec "$@"
   set +e; "$@"; STATUS=$?; set -e
   # Stop the regrowth (docs/dev-velocity.md): past SIM_TRIM_GB, erase the device and boot it once again, still
   # under its lock, so the next run gets a small, warm device.
-  KB="$(du -sk "$SIM_DEVICES_DIR/$UDID/" 2>/dev/null | cut -f1)"
+  # du exits 1 on any unreadable entry (an image's .fseventsd, files vanishing while the device shuts down): under
+  # set -e that used to end the pool with 1 and turn every run's result (pass or 65) into exit 1.
+  KB="$({ du -sk "$SIM_DEVICES_DIR/$UDID/" 2>/dev/null || true; } | cut -f1)"
   if [ "${KB:-0}" -gt $((SIM_TRIM_GB * 1024 * 1024)) ]; then
     echo "🧹 $NAME uses $((KB / 1024 / 1024)) GB (> SIM_TRIM_GB=$SIM_TRIM_GB): erasing it and booting it once (~1 min)" >&2
     xcrun simctl shutdown "$UDID" >/dev/null 2>&1 || true

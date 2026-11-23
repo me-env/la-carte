@@ -217,8 +217,10 @@ final class NotesUITests: XCTestCase {
       let photo = el(app, "study.photo")
       XCTAssertTrue(photo.waitFor(timeout: 5), "no study.photo in the answer")
       waitForLabel(photo, "Photo")  // loaded
+      Thread.sleep(forTimeInterval: 0.8)  // 014d: the reveal moves the prompt (0.35 s) and fades the rows in; read frames after it
       let prompt = app.staticTexts["runs the flower stall"].frame
-      XCTAssertGreaterThan(photo.frame.minY, prompt.maxY, "answer photo not below the prompt")
+      // 014d design 2026-11-22: every direction ends as photo, name, description (the prompt moves under the photo).
+      XCTAssertLessThan(photo.frame.maxY, prompt.minY, "answer photo not above the description prompt")
       assertTexts(app, in: "study.back", ["Sam Rivera"])
       assertNoURL(app)
       snapshot("study-person-description", appearance: appearance)
@@ -239,6 +241,241 @@ final class NotesUITests: XCTestCase {
       app.terminate()
       server.stop()
     }
+  }
+
+  // MARK: - 014d person card text (design 2026-11-22)
+
+  /// Made-up people, one note each (no sibling burying): every direction, short and long descriptions.
+  static let longDescription = "coaches the under-twelve football team on Saturday mornings and keeps the club's kit in "
+    + "a shed behind the bakery"
+
+  enum PersonPrompt { case photo, name, description }
+
+  struct PersonCase {
+    var tag: String
+    var name: String
+    var description: String
+    var prompt: PersonPrompt
+    var long: Bool { description == NotesUITests.longDescription }
+  }
+
+  static let personCases: [PersonCase] = [
+    .init(tag: "photo", name: "Mia Stone", description: "runs the bakery", prompt: .photo),
+    .init(tag: "name", name: "Theo Lane", description: "teaches piano", prompt: .name),
+    .init(tag: "description-prompt", name: "Nora Vale", description: "repairs bicycles", prompt: .description),
+    .init(tag: "long-description-prompt", name: "Iris Moreau", description: longDescription, prompt: .description),
+    .init(tag: "photo-long", name: "Owen Hart", description: longDescription, prompt: .photo),
+    .init(tag: "name-long", name: "Lena Brook", description: longDescription, prompt: .name),
+  ]
+
+  /// A stub deck of person notes, due in `cases` order, photos from the stub server.
+  @MainActor
+  private func personDeck(_ server: StubAPIServer, _ cases: [PersonCase]) -> StubDeck {
+    let base = Date(timeIntervalSince1970: 1_767_225_600)
+    let notes = cases.enumerated().map { i, c -> StubDeck.Note in
+      let fields: [String: String] = ["photo": server.url + "/photos/p\(i).png", "name": c.name,
+                                      "description": c.description]
+      let (prompt, answer): ([String], [String]) = switch c.prompt {
+      case .photo: (["photo"], ["name", "description"])
+      case .name: (["name"], ["photo", "description"])
+      case .description: (["description"], ["name", "photo"])
+      }
+      return StubDeck.Note(type: "person", fields: fields,
+                           cards: [.init(prompt: prompt, answer: answer, state: "review",
+                                         due: base.addingTimeInterval(Double(i) * 60))])
+    }
+    return StubDeck([], notes: notes)
+  }
+
+  private func text(_ app: XCUIApplication, _ label: String) -> XCUIElement {
+    app.staticTexts.matching(NSPredicate(format: "label == %@", label)).firstMatch
+  }
+
+  /// 014d "Person card text" + "Text prompt: the question moves on reveal", Acceptance (QA), every direction,
+  /// short and long descriptions, light + dark: hint/name/description/photo centred on `study.card` (± 1 pt);
+  /// photo prompt: photo frame unchanged on reveal and `study.back` top = the hint's former top; text prompt: the
+  /// prompt group then the revealed group vertically centred in `study.card`, `study.front` kept on the prompt;
+  /// order photo, name, description; hint gone; a 3+-line description in a block centred on the photo, ≤ 288 pt.
+  @MainActor
+  func testNotesStudy_personTextLayout() throws {
+    for appearance in Self.appearances {
+      XCUIDevice.shared.appearance = appearance
+      let server = StubAPIServer()
+      try server.start()
+      let deck = personDeck(server, Self.personCases)
+      server.handler = deck.handle
+      let app = launch(api: .live(server.url))
+      for c in Self.personCases {
+        XCTContext.runActivity(named: "\(c.tag) \(appearance == .dark ? "dark" : "light")") { _ in
+          checkPersonCard(app, c, appearance: appearance)
+        }
+        el(app, "study.rate.good").tap()
+      }
+      app.terminate()
+      server.stop()
+    }
+  }
+
+  @MainActor
+  private func checkPersonCard(_ app: XCUIApplication, _ c: PersonCase, appearance: XCUIDevice.Appearance) {
+    let ctx = c.tag
+    let hint = el(app, "study.answerHint")
+    let front = el(app, "study.front")
+    let card = el(app, "study.card")
+    let promptLabel = c.prompt == .name ? c.name : c.description
+    switch c.prompt {
+    case .photo:
+      XCTAssertTrue(poll(timeout: 10) { self.el(app, "study.photo").exists && self.el(app, "study.reveal").exists },
+                    "\(ctx): photo prompt not shown")
+      waitForLabel(el(app, "study.photo"), "Photo")
+    case .name, .description:
+      XCTAssertTrue(text(app, promptLabel).waitFor(timeout: 10), "\(ctx): prompt '\(promptLabel)' not shown")
+      XCTAssertFalse(el(app, "study.photo").exists, "\(ctx): photo before reveal on a text prompt")
+    }
+    XCTAssertTrue(hint.waitFor(timeout: 5), "\(ctx): no study.answerHint")
+    Thread.sleep(forTimeInterval: 0.5)  // the card's entrance settles
+    let cardF = card.frame, hintF = hint.frame, frontF = front.frame
+    let photoBefore = c.prompt == .photo ? el(app, "study.photo").frame : .null
+    XCTContext.runActivity(named: "before: card \(cardF) front \(frontF) hint \(hintF) photo \(photoBefore)") { _ in }
+    XCTAssertEqual(hintF.midX, cardF.midX, accuracy: 1, "\(ctx): hint not centred \(hintF) in card \(cardF)")
+    if c.prompt != .photo {
+      XCTAssertTrue(front.frame.contains(text(app, promptLabel).frame.insetBy(dx: 1, dy: 1)),
+                    "\(ctx): prompt text not in study.front")
+      let group = frontF.union(hintF)
+      XCTAssertEqual(group.midY, cardF.midY, accuracy: 1, "\(ctx): prompt group \(group) not vertically centred in \(cardF)")
+      XCTAssertGreaterThan(hintF.minY, frontF.maxY, "\(ctx): hint not under the prompt")
+    } else {
+      XCTAssertEqual(photoBefore.midX, cardF.midX, accuracy: 1, "\(ctx): photo not centred")
+      XCTAssertGreaterThan(hintF.minY, photoBefore.maxY, "\(ctx): hint not under the photo")
+    }
+    snapshot("study-person-\(c.tag)", appearance: appearance)
+
+    el(app, "study.reveal").tap()
+    XCTAssertTrue(text(app, c.name).waitFor(timeout: 5), "\(ctx): name not shown after reveal")
+    XCTAssertTrue(text(app, c.description).waitFor(timeout: 5), "\(ctx): description not shown after reveal")
+    let photo = el(app, "study.photo")
+    XCTAssertTrue(photo.waitFor(timeout: 5), "\(ctx): no photo after reveal")
+    waitForLabel(photo, "Photo")
+    Thread.sleep(forTimeInterval: 0.8)  // reveal animation (0.35 s) + inserted rows' fade done
+    XCTAssertTrue(!hint.exists || !hint.isHittable, "\(ctx): hint still there after reveal")
+    let back = el(app, "study.back").frame, photoF = photo.frame
+    let nameF = text(app, c.name).frame, descF = text(app, c.description).frame
+    let frontAfter = el(app, "study.front")
+    XCTContext.runActivity(named: "after: back \(back) photo \(photoF) name \(nameF) desc \(descF) front \(frontAfter.frame)") { _ in }
+
+    // study.front stays on the prompt field (text prompts), the inserted rows are study.back + study.photo.
+    if c.prompt != .photo {
+      XCTAssertTrue(frontAfter.frame.insetBy(dx: -1, dy: -1).contains(text(app, promptLabel).frame),
+                    "\(ctx): study.front \(frontAfter.frame) no longer holds the prompt '\(promptLabel)'")
+    }
+    // Order: photo, name, description.
+    XCTAssertLessThanOrEqual(photoF.maxY, nameF.minY + 1, "\(ctx): name not under the photo")
+    XCTAssertLessThanOrEqual(nameF.maxY, descF.minY + 1, "\(ctx): description not under the name")
+    // Centring on the column.
+    XCTAssertEqual(photoF.midX, cardF.midX, accuracy: 1, "\(ctx): photo not centred after reveal")
+    XCTAssertEqual(nameF.midX, cardF.midX, accuracy: 1, "\(ctx): name not centred \(nameF)")
+    if !c.long {
+      XCTAssertEqual(descF.midX, photoF.midX, accuracy: 1, "\(ctx): description not centred on the photo \(descF)")
+      XCTAssertEqual(back.midX, photoF.midX, accuracy: 1, "\(ctx): study.back not centred on the photo \(back)")
+      XCTAssertEqual(back.midX, cardF.midX, accuracy: 1, "\(ctx): study.back not centred on the card \(back)")
+    } else {
+      // The Text's frame is its widest line, leading-aligned in the block: the block (240 + 2 × 24 = 288 pt, centred
+      // on the photo) starts at photo.midX - 144; the text must start there and end inside it.
+      XCTAssertEqual(descF.minX, photoF.midX - 144, accuracy: 1, "\(ctx): caption lines don't start at the block's edge \(descF)")
+      XCTAssertLessThanOrEqual(descF.maxX, photoF.midX + 144 + 1, "\(ctx): caption wider than the block \(descF)")
+      XCTAssertGreaterThan(descF.height, 60, "\(ctx): long description not 3+ lines \(descF)")
+    }
+    switch c.prompt {
+    case .photo:
+      XCTAssertEqual(photoF, photoBefore, "\(ctx): photo moved on reveal")
+      XCTAssertEqual(back.minY, hintF.minY, accuracy: 1, "\(ctx): study.back top \(back.minY) ≠ hint's former top \(hintF.minY)")
+    case .name, .description:
+      let group = CGRect(x: cardF.minX, y: photoF.minY, width: 1, height: max(back.maxY, frontAfter.frame.maxY) - photoF.minY)
+      XCTAssertEqual(group.midY, cardF.midY, accuracy: 1, "\(ctx): revealed group \(group.minY)…\(group.maxY) not vertically centred in \(cardF)")
+    }
+    snapshot("study-person-\(c.tag)-revealed", appearance: appearance)
+  }
+
+  /// 014d Motion: the name-prompt and long-description-prompt reveals for a `--record` clip (light). Pauses around
+  /// each tap so the clip shows the still states; timings in the activity names (seconds since the test began).
+  @MainActor
+  func testNotesStudy_personRevealMotion() throws {
+    try recordPersonReveals(reduceMotion: false)
+  }
+
+  /// Same with Reduce Motion on (Settings › Accessibility › Motion, set back off at the end): cross-fade in place.
+  @MainActor
+  func testNotesStudy_personRevealMotionReduced() throws {
+    setReduceMotion(true)
+    defer { setReduceMotion(false) }
+    try recordPersonReveals(reduceMotion: true)
+  }
+
+  @MainActor
+  private func recordPersonReveals(reduceMotion: Bool) throws {
+    XCUIDevice.shared.appearance = .light
+    let cases = Self.personCases.filter { $0.tag == "name" || $0.tag == "long-description-prompt" }
+    let server = StubAPIServer()
+    try server.start()
+    server.handler = personDeck(server, cases).handle
+    let app = launch(api: .live(server.url))
+    let start = Date()
+    let suffix = reduceMotion ? "-reduce-motion" : ""
+    for c in cases {
+      let prompt = c.prompt == .name ? c.name : c.description
+      XCTAssertTrue(text(app, prompt).waitFor(timeout: 10), "\(c.tag): prompt not shown")
+      Thread.sleep(forTimeInterval: 1.5)
+      if reduceMotion {
+        // AC5: the composition layer (laid out before reveal) is hidden from the accessibility tree until reveal.
+        XCTAssertFalse(el(app, "study.photo").exists, "\(c.tag): answer layer's photo in the tree before reveal")
+        let other = c.prompt == .name ? c.description : c.name
+        XCTAssertFalse(text(app, other).exists, "\(c.tag): answer '\(other)' in the tree before reveal")
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", prompt)).count, 1,
+                       "\(c.tag): the prompt is in the tree twice before reveal: \(frames(app, prompt))")
+      }
+      let promptBefore = text(app, prompt).frame
+      XCTContext.runActivity(named: String(format: "reveal %@ at %.2f s", c.tag, Date().timeIntervalSince(start))) { _ in }
+      el(app, "study.reveal").tap()
+      Thread.sleep(forTimeInterval: 1.5)
+      let promptAfter = text(app, prompt).frame
+      XCTContext.runActivity(named: "\(c.tag) prompt \(promptBefore) → \(promptAfter)") { _ in }
+      XCTAssertNotEqual(promptBefore.minY, promptAfter.minY, "\(c.tag): the prompt didn't move into the composition")
+      // AC5: after reveal the hint is gone and (Reduce Motion) the question layer is hidden: one copy of the prompt.
+      XCTAssertTrue(!el(app, "study.answerHint").exists || !el(app, "study.answerHint").isHittable,
+                    "\(c.tag): hint still there after reveal: \(el(app, "study.answerHint").frame)")
+      XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", prompt)).count, 1,
+                     "\(c.tag): the prompt is in the tree twice after reveal: \(frames(app, prompt))")
+      snapshot("study-person-motion-\(c.tag)\(suffix)", appearance: .light)
+      el(app, "study.rate.good").tap()
+    }
+    app.terminate()
+    server.stop()
+  }
+
+  /// Frames of every static text labelled `label` (to locate duplicates in the accessibility tree).
+  @MainActor
+  private func frames(_ app: XCUIApplication, _ label: String) -> [CGRect] {
+    app.staticTexts.matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex.map(\.frame)
+  }
+
+  /// Toggles Settings › Accessibility › Motion › Reduce Motion (a simulator setting: always set back off).
+  @MainActor
+  private func setReduceMotion(_ on: Bool) {
+    let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+    settings.terminate()
+    settings.launch()
+    let accessibility = settings.staticTexts["Accessibility"].firstMatch
+    for _ in 0..<6 where !(accessibility.exists && accessibility.isHittable) { settings.swipeUp() }
+    accessibility.tap()
+    let motion = settings.staticTexts["Motion"].firstMatch
+    for _ in 0..<6 where !(motion.exists && motion.isHittable) { settings.swipeUp() }
+    motion.tap()
+    let toggle = settings.switches["Reduce Motion"].firstMatch
+    XCTAssertTrue(toggle.waitFor(timeout: 5), "Reduce Motion switch not found")
+    let isOn = { (toggle.value as? String) == "1" }
+    if isOn() != on { toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap() }
+    XCTAssertTrue(poll(timeout: 3) { isOn() == on }, "Reduce Motion not set to \(on)")
+    settings.terminate()
   }
 
   // MARK: - Live API

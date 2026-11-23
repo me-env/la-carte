@@ -10,7 +10,7 @@ from sqlmodel import Session
 
 from la_carte_api import deck
 from la_carte_api.mcp_server import build_mcp
-from la_carte_api.models import CardCreate, Rating, ReportCreate, ReviewLog, utcnow
+from la_carte_api.models import CardCreate, Rating, ReportCreate, ReviewLog, Settings, utcnow
 
 PARIS = ZoneInfo("Europe/Paris")
 NOON = datetime(2026, 11, 21, 12, 0, tzinfo=UTC)
@@ -178,9 +178,10 @@ def test_new_today_counts_cards_first_reviewed_today_in_the_local_day(session):
 
 def test_milestone_is_the_stored_size_and_15_for_none_or_zero(session):
     assert deck.stats(session).milestone == 15
-    deck.set_new_cards_per_day(session, 5)
+    deck.set_milestone(session, 5)
     assert deck.stats(session).milestone == 5
-    deck.set_new_cards_per_day(session, 0)
+    session.merge(Settings(new_cards_per_day=0))
+    session.commit()
     assert deck.stats(session).milestone == 15
 
 
@@ -203,7 +204,7 @@ async def test_mcp_deck_stats_has_the_fields_and_explains_freezes(client):
     async with Client(build_mcp(client.app.state.engine)) as mcp:
         stats = (await mcp.call_tool("deck_stats", {"tz": "Europe/Paris"})).structured_content
         rest = client.get("/stats", params={"tz": "Europe/Paris"}).json()
-        assert {k: v for k, v in stats.items() if k != "new_cards"} == rest
+        assert stats == rest
         assert (stats["history"], stats["streak_start"]) == ("p", None)
 
         [tool] = [t for t in (await mcp.list_tools()).tools if t.name == "deck_stats"]

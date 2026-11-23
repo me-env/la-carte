@@ -64,7 +64,7 @@ public struct StudyFeature {
     /// Inline edit (010) needs one text field on each side; photo and multi-field cards use the deck editor (014d).
     var canEditInline: Bool {
       guard let card = cards.first else { return false }
-      return card.prompt.count == 1 && card.answer.count == 1 && !card.prompt.contains(Card.photoField)
+      return card.type == .basic && card.prompt.count == 1 && card.answer.count == 1 && !card.prompt.contains(Card.photoField)
         && !card.answer.contains(Card.photoField)
     }
 
@@ -565,6 +565,8 @@ public struct StudyFeature {
 
 extension Card {
   static let photoField = "photo"
+  static let nameField = "name"
+  static let descriptionField = "description"
 
   /// The fields of `names` that have a value: an empty field isn't on the card.
   func shown(_ names: [String]) -> [String] {

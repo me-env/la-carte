@@ -15,12 +15,12 @@ from la_carte_api import deck
 from la_carte_api.models import (
     AddCardsReply,
     AddNotesReply,
-    AgentDeckStats,
     CardCreate,
     CardRead,
     CardUpdate,
+    DeckStats,
     Direction,
-    NewCardsStatus,
+    MilestoneSetting,
     NoteCreate,
     NoteRead,
     NoteType,
@@ -50,7 +50,7 @@ Edit the note, not loose cards: to fix a typo use `update_note`; to quiz another
 Choose directions deliberately, never "all of them". Add back -> front only when recalling it
 that way is useful to the user (e.g. vocabulary they must produce, not just recognize). For a
 person, pick the prompts the user wants to recall from (photo, name, description); ask if they
-haven't said. Each extra direction is extra daily work.
+haven't said. Each extra direction is one more card to review.
 
 Cards stay minimalist: front = a word or short question, back = the shortest answer, one fact per
 note. No explanations, no full sentences unless unavoidable.
@@ -60,9 +60,9 @@ outside this deck.
 Quiz: `due_cards` (most at risk of being forgotten first; siblings of a just-reviewed card are
 held back until that card is due again, at most 6 hours; a card still being (re)learned, e.g. just
 failed, is never held back), then `review_card`.
-New cards: N per day is a daily target (default 15), not a limit: every new card is always
-available to study. After adding, you may tell the user how many new cards are beyond today's
-target (`new_cards`). Change the target with `new_cards_per_day` only when the user asks.
+New cards are never held back: all are studyable at once, after due reviews, oldest first. The
+app shows them in steps of `milestone` cards (default 15). After adding, tell the user how many new
+cards wait (`new`). Change the step size with `new_card_milestone` only when the user asks.
 Ready-made prompts: `quiz_me`, `make_cards`, `add_people`, `handle_reports`.
 
 Reports. While studying, the user flags cards; a reported card is out of study until its report is
@@ -179,12 +179,13 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
             ) as error:  # fmt: skip
                 raise ToolError(str(error)) from error
 
-    def with_new_cards(reply, operation):
-        """`operation`'s result plus the new-card target's status right after it."""
+    def with_new_count(reply, operation):
+        """`operation`'s result plus the never-reviewed card count after it and the milestone."""
 
         def run_it(session: Session, *args):
             result = operation(session, *args)
-            return reply(**dict(result), new_cards=deck.new_cards_status(session))
+            new, milestone = deck.new_card_count(session), deck.get_milestone(session)
+            return reply(**dict(result), new=new, milestone=milestone)
 
         return run_it
 
@@ -208,10 +209,11 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         note is returned in `skipped`: edit it (`update_note`, `add_direction`) instead.
         allow_duplicates=true adds it anyway: use only when the user explicitly asks.
         All or nothing: if one note is invalid, nothing is added and the error names it.
-        Returns {added: [Note], skipped: [Note], new_cards}: how the new cards compare with the
-        daily new-card target (a target, not a limit: all of them can be studied now)."""
+        New cards are due at once, after due reviews. Tell the user how many new cards wait (`new`).
+        Returns {added: [Note], skipped: [Note], new (never-reviewed cards in the deck now),
+        milestone (the app's new-card step size)}."""
         add = partial(deck.add_notes, skip_duplicates=not allow_duplicates)
-        return run(with_new_cards(AddNotesReply, add), notes)
+        return run(with_new_count(AddNotesReply, add), notes)
 
     @mcp.tool()
     def find_notes(
@@ -237,7 +239,7 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         `prompt` is one field (e.g. ["description"]); the answer is every other field (`answer`
         may be omitted; if given it must be exactly those). Siblings are unchanged. The prompt
         field must be filled on the note; an existing direction is an error. Each direction is
-        extra daily work: add it only when the user wants to recall that way."""
+        one more card to review: add it only when the user wants to recall that way."""
         return run(deck.add_direction, note_id, Direction(prompt=prompt, answer=answer))
 
     @mcp.tool()
@@ -258,7 +260,7 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
     @mcp.tool()
     def add_cards(cards: list[CardCreate], allow_duplicates: bool = False) -> AddCardsReply:
         """Prefer the note tools (`add_notes`). Adds basic notes, one card front -> back each,
-        due immediately (`new_cards`: the daily new-card target, see `add_notes`).
+        due immediately.
 
         Minimalist cards: front = a word or short question, back = the shortest answer (no
         explanations). One fact per card. Check `list_cards` first; if a card exists, don't re-add
@@ -267,9 +269,11 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         Safety net: a front matching an existing basic note's front (case-insensitive, trimmed) or
         an earlier card in this call is not added; the existing card is returned in `skipped`.
         allow_duplicates=true adds it anyway: use only when the user explicitly asks.
-        Returns {added: [Card], skipped: [Card], new_cards}."""
+        New cards are due at once, after due reviews. Tell the user how many new cards wait (`new`).
+        Returns {added: [Card], skipped: [Card], new (never-reviewed cards in the deck now),
+        milestone (the app's new-card step size)}."""
         add = partial(deck.add_cards, skip_duplicates=not allow_duplicates)
-        return run(with_new_cards(AddCardsReply, add), cards)
+        return run(with_new_count(AddCardsReply, add), cards)
 
     @mcp.tool()
     def list_cards(query: str | None = None, limit: int = 50) -> list[CardRead]:
@@ -317,17 +321,18 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         return run(partial(deck.review_card, confidence=confidence), card_id, rating)
 
     @mcp.tool()
-    def deck_stats(tz: str = "UTC") -> AgentDeckStats:
+    def deck_stats(tz: str = "UTC") -> DeckStats:
         """How many cards in total, due now (as `due_cards` serves them), never reviewed, and
         reviewed today, and when the next card not servable now becomes servable (`next_due`,
-        UTC, null if none). `new_cards`: the daily new-card target, how many new cards were
-        first studied in the last 24 h, how many are left in today's target and beyond it.
-        Read-only.
+        UTC, null if none). Read-only.
 
         `due_new`: the never-reviewed cards among `due`. `new_today`: new cards first studied
-        today in `tz` (calendar day; `new_cards.introduced` is the last 24 h). `milestone`: the
-        app's daily step size of new cards (`new_cards.per_day`, or 15 when that is 0);
-        `new_today // milestone` steps reached.
+        today in `tz`. `at_risk_*`, `reviews_*`, `new_today`, `milestone`: the app's daily ladder
+        (display only, nothing is held back). `at_risk_total` / `at_risk_done`: cards that were
+        likely to be forgotten at the start of today, and how many of them were reviewed today
+        (both 0 when fewer than 10). `reviews_total` / `reviews_done`: cards started before today
+        that were reviewed today or are servable now, and how many were reviewed today.
+        `milestone`: the size of the app's new-card steps (`new_today // milestone` reached).
 
         `streak`: days in the current run (studied or frozen), ending today or yesterday, in `tz`;
         it forgives one missed day per 7 (a frozen day; two missed days in a row end it).
@@ -340,21 +345,19 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
             zone = deck.time_zone(tz)
         except deck.UnknownTimeZone as error:
             raise ToolError(str(error)) from error
-        return run(partial(deck.agent_stats, tz=zone))
+        return run(partial(deck.stats, tz=zone))
 
     @mcp.tool()
-    def new_cards_per_day(value: int | None = None) -> NewCardsStatus:
-        """The user's daily target of new cards to learn (default 15): a target, not a limit.
-        Every new card stays available to study; nothing is held back. Change it only when the
-        user asks.
+    def new_card_milestone(value: int | None = None) -> MilestoneSetting:
+        """Size of the new-card steps the app shows (default 15). New cards are never held back:
+        this only paces the display. Change it only when the user asks (e.g. 'only 5 new cards a
+        day').
 
-        No `value`: reads the setting (read-only). `value` (0-200): sets it, saved for every
-        client. Returns {per_day, introduced (new cards first studied in the last 24 h),
-        available (new cards left in today's target), waiting (new cards beyond it), days (about
-        how many days of targets those make; null when per_day = 0)}."""
+        No `value`: reads the setting (read-only). `value` (1-200): sets it, saved for every
+        client. Returns {milestone}."""
         if value is None:
-            return run(deck.new_cards_status)
-        return run(deck.set_new_cards_per_day, value)
+            return MilestoneSetting(milestone=run(deck.get_milestone))
+        return MilestoneSetting(milestone=run(deck.set_milestone, value))
 
     # --- Reports (spec 015) ---------------------------------------------------------------------
 
