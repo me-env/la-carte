@@ -160,7 +160,8 @@ private struct UnitShape: Shape {
 
 /// The logo drawing itself in once, e.g. on the "All caught up" screen. The card arrives tilted in 3D about its
 /// diagonal and lays itself flat (`logoTilt`) while the curve starts drawing (`logoDrawIn`); the line is in the
-/// card's plane, so the mark moves as one object. With Reduce Motion it's static: the finished mark fades in.
+/// card's plane, so the mark moves as one object. With Reduce Motion it's the finished mark, static. Never shown
+/// at app launch: nothing may delay the first card.
 public struct LaCarteLaunchMark: View {
   /// The tilt the card arrives with, about the bottom-left → top-right diagonal.
   static let tilt = Angle.degrees(40)
@@ -172,13 +173,15 @@ public struct LaCarteLaunchMark: View {
   public init() {}
 
   public var body: some View {
-    let settled = reduceMotion || shown
-    LaCarteLogo(progress: settled ? 1 : 0)
-      .animation(Theme.Motion.logoTilt) { $0.launchTilt(settled ? 0 : 1) }
-      .opacity(reduceMotion && !shown ? 0 : 1)
-      .onAppear {
-        withAnimation(reduceMotion ? Theme.Motion.standard : Theme.Motion.logoDrawIn) { shown = true }
-      }
+    if reduceMotion {
+      LaCarteLogo()
+    } else {
+      LaCarteLogo(progress: shown ? 1 : 0)
+        .animation(Theme.Motion.logoTilt) { $0.launchTilt(shown ? 0 : 1) }
+        .onAppear {
+          withAnimation(Theme.Motion.logoDrawIn) { shown = true }
+        }
+    }
   }
 
   /// The mark `time` seconds into its draw-in, on the same curves as the live one (for renders and reviews).

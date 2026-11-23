@@ -763,6 +763,10 @@ public struct StudyView: View {
   private func caughtUp(subtitle: String?) -> some View {
     centeredMessage {
       VStack(spacing: Theme.Spacing.s) {
+        LaCarteLaunchMark()
+          .frame(width: 64, height: 64)
+          .padding(.bottom, Theme.Spacing.m)
+          .accessibilityIdentifier("study.logo")
         Text("All caught up")
           .font(.cardFace)
           .foregroundStyle(Theme.ink)
