@@ -54,20 +54,21 @@ struct StudyReportTests {
   @Test func askingClosesTheMenu() async {
     var state = revealed(cards)
     state.isReportMenuShown = true
+    let clock = TestClock()
     let store = TestStore(initialState: state) {
       StudyFeature()
     } withDependencies: {
       $0.askAI.copy = { _ in }
       $0.askAI.open = { _ in true }
-      $0.continuousClock = ImmediateClock()
+      $0.continuousClock = clock
     }
 
     await store.send(.askTapped) {
       $0.isReportMenuShown = false
-    }
-    await store.receive(\.askOpened) {
       $0.notice = .copied
     }
+    await store.receive(\.askOpened)
+    await clock.advance(by: .seconds(2))
     await store.receive(\.noticeExpired) {
       $0.notice = nil
     }
@@ -271,8 +272,7 @@ struct StudyReportTests {
     }
   }
 
-  @Test(arguments: [(true, StudyFeature.State.Notice.copied), (false, .copiedNotInstalled("Claude"))])
-  func askCopiesThenOpensThePickedApp(opened: Bool, notice: StudyFeature.State.Notice) async {
+  @Test func askCopiesThenOpensThePickedAppAndSaysWhenItIsNotInstalled() async {
     let calls = LockIsolated<[String]>([])
     let clock = TestClock()
     var state = revealed(cards)
@@ -284,13 +284,15 @@ struct StudyReportTests {
       $0.askAI.copy = { text in calls.withValue { $0.append("copy \(text)") } }
       $0.askAI.open = { url in
         calls.withValue { $0.append("open \(url.absoluteString)") }
-        return opened
+        return false
       }
     }
 
-    await store.send(.askTapped)
+    await store.send(.askTapped) {
+      $0.notice = .copied
+    }
     await store.receive(\.askOpened) {
-      $0.notice = notice
+      $0.notice = .copiedNotInstalled("Claude")
     }
     let text = AskText.make(for: cards[0])
     #expect(calls.value == ["copy \(text)", "open \(AIApp.claude.link(for: text)!.absoluteString)"])
@@ -300,22 +302,32 @@ struct StudyReportTests {
     }
   }
 
-  @Test func theDefaultVibeNotInstalledSaysSo() async {
+  @Test func copiedShowsAtOnceAndASlowOpenAddsNotInstalledWhenItReturns() async {
+    let clock = TestClock()
     let store = TestStore(initialState: revealed(cards)) {
       StudyFeature()
     } withDependencies: {
-      $0.continuousClock = ImmediateClock()
+      $0.continuousClock = clock
       $0.askAI.copy = { _ in }
       $0.askAI.open = { url in
         #expect(url == AIApp.vibe.link(for: AskText.make(for: cards[0])))
+        try? await clock.sleep(for: .seconds(60))
         return false
       }
     }
 
-    await store.send(.askTapped)
+    await store.send(.askTapped) {
+      $0.notice = .copied
+    }
+    await clock.advance(by: .seconds(2))
+    await store.receive(\.noticeExpired) {
+      $0.notice = nil
+    }
+    await clock.advance(by: .seconds(58))
     await store.receive(\.askOpened) {
       $0.notice = .copiedNotInstalled("Vibe")
     }
+    await clock.advance(by: .seconds(2))
     await store.receive(\.noticeExpired) {
       $0.notice = nil
     }

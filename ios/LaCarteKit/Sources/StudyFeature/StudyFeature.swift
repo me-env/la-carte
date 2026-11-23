@@ -331,17 +331,21 @@ public struct StudyFeature {
         guard state.canReport, let card = state.cards.first else { return .none }
         state.isReportMenuShown = false
         let text = AskText.make(for: card)
-        guard let url = state.aiApp.link(for: text) else {
-          state.notice = .copied
-          return .merge(.run { [askAI] _ in askAI.copy(text) }, expireNotice())
-        }
-        return .run { [askAI] send in
-          askAI.copy(text)
-          await send(.askOpened(askAI.open(url)))
-        }
+        let url = state.aiApp.link(for: text)
+        state.notice = .copied
+        return .merge(
+          .run { [askAI] send in
+            askAI.copy(text)
+            if let url { await send(.askOpened(askAI.open(url))) }
+          },
+          expireNotice()
+        )
 
-      case let .askOpened(opened):
-        state.notice = opened ? .copied : .copiedNotInstalled(state.aiApp.title)
+      case .askOpened(true):
+        return .none
+
+      case .askOpened(false):
+        state.notice = .copiedNotInstalled(state.aiApp.title)
         return expireNotice()
 
       case .reportReasonTapped(.other):

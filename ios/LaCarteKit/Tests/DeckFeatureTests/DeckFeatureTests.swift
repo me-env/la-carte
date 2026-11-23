@@ -10,6 +10,9 @@ import Testing
 @MainActor
 @Suite(.timeLimit(.minutes(1)))
 struct DeckFeatureTests {
+  // Alone in its test bundle; see "Main serial executor" in docs/testing.md.
+  init() { uncheckedUseMainSerialExecutor = true }
+
   let notes = [Note].fixtures
   struct Offline: Error {}
 
