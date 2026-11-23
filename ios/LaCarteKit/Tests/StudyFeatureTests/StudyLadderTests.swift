@@ -110,7 +110,7 @@ struct StudyLadderTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
-    await store.receive(\.ladderResponse.success) {
+    await store.receive(\.ladderResponse) {
       $0.ladder = Ladder(stats: after)
       $0.notice = .stepDone("Reviews")
     }
@@ -137,7 +137,7 @@ struct StudyLadderTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
-    await store.receive(\.ladderResponse.success) {
+    await store.receive(\.ladderResponse) {
       $0.ladder = Ladder(stats: after)
     }
   }
@@ -159,7 +159,7 @@ struct StudyLadderTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
-    await store.receive(\.ladderResponse.failure)
+    await store.receive(\.ladderResponse)
   }
 
   @Test func ratingTheLastCardLoadsTheQueueOnceAndShowsTheStep() async {

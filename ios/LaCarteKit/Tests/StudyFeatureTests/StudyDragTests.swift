@@ -147,7 +147,7 @@ struct StudyDragTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
-    await store.receive(\.ladderResponse.success) {
+    await store.receive(\.ladderResponse) {
       $0.ladder = Ladder(stats: .plain)
     }
     #expect(store.state.rowEcho == nil)

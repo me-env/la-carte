@@ -106,6 +106,7 @@ struct StudyReportTests {
     } withDependencies: {
       $0.continuousClock = clock
       $0.apiClient.reportCard = { id, reason, comment in sent.withValue { $0.append((id, reason, comment)) } }
+      $0.apiClient.stats = { .plain }
     }
 
     await store.send(.reportReasonTapped(reason)) {
@@ -116,6 +117,9 @@ struct StudyReportTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
       $0.notice = .reported
+    }
+    await store.receive(\.ladderResponse) {
+      $0.ladder = Ladder(stats: .plain)
     }
     #expect(sent.value.map(\.0) == [cards[0].id])
     #expect(sent.value.map(\.1) == [reason])
@@ -137,6 +141,7 @@ struct StudyReportTests {
     } withDependencies: {
       $0.continuousClock = clock
       $0.apiClient.reportCard = { _, reason, comment in sent.withValue { $0.append((reason, comment)) } }
+      $0.apiClient.stats = { .plain }
     }
 
     await store.send(.reportReasonTapped(.other)) {
@@ -160,6 +165,9 @@ struct StudyReportTests {
       $0.cards.removeFirst()
       $0.notice = .reported
     }
+    await store.receive(\.ladderResponse) {
+      $0.ladder = Ladder(stats: .plain)
+    }
     #expect(sent.value.map(\.0) == [.other])
     #expect(sent.value.map(\.1) == ["typo in the answer"])
     await clock.advance(by: .seconds(2))
@@ -176,6 +184,71 @@ struct StudyReportTests {
     }
     await store.send(.binding(.set(\.isReportCommentShown, false))) {
       $0.isReportCommentShown = false
+    }
+  }
+
+  /// Spec 021 (QA): the API holds the reported card, so the counter drops it ("3 new" → "2 new").
+  @Test func aReportRefreshesTheCounter() async {
+    let before = DeckStats(total: 3, due: 3, new: 3, reviewedToday: 0, nextDue: nil, dueNew: 3)
+    let after = DeckStats(total: 3, due: 2, new: 2, reviewedToday: 0, nextDue: nil, dueNew: 2)
+    let clock = TestClock()
+    let store = TestStore(initialState: revealed(cards, ladder: before)) {
+      StudyFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.apiClient.reportCard = { _, _, _ in }
+      $0.apiClient.stats = { after }
+    }
+    #expect(store.state.ladder?.counter?.count == 3)
+
+    await store.send(.reportReasonTapped(.drop)) {
+      $0.isReviewing = true
+    }
+    await store.receive(\.reportResponse) {
+      $0.isReviewing = false
+      $0.isRevealed = false
+      $0.cards.removeFirst()
+      $0.notice = .reported
+    }
+    await store.receive(\.ladderResponse) {
+      $0.ladder = Ladder(stats: after)
+    }
+    #expect(store.state.ladder?.counter?.count == 2)
+    await clock.advance(by: StudyFeature.noticeDuration)
+    await store.receive(\.noticeExpired) {
+      $0.notice = nil
+    }
+  }
+
+  /// Reporting the last at-risk card finishes the step, but only a rating announces one (spec 021 decision 8).
+  @Test func aReportThatEmptiesAStepShowsNoStepNotice() async {
+    let clock = TestClock()
+    let before = DeckStats(total: 3, due: 3, new: 0, reviewedToday: 0, nextDue: nil, atRiskTotal: 3, atRiskDone: 2)
+    let after = DeckStats(total: 3, due: 2, new: 0, reviewedToday: 0, nextDue: nil, atRiskTotal: 2, atRiskDone: 2)
+    #expect(Ladder(stats: after).notice(after: Ladder(stats: before)) == "At risk")
+    let store = TestStore(initialState: revealed(cards, ladder: before)) {
+      StudyFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.apiClient.reportCard = { _, _, _ in }
+      $0.apiClient.stats = { after }
+    }
+
+    await store.send(.reportReasonTapped(.wrong)) {
+      $0.isReviewing = true
+    }
+    await store.receive(\.reportResponse) {
+      $0.isReviewing = false
+      $0.isRevealed = false
+      $0.cards.removeFirst()
+      $0.notice = .reported
+    }
+    await store.receive(\.ladderResponse) {
+      $0.ladder = Ladder(stats: after)
+    }
+    await clock.advance(by: StudyFeature.noticeDuration)
+    await store.receive(\.noticeExpired) {
+      $0.notice = nil
     }
   }
 
@@ -240,7 +313,7 @@ struct StudyReportTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
-    await store.receive(\.ladderResponse.success) {
+    await store.receive(\.ladderResponse) {
       $0.ladder = Ladder(stats: .plain)
     }
   }
@@ -368,6 +441,7 @@ struct StudyReportTests {
       StudyFeature()
     } withDependencies: {
       $0.apiClient.reportCard = { id, reason, comment in sent.withValue { $0.append((id, reason, comment)) } }
+      $0.apiClient.stats = { .plain }
     }
     let url = String(repeating: "x", count: 600)
 
@@ -376,14 +450,16 @@ struct StudyReportTests {
       $0.cards.removeFirst()
     }
     await store.receive(\.brokenPhotoReportResponse)
+    // The API holds the skipped card: the counter drops it, as after a report.
+    await store.receive(\.ladderResponse) {
+      $0.ladder = Ladder(stats: .plain)
+    }
     #expect(sent.value.map(\.0) == [photoCard.id])
     #expect(sent.value.map(\.1) == [.brokenPhoto])
     #expect(sent.value.map(\.2) == [String(repeating: "x", count: 500)])
 
     // The report may not have landed: the card is not served again this session, nor reported twice.
-    await store.send(.queueResponse(.success(.init(cards: [photoCard, cards[0]], stats: .plain)), afterRating: false)) {
-      $0.ladder = Ladder(stats: .plain)
-    }
+    await store.send(.queueResponse(.success(.init(cards: [photoCard, cards[0]], stats: .plain)), afterRating: false))
     await store.send(.photoLoadFailed(cardID: photoCard.id, url: url, side: .front))
     #expect(sent.value.count == 1)
   }
@@ -454,15 +530,17 @@ struct StudyReportTests {
       StudyFeature()
     } withDependencies: {
       $0.apiClient.reportCard = { id, reason, _ in sent.withValue { $0.append((id, reason)) } }
+      $0.apiClient.stats = { .plain }
     }
 
     await store.send(.photoLoadFailed(cardID: nameCard.id, url: "https://example.org/a.jpg", side: .back)) {
       $0.reportedBrokenPhotos = [nameCard.id]
     }
     await store.receive(\.brokenPhotoReportResponse)
-    await store.send(.queueResponse(.success(.init(cards: [nameCard, cards[0]], stats: .plain)), afterRating: false)) {
+    await store.receive(\.ladderResponse) {
       $0.ladder = Ladder(stats: .plain)
     }
+    await store.send(.queueResponse(.success(.init(cards: [nameCard, cards[0]], stats: .plain)), afterRating: false))
     await store.send(.photoLoadFailed(cardID: nameCard.id, url: "https://example.org/a.jpg", side: .back))
     #expect(sent.value.map(\.0) == [nameCard.id])
     #expect(sent.value.map(\.1) == [.brokenPhoto])
@@ -474,17 +552,22 @@ struct StudyReportTests {
       StudyFeature()
     } withDependencies: {
       $0.apiClient.reportCard = { _, _, _ in }
+      $0.apiClient.stats = { .plain }
     }
 
     await store.send(.photoLoadFailed(cardID: photoCard.id, url: "https://example.org/a.jpg", side: .front)) {
       $0.reportedBrokenPhotos = [photoCard.id]
     }
     await store.receive(\.brokenPhotoReportResponse)
+    await store.receive(\.ladderResponse) {
+      $0.ladder = Ladder(stats: .plain)
+    }
   }
 
-  private func revealed(_ cards: [Card]) -> StudyFeature.State {
+  private func revealed(_ cards: [Card], ladder: DeckStats? = nil) -> StudyFeature.State {
     var state = studying(cards)
     state.isRevealed = true
+    state.ladder = ladder.map(Ladder.init)
     return state
   }
 

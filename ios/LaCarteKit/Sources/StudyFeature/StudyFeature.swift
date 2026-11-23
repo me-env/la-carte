@@ -126,8 +126,8 @@ public struct StudyFeature {
     case autoRefreshFired
     case remainingTapped
     case queueResponse(Result<Queue, any Error>, afterRating: Bool)
-    /// The stats fetched after a rating that left cards in the batch.
-    case ladderResponse(Result<DeckStats, any Error>)
+    /// The stats fetched after a rating or a report that left cards in the batch; only a rating shows a step notice.
+    case ladderResponse(Result<DeckStats, any Error>, afterRating: Bool)
     case reviewResponse(Result<Card, any Error>)
     case editSaveResponse(Result<Card, any Error>, previous: Card)
     case cardDoubleTapped
@@ -327,10 +327,10 @@ public struct StudyFeature {
         }
         return .merge(notice, armAutoRefresh(state))
 
-      case let .ladderResponse(.success(stats)):
-        return updateLadder(&state, stats: stats, afterRating: true)
+      case let .ladderResponse(.success(stats), afterRating):
+        return updateLadder(&state, stats: stats, afterRating: afterRating)
 
-      case .ladderResponse(.failure):
+      case .ladderResponse(.failure, _):
         return .none
 
       case let .reviewResponse(.success(card)):
@@ -338,7 +338,7 @@ public struct StudyFeature {
         state.releasedRating = nil
         state.isRevealed = false
         state.cards.remove(id: card.id)
-        return state.cards.isEmpty ? fetchQueue(&state, afterRating: true) : fetchLadder()
+        return state.cards.isEmpty ? fetchQueue(&state, afterRating: true) : fetchLadder(afterRating: true)
 
       case let .queueResponse(.failure(error), _), let .reviewResponse(.failure(error)):
         state.isReviewing = false
@@ -389,7 +389,8 @@ public struct StudyFeature {
         state.isRevealed = false
         state.cards.remove(id: cardID)
         state.notice = .reported
-        return .merge(expireNotice(), state.cards.isEmpty ? fetchQueue(&state) : .none)
+        // The API holds the card: the counter drops it, without a step notice.
+        return .merge(expireNotice(), state.cards.isEmpty ? fetchQueue(&state) : fetchLadder(afterRating: false))
 
       case .reportResponse(.failure, _):
         state.isReviewing = false
@@ -420,7 +421,7 @@ public struct StudyFeature {
         }
 
       case .brokenPhotoReportResponse(.success, _):
-        return state.cards.isEmpty && state.phase == .loading ? fetchQueue(&state) : .none
+        return state.cards.isEmpty && state.phase == .loading ? fetchQueue(&state) : fetchLadder(afterRating: false)
 
       case let .brokenPhotoReportResponse(.failure, cardID):
         // Not held by the API, so it may come back on the next load; refetching now would only loop on it.
@@ -487,10 +488,10 @@ public struct StudyFeature {
     .cancellable(id: CancelID.autoRefresh, cancelInFlight: true)
   }
 
-  /// Only the latest post-rating stats land.
-  private func fetchLadder() -> Effect<Action> {
+  /// Only the latest post-rating (or post-report) stats land.
+  private func fetchLadder(afterRating: Bool) -> Effect<Action> {
     .run { [apiClient] send in
-      await send(.ladderResponse(Result { try await apiClient.stats() }))
+      await send(.ladderResponse(Result { try await apiClient.stats() }, afterRating: afterRating))
     }
     .cancellable(id: CancelID.ladder, cancelInFlight: true)
   }

@@ -62,7 +62,7 @@ struct StudyFeatureTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
-    await store.receive(\.ladderResponse.success) {
+    await store.receive(\.ladderResponse) {
       $0.ladder = Ladder(stats: .plain)
     }
     #expect(reviewed.value.map(\.0) == [cards[0].id])
@@ -230,7 +230,7 @@ struct StudyFeatureTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
-    await store.receive(\.ladderResponse.success) {
+    await store.receive(\.ladderResponse) {
       $0.ladder = Ladder(stats: .plain)
     }
     #expect(reviewCount.value == 1)
@@ -465,7 +465,7 @@ struct StudyFeatureTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
-    await store.receive(\.ladderResponse.success) {
+    await store.receive(\.ladderResponse) {
       $0.ladder = Ladder(stats: .plain)
     }
   }
@@ -855,7 +855,7 @@ struct StudyFeatureTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
-    await store.receive(\.ladderResponse.success) {
+    await store.receive(\.ladderResponse) {
       $0.ladder = Ladder(stats: .plain)
     }
   }
@@ -946,7 +946,7 @@ struct StudyFeatureTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
-    await store.receive(\.ladderResponse.success) {
+    await store.receive(\.ladderResponse) {
       $0.ladder = Ladder(stats: .plain)
     }
     var saved = cards[0]
@@ -980,7 +980,7 @@ struct StudyFeatureTests {
         $0.isRevealed = false
         $0.cards.removeFirst()
       }
-      await store.receive(\.ladderResponse.success) {
+      await store.receive(\.ladderResponse) {
         $0.ladder = Ladder(stats: .plain)
       }
       #expect(reviewed.value == [rating])
@@ -1056,7 +1056,7 @@ struct StudyFeatureTests {
       $0.isRevealed = false
       $0.cards.removeFirst()
     }
-    await store.receive(\.ladderResponse.success) {
+    await store.receive(\.ladderResponse) {
       $0.ladder = Ladder(stats: .plain)
     }
     #expect(reviewed.value.map(\.0) == [cards[0].id])
