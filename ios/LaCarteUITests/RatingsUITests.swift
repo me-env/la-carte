@@ -367,6 +367,13 @@ final class RatingsUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.05)
       }
       XCTAssertTrue(seen.isEmpty, "dial in the accessibility tree after a \(step.rating) release:\n" + seen.joined(separator: "\n"))
+      // On a loaded CI runner one synthesized drag was once lost (run 45071709294: no POST, the same card still
+      // revealed). Redo it once; a release that really doesn't rate still fails `waitForPost`.
+      if !poll(timeout: 5, { server.requests.filter { $0.method == "POST" }.count > i }),
+         el(app, "study.back").label == "back \(i)" {
+        print("019 reward: release \(i) (\(step.rating)) sent nothing, card unchanged; dragging once more")
+        drag(app, dx: step.dx, dy: step.dy)
+      }
       let post = try waitForPost(server, count: i + 1)
       let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(post.body.utf8)) as? [String: Any])
       XCTAssertEqual(body["rating"] as? String, step.rating, "release \(i)")

@@ -35,9 +35,12 @@ Rules:
   `VACUUM INTO <db>.pre-<spec>-<timestamp>.bak` copy of the file; any failure rolls back.
   Steps: 012 (reviewlog loses its FK), 013 (`reviewlog.confidence`), 014 (cards → notes, below), 015 (creates
   `report` through `_rebuild_if`: backup + one transaction; skipped once it exists), 021 (creates `settings` the
-  same way, no row).
+  same way, no row; adds the nullable `reviewlog.stability_before` / `last_review_before` in place, like
+  `confidence`: rows from before read NULL).
 - Review history (`ReviewLog`) is never deleted: `card_id` has no foreign key, so deleting a card keeps its reviews
-  and `streak` / `reviewed_today` don't change (spec 012).
+  and `streak` / `reviewed_today` don't change (spec 012). Each row also stores the card's memory state just before
+  that review (`stability_before`, `last_review_before`; null when the card was new), written by `deck.review_card`
+  and used only for the day's at-risk snapshot (spec 021); not exposed.
 
 ### Notes and cards (spec 014)
 - **Note** = one thing the user knows: `type` + named string `fields` (JSON). Types are fixed in `deck.NOTE_TYPES`:
@@ -72,16 +75,23 @@ Rules:
 - **Held cards (spec 015)**: a card with any `Report` whose status is `open` or `waiting_user` is left out of the
   servable queue entirely (so out of `/cards/due`, `due_cards`, `stats.due`, `stats.next_due`; it doesn't bury its
   siblings). It still counts in `total` and shows in `/cards`, `/notes`. Its FSRS state is never touched.
-- **Daily new-card target (spec 021, hotfixed 2026-11-22)**: the user rejected hiding new cards, so
-  `new_cards_per_day` is a daily *target*, not a limit: the servable queue serves every new card exactly as before
-  spec 021 (the 014 sibling hold applies to new siblings as to any card; no one-per-note rule). It only feeds the
-  MCP counters (`deck.new_cards_status`): a card is *introduced* when its first `ReviewLog` row falls in the rolling
-  window `(now - 24 h, now]` (`deck.NEW_CARD_WINDOW`; counted from `ReviewLog`, so a deleted card still counts);
-  `available = min(per_day - introduced, new)`, `waiting` = the other never-reviewed cards (report-held ones not
-  counted). An architect is re-speccing it as a daily milestone (app UI included).
-- **`settings` table** (spec 021): one row, `id = 1`, `new_cards_per_day` (default 15, 0–200). A missing
-  row means the defaults (`deck.get_settings`); `deck.set_new_cards_per_day` upserts it (`InvalidSetting` outside
-  0–200). Migration 021 creates the table on a pre-021 database (backup `<db>.pre-021-<timestamp>.bak`).
+- **New cards are never held (spec 021)**: the servable queue serves every new card (the 014 sibling hold applies
+  to new siblings as to any card; no one-per-note rule). The stored setting is only the size M of the new-card steps
+  the app shows.
+- **The daily ladder (spec 021 v3), display only**: `/stats` reports counts, the app arranges them into steps (At
+  risk, Reviews, then steps of M new cards); nothing about the queue changes. With `start_of_day` = local midnight
+  in `tz`:
+  - At risk: the snapshot S = cards with a memory state at `start_of_day` whose FSRS retrievability then
+    (`_scheduler.get_card_retrievability`) was below `deck.AT_RISK_RECALL` (0.8). A card reviewed today is judged by
+    the `*_before` state of its first review today (done, even if deleted since); any other card by its current
+    fields (waiting, unless held by a report). `at_risk_done` = S cards reviewed today, `at_risk_total` = done +
+    waiting; both 0 when the total is below `deck.AT_RISK_MIN` (10).
+  - Reviews: `reviews_done = reviewed_today - new_today`; `reviews_total` = done + cards in the servable queue now
+    whose `last_review` is before `start_of_day` (a card failed today or a learning step doesn't reopen it).
+- **`settings` table** (spec 021): one row, `id = 1`, `new_cards_per_day` = the new-card milestone size M (default
+  15, 1–200; a stored 0 reads 15). A missing row means the defaults; `deck.get_milestone` reads it,
+  `deck.set_milestone` upserts it (`InvalidSetting` outside 1–200). Migration 021 creates the table on a pre-021
+  database (backup `<db>.pre-021-<timestamp>.bak`).
 - **`report` table**: `{id, card_id, note_id, reason: wrong|drop|doubt|rephrase|other|broken_photo, comment, status:
   open|waiting_user|resolved|dismissed, resolution, created_at, updated_at, resolved_at}`. `card_id` / `note_id` have
   no foreign key (like `ReviewLog`): a report outlives its card.
@@ -108,7 +118,7 @@ Rules:
 | GET/PATCH/DELETE | `/cards/{id}` | PATCH `{front?, back?}` edits the note field this card shows on that side (422 if the side has several fields: use `PATCH /notes/{note_id}`); DELETE removes the direction, and the note with its last card | `Card` / 204 |
 | POST | `/cards/{id}/review` | `{rating: again\|hard\|good\|easy, confidence?: 0–1}` (`confidence`: optional measured drag value, stored in `ReviewLog`, not used by FSRS; outside [0, 1] → 422 — spec 013) | rescheduled `Card` |
 | POST | `/cards/{id}/report` | `{reason: wrong\|drop\|doubt\|rephrase\|other\|broken_photo, comment?: string}` (`comment` trimmed, 1–500 chars, required for `other`; bad reason/comment → 422 `{"detail": …}`; unknown card → 404 — spec 015) | `Report` (201); the card is held out of study. `broken_photo` (filed by the app) is idempotent: an active one on the card is returned with 200, no new row |
-| GET | `/stats` | `?tz=` (IANA name, default `UTC`; unknown → 422 `{"detail": "Unknown time zone: <name>"}`) | `{total, due, new, reviewed_today, next_due, new_today, milestone, streak, streak_start, history_start, history, due_new}` (`due` / `next_due`: servable queue, see burying — spec 014; `due_new`: never-reviewed cards in that queue; `new_today`: distinct cards first reviewed today, `milestone`: the stored new-card size, 0 → 15 — spec 021; `history`: one letter per local day from `history_start` (first review day, or today) to today, `s` studied / `f` frozen / `m` missed / `p` today not yet studied; a missed day is frozen when the day before is studied, no freeze in the 6 days before, and the day after is studied or today; `streak` = trailing `s`/`f` days ending today, or yesterday while today is `p`, starting `streak_start` (null when 0) — spec 024; all per-day fields use local days in `tz` — spec 007) |
+| GET | `/stats` | `?tz=` (IANA name, default `UTC`; unknown → 422 `{"detail": "Unknown time zone: <name>"}`) | `{total, due, new, reviewed_today, next_due, new_today, milestone, streak, streak_start, history_start, history, due_new, at_risk_total, at_risk_done, reviews_total, reviews_done}` (`due` / `next_due`: servable queue, see burying — spec 014; `due_new`: never-reviewed cards in that queue; `new_today`: distinct cards first reviewed today, `milestone`: the stored new-card step size, 0 → 15, `at_risk_total` / `at_risk_done` (0 / 0 when the step doesn't exist today) and `reviews_total` / `reviews_done`: the daily ladder, display only, see "The daily ladder" — spec 021; `history`: one letter per local day from `history_start` (first review day, or today) to today, `s` studied / `f` frozen / `m` missed / `p` today not yet studied; a missed day is frozen when the day before is studied, no freeze in the 6 days before, and the day after is studied or today; `streak` = trailing `s`/`f` days ending today, or yesterday while today is `p`, starting `streak_start` (null when 0) — spec 024; all per-day fields use local days in `tz` — spec 007) |
 
 `Note` = `{id, type, fields, cards: [{id, prompt, answer, state, due, last_review}], created_at, updated_at}`.
 `Card` = `{id, note_id, type, prompt, answer, fields, front, back, state: new|learning|review|relearning, due,
@@ -126,16 +136,13 @@ nothing on a validation error), `find_notes(query, type, limit=50)`, `update_not
 Cards (thin wrappers with the `/cards` semantics; docstrings start "Prefer the note tools"): `add_cards` (basic
 notes; same duplicate rule on basic fronts, returns `{added: [Card], skipped: [Card]}`), `list_cards`, `update_card`,
 `delete_card`, `due_cards` (servable queue), `review_card(card_id, rating, confidence=None)`, `deck_stats(tz="UTC")`
-(the `/stats` fields, freezes and the `history` alphabet explained in its docstring, plus `new_cards`).
+(the same `DeckStats` as `/stats`; fields, the ladder, freezes and the `history` alphabet explained in its docstring).
 REST `POST /notes` / `POST /cards` always add.
 
-New-card target (spec 021, MCP only; a target, not a limit): `new_cards_per_day(value=None)` reads the target, or
-sets it (0–200, else `ToolError` "new_cards_per_day must be between 0 and 200."), and returns `NewCardsStatus` =
-`{per_day, introduced, available, waiting, days}` (`available`: new cards left in today's target; `waiting`: new
-cards beyond it, still studyable; `days` = `ceil(waiting / per_day)`, null when 0). The same
-block is added as `new_cards` to the MCP replies of `deck_stats` (`AgentDeckStats`), `add_notes` (`AddNotesReply`)
-and `add_cards` (`AddCardsReply`), taken after the insert; REST `/stats`, `POST /notes`, `POST /cards` keep their
-models.
+New-card milestone (spec 021, MCP only): `new_card_milestone(value=None)` reads the step size, or sets it (1–200,
+else `ToolError` "new_card_milestone must be between 1 and 200."), and returns `MilestoneSetting` = `{milestone}`.
+The MCP replies of `add_notes` (`AddNotesReply`) and `add_cards` (`AddCardsReply`) add `new` (never-reviewed cards
+after the insert) and `milestone`; REST `POST /notes`, `POST /cards` keep their models.
 
 Reports (spec 015): `list_reports(status="active")` → `[Report]`, oldest first (`active` = open + waiting_user;
 also `all` or one status). `update_report(report_id, outcome, note)` stores `note` (non-blank) as `resolution`:
@@ -146,8 +153,9 @@ also `all` or one status). `update_report(report_id, outcome, note)` stores `not
 Server `instructions` (sent on initialize, `mcp_server.INSTRUCTIONS`) explain notes vs cards and siblings, both
 types, "edit the note, not loose cards", "choose directions deliberately", minimalist cards, photo privacy, and the
 burying (until the reviewed sibling is due again, at most 6 hours; (re)learning cards never held), and how to handle
-each report reason (doubt / rephrase: ask the user before changing anything), and the new-card target (a target, not a
-limit: every new card stays available; change it with `new_cards_per_day` only when the user asks).
+each report reason (doubt / rephrase: ask the user before changing anything), and new cards (never held back, shown by the app
+in steps of `milestone`; tell the user how many wait (`new`); change the step size with `new_card_milestone` only
+when the user asks). No text says reviews must be done daily (the streak needs one review a day, spec 024).
 `allow_duplicates` is only for when the user explicitly asks.
 
 ### MCP prompts (spec 005, 014, 015)

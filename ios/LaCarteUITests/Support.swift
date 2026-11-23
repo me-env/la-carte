@@ -72,8 +72,9 @@ extension XCTestCase {
   }
 
   /// Infrastructure retry, not a test retry: the first launch on a cold CI simulator can fail with "Timed out while
-  /// launching application via Xcode" (the next test then fails with "background assertion … pid 0"). Only that
-  /// error is caught (as an expected failure); it's logged, the app is terminated and launched once more.
+  /// launching application via Xcode" or "Failed to get background assertion for target app with pid 0" (CI run
+  /// 45075410831). Only those launch errors are caught (as expected failures); logged, the app is terminated and
+  /// launched once more.
   @MainActor
   private func launchRetryingTimeout(_ app: XCUIApplication) {
     final class Flag: @unchecked Sendable { var raised = false }
@@ -81,16 +82,17 @@ extension XCTestCase {
     let options = XCTExpectedFailure.Options()
     options.isStrict = false
     options.issueMatcher = { issue in
-      let match = issue.compactDescription.contains("Timed out while launching")
+      let match = ["Timed out while launching", "Failed to get background assertion"]
+        .contains { issue.compactDescription.contains($0) }
       if match { timedOut.raised = true }
       return match
     }
     let stopOnFailure = continueAfterFailure
     continueAfterFailure = true  // or the recorded launch issue would end the test before the retry
-    XCTExpectFailure("cold-simulator launch timeout, retried once", options: options) { app.launch() }
+    XCTExpectFailure("cold-simulator launch failure, retried once", options: options) { app.launch() }
     continueAfterFailure = stopOnFailure
     guard timedOut.raised else { return }
-    print("launch(): launch timed out (cold simulator); terminating and retrying once")
+    print("launch(): launch failed (cold simulator); terminating and retrying once")
     if app.state != .notRunning { app.terminate() }
     Thread.sleep(forTimeInterval: 3)
     app.launch()
@@ -278,6 +280,19 @@ extension XCTestCase {
       let window = app.windows.firstMatch
       window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
         .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+      swipes += 1
+    }
+  }
+
+  /// Scrolls the frontmost scroll view back down until `element` is hittable. Never drags when it already is: on a
+  /// sheet whose content is at the top, a downward drag (`app.swipeDown()`) dismisses the sheet instead (CI, 014c).
+  @MainActor
+  func scrollBackIntoView(_ app: XCUIApplication, _ element: XCUIElement, maxSwipes: Int = 6) {
+    var swipes = 0
+    while !element.isHittable, swipes < maxSwipes {
+      let window = app.windows.firstMatch
+      window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+        .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)))
       swipes += 1
     }
   }
