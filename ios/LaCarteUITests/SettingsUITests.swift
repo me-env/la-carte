@@ -212,7 +212,7 @@ final class SettingsUITests: SettingsTestCase {
     swipeSheetDown(app, from: deckTitle(app))
     waitForAbsence(deckTitle(app))
     waitForLabel(el(app, "study.front"), "greeting")
-    waitForCounter(app, "2 to review")
+    waitForCounter(app, "2 new")
     snapshot("study-live-after-settings", appearance: .light)
 
     // Same values after a relaunch with no env (the real phone path).
