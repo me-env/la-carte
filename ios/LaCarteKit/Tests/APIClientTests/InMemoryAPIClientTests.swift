@@ -123,6 +123,42 @@ struct InMemoryAPIClientTests {
   }
 }
 
+/// Spec 021's mock ladder (AC 20-22 run on it): roles from the launch environment, counts moved by each rating.
+struct MockLadderTests {
+  func ladder(_ stats: DeckStats) -> [Int] {
+    [stats.atRiskDone, stats.atRiskTotal, stats.reviewsDone, stats.reviewsTotal, stats.newToday, stats.milestone, stats.dueNew]
+  }
+
+  @Test func ratingsMoveAtRiskThenReviewsThenNew() async throws {
+    let environment = ["LA_CARTE_API": "mock", "LA_CARTE_STARTED": "2", "LA_CARTE_AT_RISK": "1", "LA_CARTE_MILESTONE": "1"]
+    let client = APIClient.live(environment: environment) { nil }
+    let served = try await client.dueCards(100)
+    #expect(served.map(\.front) == [Card].fixtures.map(\.front))
+    #expect(served.map(\.state) == [.review, .review, .new])
+    #expect(ladder(try await client.stats()) == [0, 1, 0, 2, 0, 1, 1])
+
+    _ = try await client.review(served[0].id, .good)
+    #expect(ladder(try await client.stats()) == [1, 1, 1, 2, 0, 1, 1])
+    _ = try await client.review(served[1].id, .again)
+    #expect(ladder(try await client.stats()) == [1, 1, 2, 2, 0, 1, 1])
+    _ = try await client.review(served[2].id, .good)
+    let stats = try await client.stats()
+    #expect(ladder(stats) == [1, 1, 2, 2, 1, 1, 0])
+    #expect(stats.reviewedToday == 3)
+  }
+
+  @Test func milestoneAndNewTodaySeedTheNewSteps() async throws {
+    let environment = ["LA_CARTE_API": "mock", "LA_CARTE_MILESTONE": "2", "LA_CARTE_NEW_TODAY": "4"]
+    let stats = try await APIClient.live(environment: environment) { nil }.stats()
+    #expect(ladder(stats) == [0, 0, 0, 0, 4, 2, 3])
+  }
+
+  @Test func withoutTheEnvironmentTheMockHasNoLadder() async throws {
+    let stats = try await APIClient.live(environment: ["LA_CARTE_API": "mock"]) { nil }.stats()
+    #expect(ladder(stats) == [0, 0, 0, 0, 0, 15, 3])
+  }
+}
+
 /// `LA_CARTE_API=mock-lengths` (spec 017): QA expects these four cards first, in this order.
 struct LengthFixturesTests {
   @Test func mockLengthsServesTheFourLengthCardsBeforeTheUsualDeck() async throws {

@@ -190,6 +190,11 @@ public struct DeckStats: Equatable, Sendable {
   public var milestone: Int
   /// The never-reviewed cards among `due`.
   public var dueNew: Int
+  /// The day's ladder steps "At risk" and "Reviews" (spec 021 decision 5); a total of 0 = no such step today.
+  public var atRiskTotal: Int
+  public var atRiskDone: Int
+  public var reviewsTotal: Int
+  public var reviewsDone: Int
   /// One letter per local day from `historyStart` to today: `s` studied, `f` frozen, `m` missed, `p` today not yet
   /// studied.
   public var history: String
@@ -208,6 +213,10 @@ public struct DeckStats: Equatable, Sendable {
     newToday: Int = 0,
     milestone: Int = 15,
     dueNew: Int = 0,
+    atRiskTotal: Int = 0,
+    atRiskDone: Int = 0,
+    reviewsTotal: Int = 0,
+    reviewsDone: Int = 0,
     history: String = "p",
     historyStart: Date = .distantPast,
     streakStart: Date? = nil
@@ -221,6 +230,10 @@ public struct DeckStats: Equatable, Sendable {
     self.newToday = newToday
     self.milestone = milestone
     self.dueNew = dueNew
+    self.atRiskTotal = atRiskTotal
+    self.atRiskDone = atRiskDone
+    self.reviewsTotal = reviewsTotal
+    self.reviewsDone = reviewsDone
     self.history = history
     self.historyStart = historyStart
     self.streakStart = streakStart
@@ -243,10 +256,11 @@ public struct DeckStats: Equatable, Sendable {
 extension DeckStats: Codable {
   enum CodingKeys: String, CodingKey {
     case total, due, new, reviewedToday, nextDue, streak, newToday, milestone, dueNew, history, historyStart
-    case streakStart
+    case streakStart, atRiskTotal, atRiskDone, reviewsTotal, reviewsDone
   }
 
-  /// The dates are `yyyy-MM-dd` days; a missing `new_today` / `milestone` reads as 0 / 15, spec 021's defaults.
+  /// The dates are `yyyy-MM-dd` days. A missing ladder count reads as 0 (`milestone` as 15), spec 021's defaults,
+  /// so an older server still decodes.
   public init(from decoder: any Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     try self.init(
@@ -258,7 +272,11 @@ extension DeckStats: Codable {
       streak: container.decode(Int.self, forKey: .streak),
       newToday: container.decodeIfPresent(Int.self, forKey: .newToday) ?? 0,
       milestone: container.decodeIfPresent(Int.self, forKey: .milestone) ?? 15,
-      dueNew: container.decode(Int.self, forKey: .dueNew),
+      dueNew: container.decodeIfPresent(Int.self, forKey: .dueNew) ?? 0,
+      atRiskTotal: container.decodeIfPresent(Int.self, forKey: .atRiskTotal) ?? 0,
+      atRiskDone: container.decodeIfPresent(Int.self, forKey: .atRiskDone) ?? 0,
+      reviewsTotal: container.decodeIfPresent(Int.self, forKey: .reviewsTotal) ?? 0,
+      reviewsDone: container.decodeIfPresent(Int.self, forKey: .reviewsDone) ?? 0,
       history: container.decode(String.self, forKey: .history),
       historyStart: Self.day(container.decode(String.self, forKey: .historyStart), forKey: .historyStart, in: container),
       streakStart: container.decodeIfPresent(String.self, forKey: .streakStart).map {
@@ -278,6 +296,10 @@ extension DeckStats: Codable {
     try container.encode(newToday, forKey: .newToday)
     try container.encode(milestone, forKey: .milestone)
     try container.encode(dueNew, forKey: .dueNew)
+    try container.encode(atRiskTotal, forKey: .atRiskTotal)
+    try container.encode(atRiskDone, forKey: .atRiskDone)
+    try container.encode(reviewsTotal, forKey: .reviewsTotal)
+    try container.encode(reviewsDone, forKey: .reviewsDone)
     try container.encode(history, forKey: .history)
     try container.encode(Self.dayString(historyStart), forKey: .historyStart)
     try container.encodeIfPresent(streakStart.map(Self.dayString), forKey: .streakStart)

@@ -9,6 +9,8 @@ extension APIClient: DependencyKey {
   /// - `LA_CARTE_API=mock`      → in-memory deck seeded with `[Card].fixtures` (deterministic screenshots)
   /// - `LA_CARTE_API=mock-notes` → in-memory deck seeded with `[Note].fixtures` (several directions, a person)
   /// - `LA_CARTE_API=mock-lengths` → `[Card].lengthFixtures` (short, long and very long cards first, spec 017)
+  /// - `LA_CARTE_STARTED`, `LA_CARTE_AT_RISK`, `LA_CARTE_MILESTONE`, `LA_CARTE_NEW_TODAY` → a mock's daily ladder
+  ///   (spec 021, see `inMemory(notes:environment:now:)`)
   /// - `LA_CARTE_API_URL=…`     → base URL of the API, wins over the one entered in Settings (no default)
   /// - `LA_CARTE_API_TOKEN=…`   → bearer token, wins over the one entered in Settings
   /// The widget has no launch environment, so it resolves from the App Group and the Keychain only.
@@ -17,14 +19,11 @@ extension APIClient: DependencyKey {
   }
 
   static func live(environment: [String: String], storedURL: @escaping @Sendable () -> String?) -> APIClient {
-    if environment["LA_CARTE_API"] == "mock" {
-      return .inMemory(cards: .fixtures)
-    }
-    if environment["LA_CARTE_API"] == "mock-notes" {
-      return .inMemory(notes: .fixtures)
-    }
-    if environment["LA_CARTE_API"] == "mock-lengths" {
-      return .inMemory(cards: .lengthFixtures)
+    switch environment["LA_CARTE_API"] {
+    case "mock": return .inMemory(notes: [Card].fixtures.map(\.basicNote), environment: environment)
+    case "mock-notes": return .inMemory(notes: .fixtures, environment: environment)
+    case "mock-lengths": return .inMemory(notes: [Card].lengthFixtures.map(\.basicNote), environment: environment)
+    default: break
     }
     return .live(
       baseURL: {

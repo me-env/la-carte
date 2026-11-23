@@ -9,14 +9,17 @@ extension APIClient {
 
   /// A fake deck of notes held in memory; cards are derived from them, like on the server.
   /// Scheduling is deliberately naive: any review pushes the card one day out. Burying and holding match the API.
-  public static func inMemory(notes: [Note], now: Date = Date()) -> APIClient {
+  /// Spec 021's ladder: cards last reviewed before `now`'s day are started reviews, `atRisk` of them form the day's
+  /// at-risk snapshot (no threshold), and `newToday` new cards count as already introduced today.
+  public static func inMemory(
+    notes: [Note], now: Date = Date(), atRisk: Set<Card.ID> = [], milestone: Int = 15, newToday: Int = 0
+  ) -> APIClient {
     let deck = LockIsolated(notes)
+    let started = Set(
+      cards(notes).filter { $0.lastReview.map { !DeckStats.calendar.isDate($0, inSameDayAs: now) } ?? false }.map(\.id)
+    )
     /// Reported cards: out of study for good, as no agent closes reports here (spec 015).
     let held = LockIsolated<Set<Card.ID>>([])
-
-    @Sendable func cards(_ notes: [Note]) -> [Card] {
-      notes.flatMap { note in note.cards.map { Card(note: note, card: $0) } }
-    }
 
     /// When a card can be served: once due, and 6 h after any sibling's last review (spec 014).
     @Sendable func readyAt(_ card: Card, _ notes: [Note]) -> Date {
@@ -74,9 +77,18 @@ extension APIClient {
         let cards = cards(notes)
         let studied = cards.filter { !held.value.contains($0.id) }
         let readyDates = studied.map { readyAt($0, notes) }
-        let reviewedToday = cards.filter { $0.lastReview.map(Calendar.current.isDateInToday) ?? false }.count
+        let isToday = { (card: Card) in card.lastReview.map { DeckStats.calendar.isDate($0, inSameDayAs: now) } ?? false }
+        let reviewed = cards.filter(isToday)
+        let reviewedToday = reviewed.count
         let dueCards = zip(studied, readyDates).filter { $1 <= now }.map(\.0)
         let today = DeckStats.calendar.startOfDay(for: now)
+        /// Done = reviewed today; total = done + those of `ids` still waiting (not held, not reviewed today).
+        func step(_ ids: Set<Card.ID>) -> (done: Int, total: Int) {
+          let done = reviewed.filter { ids.contains($0.id) }.count
+          return (done, done + studied.filter { ids.contains($0.id) && !isToday($0) }.count)
+        }
+        let (atRiskDone, atRiskTotal) = step(atRisk)
+        let (reviewsDone, reviewsTotal) = step(started)
         return DeckStats(
           total: cards.count,
           due: Set(dueCards.map(\.noteId)).count,
@@ -84,7 +96,13 @@ extension APIClient {
           reviewedToday: reviewedToday,
           nextDue: readyDates.filter { $0 > now }.min(),
           streak: reviewedToday > 0 ? 1 : 0,
+          newToday: newToday + reviewedToday - reviewsDone,
+          milestone: milestone,
           dueNew: Set(dueCards.filter { $0.lastReview == nil }.map(\.noteId)).count,
+          atRiskTotal: atRiskTotal,
+          atRiskDone: atRiskDone,
+          reviewsTotal: reviewsTotal,
+          reviewsDone: reviewsDone,
           history: reviewedToday > 0 ? "s" : "p",
           historyStart: today,
           streakStart: reviewedToday > 0 ? today : nil
@@ -128,6 +146,36 @@ extension APIClient {
       isConfigured: { true }
     )
   }
+}
+
+extension APIClient {
+  /// A `LA_CARTE_API=mock*` deck with spec 021's ladder seeded from the launch environment: the first
+  /// `LA_CARTE_STARTED` cards are started reviews (served first), the first `LA_CARTE_AT_RISK` of them are at risk,
+  /// `LA_CARTE_MILESTONE` (15) is the step size and `LA_CARTE_NEW_TODAY` (0) the new cards already introduced today.
+  static func inMemory(notes: [Note], environment: [String: String], now: Date = Date()) -> APIClient {
+    func count(_ key: String) -> Int? { environment[key].flatMap { Int($0) } }
+    var notes = notes
+    var started: [Card.ID] = []
+    let startedCount = count("LA_CARTE_STARTED") ?? 0
+    for noteIndex in notes.indices {
+      for cardIndex in notes[noteIndex].cards.indices where started.count < startedCount {
+        notes[noteIndex].cards[cardIndex].state = .review
+        notes[noteIndex].cards[cardIndex].lastReview = now.addingTimeInterval(-2 * 86_400)
+        started.append(notes[noteIndex].cards[cardIndex].id)
+      }
+    }
+    return .inMemory(
+      notes: notes,
+      now: now,
+      atRisk: Set(started.prefix(count("LA_CARTE_AT_RISK") ?? 0)),
+      milestone: count("LA_CARTE_MILESTONE") ?? 15,
+      newToday: count("LA_CARTE_NEW_TODAY") ?? 0
+    )
+  }
+}
+
+@Sendable private func cards(_ notes: [Note]) -> [Card] {
+  notes.flatMap { note in note.cards.map { Card(note: note, card: $0) } }
 }
 
 /// How long a review buries the card's siblings (`SIBLING_BURY` in `api/src/la_carte_api/deck.py`).

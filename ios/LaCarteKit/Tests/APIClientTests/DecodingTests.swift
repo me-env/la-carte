@@ -59,11 +59,12 @@ struct DecodingTests {
     #expect(note.updatedAt == Date(timeIntervalSince1970: 1_795_212_892))
   }
 
-  /// A real `/stats?tz=Europe/Paris` reply (spec 024 step 1).
+  /// A real `/stats?tz=Europe/Paris` reply (spec 024 step 1) with spec 021's ladder counts.
   static let statsPayload = """
     {"total":120,"due":64,"new":45,"reviewed_today":30,"next_due":"2026-11-20T23:24:08.477041Z",
      "new_today":19,"milestone":15,"streak":25,"streak_start":"2026-10-29",
-     "history_start":"2026-10-26","history":"smmsssssssssfssssssssssfssss","due_new":45}
+     "history_start":"2026-10-26","history":"smmsssssssssfssssssssssfssss","due_new":45,
+     "at_risk_total":14,"at_risk_done":6,"reviews_total":52,"reviews_done":11}
     """
 
   @Test func decodesStats() throws {
@@ -74,6 +75,10 @@ struct DecodingTests {
     #expect(stats.milestone == 15)
     #expect(stats.streak == 25)
     #expect(stats.dueNew == 45)
+    #expect(stats.atRiskTotal == 14)
+    #expect(stats.atRiskDone == 6)
+    #expect(stats.reviewsTotal == 52)
+    #expect(stats.reviewsDone == 11)
     #expect(stats.history.count == 28)
     let nextDue = try #require(stats.nextDue)
     #expect(abs(nextDue.timeIntervalSince1970 - 1_795_217_048.477) < 0.001)
@@ -82,11 +87,11 @@ struct DecodingTests {
     #expect(stats.streakStart == calendar.date(from: DateComponents(year: 2026, month: 10, day: 29)))
   }
 
-  /// No reviews yet: no streak start. `new_today` / `milestone` absent read as 0 / 15 (the hand-off's defaults).
-  @Test func decodesStatsWithoutStreakOrBatch() throws {
+  /// No reviews yet: no streak start. A server without spec 021's seven ladder fields reads 0 (`milestone` 15).
+  @Test func decodesStatsWithoutStreakOrLadder() throws {
     let json = """
       {"total":0,"due":0,"new":0,"reviewed_today":0,"next_due":null,"streak":0,"streak_start":null,
-       "history_start":"2026-11-22","history":"p","due_new":0}
+       "history_start":"2026-11-22","history":"p"}
       """
     let stats = try JSONDecoder.api.decode(DeckStats.self, from: Data(json.utf8))
     let today = try #require(DeckStats.calendar.date(from: DateComponents(year: 2026, month: 11, day: 22)))
