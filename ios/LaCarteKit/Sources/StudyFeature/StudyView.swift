@@ -615,12 +615,12 @@ public struct StudyView: View {
     } else if reduceMotion {
       // No move, no morph: both are laid out in place and only their opacity changes.
       CrossFadeStack(showsSecond: store.isRevealed) {
-        personQuestion(card, rows: rows, revealed: false)
+        personQuestion(card, rows: rows, revealed: false, hidden: store.isRevealed)
           .animation(Theme.Motion.standard) { $0.opacity(store.isRevealed ? 0 : 1) }
-          .accessibilityHidden(store.isRevealed)
-        personQuestion(card, rows: rows, revealed: true)
+          .allowsHitTesting(!store.isRevealed)
+        personQuestion(card, rows: rows, revealed: true, hidden: !store.isRevealed)
           .animation(Theme.Motion.standard) { $0.opacity(store.isRevealed ? 1 : 0) }
-          .accessibilityHidden(!store.isRevealed)
+          .allowsHitTesting(store.isRevealed)
       }
     } else {
       personQuestion(card, rows: rows, revealed: store.isRevealed)
@@ -628,8 +628,9 @@ public struct StudyView: View {
   }
 
   /// A text prompt and its hint before reveal; after it, the prompt in its row among the inserted ones. One `ForEach`
-  /// keyed by field name, so the prompt keeps its identity and moves.
-  private func personQuestion(_ card: Card, rows: [String], revealed: Bool) -> some View {
+  /// keyed by field name, so the prompt keeps its identity and moves. `hidden` (a Reduce Motion layer not shown) is
+  /// applied to each element, never to the layer: an outer `accessibilityHidden(false)` un-hid the hidden style and hint.
+  private func personQuestion(_ card: Card, rows: [String], revealed: Bool, hidden: Bool = false) -> some View {
     let shown = revealed ? rows : rows.filter(card.prompt.contains)
     let promptIsName = card.prompt.contains(Card.nameField)
     return VStack(spacing: 0) {
@@ -639,12 +640,14 @@ public struct StudyView: View {
           if name == Card.photoField {
             photo(of: card, side: .back)
               .accessibilityActions { ratingActions }
+              .accessibilityHidden(hidden)
           } else if isPrompt {
-            personPrompt(name, of: card, revealed: revealed)
+            personPrompt(name, of: card, revealed: revealed, hidden: hidden)
           } else {
             personText(name, of: card, revealed: revealed)
               .accessibilityActions { ratingActions }
               .accessibilityIdentifier("study.back")
+              .accessibilityHidden(hidden)
           }
         }
         .padding(.top, Self.gap(before: name, in: shown))
@@ -657,22 +660,24 @@ public struct StudyView: View {
 
   /// A text prompt's row, its hint under it before reveal. The hint stays in the row and folds to no height as it
   /// fades: removed, it faded where it was while the prompt moved across it.
-  private func personPrompt(_ name: String, of card: Card, revealed: Bool) -> some View {
+  private func personPrompt(_ name: String, of card: Card, revealed: Bool, hidden: Bool) -> some View {
     VStack(spacing: 0) {
       Group {
         if name == Card.nameField {
           personText(name, of: card, revealed: revealed)
+            .accessibilityHidden(hidden)
         } else {
           // A description re-wraps and changes colour: its two styles cross-fade on one moving frame. A `Text` with
           // `.contentTransition(.opacity)` drew the old style at its old place, a copy left behind.
           CrossFadeStack(showsSecond: revealed) {
-            // Done before the rows above fade in (0.3 s delay): the larger prompt style reaches into the name's row.
+            // In sequence, never two legible copies: the caption starts once the prompt style is almost gone. Both
+            // done before the rows above fade in (0.3 s delay): the larger prompt style reaches into the name's row.
             personText(name, of: card, revealed: false)
-              .animation(.easeOut(duration: 0.15)) { $0.opacity(revealed ? 0 : 1) }
-              .accessibilityHidden(revealed)
+              .animation(.easeOut(duration: 0.1)) { $0.opacity(revealed ? 0 : 1) }
+              .accessibilityHidden(revealed || hidden)
             personText(name, of: card, revealed: true)
-              .animation(.easeOut(duration: 0.2)) { $0.opacity(revealed ? 1 : 0) }
-              .accessibilityHidden(!revealed)
+              .animation(.easeIn(duration: 0.15).delay(0.08)) { $0.opacity(revealed ? 1 : 0) }
+              .accessibilityHidden(!revealed || hidden)
           }
         }
       }
@@ -684,7 +689,8 @@ public struct StudyView: View {
           // Gone before the prompt reaches it (0.15 s ease-in still showed under the moving name).
           .animation(.easeOut(duration: 0.1)) { $0.opacity(revealed ? 0 : 1) }
           .frame(height: revealed ? 0 : nil, alignment: .top)
-          .accessibilityHidden(revealed)
+          .allowsHitTesting(!revealed)
+          .accessibilityHidden(revealed || hidden)
       }
     }
   }
