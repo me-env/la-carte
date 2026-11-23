@@ -69,7 +69,10 @@ struct StudyRenders {
     for (name, state, withSystem) in Self.catalogue {
       for look in Self.looks + (withSystem ? [Self.system] : []) {
         // Writes screen-study-<name>-<theme>-<scheme>.png.
-        _ = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), look, name: "study-\(name)")
+        // Reduce Motion: the logo as it lands (this render drops 3D transforms, so it can't draw the tilt).
+        let view = StudyView(store: Store(initialState: state) { EmptyReducer() })
+          .environment(\._accessibilityReduceMotion, true)
+        _ = try Screen(view, look, name: "study-\(name)")
         count += 1
       }
     }
@@ -105,6 +108,38 @@ struct StudyRenders {
       let state = Self.studying(CardLines.card(CardLines.narrowWrapping, answer), revealed: true)
       _ = try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), Self.looks[0],
                      name: "study-d-wrapped-\(name)")
+    }
+  }
+
+  /// Person cards (spec 014d), light and dark: every direction with a short, a long and no description, before and
+  /// after reveal (`screen-study-person-<photo|name|desc>-<short|long|none>-<q|rev>-<theme>-<scheme>.png`). The photo
+  /// URL never loads, so the placeholder stands in for it.
+  @Test func personCards() throws {
+    let dir = try #require(ProcessInfo.processInfo.environment["LA_CARTE_RENDER_DIR"])
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let date = Date(timeIntervalSince1970: 1_767_225_600)
+    let descriptions = [
+      ("short", "runs the bakery"),
+      ("long", "runs the bakery on the corner of Elm Street and sings in the choir every Sunday morning with her two sisters"),
+      ("none", ""),
+    ]
+    let directions = [
+      ("photo", ["photo"], ["name", "description"]),
+      ("name", ["name"], ["photo", "description"]),
+      ("desc", ["description"], ["photo", "name"]),
+    ]
+    for (length, description) in descriptions {
+      for (direction, prompt, answer) in directions where !(description.isEmpty && direction == "desc") {
+        let fields = ["photo": "https://invalid.example/p.jpg", "name": "Ada Example", "description": description]
+        let card = Card(id: UUID(), type: .person, prompt: prompt, answer: answer, fields: fields,
+                        front: "", back: "", due: date, createdAt: date, updatedAt: date)
+        for revealed in [false, true] {
+          for look in Self.looks.prefix(2) {
+            _ = try Screen(StudyView(store: Store(initialState: Self.studying(card, revealed: revealed)) { EmptyReducer() }),
+                           look, name: "study-person-\(direction)-\(length)-\(revealed ? "rev" : "q")")
+          }
+        }
+      }
     }
   }
 }

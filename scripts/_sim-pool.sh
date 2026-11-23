@@ -8,8 +8,8 @@
 # unit: slot 1 is $UNIT_SIMULATOR (lock $UNIT_SIM_LOCK), slots 2..$UNIT_POOL_SIZE are "la-carte-unit-<n>".
 # ui:   slot 1 is $SIMULATOR (lock $SIM_LOCK), slots 2..$UI_POOL_SIZE are "la-carte-ui-<n>".
 # Slot 1 is the same device and lock as older scripts, so worktrees that still run them share it correctly.
-# Other slots are created on first use (slot 1's device type, $OS runtime: identical screenshots), each with
-# its own lock.
+# Any missing slot device is created on first use (slot 1's device type, $OS runtime: identical screenshots) and
+# booted once; each slot has its own lock. After a run, a device grown past SIM_TRIM_GB is erased and re-booted.
 # Tries each slot without waiting; if all are busy, retries every 2 s (fair enough for a handful of agents) until
 # one frees up or LOCK_TIMEOUT passes (exit 75). Locks are the same kernel locks as scripts/_lock.sh (lockf,
 # dropped on exit or crash) in LOCK_DIR, with the same holder notes.
@@ -24,34 +24,41 @@ else
 fi
 slot_lock() { if [ "$1" -eq 1 ]; then echo "$FIRST_LOCK"; else echo "sim-la-carte-$KIND-$1-$LOCK_OS"; fi; }
 
-# Internal: we now hold slot $2's lock. Find or create its device, then run the command.
+# Internal: we now hold slot $2's lock. Find or create its device, run the command, then trim the device.
 if [ "${1:-}" = --on-slot ]; then
   SLOT="$2"; shift 2
-  if [ "$SLOT" -eq 1 ]; then
-    export POOL_DESTINATION="$FIRST_DEST"
+  if [ "$SLOT" -eq 1 ] && [ -n "${CI:-}" ]; then export POOL_DESTINATION="$FIRST_DEST"; exec "$@"; fi  # CI boots it
+  if [ "$SLOT" -eq 1 ]; then NAME="$MODEL"; else NAME="la-carte-$KIND-$SLOT"; fi
+  if [ "$OS" = latest ]; then
+    RUNTIME="$(xcrun simctl list runtimes | sed -n 's/^iOS \([0-9.]*\) .* - \(com\.apple\.[^ ]*\).*/\1 \2/p' \
+      | sort -t. -k1,1n -k2,2n | tail -1 | cut -d' ' -f2)"
   else
-    NAME="la-carte-$KIND-$SLOT"
-    if [ "$OS" = latest ]; then
-      RUNTIME="$(xcrun simctl list runtimes | sed -n 's/^iOS \([0-9.]*\) .* - \(com\.apple\.[^ ]*\).*/\1 \2/p' \
-        | sort -t. -k1,1n -k2,2n | tail -1 | cut -d' ' -f2)"
-    else
-      RUNTIME="$(xcrun simctl list runtimes | sed -n "s/^iOS ${OS//./\\.} .* - \(com\.apple\.[^ ]*\).*/\1/p" | head -1)"
-    fi
-    [ -n "$RUNTIME" ] || { echo "no iOS $OS simulator runtime installed" >&2; exit 72; }
-    UDID="$(xcrun simctl list devices -j | python3 -I -c '
+    RUNTIME="$(xcrun simctl list runtimes | sed -n "s/^iOS ${OS//./\\.} .* - \(com\.apple\.[^ ]*\).*/\1/p" | head -1)"
+  fi
+  [ -n "$RUNTIME" ] || { echo "no iOS $OS simulator runtime installed" >&2; exit 72; }
+  UDID="$(xcrun simctl list devices -j | python3 -I -c '
 import json, sys
 devices = json.load(sys.stdin)["devices"].get(sys.argv[1], [])
 print(next((d["udid"] for d in devices if d["name"] == sys.argv[2] and d["isAvailable"]), ""))' "$RUNTIME" "$NAME")"
-    if [ -z "$UDID" ]; then
-      echo "📱 creating simulator $NAME ($MODEL, $RUNTIME), about 1.5 GB once used" >&2
-      UDID="$(xcrun simctl create "$NAME" "$MODEL" "$RUNTIME")"
-      # First boot once, here, and let it settle (its first-boot crashes happen now, not in a test run)
-      xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1 || true
-      xcrun simctl shutdown "$UDID" >/dev/null 2>&1 || true
-    fi
-    export POOL_DESTINATION="platform=iOS Simulator,id=$UDID"
+  if [ -z "$UDID" ]; then
+    echo "📱 creating simulator $NAME ($MODEL, $RUNTIME), about 2 GB once used" >&2
+    UDID="$(sim_create "$NAME" "$MODEL" "$RUNTIME")"
   fi
-  exec "$@"
+  sim_appearance_ready "$UDID"
+  if [ "$SLOT" -eq 1 ]; then export POOL_DESTINATION="$FIRST_DEST"; else export POOL_DESTINATION="platform=iOS Simulator,id=$UDID"; fi
+  [ -z "${CI:-}" ] || exec "$@"
+  set +e; "$@"; STATUS=$?; set -e
+  # Stop the regrowth (docs/dev-velocity.md): past SIM_TRIM_GB, erase the device and boot it once again, still
+  # under its lock, so the next run gets a small, warm device.
+  # du exits 1 on any unreadable entry (an image's .fseventsd, files vanishing while the device shuts down): under
+  # set -e that used to end the pool with 1 and turn every run's result (pass or 65) into exit 1.
+  KB="$({ du -sk "$SIM_DEVICES_DIR/$UDID/" 2>/dev/null || true; } | cut -f1)"
+  if [ "${KB:-0}" -gt $((SIM_TRIM_GB * 1024 * 1024)) ]; then
+    echo "🧹 $NAME uses $((KB / 1024 / 1024)) GB (> SIM_TRIM_GB=$SIM_TRIM_GB): erasing it and booting it once (~1 min)" >&2
+    xcrun simctl shutdown "$UDID" >/dev/null 2>&1 || true
+    xcrun simctl erase "$UDID" && sim_prewarm "$UDID"
+  fi
+  exit "$STATUS"
 fi
 
 [ $# -ge 1 ] || { echo "usage: $0 <command> [args...]" >&2; exit 64; }

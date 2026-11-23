@@ -139,8 +139,11 @@ centred, after reveal the whole composition is centred. Basic cards and the phot
   - **Description prompt:** moves as one frame and cross-fades its style on it: the prompt style (017 tier, ink,
     017 alignment) and the caption style (caption block) are laid over each other in a `CrossFadeStack` (a private
     `Layout`: both centred in one frame, sized by the one shown, each at the offered width so neither re-wraps while
-    fading). Prompt style fades out `.easeOut(0.15)`, caption style fades in `.easeOut(0.2)`. Not
-    `.contentTransition(.opacity)`: it drew the old style at its old place, a copy left behind.
+    fading). Sequenced so two legible copies never show at once: the prompt style fades out
+    `.easeOut(duration: 0.1)`, then the caption style fades in `.easeIn(duration: 0.15).delay(0.08)` (done 0.23 s
+    after the tap). The hidden style is `accessibilityHidden` on each element itself, never through a layer-level
+    `accessibilityHidden(false)`, which would un-hide its children. Not `.contentTransition(.opacity)`: it drew the
+    old style at its old place, a copy left behind.
   - **Hint:** stays inside the prompt row (`study.front` container + hint); on reveal it fades out `.easeOut(0.1)` and
     its frame folds to height 0, so it is gone before the prompt passes over it.
   - **Identifiers:** the prompt keeps `study.front` in its new row (the name row on a name prompt, the description
@@ -153,7 +156,7 @@ centred, after reveal the whole composition is centred. Basic cards and the phot
   `Theme.Motion.reveal` = `.smooth(duration: 0.35)`: the prompt's move, the name's font morph and the space opening
   for the photo (layout follows the transaction). Inserted rows (photo, name or description) fade in
   `.easeOut(0.2)` after the prompt has moved past them: delay 0.2 s on a name prompt, 0.3 s on a description prompt
-  (it travels further, under the name's row). Total ≈ 0.38 s (name prompt), ≈ 0.45 s (description prompt). These
+  (it travels further, under the name's row). Total ≈ 0.38 s (name prompt), ≈ 0.48 s (description prompt). These
   timings are spec values, not tokens. The rating row and top bar don't move (outside the scroll view).
 - **Reduce Motion** (`accessibilityReduceMotion`): nothing moves, no layout animation. The question and the
   composition are laid out in one `CrossFadeStack`; only their opacity animates (`Theme.Motion.standard`), the

@@ -16,6 +16,8 @@ if [ -n "${CI:-}" ]; then UI_POOL_SIZE="${UI_POOL_SIZE:-1}"; else UI_POOL_SIZE="
 # Parallel-testing workers inside one UI run. Each worker is one more simulator (Xcode clones it), so the default is 1;
 # raise it only when UI slots are idle. Budget: about 8 booted simulators in all (docs/dev-velocity.md).
 UI_WORKERS="${UI_WORKERS:-1}"
+# A pool device grown past this many GB is erased (and booted once) when a run releases it (_sim-pool.sh).
+SIM_TRIM_GB="${SIM_TRIM_GB:-8}"
 
 # Locks (scripts/_lock.sh, rules in docs/dev-velocity.md). Always take the DerivedData lock before the
 # simulator lock, so two scripts can never deadlock. DerivedData is per checkout (Xcode hashes the path).
@@ -56,3 +58,67 @@ else
   LA_CARTE_SCRATCH=""
   RESULTS_DIR="$ROOT/qa/.results"
 fi
+
+# Simulator devices on another volume (docs/dev-velocity.md): set LA_CARTE_SIM_DEVICES in scripts/.local.env. Each device
+# is an APFS disk image there, <UDID>.sparsebundle, mounted AT its own folder ~/Library/Developer/CoreSimulator/Devices/<UDID>.
+# Not a symlink: through a link the simulator sees one folder under two paths, and a preference written through one
+# (XCUIDevice.appearance, by testmanagerd) never reaches the process reading the other (SpringBoard): dark mode stayed
+# light. Images are mounted here when missing (after a reboot or replug). Fail fast if that volume isn't mounted,
+# rather than let a script recreate devices on the internal disk. Never on CI.
+SIM_DEVICES_DIR="$HOME/Library/Developer/CoreSimulator/Devices"
+if [ -n "${CI:-}" ]; then LA_CARTE_SIM_DEVICES=""; fi
+if [ -n "${LA_CARTE_SIM_DEVICES:-}" ] && ! [ -d "$LA_CARTE_SIM_DEVICES" ]; then
+  echo "❌ The simulators live in $LA_CARTE_SIM_DEVICES (LA_CARTE_SIM_DEVICES, scripts/.local.env) and that disk is not mounted. Plug it in and rerun; nothing ran." >&2
+  exit 78
+fi
+sim_mounted() { mount | grep -qF " on $SIM_DEVICES_DIR/$1 ("; }  # <udid>
+sim_attach() {  # <udid>: mount its image at its device folder (no-op if mounted)
+  sim_mounted "$1" && return 0
+  mkdir -p "$SIM_DEVICES_DIR/$1"
+  hdiutil attach -quiet -nobrowse -owners on -mountpoint "$SIM_DEVICES_DIR/$1" "$LA_CARTE_SIM_DEVICES/$1.sparsebundle"
+}
+if [ -n "${LA_CARTE_SIM_DEVICES:-}" ]; then
+  MOUNTS="$(mount)"
+  for img in "$LA_CARTE_SIM_DEVICES"/*.sparsebundle; do
+    [ -d "$img" ] || continue
+    u="$(basename "$img" .sparsebundle)"
+    case "$MOUNTS" in *" on $SIM_DEVICES_DIR/$u ("*) ;; *) sim_attach "$u" || echo "⚠️  could not mount $img" >&2 ;; esac
+  done
+  unset MOUNTS img u
+fi
+# Move a device (local folder, or an older symlink to LA_CARTE_SIM_DEVICES/<UDID>) into a new image mounted at its
+# device folder, then erase it: its databases (LaunchServices, containers) hold absolute paths to the old folder, and
+# would keep writing app data there. Only device.plist is kept. Call it while holding the device's lock.
+sim_to_image() {  # <udid>
+  local dev="$SIM_DEVICES_DIR/$1" img="$LA_CARTE_SIM_DEVICES/$1.sparsebundle" src
+  sim_mounted "$1" && return 0
+  xcrun simctl shutdown "$1" >/dev/null 2>&1 || true
+  if [ -L "$dev" ]; then src="$(readlink "$dev")"; else src="$SIM_DEVICES_DIR/../$1.moving"; mv "$dev" "$src"; fi
+  case "$src" in "$LA_CARTE_SIM_DEVICES/$1"|"$SIM_DEVICES_DIR/../$1.moving") ;; *) echo "⚠️  $dev -> $src: not ours, left alone" >&2; return 1 ;; esac
+  hdiutil create -quiet -type SPARSEBUNDLE -fs APFS -size 100g -volname "sim-$1" "$img" || return 1
+  rm -f "$dev"; mkdir "$dev"
+  sim_attach "$1" && cp "$src/device.plist" "$dev/" && xcrun simctl erase "$1" && rm -rf "$src"
+}
+# Create a simulator (prints its UDID), move it into its image on LA_CARTE_SIM_DEVICES (if set) and boot it once, so
+# its first-boot work happens now and not in a test run. Call it while holding the device's lock.
+sim_create() {  # <name> <device type> <runtime id>
+  local udid
+  udid="$(xcrun simctl create "$1" "$2" "$3")" || return 1
+  if [ -n "${LA_CARTE_SIM_DEVICES:-}" ]; then sim_to_image "$udid" >&2 || return 1; fi
+  sim_prewarm "$udid"
+  echo "$udid"
+}
+sim_prewarm() {  # <udid>: boot once, write the appearance preference (sim_appearance_ready), shut down
+  xcrun simctl bootstatus "$1" -b >/dev/null 2>&1 || true
+  xcrun simctl spawn "$1" defaults write com.apple.uikitservices.userInterfaceStyleMode UserInterfaceStyleMode -int 1 \
+    >/dev/null 2>&1 || true
+  xcrun simctl shutdown "$1" >/dev/null 2>&1 || true
+}
+# SpringBoard follows XCUIDevice.appearance only if the appearance preference file existed when it started: on a
+# new or erased device it doesn't, and every "dark" screenshot of the first boot renders light (docs/dev-velocity.md).
+# Before a run: if the file is missing, write it with one boot and shut down, so the run's boot starts with it.
+sim_appearance_ready() {  # <udid>
+  [ -f "$SIM_DEVICES_DIR/$1/data/Library/Preferences/com.apple.uikitservices.userInterfaceStyleMode.plist" ] && return 0
+  echo "🌗 $1: writing the appearance preference first (one boot, ~30 s)" >&2
+  sim_prewarm "$1"
+}

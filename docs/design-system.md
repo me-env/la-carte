@@ -92,7 +92,7 @@ Uniform by **layer**, not by material: glass where Apple's own apps put it, nowh
   `.glassEffect`, which does too. Don't add your own fallback.
 
 ## Motion (`Theme.Motion`)
-`standard` ease-in-out 0.25 s (fades, reveals) · `logoDrawIn` 0.9 s · `loadingPulse` 0.8 s. Every animation has a
+`standard` ease-in-out 0.25 s (fades, reveals) · `logoDrawIn` 0.9 s · `logoTilt` 1.0 s (the launch mark's card laying flat from a 3D tilt) · `loadingPulse` 0.8 s. Every animation has a
 Reduce Motion variant (a fade or nothing). Full motion principles: `docs/design/brand.md`.
 
 ## Logo (`DesignSystem/LaCarteLogo.swift`)
@@ -100,7 +100,7 @@ A portrait card crossed by the forgetting curve as one thick line: cut out of th
 Built from shapes in tokens (`ink` card, `accent` line; the cut-out shows what's behind). Geometry constants are
 generated into `LaCarteLogoGeometry.swift` by `docs/design/brand/render.py` (don't edit by hand).
 `LaCarteLogo(progress:)` is animatable (0 → 1: the card settles, then the curve is drawn) and can be used with
-`matchedGeometryEffect`. `LaCarteLaunchMark()` draws in once; `LaCarteLoadingMark()` draws and erases the curve.
+`matchedGeometryEffect`. `LaCarteLaunchMark()` draws in once while its card lays itself flat from a 3D tilt (frames: `RenderTests/launchMark`), 64 pt above Study's "All caught up" (`study.logo`); never at app launch, so nothing delays the first card; `LaCarteLoadingMark()` draws and erases the curve.
 Both honor Reduce Motion (static mark / opacity pulse). The line's first stroke-width grows from zero width, so
 nothing pops in or out at the start of a draw or the end of an erase (a round cap alone is a full dot).
 Sources, SVG/PNG exports and the app icon: `docs/design/brand/` (regenerate with `uv run docs/design/brand/render.py`). Usage rules for
