@@ -68,7 +68,7 @@ final class ReportUITests: XCTestCase {
       waitForAbsence(buttons[1], "dialog still shown after Cancel")
       waitForLabel(el(app, "study.back"), Self.back)
       assertRatingsEnabled(app)
-      waitForLabel(el(app, "study.remaining"), "3 to review")
+      waitForCounter(app, "3 to review")
       app.terminate()
     }
   }
@@ -129,7 +129,7 @@ final class ReportUITests: XCTestCase {
       XCTAssertEqual(report.reason, reason)
       XCTAssertFalse(report.hasCommentKey, "\(reason) body has a comment key")
       // The notice lasts `noticeSeconds` here (2 s by default), then the counter (decremented) comes back.
-      waitForLabel(el(app, "study.remaining"), "\(4 - i) to review", timeout: Self.noticeSeconds + 5)
+      waitForCounter(app, "\(4 - i) to review", timeout: Self.noticeSeconds + 5)
     }
 
     // Other…: alert straight after the menu, Cancel sends nothing.
@@ -255,11 +255,11 @@ final class ReportUITests: XCTestCase {
     openMenu(app)
     menuButton(app, "drop", "I don't want this card").tap()
     waitForLabel(el(app, "study.front"), "la carte")
-    waitForLabel(el(app, "study.remaining"), "2 to review", timeout: 4)
+    waitForCounter(app, "2 to review", timeout: 4)
     backgroundAndReactivate(app)
     Thread.sleep(forTimeInterval: 2)
     waitForLabel(el(app, "study.front"), "la carte")
-    waitForLabel(el(app, "study.remaining"), "2 to review")
+    waitForCounter(app, "2 to review")
     app.terminate()
   }
 
@@ -283,7 +283,7 @@ final class ReportUITests: XCTestCase {
       // Vibe explicitly (the default, checked by SettingsUITests): it opens a plain link, the prompt goes by clipboard.
       let app = launch(api: .live(server.url), arguments: ["-aiApp", "vibe"] + Self.longNotices)
       reveal(app)
-      waitForLabel(el(app, "study.remaining"), "2 to review")
+      waitForCounter(app, "2 to review")
       let before = server.requests.count
       openMenu(app)
       menuButton(app, "ask", "Ask about this card").tap()
@@ -300,7 +300,7 @@ final class ReportUITests: XCTestCase {
                      "notice gone after ~3.5 s despite -noticeSeconds 10")
       waitForLabel(el(app, "study.back"), Self.back)
       assertRatingsEnabled(app)
-      waitForLabel(el(app, "study.remaining"), "2 to review", timeout: Self.noticeSeconds + 5)
+      waitForCounter(app, "2 to review", timeout: Self.noticeSeconds + 5)
       XCTAssertTrue(deck.reports.isEmpty, "Ask sent a report")
       let writes = server.requests.dropFirst(before).filter { $0.method != "GET" }
       XCTAssertTrue(writes.isEmpty, "Ask sent a request: \(writes.map { "\($0.method) \($0.path)" })")
@@ -370,7 +370,7 @@ final class ReportUITests: XCTestCase {
     XCTAssertFalse(sawBrokenPrompt, "the broken prompt photo was shown (placeholder) before the skip")
     XCTAssertFalse(sawNotice, "a notice was shown for the silent broken_photo report")
     XCTAssertFalse(menuButton(app, "wrong", "This is wrong").exists, "a dialog opened")
-    waitForLabel(el(app, "study.remaining"), "2 to review")
+    waitForCounter(app, "2 to review")
     snapshot("study-broken-photo-skipped", appearance: .light)
     XCTAssertTrue(poll(timeout: 5) { deck.reports.contains { $0.cardID == promptCard.id } }, "no report for the prompt photo")
     let promptReports = deck.reports.filter { $0.cardID == promptCard.id }

@@ -123,7 +123,7 @@ final class StudyEditUITests: XCTestCase {
       XCTAssertEqual(deck.cards.first?.back, "a happy accident", "stub deck not updated")
       Thread.sleep(forTimeInterval: 1)
       waitForLabel(el(app, "study.back"), "a happy accident")
-      waitForLabel(el(app, "study.remaining"), "2 to review")
+      waitForCounter(app, "2 to review")
       if appearance == .light { snapshot("study-edited", appearance: appearance) }
       app.terminate()
       server.stop()

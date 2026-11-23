@@ -151,9 +151,12 @@ enum StubJSON {
 
   static func cards(_ cards: [String]) -> String { "[" + cards.joined(separator: ",") + "]" }
 
+  /// Spec 021: the four ladder counts are 0 (no at-risk or reviews step), so Study's counter falls back to the
+  /// loaded batch ("N to review") whatever the stubbed cards are.
   static func stats(total: Int, nextDue: Date?) -> String {
     let next = nextDue.map { "\"\(iso($0))\"" } ?? "null"
-    return #"{"total":\#(total),"due":0,"new":0,"reviewed_today":\#(total),"next_due":\#(next),"streak":0}"#
+    return #"{"total":\#(total),"due":0,"new":0,"reviewed_today":\#(total),"next_due":\#(next),"streak":0,"#
+      + #""at_risk_total":0,"at_risk_done":0,"reviews_total":0,"reviews_done":0}"#
   }
 }
 

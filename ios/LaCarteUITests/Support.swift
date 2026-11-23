@@ -40,9 +40,11 @@ extension XCTestCase {
   /// `theme`: value passed as `-theme <value>` (UserDefaults argument domain, spec 004 #6). Defaults to `system`
   /// so a theme left stored by a failed run can't change other suites' colors; pass `nil` to use the stored theme
   /// (required whenever the test taps the Settings picker: the argument domain wins over what it writes).
+  /// `environment`: extra launch environment (e.g. spec 021's `LA_CARTE_STARTED` for the mock ladder).
   func launch(api: APIMode, screen: String? = nil, arguments: [String] = [],
-              theme: String? = "system") -> XCUIApplication {
+              theme: String? = "system", environment: [String: String] = [:]) -> XCUIApplication {
     let app = XCUIApplication()
+    app.launchEnvironment.merge(environment) { _, new in new }
     switch api {
     case .mock:
       app.launchEnvironment["LA_CARTE_API"] = "mock"
@@ -105,6 +107,18 @@ extension XCTestCase {
     XCTAssertTrue(element.waitFor(timeout: timeout), "\(element) missing", file: file, line: line)
     let matched = poll(timeout: timeout) { element.label == expected }
     XCTAssertTrue(matched, "Expected label '\(expected)', got '\(element.label)'", file: file, line: line)
+  }
+
+  /// Spec 021 #23: `study.remaining` is a button labelled "Milestones" whose value is the counter text
+  /// ("3 new", "1 at risk", "2 to review"). Waits until the value is `expected`.
+  @MainActor
+  func waitForCounter(_ app: XCUIApplication, _ expected: String, timeout: TimeInterval = 10,
+                      file: StaticString = #filePath, line: UInt = #line) {
+    let counter = el(app, "study.remaining")
+    XCTAssertTrue(counter.waitFor(timeout: timeout), "study.remaining missing", file: file, line: line)
+    let matched = poll(timeout: timeout) { counter.value as? String == expected }
+    XCTAssertTrue(matched, "Expected counter '\(expected)', got '\(counter.value as? String ?? "nil")'",
+                  file: file, line: line)
   }
 
   /// Asserts the on-screen static texts don't overlap each other and stay inside the window width.

@@ -147,7 +147,7 @@ final class RatingsUITests: XCTestCase {
     let app = launch(api: .live(server.url))
     for (i, step) in plan.enumerated() {
       waitForLabel(el(app, "study.front"), "front \(i)")
-      waitForLabel(el(app, "study.remaining"), "\(plan.count - i) to review")
+      waitForCounter(app, "\(plan.count - i) to review")
       XCTAssertTrue(el(app, "study.reveal").exists, "card \(i) not unrevealed")
       XCTAssertFalse(ring(app).exists, "ring on next card \(i)")
       el(app, "study.card").tap()

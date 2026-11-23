@@ -36,7 +36,7 @@ final class RefreshUITests: XCTestCase {
     assertRevealed(app, front: "canine", back: "dog")
     deck.add(card(Self.idB, "feline", "cat", minutes: 1))
     backgroundAndReactivate(app)
-    waitForLabel(el(app, "study.remaining"), "2 to review")
+    waitForCounter(app, "2 to review")
     assertRevealed(app, front: "canine", back: "dog")
     snapshot("study-foreground-revealed", appearance: .light)
 
@@ -208,7 +208,7 @@ final class RefreshUITests: XCTestCase {
   private func assertFront(_ app: XCUIApplication, _ front: String, remaining: String,
                            file: StaticString = #filePath, line: UInt = #line) {
     waitForLabel(el(app, "study.front"), front, file: file, line: line)
-    waitForLabel(el(app, "study.remaining"), remaining, file: file, line: line)
+    waitForCounter(app, remaining, file: file, line: line)
     XCTAssertFalse(el(app, "study.back").exists, "study.back visible: card should be unrevealed", file: file, line: line)
     XCTAssertTrue(el(app, "study.reveal").waitFor(timeout: 3), "study.reveal missing", file: file, line: line)
     for rating in Self.ratings {

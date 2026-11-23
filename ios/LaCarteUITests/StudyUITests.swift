@@ -187,7 +187,7 @@ final class StudyUITests: XCTestCase {
                            file: StaticString = #filePath, line: UInt = #line) {
     let frontEl = el(app, "study.front")
     waitForLabel(frontEl, front, file: file, line: line)
-    waitForLabel(el(app, "study.remaining"), remaining, file: file, line: line)
+    waitForCounter(app, remaining, file: file, line: line)
     let window = app.windows.firstMatch.frame
     XCTAssertEqual(frontEl.frame.midX, window.midX, accuracy: 1, "study.front not centered: \(frontEl.frame)",
                    file: file, line: line)

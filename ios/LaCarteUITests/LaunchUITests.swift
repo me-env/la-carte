@@ -37,7 +37,7 @@ final class LaunchUITests: XCTestCase {
     let app = launch(api: .live(server.url))
     let deckButton = el(app, "study.deck")
     let add = el(app, "study.add")
-    waitForLabel(el(app, "study.remaining"), "1 to review")
+    waitForCounter(app, "1 to review")
     el(app, "study.reveal").tap()
     XCTAssertTrue(el(app, "study.rate.good").waitFor(timeout: 5), "study.rate.good missing")
     let studying = (deck: deckButton.frame, add: add.frame)

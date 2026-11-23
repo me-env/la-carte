@@ -70,7 +70,7 @@ final class MarketingUITests: XCTestCase {
     waitForLabel(el(app, "study.reportNotice"), "Copied", timeout: 3)
     settle()
     snapshot("v09-copied", appearance: .light)
-    waitForLabel(el(app, "study.remaining"), "5 to review", timeout: 5)
+    waitForCounter(app, "5 to review", timeout: 5)
     next(app)
 
     // A wrong card (as an agent might write it): report it, it leaves the session.

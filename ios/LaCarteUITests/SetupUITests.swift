@@ -75,7 +75,7 @@ final class SetupUITests: SettingsTestCase {
     waitForAbsence(sheetBar(app, "Settings"), "settings still open after swiping down")
     assertNoSavePasswordPrompt(app)
     waitForLabel(el(app, "study.front"), "alpha", timeout: 15)
-    waitForLabel(el(app, "study.remaining"), "2 to review")
+    waitForCounter(app, "2 to review")
     XCTAssertFalse(el(app, "study.openSettings").exists, "study.openSettings still shown with a card")
     snapshot("study-after-setup", appearance: .light)
     server.stop()
