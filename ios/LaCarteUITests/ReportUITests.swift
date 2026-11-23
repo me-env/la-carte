@@ -254,8 +254,16 @@ final class ReportUITests: XCTestCase {
     reveal(app)
     openMenu(app)
     menuButton(app, "drop", "I don't want this card").tap()
+    // 021: the report refetches the ladder ("3 new" → "2 new") without a step notice.
+    var sawStepNotice = false
+    _ = poll(timeout: 4) {
+      if el(app, "study.milestoneNotice").exists { sawStepNotice = true }
+      return false
+    }
+    XCTAssertFalse(sawStepNotice, "a step notice showed after a report")
     waitForLabel(el(app, "study.front"), "la carte")
     waitForCounter(app, "2 new", timeout: 4)
+    snapshot("study-report-counter-updated", appearance: .light)
     backgroundAndReactivate(app)
     Thread.sleep(forTimeInterval: 2)
     waitForLabel(el(app, "study.front"), "la carte")

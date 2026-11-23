@@ -1,8 +1,8 @@
 # QA: 021 Milestone ladder (new cards per day, iOS UI ACs 20–24)
 
-Verdict: **FAIL** (1 bug: the counter goes stale after a report)
+Verdict: **PASS** (re-validated after the report fix, 62a08aa merged with origin/main aaaf8fd)
 Date: 2026-11-23 · Simulator: iPhone 17 Pro / iOS 27 · Branch `worktree-agent-adce3acd44906595c` (merged local main 3061a3e)
-Runs: `qa/screenshots/021-mock/` (new class), `qa/screenshots/021-regress/` + `021-regress2/` (affected classes),
+Runs: `qa/screenshots/021-recheck/` + `021-recheck-report/` (re-validation), `qa/screenshots/021-mock/` (new class), `qa/screenshots/021-regress/` + `021-regress2/` (affected classes),
 `qa/screenshots/021-e2e/`
 Commands:
 - `scripts/ios-ui-test.sh 021-mock -only-testing:LaCarteUITests/StudyMilestonesUITests`: ✅ 3 passed, 1 skipped (live)
@@ -32,19 +32,32 @@ Dark mode is real: the background samples as #1A1A1A in dark shots and #0E1913 i
 - [x] Notices are centred, in secondary ink like "Reported", and replace the counter.
 - [x] No default blue tint. Text-size checks are deferred (docs/testing.md).
 
+## Re-validation (2026-11-23, after the fix)
+- `scripts/ios-ui-test.sh --split 021-recheck` over ReportUITests, StudyMilestonesUITests, DeckUITests,
+  RatingsUITests, StudyUITests (every class that failed in `021-regress`): ✅ 49 passed, 0 failed, 5 skipped (live).
+- `testReport_heldAfterRefresh` now also asserts that `study.milestoneNotice` never appears in the 4 s after the
+  report, then shoots the result. `021-recheck-report`: ✅ 2 passed (with `testReport_brokenPhotos`).
+  `study-report-counter-updated-light.png`: "la carte" unrevealed, the counter reads **"2 new"**, no step notice.
+- `scripts/e2e.sh 021-recheck-e2e` on the merged head: ✅ 10 passed.
+- `scripts/ios-test.sh` on the merged head: ✅ 332 passed, 0 failed, 11 skipped.
+
 ## Bugs
-1. **A report leaves the counter stale (the counter overstates what's left).** Repro: `LA_CARTE_API=mock` (3 new
+None open.
+
+### Fixed
+1. ~~**A report leaves the counter stale (the counter overstates what's left).** Repro: `LA_CARTE_API=mock` (3 new
    cards). Reveal "serendipity", open the report menu, choose "I don't want this card". The front becomes "la carte"
    but the counter stays **"3 new"** with 2 cards left; expected "2 new" (before 021 it read "2 to review"). Test:
    `ReportUITests/testReport_heldAfterRefresh` (line 258, 4 s wait), reproduced twice. Likely cause: the counter for
    a new step is `min(T − newToday, W)` with W from the last `/stats`. Only a rating refreshes the ladder (decision
    7), so a report, which removes the card from the batch and holds it on the server, never updates W. Fix
    (ios-engineer, or architect if decision 7 needs a word): after a successful report, refetch the ladder like after
-   a rating, without a step notice. Alternatively, cap the counter by the batch size.
+   a rating, without a step notice. Alternatively, cap the counter by the batch size.~~ Fixed in 62a08aa:
+   after a report the counter reads "2 new" and no notice shows (`021-recheck-report/study-report-counter-updated-light.png`).
 
 ## Not 021 (pre-existing)
-- `ReportUITests/testReport_brokenPhotos` fails the same way on main 3061a3e (run from a clean worktree): "the card
-  after the broken prompt photo never showed". It is not caused by this branch. It needs its own ticket.
+- `ReportUITests/testReport_brokenPhotos` failed on main 3061a3e. aaaf8fd (now merged) fixed it, and it passes in
+  `021-recheck` and `021-recheck-report`.
 
 ## Test changes in this round (qa-owned)
 - New `StudyMilestonesUITests` (3 mock flows × light/dark/forest, plus 1 live test added to `scripts/e2e.sh`).
