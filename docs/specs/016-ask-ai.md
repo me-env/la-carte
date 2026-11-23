@@ -108,7 +108,7 @@ Screenshots: `study-ask-menu` (light + dark), `study-ask-copied` (light).
 | 1 | Settings has a section "Ask AI" with a native menu `Picker` "App" (`settings.aiApp`) listing Vibe, Claude, ChatGPT, Perplexity, Grok, Copy only. Footer: "Ask about this card copies the card and opens this app." | unit + UI (light, dark) |
 | 2 | First launch: the picker shows Vibe. A pick is stored in `@Shared(.appStorage("aiApp"))` and survives a relaunch | unit + UI |
 | 3 | `AIApp.link(for:)` returns exactly: Vibe `https://chat.mistral.ai/chat/`; Claude `https://claude.ai/new?q=<enc>`; ChatGPT `https://chatgpt.com/?q=<enc>`; Perplexity `https://www.perplexity.ai/search`; Grok `https://grok.com/`; Copy only `nil`. `<enc>` as in "Prefill encoding" (test a text with a newline, `&`, `+` and `é`) | unit |
-| 4 | Ask with an app chosen: copy first, then `askAI.open(link)`. Opened → notice "Copied". Not opened (app not installed) → "Copied · Vibe isn't installed" (the app's name). Both last 2 s (debug builds: `-noticeSeconds <s>` lengthens every notice, for slow UI-test runners) | unit (open stubbed `true` / `false`) |
+| 4 | Ask with an app chosen: copies and shows "Copied" at once (2 s expiry), then calls `askAI.open(link)`. Opened → nothing changes. Not opened (app not installed) → when the call returns, "Copied · Vibe isn't installed" (the app's name) replaces the notice and restarts the 2 s expiry. The notice never waits for `open` (the universal-link lookup can stall). Notices last 2 s (debug builds: `-noticeSeconds <s>` lengthens every notice, for slow UI-test runners) | unit (open stubbed `true` / `false`) |
 | 5 | Ask with "Copy only": copies, calls no `open`, notice "Copied" (016a behaviour) | unit |
 | 6 | Simulator, no AI app installed, default Vibe: Ask shows "Copied · Vibe isn't installed" and the app stays in front | UI |
 | 7 | Left for the user (device): with Vibe, Claude and ChatGPT installed, Ask opens each one; Claude and ChatGPT show the text in their box; in Vibe, pasting gives the exact text | manual |
@@ -145,9 +145,10 @@ public enum AIApp: String, CaseIterable, Sendable {      // 016b
 - State (016b): `@Shared(.appStorage(AIApp.storageKey)) var aiApp: AIApp = .vibe`.
 - Actions: `askTapped` (016a), `askOpened(Bool)` (016b).
 - `askTapped`: `guard canReport, let card = cards.first`. Effect: `askAI.copy(AskText.make(for: card))`. 016a:
-  `notice = .copied` and start the expiry. 016b: if `aiApp.link(for:)` is nil, as 016a; otherwise await
-  `askAI.open(url)` and send `askOpened`, which sets `.copied` or `.copiedNotInstalled(aiApp.title)` and starts the
-  expiry. Doesn't touch `isReviewing` or `cards`.
+  `notice = .copied` and start the expiry. 016b: the same at once; then, if `aiApp.link(for:)` isn't nil, await
+  `askAI.open(url)` and send `askOpened`. `askOpened(true)` changes nothing; `askOpened(false)` sets
+  `.copiedNotInstalled(aiApp.title)` and restarts the expiry. Feedback never waits for `open`: the universal-link
+  lookup can stall. Doesn't touch `isReviewing` or `cards`.
 - View: the dialog becomes `.confirmationDialog("", isPresented:, titleVisibility: .hidden)` with
   "Ask about this card" first. The `.success` haptic stays on `.reported` only.
 

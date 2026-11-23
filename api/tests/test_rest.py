@@ -28,6 +28,7 @@ def test_card_lifecycle(client):
         "total": 1, "due": 0, "new": 0, "reviewed_today": 1, "next_due": reviewed["due"],
         "new_today": 1, "milestone": 15, "streak": 1, "streak_start": today,
         "history_start": today, "history": "s", "due_new": 0,
+        "at_risk_total": 0, "at_risk_done": 0, "reviews_total": 0, "reviews_done": 0,
     }  # fmt: skip
 
     assert client.delete(f"/cards/{created['id']}").status_code == 204

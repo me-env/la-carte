@@ -135,6 +135,9 @@ class ReviewLog(SQLModel, table=True):
     rating: Rating
     reviewed_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime, index=True)
     confidence: float | None = None  # measured 0-1 drag value (spec 013); not used by FSRS
+    # The card's memory state just before this review; null when it was new (spec 021).
+    stability_before: float | None = None
+    last_review_before: datetime | None = Field(default=None, sa_type=UTCDateTime)
 
 
 class Report(SQLModel, table=True):
@@ -157,7 +160,7 @@ class Settings(SQLModel, table=True):
     """Deck-wide settings (spec 021): a single row, id 1. A missing row means the defaults."""
 
     id: int = Field(default=1, primary_key=True)
-    new_cards_per_day: int = 15  # daily target of new cards (rolling 24 h), not a limit
+    new_cards_per_day: int = 15  # the new-card milestone size M (1-200; a stored 0 reads 15)
 
 
 # --- Public schemas (REST + MCP) ---------------------------------------------------------------
@@ -314,22 +317,17 @@ class DeckStats(BaseModel):
     # p today not yet studied (spec 024).
     history: str
     due_new: int  # never-reviewed cards in the servable queue (a subset of `due`)
+    # The app's daily ladder (spec 021 decision 5), display only: nothing is held back.
+    at_risk_total: int  # 0 when the at-risk step doesn't exist today (fewer than AT_RISK_MIN)
+    at_risk_done: int
+    reviews_total: int
+    reviews_done: int  # = reviewed_today - new_today
 
 
-class NewCardsStatus(BaseModel):
-    """The daily new-card target at a moment (spec 021). MCP only. Counters: no card is held."""
+class MilestoneSetting(BaseModel):
+    """MCP `new_card_milestone`: the size of the new-card steps the app shows (spec 021)."""
 
-    per_day: int  # the target N
-    introduced: int  # cards first reviewed in the last 24 h
-    available: int  # never-reviewed cards left in today's target
-    waiting: int  # never-reviewed cards beyond it (still studyable)
-    days: int | None  # ceil(waiting / per_day), rough; null when per_day = 0
-
-
-class AgentDeckStats(DeckStats):
-    """`deck_stats` over MCP: the REST `/stats` body plus the new-card target."""
-
-    new_cards: NewCardsStatus
+    milestone: int
 
 
 class AddCardsResult(BaseModel):
@@ -343,11 +341,17 @@ class AddNotesResult(BaseModel):
 
 
 class AddCardsReply(AddCardsResult):
-    new_cards: NewCardsStatus  # after the insert (MCP only)
+    """MCP only: never-reviewed cards after the insert, and the milestone size."""
+
+    new: int
+    milestone: int
 
 
 class AddNotesReply(AddNotesResult):
-    new_cards: NewCardsStatus  # after the insert (MCP only)
+    """MCP only: never-reviewed cards after the insert, and the milestone size."""
+
+    new: int
+    milestone: int
 
 
 class ReportCreate(BaseModel):
