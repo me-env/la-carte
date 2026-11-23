@@ -82,7 +82,7 @@ final class NotesUITests: XCTestCase {
       waitForLabel(el(app, "editor.directionsHint"), "Choose at least one direction")
       XCTAssertFalse(el(app, "editor.save").isEnabled, "save enabled for an empty person")
       snapshot("editor-person-new-directions", appearance: appearance)
-      app.swipeDown()
+      scrollBackIntoView(app, el(app, "editor.name"))
 
       type(app, "editor.name", "Sam Rivera")
       type(app, "editor.description", "runs the flower stall")
@@ -95,7 +95,7 @@ final class NotesUITests: XCTestCase {
       XCTAssertTrue(dir(app, dirs[2]).isSelected, "\(dirs[2]) not on")
       XCTAssertFalse(dir(app, dirs[1]).isSelected, "\(dirs[1]) on without a tap")
       XCTAssertTrue(el(app, "editor.save").isEnabled, "save disabled for a complete person")
-      app.swipeDown()  // back to the top: photo preview in the shot
+      scrollBackIntoView(app, el(app, "editor.photoPreview"))  // back to the top: photo preview in the shot
       snapshot("editor-person-filled", appearance: appearance)
       el(app, "editor.save").tap()
       waitForAbsence(editorBar(app), "editor still open after saving")
