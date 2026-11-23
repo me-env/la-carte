@@ -425,6 +425,14 @@ final class NotesUITests: XCTestCase {
       let prompt = c.prompt == .name ? c.name : c.description
       XCTAssertTrue(text(app, prompt).waitFor(timeout: 10), "\(c.tag): prompt not shown")
       Thread.sleep(forTimeInterval: 1.5)
+      if reduceMotion {
+        // AC5: the composition layer (laid out before reveal) is hidden from the accessibility tree until reveal.
+        XCTAssertFalse(el(app, "study.photo").exists, "\(c.tag): answer layer's photo in the tree before reveal")
+        let other = c.prompt == .name ? c.description : c.name
+        XCTAssertFalse(text(app, other).exists, "\(c.tag): answer '\(other)' in the tree before reveal")
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", prompt)).count, 1,
+                       "\(c.tag): the prompt is in the tree twice before reveal: \(frames(app, prompt))")
+      }
       let promptBefore = text(app, prompt).frame
       XCTContext.runActivity(named: String(format: "reveal %@ at %.2f s", c.tag, Date().timeIntervalSince(start))) { _ in }
       el(app, "study.reveal").tap()
@@ -432,11 +440,22 @@ final class NotesUITests: XCTestCase {
       let promptAfter = text(app, prompt).frame
       XCTContext.runActivity(named: "\(c.tag) prompt \(promptBefore) → \(promptAfter)") { _ in }
       XCTAssertNotEqual(promptBefore.minY, promptAfter.minY, "\(c.tag): the prompt didn't move into the composition")
+      // AC5: after reveal the hint is gone and (Reduce Motion) the question layer is hidden: one copy of the prompt.
+      XCTAssertTrue(!el(app, "study.answerHint").exists || !el(app, "study.answerHint").isHittable,
+                    "\(c.tag): hint still there after reveal: \(el(app, "study.answerHint").frame)")
+      XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", prompt)).count, 1,
+                     "\(c.tag): the prompt is in the tree twice after reveal: \(frames(app, prompt))")
       snapshot("study-person-motion-\(c.tag)\(suffix)", appearance: .light)
       el(app, "study.rate.good").tap()
     }
     app.terminate()
     server.stop()
+  }
+
+  /// Frames of every static text labelled `label` (to locate duplicates in the accessibility tree).
+  @MainActor
+  private func frames(_ app: XCUIApplication, _ label: String) -> [CGRect] {
+    app.staticTexts.matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex.map(\.frame)
   }
 
   /// Toggles Settings › Accessibility › Motion › Reduce Motion (a simulator setting: always set back off).
