@@ -543,6 +543,8 @@ final class RatingsUITests: XCTestCase {
     let server = StubAPIServer { request in
       if request.method == "POST" { return .init(status: 500, body: #"{"detail":"boom"}"#) }
       if request.path.hasPrefix("/cards/due") { return .init(body: StubJSON.cards([card])) }
+      // Spec 021 AC 17: a queue load fetches due cards and stats together; a failed stats call means offline.
+      if request.path.hasPrefix("/stats") { return .init(body: StubJSON.stats(total: 1, nextDue: nil)) }
       return .init(status: 404, body: "{}")
     }
     try server.start()

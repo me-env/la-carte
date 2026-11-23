@@ -68,7 +68,7 @@ final class ReportUITests: XCTestCase {
       waitForAbsence(buttons[1], "dialog still shown after Cancel")
       waitForLabel(el(app, "study.back"), Self.back)
       assertRatingsEnabled(app)
-      waitForCounter(app, "3 to review")
+      waitForCounter(app, "3 new")
       app.terminate()
     }
   }
@@ -255,11 +255,11 @@ final class ReportUITests: XCTestCase {
     openMenu(app)
     menuButton(app, "drop", "I don't want this card").tap()
     waitForLabel(el(app, "study.front"), "la carte")
-    waitForCounter(app, "2 to review", timeout: 4)
+    waitForCounter(app, "2 new", timeout: 4)
     backgroundAndReactivate(app)
     Thread.sleep(forTimeInterval: 2)
     waitForLabel(el(app, "study.front"), "la carte")
-    waitForCounter(app, "2 to review")
+    waitForCounter(app, "2 new")
     app.terminate()
   }
 

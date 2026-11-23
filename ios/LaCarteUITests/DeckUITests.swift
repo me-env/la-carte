@@ -246,7 +246,7 @@ final class DeckUITests: XCTestCase {
     el(app, "editor.save").tap()
     waitForAbsence(editorBar(app), "editor still open after saving")
     waitForLabel(el(app, "study.front"), "feline")
-    waitForCounter(app, "1 to review")
+    waitForCounter(app, "1 new")
     snapshot("study-after-add", appearance: .light)
   }
 
@@ -259,7 +259,7 @@ final class DeckUITests: XCTestCase {
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .mock)
     waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
-    waitForCounter(app, "3 to review")
+    waitForCounter(app, "3 new")
 
     // Delete the current card.
     openDeck(app)
@@ -269,7 +269,7 @@ final class DeckUITests: XCTestCase {
     swipeSheetDown(app, from: deckTitle(app))
     waitForAbsence(deckTitle(app))
     waitForLabel(el(app, "study.front"), Self.fixtures[1].front)
-    waitForCounter(app, "2 to review")
+    waitForCounter(app, "2 new")
     snapshot("study-after-delete", appearance: .light)
 
     // Edit the (new) current card's front.
@@ -294,7 +294,7 @@ final class DeckUITests: XCTestCase {
     waitForAbsence(editorBar(app))
     swipeSheetDown(app, from: deckTitle(app))
     waitForAbsence(deckTitle(app))
-    waitForCounter(app, "3 to review")
+    waitForCounter(app, "3 new")
   }
 
   // MARK: - #13 live API

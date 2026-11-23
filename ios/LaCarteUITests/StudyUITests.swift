@@ -16,7 +16,7 @@ final class StudyUITests: XCTestCase {
 
   // MARK: - Studying (criteria 1, 2, 3, 4, 8)
 
-  /// #1 front centered + "3 to review", #3 no ratings before reveal, #2 tap card / reveal button,
+  /// #1 front centered + "3 new" (spec 021: new cards), #3 no ratings before reveal, #2 tap card / reveal button,
   /// #4 rate → next card unrevealed + decrement, #8 corner buttons present and 44pt.
   @MainActor
   func testStudy_frontRevealRateNext() {
@@ -24,7 +24,7 @@ final class StudyUITests: XCTestCase {
     let app = launch(api: .mock)
 
     // Front, unrevealed.
-    assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
+    assertFront(app, Self.fixtures[0].front, remaining: "3 new")
     assertCornerButtons(app)
     snapshot("study-front", appearance: .light)
     let frontBefore = el(app, "study.front").frame
@@ -38,7 +38,7 @@ final class StudyUITests: XCTestCase {
 
     // Rate → next card, unrevealed, remaining decrements.
     el(app, "study.rate.good").tap()
-    assertFront(app, Self.fixtures[1].front, remaining: "2 to review")
+    assertFront(app, Self.fixtures[1].front, remaining: "2 new")
 
     // Reveal with the "Show answer" button this time.
     let secondBefore = el(app, "study.front").frame
@@ -48,7 +48,7 @@ final class StudyUITests: XCTestCase {
     assertRevealed(app, front: Self.fixtures[1].front, back: Self.fixtures[1].back)
     assertFrontDidNotMove(app, from: secondBefore)
     el(app, "study.rate.again").tap()
-    assertFront(app, Self.fixtures[2].front, remaining: "1 to review")
+    assertFront(app, Self.fixtures[2].front, remaining: "1 new")
   }
 
   /// #4 + #5: rate every due card (each rating button once at least) → "All caught up" + "Next card in…".
@@ -58,7 +58,7 @@ final class StudyUITests: XCTestCase {
     let app = launch(api: .mock)
     let plan = ["good", "again", "good"]
     for (index, card) in Self.fixtures.enumerated() {
-      assertFront(app, card.front, remaining: "\(3 - index) to review")
+      assertFront(app, card.front, remaining: "\(3 - index) new")
       el(app, index.isMultiple(of: 2) ? "study.card" : "study.reveal").tap()
       assertRevealed(app, front: card.front, back: card.back)
       el(app, "study.rate.\(plan[index])").tap()
@@ -74,21 +74,21 @@ final class StudyUITests: XCTestCase {
   func testStudy_cornerButtonsTappable() {
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .mock)
-    assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
+    assertFront(app, Self.fixtures[0].front, remaining: "3 new")
 
     XCTAssertTrue(el(app, "study.deck").isHittable, "study.deck not hittable")
     el(app, "study.deck").tap()
     waitForDeckTitle(app)
     swipeSheetDown(app, from: deckTitle(app))
     waitForAbsence(deckTitle(app), "deck sheet still open after swiping down")
-    assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
+    assertFront(app, Self.fixtures[0].front, remaining: "3 new")
 
     XCTAssertTrue(el(app, "study.add").isHittable, "study.add not hittable")
     el(app, "study.add").tap()
     waitForSheet(app, "New card")
     el(app, "editor.close").tap()
     waitForAbsence(editorBar(app), "editor still open after editor.close")
-    assertFront(app, Self.fixtures[0].front, remaining: "3 to review")
+    assertFront(app, Self.fixtures[0].front, remaining: "3 new")
   }
 
   // MARK: - Stub-API states (criteria 4, 5, 6, 7)
@@ -117,6 +117,8 @@ final class StudyUITests: XCTestCase {
     let card = StubJSON.card(id: "22222222-2222-2222-2222-222222222222", front: "gratitude", back: "thank you")
     let server = StubAPIServer { request in
       if request.path.hasPrefix("/cards/due") { return .init(body: StubJSON.cards([card])) }
+      // Spec 021 AC 17: a queue load fetches due cards and stats together; a failed stats call means offline.
+      if request.path.hasPrefix("/stats") { return .init(body: StubJSON.stats(total: 1, nextDue: nil)) }
       return .init(status: 404, body: "{}")
     }
     // Server down: take an OS-picked port, then close it so it refuses connections.
@@ -149,7 +151,7 @@ final class StudyUITests: XCTestCase {
     let url = try liveURL("LA_CARTE_API_URL")
     XCUIDevice.shared.appearance = .light
     let app = launch(api: .live(url))
-    assertFront(app, "greeting", remaining: "2 to review")
+    assertFront(app, "greeting", remaining: "2 new")
     snapshot("study-live-front", appearance: .light)
     el(app, "study.card").tap()
     assertRevealed(app, front: "greeting", back: "hello")
@@ -157,7 +159,7 @@ final class StudyUITests: XCTestCase {
     let card = el(app, "study.card")
     let start = card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
     start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -0.13 * card.frame.width)))
-    assertFront(app, "gratitude", remaining: "1 to review")
+    assertFront(app, "gratitude", remaining: "1 new")
     el(app, "study.reveal").tap()
     assertRevealed(app, front: "gratitude", back: "thank you")
     el(app, "study.rate.good").tap()
