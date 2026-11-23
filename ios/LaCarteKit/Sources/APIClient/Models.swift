@@ -175,22 +175,127 @@ public enum ReportReason: String, Codable, CaseIterable, Sendable {
   case brokenPhoto = "broken_photo"
 }
 
-public struct DeckStats: Codable, Equatable, Sendable {
+/// The deck's counts and study history, as `/stats` returns them for the device's time zone (specs 007, 024).
+public struct DeckStats: Equatable, Sendable {
   public var total: Int
   public var due: Int
   public var new: Int
   public var reviewedToday: Int
   /// When the next card that isn't due yet becomes due; `nil` if there is none.
   public var nextDue: Date?
-  /// Consecutive days with at least one review, ending today or yesterday, in the device's time zone (spec 007).
+  /// Days in the current run, frozen days included, ending today or yesterday (spec 024 decision 4).
   public var streak: Int
+  /// New cards introduced today and the size of a batch of new cards (spec 021).
+  public var newToday: Int
+  public var milestone: Int
+  /// The never-reviewed cards among `due`.
+  public var dueNew: Int
+  /// One letter per local day from `historyStart` to today: `s` studied, `f` frozen, `m` missed, `p` today not yet
+  /// studied.
+  public var history: String
+  /// Local midnights in the device's time zone (`yyyy-MM-dd` on the wire).
+  public var historyStart: Date
+  public var streakStart: Date?
 
-  public init(total: Int, due: Int, new: Int, reviewedToday: Int, nextDue: Date?, streak: Int = 0) {
+  /// The history defaults describe a deck with no reviews whose today is unknown; only the widget's grid reads them.
+  public init(
+    total: Int,
+    due: Int,
+    new: Int,
+    reviewedToday: Int,
+    nextDue: Date?,
+    streak: Int = 0,
+    newToday: Int = 0,
+    milestone: Int = 15,
+    dueNew: Int = 0,
+    history: String = "p",
+    historyStart: Date = .distantPast,
+    streakStart: Date? = nil
+  ) {
     self.total = total
     self.due = due
     self.new = new
     self.reviewedToday = reviewedToday
     self.nextDue = nextDue
     self.streak = streak
+    self.newToday = newToday
+    self.milestone = milestone
+    self.dueNew = dueNew
+    self.history = history
+    self.historyStart = historyStart
+    self.streakStart = streakStart
+  }
+
+  /// The count Study shows (spec 021 decision 6): due reviews, plus new cards up to the end of today's batch.
+  public var toReview: Int {
+    let batchLeft = milestone > 0 ? milestone - newToday % milestone : dueNew
+    return (due - dueNew) + min(dueNew, batchLeft)
+  }
+
+  /// Calendar days in the device's time zone, in the Gregorian calendar whatever the user's calendar setting.
+  public static var calendar: Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = .current
+    return calendar
+  }
+}
+
+extension DeckStats: Codable {
+  enum CodingKeys: String, CodingKey {
+    case total, due, new, reviewedToday, nextDue, streak, newToday, milestone, dueNew, history, historyStart
+    case streakStart
+  }
+
+  /// The dates are `yyyy-MM-dd` days; a missing `new_today` / `milestone` reads as 0 / 15, spec 021's defaults.
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    try self.init(
+      total: container.decode(Int.self, forKey: .total),
+      due: container.decode(Int.self, forKey: .due),
+      new: container.decode(Int.self, forKey: .new),
+      reviewedToday: container.decode(Int.self, forKey: .reviewedToday),
+      nextDue: container.decodeIfPresent(Date.self, forKey: .nextDue),
+      streak: container.decode(Int.self, forKey: .streak),
+      newToday: container.decodeIfPresent(Int.self, forKey: .newToday) ?? 0,
+      milestone: container.decodeIfPresent(Int.self, forKey: .milestone) ?? 15,
+      dueNew: container.decode(Int.self, forKey: .dueNew),
+      history: container.decode(String.self, forKey: .history),
+      historyStart: Self.day(container.decode(String.self, forKey: .historyStart), forKey: .historyStart, in: container),
+      streakStart: container.decodeIfPresent(String.self, forKey: .streakStart).map {
+        try Self.day($0, forKey: .streakStart, in: container)
+      }
+    )
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(total, forKey: .total)
+    try container.encode(due, forKey: .due)
+    try container.encode(new, forKey: .new)
+    try container.encode(reviewedToday, forKey: .reviewedToday)
+    try container.encodeIfPresent(nextDue, forKey: .nextDue)
+    try container.encode(streak, forKey: .streak)
+    try container.encode(newToday, forKey: .newToday)
+    try container.encode(milestone, forKey: .milestone)
+    try container.encode(dueNew, forKey: .dueNew)
+    try container.encode(history, forKey: .history)
+    try container.encode(Self.dayString(historyStart), forKey: .historyStart)
+    try container.encodeIfPresent(streakStart.map(Self.dayString), forKey: .streakStart)
+  }
+
+  private static func day(
+    _ string: String, forKey key: CodingKeys, in container: KeyedDecodingContainer<CodingKeys>
+  ) throws -> Date {
+    let parts = string.split(separator: "-").compactMap { Int($0) }
+    guard parts.count == 3, let date = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    else {
+      throw DecodingError.dataCorruptedError(forKey: key, in: container, debugDescription: "Invalid day: \(string)")
+    }
+    return date
+  }
+
+  private static func dayString(_ date: Date) -> String {
+    let day = calendar.dateComponents([.year, .month, .day], from: date)
+    return String(format: "%04d-%02d-%02d", day.year ?? 0, day.month ?? 0, day.day ?? 0)
   }
 }

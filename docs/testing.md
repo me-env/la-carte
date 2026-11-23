@@ -30,6 +30,12 @@ the main actor. The global switch is safe only because each suite is the only on
 runs each bundle in its own process, so it can't leak into other suites. Keep such a suite alone in its bundle, or
 switch it to the scoped `withMainSerialExecutor { … }`.
 
+**Widget renders** (spec 024). `scripts/ios-test.sh --render -only-testing:ScreenColorTests/WidgetRenders` draws the
+real `DeckWidgetView` with `ImageRenderer` (plain SwiftUI) and writes 68 PNGs,
+`widget-<small|medium>-<id>-<light|dark|forest>.png` (170 × 170 / 364 × 170 pt at 3×, `background`, radius 22): every
+scenario in `DeckWidgetEntry.scenarios` plus `unavailable`, and `widget-<family>-nine-accented.png` (tinted Home
+Screen inks; the system's tint itself only shows on a device).
+
 ## Script output and exit codes
 
 - **Live:** `ios-test.sh`, `ios-ui-test.sh` and `e2e.sh` print each test as it finishes, even redirected to a

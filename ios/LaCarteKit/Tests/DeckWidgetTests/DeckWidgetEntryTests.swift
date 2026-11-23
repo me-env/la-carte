@@ -67,7 +67,35 @@ struct DeckWidgetEntryTests {
   @Test func streakText() {
     #expect(DeckWidgetEntry.streakText(12) == "12-day streak")
     #expect(DeckWidgetEntry.streakText(1) == "1-day streak")
-    #expect(DeckWidgetEntry.streakText(0) == "No streak yet")
+    #expect(DeckWidgetEntry.streakText(0) == "Start a streak today")
+  }
+
+  /// Spec 024 #18.
+  @Test func accessibilityText() throws {
+    let scenarios = Dictionary(uniqueKeysWithValues: DeckWidgetEntry.scenarios(calendar: calendar).map {
+      ($0.id, $0.entry.content)
+    })
+    func text(_ id: String) throws -> String {
+      guard case let .stats(stats) = scenarios[id] else { throw Offline() }
+      return DeckWidgetEntry.accessibilityText(stats: stats)
+    }
+    #expect(try text("zero") == "Start a streak today, no cards yet")
+    #expect(try text("nine") == "9-day streak, today still to do, 8 to review")
+    #expect(try text("three") == "3-day streak, studied today, all caught up")
+    #expect(try text("eightHundred") == "800-day streak, today still to do, 5 to review")
+  }
+
+  @Test func statusTextUsesStudysCount() {
+    var stats = stats
+    #expect(DeckWidgetEntry.statusText(stats) == "8 to review")
+    stats.dueNew = 8
+    stats.newToday = 14
+    #expect(DeckWidgetEntry.statusText(stats) == "1 to review")
+    stats.due = 0
+    stats.dueNew = 0
+    #expect(DeckWidgetEntry.statusText(stats) == "All caught up")
+    stats.total = 0
+    #expect(DeckWidgetEntry.statusText(stats) == "No cards yet")
   }
 
   @Test func nextDueWithinADayShowsTheTime() {

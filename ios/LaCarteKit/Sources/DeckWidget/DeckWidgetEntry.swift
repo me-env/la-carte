@@ -21,10 +21,9 @@ struct DeckWidgetEntry: TimelineEntry, Equatable, Sendable {
   }
 
   /// Placeholder and widget-gallery preview: no network.
-  static let sample = DeckWidgetEntry(
-    date: .now,
-    content: .stats(DeckStats(total: 42, due: 8, new: 3, reviewedToday: 5, nextDue: nil, streak: 12))
-  )
+  static var sample: DeckWidgetEntry {
+    scenarios(calendar: DeckStats.calendar)[2].entry  // "nine": 8 to review, today still to do
+  }
 
   /// When WidgetKit should fetch again: in 30 min at most, at the next local midnight (the streak may end), and when
   /// the next card comes due if nothing is due now.
@@ -41,9 +40,26 @@ struct DeckWidgetEntry: TimelineEntry, Equatable, Sendable {
     return dates.min() ?? now
   }
 
-  /// "12-day streak" / "No streak yet".
+  /// "12-day streak" / "Start a streak today".
   static func streakText(_ streak: Int) -> String {
-    streak >= 1 ? "\(streak)-day streak" : "No streak yet"
+    streak >= 1 ? "\(streak)-day streak" : "Start a streak today"
+  }
+
+  /// "N to review" / "All caught up" / "No cards yet", with Study's count (spec 024 decision 9).
+  static func statusText(_ stats: DeckStats) -> String {
+    if stats.total == 0 { return "No cards yet" }
+    return stats.toReview > 0 ? "\(stats.toReview) to review" : "All caught up"
+  }
+
+  /// The widget is one VoiceOver element and the marks are decorative (spec 024): "9-day streak, today still to do,
+  /// 8 to review".
+  static func accessibilityText(stats: DeckStats) -> String {
+    var parts = [streakText(stats.streak)]
+    if stats.streak >= 1 {
+      parts.append(stats.history.last == "s" ? "studied today" : "today still to do")
+    }
+    parts.append(statusText(stats).localizedLowercase)
+    return parts.joined(separator: ", ")
   }
 
   /// "Next at 18:40" within 24 h, else "Next on 24 Nov" (localized).

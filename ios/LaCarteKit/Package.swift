@@ -37,7 +37,9 @@ let package = Package(
     // Own bundle: its window renders hold the main actor for seconds, which starved the TestStore tests beside it.
     .testTarget(
       name: "ScreenColorTests",
-      dependencies: ["APIClient", "DeckFeature", "DesignSystem", "NoteEditorFeature", "SettingsFeature", "StudyFeature"]
+      dependencies: [
+        "APIClient", "DeckFeature", "DeckWidget", "DesignSystem", "NoteEditorFeature", "SettingsFeature", "StudyFeature",
+      ]
     ),
     .target(
       name: "NoteEditorFeature",

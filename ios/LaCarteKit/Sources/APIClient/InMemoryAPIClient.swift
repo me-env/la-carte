@@ -75,13 +75,19 @@ extension APIClient {
         let studied = cards.filter { !held.value.contains($0.id) }
         let readyDates = studied.map { readyAt($0, notes) }
         let reviewedToday = cards.filter { $0.lastReview.map(Calendar.current.isDateInToday) ?? false }.count
+        let dueCards = zip(studied, readyDates).filter { $1 <= now }.map(\.0)
+        let today = DeckStats.calendar.startOfDay(for: now)
         return DeckStats(
           total: cards.count,
-          due: Set(zip(studied, readyDates).filter { $1 <= now }.map(\.0.noteId)).count,
+          due: Set(dueCards.map(\.noteId)).count,
           new: cards.filter { $0.lastReview == nil }.count,
           reviewedToday: reviewedToday,
           nextDue: readyDates.filter { $0 > now }.min(),
-          streak: reviewedToday > 0 ? 1 : 0
+          streak: reviewedToday > 0 ? 1 : 0,
+          dueNew: Set(dueCards.filter { $0.lastReview == nil }.map(\.noteId)).count,
+          history: reviewedToday > 0 ? "s" : "p",
+          historyStart: today,
+          streakStart: reviewedToday > 0 ? today : nil
         )
       },
       notes: { query in

@@ -1,12 +1,15 @@
 import APIClient
 import DesignSystem
 import SwiftUI
+import WidgetKit
 
-/// Every widget state in systemSmall-sized tiles, under the app's theme, for QA screenshots (spec 007 #23).
+/// Every widget scenario in both families, under the app's theme, for QA screenshots (specs 007 #23, 024 #17).
 /// Widgets aren't reachable from XCUITest; launch the app with `LA_CARTE_SCREEN=widget` (debug builds).
 #if DEBUG
 public struct DeckWidgetGallery: View {
   public init() {}
+
+  private let scenarios = DeckWidgetEntry.scenarios(calendar: DeckStats.calendar)
 
   public var body: some View {
     ScrollView {
@@ -17,19 +20,13 @@ public struct DeckWidgetGallery: View {
           .accessibilityIdentifier("widgetGallery.title")
 
         LazyVGrid(columns: Array(repeating: GridItem(.fixed(170), spacing: Theme.Spacing.m), count: 2)) {
-          ForEach(DeckWidgetEntry.gallery, id: \.state) { tile in
-            VStack(spacing: Theme.Spacing.s) {
-              DeckWidgetView(entry: tile.entry)
-                .padding(Theme.Spacing.m)
-                .frame(width: 170, height: 170)
-                .background(Theme.background, in: .rect(cornerRadius: 22))
-                .accessibilityIdentifier("widgetGallery.tile.\(tile.state)")
-              Text(tile.name)
-                .font(.meta)
-                .foregroundStyle(Theme.secondaryInk)
-            }
-            .padding(.bottom, Theme.Spacing.s)
+          ForEach(scenarios, id: \.id) { scenario in
+            tile(scenario.id, scenario.entry, .systemSmall, id: "small.\(scenario.id)")
           }
+          tile("unavailable", DeckWidgetEntry(date: .now, content: .unavailable), .systemSmall, id: "unavailable")
+        }
+        ForEach(scenarios, id: \.id) { scenario in
+          tile(scenario.id, scenario.entry, .systemMedium, id: "medium.\(scenario.id)")
         }
       }
       .padding(.horizontal, Theme.Spacing.m)
@@ -37,28 +34,30 @@ public struct DeckWidgetGallery: View {
     }
     .background(Theme.surface)  // the "wallpaper", so the background-colored tiles stand out
   }
+
+  private func tile(_ name: String, _ entry: DeckWidgetEntry, _ family: WidgetFamily, id: String) -> some View {
+    VStack(spacing: Theme.Spacing.s) {
+      DeckWidgetTile(entry: entry, family: family)
+        .accessibilityIdentifier("widgetGallery.tile.\(id)")
+      Text(name)
+        .font(.meta)
+        .foregroundStyle(Theme.secondaryInk)
+    }
+    .padding(.bottom, Theme.Spacing.s)
+  }
 }
 #endif
 
-extension DeckWidgetEntry {
-  /// Fixed entries, one per state (gallery and widget previews); "today" times use the current day so "Next at 18:40" reads naturally.
-  static var gallery: [(state: String, name: String, entry: DeckWidgetEntry)] {
-    let now = Date.now
-    let calendar = Calendar.current
-    let evening = calendar.date(bySettingHour: 18, minute: 40, second: 0, of: now) ?? now
-    func stats(total: Int = 42, due: Int, nextDue: Date? = nil, streak: Int) -> Content {
-      .stats(DeckStats(total: total, due: due, new: 0, reviewedToday: 0, nextDue: nextDue, streak: streak))
-    }
-    return [
-      ("due", "due", .init(date: now, content: stats(due: 8, streak: 12))),
-      ("caughtUp", "caught up", .init(date: now, content: stats(due: 0, nextDue: evening, streak: 3))),
-      (
-        "caughtUpLater", "caught up later",
-        .init(date: now, content: stats(due: 0, nextDue: now.addingTimeInterval(3 * 86_400), streak: 0))
-      ),
-      ("empty", "empty deck", .init(date: now, content: stats(total: 0, due: 0, streak: 0))),
-      ("unavailable", "unavailable", .init(date: now, content: .unavailable)),
-      ("long", "long", .init(date: now, content: stats(total: 1_200, due: 999, streak: 365))),
-    ]
+/// A widget as the Home Screen draws it, for the gallery, previews and renders: 16 pt content margins, `background`,
+/// radius 22, at the iPhone 17 Pro's systemSmall (170 × 170) or systemMedium (364 × 170) size.
+struct DeckWidgetTile: View {
+  let entry: DeckWidgetEntry
+  let family: WidgetFamily
+
+  var body: some View {
+    DeckWidgetView(entry: entry, family: family)
+      .padding(Theme.Spacing.m)
+      .frame(width: family == .systemMedium ? 364 : 170, height: 170)
+      .background(Theme.background, in: .rect(cornerRadius: 22))
   }
 }
