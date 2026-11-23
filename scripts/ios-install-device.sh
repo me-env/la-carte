@@ -20,7 +20,7 @@ fi
 if [ -z "${DEVICE:-}" ]; then
   # JSON goes to its own file: devicectl also prints a human-readable table on stdout.
   JSON="$(mktemp)"; trap 'rm -f "$JSON"' EXIT
-  xcrun devicectl list devices --json-output "$JSON" >/dev/null
+  xcrun devicectl list devices --timeout 30 --json-output "$JSON" >/dev/null
   # Xcode 27.2+ also lists simulators (hardwareProperties.reality == "simulated"): skip them, keep
   # paired iPhones, connected ones first. On failure, list what devicectl saw (names only, no IDs).
   DEVICE="$(python3 -I -c '
@@ -45,6 +45,17 @@ fi
 # Bundle ID from the .ipa itself, so it follows Signing.xcconfig (and a fork's prefix).
 BUNDLE_ID="$(unzip -p "$IPA" Payload/LaCarte.app/Info.plist | plutil -extract CFBundleIdentifier raw -)"
 
+# devicectl waits forever on a device whose tunnel won't come up (seen 2026-11-23 over Wi-Fi: tunnel
+# stuck "connecting" until the user's CoreDeviceService was restarted). So every call is bounded, and the
+# device is probed first; if it doesn't answer, restart CoreDeviceService once (launchd relaunches it).
+probe() { xcrun devicectl device info details --device "$DEVICE" --timeout 45 >/dev/null 2>&1; }
+if ! probe; then
+  echo "==> $DEVICE doesn't answer; restarting CoreDeviceService and retrying" >&2
+  pkill -u "$(id -u)" -x CoreDeviceService || true
+  sleep 3
+  probe || { echo "Device $DEVICE doesn't answer: unlock the iPhone (or plug it in by cable) and re-run" >&2; exit 1; }
+fi
+
 echo "==> Installing $IPA on $DEVICE"
-xcrun devicectl device install app --device "$DEVICE" "$IPA"
-xcrun devicectl device process launch --device "$DEVICE" "$BUNDLE_ID" || true
+xcrun devicectl device install app --device "$DEVICE" --timeout 600 "$IPA"
+xcrun devicectl device process launch --device "$DEVICE" --timeout 60 "$BUNDLE_ID" || true

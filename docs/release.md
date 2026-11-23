@@ -94,6 +94,10 @@ scripts/ios-install-device.sh   downloads the latest .ipa (gh) → xcrun devicec
 
 `ios-install-device.sh` picks the first paired, non-simulated iPhone in `devicectl list devices`, preferring connected ones
 (since Xcode 27.2 that list also includes simulators). Override with `DEVICE=<udid or name>`.
+Every devicectl call is bounded (install: 10 min). The script first checks that the device answers; if it
+doesn't (seen over Wi-Fi: tunnel stuck at "connecting"), it restarts your CoreDeviceService once and
+retries, then fails with "unlock the iPhone (or plug it in by cable)". The launch step needs the phone
+unlocked; if it's locked, the app is still installed.
 
 There's no .p12 or provisioning profile to manage. With `-allowProvisioningUpdates`, Xcode creates or
 downloads the Apple Distribution certificate and an Ad Hoc profile ("iOS Team Ad Hoc Provisioning
