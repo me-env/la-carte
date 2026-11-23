@@ -82,7 +82,8 @@ years.
    still to do, filled once studied. The streak number is `ink`. A run of pink marks would be a pink fill, which
    the accent rule forbids. This replaces accent rule 3 in `docs/design-system.md`.
 9. **The count (#46; default: the small widget keeps it on top).** Since 021 v2, `stats.due` includes every new card,
-   so "300 to review" is possible. The widget shows the counter Study shows (021 decision 6), from `/stats` alone:
+   so "300 to review" is possible. The widget shows reviews plus new cards to the next milestone (021 v2's counter;
+   Study's counter follows 021 v3's ladder instead, aligning the widget is backlog #49), from `/stats` alone:
    `toReview = (due − due_new) + min(due_new, milestone − new_today % milestone)`.
    `due_new` (new field) = the never-reviewed cards in the servable queue (a subset of `due`). The function is
    `DeckStats.toReview` in `APIClient`. Study's batch is capped at 100, so the two can differ only when more than

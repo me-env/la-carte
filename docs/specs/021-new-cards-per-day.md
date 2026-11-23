@@ -1,248 +1,282 @@
-# 021 — New cards: daily milestones, never held
+# 021 — New cards never held; the daily milestone ladder
 
 Status: ready
-Owners: api-engineer (server, first), ios-engineer (Study counter + popover), design-lead (design-system.md lines)
-Depends on: 014a (notes, sibling burying), 015a (reports), 018 (auto-refresh), all merged. Backlog #43.
-Design reference: none new. The counter is Study's existing top-bar counter (specs 001, 009c). The popover uses the
-native title-menu affordance (text + `chevron.down`, as in Photos / Files / Notes) and a system popover (Liquid
-Glass, design-system "Glass" section). Design input: design-lead, 2026-11-22.
+Owners: api-engineer (server, first), ios-engineer (Study counter + ladder popover), design-lead (design-system.md lines)
+Depends on: 014a (notes, sibling burying), 015a (reports), 018 (auto-refresh), 022 (queue order), all merged. 024
+step 1 (merged) already added `new_today`, `milestone` and `due_new` to `/stats`. Backlog #43.
+Design reference: `docs/design/renders/021/milestone-ladder.png` (design-lead's real-view renders, approved by the
+user 2026-11-23). Renders can't draw Liquid Glass: the counter's capsule and the popover's glass come from the system.
 
-**Revision 2026-11-22 (user feedback on the deployed hard cap).** In v1 the server held never-reviewed cards back
-past N a day. The user said: "In the app, you should always see the new cards you can learn, even though it's a
-lot. But at the same time, you should have intermediate milestones about the limit per day, so that you don't get
-discouraged. [...] If you click on it, you see if you are still in the first milestone or if you are three
-milestones down the line [...]. The idea that you add new cards and you can't see them, even on a tryout session to
-learn a lot of new things, is bad." So v1's hold, its `next_due` rule and its one-per-note-per-day rule are gone
-(an api-engineer hotfix removes the hold first). The stored number becomes the **milestone size**.
+**Revision 3, 2026-11-23 (milestone ladder, approved by the user).** v2's single "Milestone K" counter, chevron,
+marks, explanation lines and "Milestone K reached" notice are gone. The day is now a short ladder of steps: **At
+risk** (only on heavy days), **Reviews**, then **15 new**, **30 new**, … The ladder is **display only**: it never
+changes what is served or in which order. v1's hold (removed by the hotfix) stays gone.
 
 ## Goal
-Every new card can be studied right away, however many an agent adds. The app keeps the session from feeling
-endless: the number at the top counts toward the next **milestone** of M new cards (default 15), and tapping it shows
-how many milestones the user reached today and how many new cards wait. Nothing blocks and nothing nags.
+Every new card can be studied right away, however many an agent adds, and every session still feels finite. The
+top bar counts down to the next step of a small ladder ("8 at risk", "22 to review", "6 new"); tapping it shows the
+ladder; finishing a step says so in one quiet line. Nothing blocks, nothing nags, and nothing says reviews are a
+daily must (the streak needs one review a day, spec 024).
 
 ## User stories
-- As the user, an agent adds 60 words, and I can learn all of them tonight if I want to. The counter says
-  "15 to review", then "Milestone 1 reached", then counts toward the next 15.
-- As the user, I tap the counter and see that I'm at milestone 3, 4 of 15, with 21 new cards waiting.
-- As the user, I tell my agent "only 5 new cards a day", and my milestones become 5 cards.
-- As an agent, after `add_notes` I tell the user how many new cards wait, about how many milestones that is.
+- As the user back from a break, the counter says "8 at risk": I clear the cards I'm about to forget first, see
+  "At risk done", and can stop there.
+- As the user on a normal day, the counter says "8 to review"; after it, "Reviews done", then "15 new" counts down.
+- As the user, an agent adds 60 words and I learn all of them tonight if I want: "15 new done", "30 new done", ….
+- As the user, I tap the counter and see the steps I finished (grey, checked) and the one I'm on, with a bar.
+- As the user, I tell my agent "only 5 new cards a day" and the new-card steps become 5, 10, 15, ….
 
 ## Decisions
-1. **No hold.** Every never-reviewed, non-held (spec 015) card is in the servable queue as soon as it's added.
-   Sibling burying stays as in spec 014 (6 h, or until the reviewed sibling is due again), for new cards too.
-   v1's "one new card per note per day" rule is dropped: it only existed to spread the cap.
-2. **Queue order: started cards first, then new cards, oldest first.** The servable queue sorts by
-   `(never reviewed, due if reviewed, _card_order)`:
-   - Cards already reviewed (`learning`, `review`, `relearning`), most overdue first. That's the order today.
-     **Refined by spec 022:** (re)learning cards first by `due`, then `review` cards lowest FSRS retrievability
-     first. New-card placement below is unchanged.
-   - Then never-reviewed cards in `_card_order`: oldest `created_at`, and a batch keeps its insertion order and
-     field order.
+1. **No hold** (unchanged from v2). Every never-reviewed, non-held (spec 015) card is servable as soon as it's
+   added. Sibling burying stays as in spec 014, for new cards too. No one-new-card-per-note rule.
+2. **Queue order is spec 022's, untouched by the ladder**: (re)learning cards by `due`, then review cards lowest
+   retrievability first, then new cards oldest first (`_card_order`). No cap.
+3. **Milestone size M = the stored setting** (unchanged from v2). Column `settings.new_cards_per_day`, no migration.
+   Default 15, valid 1–200; a stored 0 reads as 15. MCP tool renamed `new_card_milestone`, no alias.
+4. **"Today" = the local calendar day in `tz`**, as for `reviewed_today` and `streak`. `start_of_day` = local
+   midnight of today in `tz`.
+5. **The ladder's steps, in order.** Each step has a `done` and a `total`; it is complete when `done == total`.
+   1. **At risk** (shown only when `at_risk_total > 0`). The **snapshot** S of the day = every card that, at
+      `start_of_day`, had already been reviewed at least once (it has a memory state) and whose FSRS retrievability
+      at `start_of_day` was below **0.8**. With the default desired retention 0.9 a card is at 0.9 on its due date,
+      so these are overdue cards. S is fixed for the day: a card that falls below 0.8 at 15:00 isn't added, and a
+      card in S stays in S after it's reviewed.
+      - `at_risk_done` = cards of S reviewed at least once today (any rating; a card failed today is done).
+      - `at_risk_total` = `at_risk_done` + cards of S not reviewed today and not held by an open report (015).
+        A deleted card that wasn't reviewed today drops out.
+      - **Threshold**: when that sum is below **10**, the server returns `at_risk_total = 0` and `at_risk_done = 0`
+        and the step doesn't exist today. Constants `AT_RISK_RECALL = 0.8`, `AT_RISK_MIN = 10` in `deck.py`.
+      - How the server knows a reviewed card's state at `start_of_day`: each `ReviewLog` row now stores the card's
+        memory state just before that review (`stability_before`, `last_review_before`, null when the card was
+        new). For a card reviewed today, its first review today gives its state at `start_of_day` (it was last
+        reviewed before today). For a card not reviewed today, its current fields are its state at `start_of_day`.
+        Retrievability uses `_scheduler.get_card_retrievability` as in spec 022 (no copied formula).
+      - Edge, accepted: a card of S buried by a sibling (spec 014, at most 6 h) keeps the step open until it's served.
+   2. **Reviews** (shown when `reviews_total > 0`): every card that was already started before today.
+      - `reviews_done` = distinct cards reviewed today whose first review ever was before today
+        (= `reviewed_today − new_today`).
+      - `reviews_total` = `reviews_done` + cards in the servable queue now whose `last_review` is before
+        `start_of_day`. So a card failed today, or a new card learned today coming back for its learning step, is
+        served as usual but doesn't reopen the step; a review that falls due at 15:00 adds 1 to the total once due.
+      - Cards of S count here too: "At risk" is the first part of "Reviews".
+   3. **New-card steps** of M: "15 new", "30 new", "45 new", …, from `new_today` (cards first reviewed today),
+      `milestone` (M) and `due_new` (new cards servable now). Step k is complete when `new_today ≥ k·M`.
+6. **The server reports, the app arranges.** `/stats` gains four counts (`at_risk_total`, `at_risk_done`,
+   `reviews_total`, `reviews_done`); the new-card steps reuse `new_today`, `milestone`, `due_new`. The app turns
+   them into rows, the counter and the notices with one pure function (`Ladder`, below). No step decides anything
+   about the queue.
+7. **The app refreshes the numbers after every rating.** Each queue load fetches `/cards/due?limit=100` and `/stats`
+   concurrently and handles them as one response (this replaces today's sequential stats call when caught up).
+   After each successful rating, the app fetches `/stats` once more (when the rating emptied the batch, the queue
+   load that follows is that fetch). Only this post-rating stats response can show a step notice. A failed
+   post-rating stats fetch changes nothing (no offline screen); the next load catches up.
+8. **Step notice.** When the post-rating ladder completes a step that wasn't complete before the rating, the notice
+   slot shows "{step label} done" ("At risk done", "Reviews done", "15 new done") for the usual notice duration,
+   with the existing `.success` haptic. If one rating completes several steps, only the last step's notice shows.
+   Never on launch, reload or foreground. No screen, no stop, no other text.
+9. **The streak is not part of the ladder.** One review a day keeps it (spec 024). No string anywhere (app, MCP
+   docstrings, `INSTRUCTIONS`) says reviews or steps must be done daily.
+10. **REST**: `/stats` gains the four counts. No new endpoint, no in-app setting for M (backlog #44).
 
-   Why: a due review is at risk of being forgotten, and a new card loses nothing by waiting. Anki's default is the
-   same ("new cards after reviews"). It also gives every session the same shape: clear the reviews, then learn as
-   many new cards as you like. Oldest first keeps an agent's batch in the order it was added. The one-card-per-note
-   rule still applies, and a (re)learning card still wins its note.
-3. **Milestone size M = the stored setting.** The column stays `settings.new_cards_per_day`, so there's no
-   migration. Migration 021 and the `settings` table from v1 stay. Default 15, valid range 1–200. 0 no longer means
-   anything: a stored 0 (v1's "paused") reads as the default 15. The MCP tool is renamed to `new_card_milestone`, a
-   clean rename with no alias. Agents list tools on every connection and the only callers are the user's agents, so
-   an alias would just be dead weight.
-4. **"Today" = the local calendar day**, the same `tz` that `/stats` already uses for `reviewed_today` and
-   `streak`. v1 picked a rolling 24 h window because the cap decided what the server serves, and `/cards/due` has no
-   time zone. Now the number only feeds a display, and the app sends its time zone, so the calendar day wins: the
-   count goes back to 0 at local midnight, which is what "today" means to the user. A rolling window would make the
-   count drop in the middle of a session.
+## The ladder (app, pure: `Ladder(stats:)`)
+Inputs from `DeckStats`: `atRiskTotal`, `atRiskDone`, `reviewsTotal`, `reviewsDone`, `newToday`, `milestone` (M),
+`dueNew` (W). Let `k = newToday / M` (integer division) and `T = (k + 1)·M`.
 
-   `new_today` = the number of distinct cards whose **first** `ReviewLog` row falls in today's local day. It's
-   counted from `ReviewLog`, so a card that was introduced and then deleted still counts.
-5. **The milestone maths lives in the app, and it's display only.** The server reports `new_today` and `milestone`.
-   The app derives:
-   - `reached = new_today / M` (integer division);
-   - `into = new_today % M`.
+**Rows, in ladder order** (each row is done or not):
+1. "At risk", when `atRiskTotal > 0`: fraction `atRiskDone/atRiskTotal`; done when equal.
+2. "Reviews", when `reviewsTotal > 0`: fraction `reviewsDone/reviewsTotal`; done when equal.
+3. The last finished new step, always done:
+   - while new cards wait (W > 0) and k ≥ 1: "{k·M} new" (only the highest one: "45 new", not 15, 30, 45);
+   - when none wait (W = 0) and `newToday > 0`: "{newToday} new" (the day's actual total, e.g. "7 new").
+4. The next new step, when W > 0: "{T} new", fraction `newToday/T`, not done.
 
-   This isn't scheduling: it decides nothing about what is served.
-6. **The counter's N.** `study.remaining` keeps its text "N to review". N is now:
-   `started cards in the loaded batch + min(new cards in the batch, M - into)`.
-   So the counter tops out at the reviews plus at most M, and never reads "300 to review". When the last new card
-   of a milestone is rated, the next one starts: the app reloads the queue so (re)learning cards due by then come
-   first, and N counts toward the next milestone.
-7. **The app gets the numbers with every queue load.** Each load fetches `/cards/due?limit=100` and `/stats`
-   concurrently and handles them as one response. That also replaces today's second, sequential `/stats` call when
-   caught up. Between loads the app keeps `new_today` and `new` current itself. When a review of a card that was
-   `state == .new` succeeds, `new_today += 1` and `new -= 1`. The next load replaces both with the server's values.
-8. **Milestone moment (small, optional to keep).** Rating the card that completes a milestone shows the notice
-   "Milestone K reached" in the existing notice slot, for the usual notice duration, and plays the existing
-   `.success` haptic. It shows only after a rating, never on launch or reload, and never when reviews alone empty
-   the counter. There's no screen and no stop: the session goes on, and the notice is the natural place to stop.
-9. **REST**: `/stats` gains two fields. No new endpoint, and no in-app setting (backlog #44).
+The **current row** is the first row that isn't done. The popover shows every row up to and including the current
+one (rows after it, possible only when a review falls due late and reopens "Reviews", are hidden until it's done
+again); with no current row, it shows every row.
+
+**Counter** (the number is the only pink, decision unchanged from spec 009 rule 4):
+- current "At risk": "{atRiskTotal − atRiskDone} at risk";
+- current "Reviews": "{reviewsTotal − reviewsDone} to review";
+- current new step: "{min(T − newToday, W)} new";
+- no current row (every step done, yet the batch still has cards, e.g. today's learning steps), or no stats yet:
+  today's counter, "{cards in the loaded batch} to review".
+
+**Notice after a rating** (decision 8), comparing the ladder before (L0) and after (L1), first match wins:
+1. `L1.newToday / M > L0.newToday / M` → "{(L1.newToday / M)·M} new done";
+2. "Reviews" existed in L0 and was not done, and is done in L1 → "Reviews done";
+3. "At risk" existed in L0 and was not done, and is done in L1 → "At risk done".
+
+Mockup states as `Ladder` fixtures (they are also unit tests, AC 14):
+
+| State | at risk | reviews | new_today / M / due_new | Counter | Popover rows |
+|---|---|---|---|---|---|
+| 1 backlog | 6/14 | 6/52 | 0 / 15 / 40 | "8 at risk" | At risk 6/14 |
+| 2 reviews | 14/14 | 30/52 | 0 / 15 / 40 | "22 to review" | At risk ✓, Reviews 30/52 |
+| 3 first new | 14/14 | 52/52 | 9 / 15 / 40 | "6 new" | At risk ✓, Reviews ✓, 15 new 9/15 |
+| 4 many new | 14/14 | 52/52 | 49 / 15 / 30 | "11 new" | At risk ✓, Reviews ✓, 45 new ✓, 60 new 49/60 |
+| 5 normal day | 0/0 | 12/20 | 0 / 15 / 0 | "8 to review" | Reviews 12/20 |
 
 ## API / MCP changes
-Server state after this spec, starting from the hotfix. Remove v1's `_admit_new`, `NEW_CARD_WINDOW`,
-`NewCardsStatus`, `AgentDeckStats`, `AddNotesReply.new_cards` and `AddCardsReply.new_cards`, and v1's `next_due`
-slot rule. `next_due` goes back to the 014/015 definition.
+Server state today: `/stats` has `new_today`, `milestone`, `due_new` (024 step 1). Still to remove: `NewCardsStatus`,
+`AgentDeckStats`, `agent_stats`, `new_cards_status`, `_introductions` if unused, `NEW_CARD_WINDOW`,
+`AddNotesReply.new_cards` / `AddCardsReply.new_cards`, the MCP tool `new_cards_per_day`, and its `INSTRUCTIONS` line.
 
-**`GET /stats?tz=…`** → `DeckStats` (both REST and MCP `deck_stats`):
+**`ReviewLog`** gains two nullable columns, written by `deck.review_card` from the card before FSRS runs:
+`stability_before: float | None`, `last_review_before: datetime | None` (UTC, `UTCDateTime`). Both null when the
+card was new. Startup migration: `ALTER TABLE reviewlog ADD COLUMN …` for each missing column, like `confidence`
+(spec 013); existing rows stay null (so reviews made before the deploy never count as at risk; accepted). Not
+exposed anywhere.
+
+**`GET /stats?tz=…`** → `DeckStats` (REST and MCP `deck_stats`, same model). Spec 024's fields are unchanged:
 ```json
 {
-  "total": 120, "due": 64, "new": 45, "reviewed_today": 30, "next_due": null, "streak": 4,
-  "new_today": 19,   // distinct cards first reviewed today (local day in tz), from ReviewLog
-  "milestone": 15    // the milestone size M, 1-200
+  "total": 120, "due": 64, "new": 45, "reviewed_today": 30, "next_due": null,
+  "new_today": 19, "milestone": 15, "due_new": 45,
+  "streak": 4, "streak_start": "2026-11-20", "history_start": "2026-10-01", "history": "sssfsp",
+  "at_risk_total": 14,  // decision 5.1; 0 when the step doesn't exist today (fewer than 10)
+  "at_risk_done": 6,
+  "reviews_total": 52,  // decision 5.2
+  "reviews_done": 6
 }
 ```
-`due` now includes every servable new card. `new` is unchanged: every never-reviewed card. A report-held new card
-still counts in `new`, which is good enough for "waiting".
+Invariants: `0 ≤ at_risk_done ≤ at_risk_total`, `at_risk_total = 0 or ≥ 10` when computed, `0 ≤ reviews_done ≤
+reviews_total`, `reviews_done = reviewed_today − new_today`.
 
-**`GET /cards/due`**: same shape, ordered as in decision 2.
-
-**Deck**:
-- `deck.get_milestone(session) -> int`: the setting, or 15 when it's missing or 0.
-- `deck.set_milestone(session, value) -> int`: raises `InvalidSetting` outside 1–200 and returns the value.
+**Deck**: `deck.get_milestone(session) -> int` (the setting, 15 when missing or 0); `deck.set_milestone(session,
+value) -> int` (`InvalidSetting` outside 1–200). `deck.stats` computes the four counts in its existing pass (the
+retrievability calls are one per started card, as in `_queue`).
 
 **MCP** (`mcp_server.py`):
 - **`new_card_milestone(value: int | None = None) -> MilestoneSetting {milestone: int}`** replaces
-  `new_cards_per_day`. With no value it reads the setting; with a value it sets it.
-  - Docstring: "Size of the daily milestones the app shows for new cards (default 15). New cards are never held
-    back: this only paces the display. Change it only when the user asks (e.g. 'only 5 new cards a day')."
-  - Out of range raises a tool error: "new_card_milestone must be between 1 and 200."
-- **`deck_stats(tz)`** returns `DeckStats`, which now has `new_today` and `milestone`. Docstring: "`new_today`: new
-  cards first studied today in `tz`; `new_today // milestone` milestones reached."
+  `new_cards_per_day`: no value reads, a value sets. Docstring: "Size of the new-card steps the app shows (default
+  15). New cards are never held back: this only paces the display. Change it only when the user asks (e.g. 'only 5
+  new cards a day')." Out of range: tool error "new_card_milestone must be between 1 and 200."
+- **`deck_stats(tz)`** returns `DeckStats`. Docstring adds: "`at_risk_*`, `reviews_*`, `new_today`, `milestone`:
+  the app's daily ladder (display only, nothing is held back)."
 - **`add_notes` / `add_cards`** return `AddNotesReply(AddNotesResult)` / `AddCardsReply(AddCardsResult)` with flat
-  `new: int` (never-reviewed cards in the deck after the insert) and `milestone: int`.
-  - They carry no "today" count: these tools take no `tz`, and a UTC day would disagree with the app. The docstrings
-    point to `deck_stats(tz)` for today's progress.
-  - Docstring line: "New cards are due at once, after due reviews. Tell the user how many new cards wait (`new`),
-    about `ceil(new / milestone)` milestones."
-  - REST `POST /notes` / `POST /cards` keep their models.
-- **`INSTRUCTIONS`**: the v1 cap line becomes: "New cards are never held back: all are studyable at once, after due
-  reviews, oldest first. The app paces them in daily milestones of `milestone` cards (default 15). After adding,
-  tell the user how many new cards wait (`new`), about how many milestones. Change the size with
-  `new_card_milestone` only when the user asks."
+  `new: int` (never-reviewed cards after the insert) and `milestone: int`. No "today" count (no `tz` there).
+  Docstring line: "New cards are due at once, after due reviews. Tell the user how many new cards wait (`new`)."
+  REST `POST /notes` / `POST /cards` keep their models.
+- **`INSTRUCTIONS`**: the target line becomes: "New cards are never held back: all are studyable at once, after
+  due reviews, oldest first. The app shows them in steps of `milestone` cards (default 15). After adding, tell the
+  user how many new cards wait (`new`). Change the step size with `new_card_milestone` only when the user asks."
 
 **iOS `APIClient`**:
-- `DeckStats` gains `newToday: Int` and `milestone: Int`. Decoding a body without them gives `0` / `15`, so an older
-  server still decodes and the caught-up path doesn't turn into "offline".
-- The `init` gets defaults (`newToday: Int = 0, milestone: Int = 15`), so the widget and other callers compile
-  unchanged.
-- The in-memory client (mock):
-  - orders `dueCards` like decision 2;
-  - tracks `newToday`: cards reviewed while `state == .new`, plus a seed;
-  - reads `LA_CARTE_MILESTONE` (default 15) and `LA_CARTE_NEW_TODAY` (default 0) from the environment, for QA.
+- `DeckStats` gains `newToday`, `milestone`, `dueNew` (if 024's iOS step hasn't added them yet: same names, whoever
+  lands first adds them), `atRiskTotal`, `atRiskDone`, `reviewsTotal`, `reviewsDone`. Missing keys decode to 0
+  (`milestone` → 15), so an older server still decodes and the caught-up path doesn't turn into "offline". The
+  `init` gets the same defaults, so the widget and other callers compile unchanged.
+- The in-memory client (mock) keeps per-card roles and reports the ladder from them:
+  - `LA_CARTE_STARTED=n` (default 0): the first n fixture cards are started reviews (`state == .review`), served
+    first; `LA_CARTE_AT_RISK=k` (default 0, k ≤ n): the first k of those are in S. The mock reports
+    `at_risk_total = k` with no threshold (pytest covers the threshold).
+  - Rating a card: at risk → `atRiskDone += 1`; started → `reviewsDone += 1`; new → `newToday += 1`, `dueNew −= 1`.
+  - `LA_CARTE_MILESTONE` (default 15), `LA_CARTE_NEW_TODAY` (default 0) seed M and `newToday`.
 
 ## Acceptance criteria
-API criteria are pytest with `now` injected. iOS criteria are TestStore / DecodingTests unless marked UI.
+API: pytest with `now` injected. iOS: TestStore / pure unit tests / DecodingTests unless marked UI.
+"(in place)" = already implemented and tested; keep it passing.
 
 | # | Criterion (observable) | Validated by |
 |---|---|---|
-| 1 | No hold: fresh DB, add 60 one-card notes. `due_cards(limit=200)` returns all 60 and `stats.due = 60`. After reviewing 15 of them, the other 45 are still servable at `t + 1 min` | pytest |
-| 2 | Order: a `review` card due 1 h ago, a `relearning` card due now and 3 new cards (one created 2 days before the review card's due) give `/cards/due` = reviewed cards first (in spec 022's order: the `relearning` card, then the `review` card), then the 3 new cards oldest first, in insertion order within a batch | pytest |
-| 3 | Siblings: a person note with 3 new directions serves one (field order). After it is reviewed, the next one is buried only per spec 014 (until `min(t + 6 h, its due)`), not 24 h | pytest |
-| 4 | `next_due` follows 014/015 only: with only new cards left, `due > 0` and the app is never "caught up" while a new card exists. With nothing servable, `next_due` = the earliest ready time of a started card | pytest |
-| 5 | `new_today` uses the local day: with `tz=Europe/Paris`, a card first reviewed at 23:30 local yesterday and again today doesn't count; a card first reviewed at 00:10 local today does; a card introduced today and then deleted still counts; `tz=UTC` can give a different value for the same data | pytest |
-| 6 | `GET /stats` has exactly `{total, due, new, reviewed_today, next_due, streak, new_today, milestone}`; fresh DB `milestone = 15` | pytest (REST client) |
-| 7 | MCP `new_card_milestone()` reads 15. `new_card_milestone(5)` returns `{milestone: 5}`, after which `deck_stats` and `/stats` show `milestone = 5` and it persists across a new engine on the same file. `(0)`, `(201)` and `(-1)` raise the tool error above and leave it unchanged. A row with a stored 0 reads as 15. `new_cards_per_day` is no longer a tool | pytest (MCP) |
-| 8 | MCP `add_notes` with 60 basic notes on an empty deck replies `new = 60, milestone = 15`; `add_cards` carries `new` and `milestone` too; neither has `new_cards` | pytest (MCP) |
-| 9 | `INSTRUCTIONS` contains "never held back" and "new_card_milestone"; the `add_notes` docstring mentions `milestone` | pytest (substring) |
-| 10 | Report-held new cards (015) stay out of the queue and still count in `new` | pytest |
-| 11 | `DecodingTests`: `/stats` JSON with `new_today: 19, milestone: 15` decodes to `newToday 19, milestone 15`; JSON without them decodes to `0 / 15` | unit |
-| 12 | Each queue load fetches due cards and stats concurrently; when either fails, the screen shows offline (as today). With cards, the phase is `.studying`; with no cards, `.caughtUp(nextDue)` / `.empty` from the same stats. No separate stats request follows | unit |
-| 13 | Counter N (decision 6): a batch of 3 started + 40 new cards with `newToday 4, M 15` shows "14 to review". With `newToday 15` (reached 1, into 0) it shows "18 to review". A batch of only started cards shows their count | unit (state) + UI (`study.remaining` label) |
-| 14 | Rating a card whose state was `.new` (success) increments `newToday` and decrements `new`. Rating a started card changes neither | unit |
-| 15 | Rating the new card that makes `newToday % M == 0` sets the notice to "Milestone K reached" (K = `newToday / M`), triggers the success haptic and reloads the queue. A reload or launch with `newToday` already a multiple of M shows no notice | unit |
-| 16 | The counter is a button with a `chevron.down` when `newToday + new > 0`. Tapping it opens the milestones popover (`study.milestones`). Otherwise it is plain text with no chevron, and tapping does nothing | unit (both) + UI (button case) |
-| 17 | Popover content (static strings, unit-tested), per the Screens section: marks = `reached` checkmarks + 1 open circle while new cards wait; status "Milestone {reached+1}: {into} of {M} new cards", or "{newToday} new cards today" when none wait; waiting line inflected ("1 new card waiting" / "21 new cards waiting" / "No new cards waiting"); note per `reached` 0 / 1 / ≥2. Above 6 reached, the marks become the text "{reached} milestones today" | unit + UI |
-| 18 | The mock (`LA_CARTE_API=mock`, `LA_CARTE_MILESTONE=2`): rating 2 new cards shows "Milestone 1 reached"; then the popover shows 1 checkmark and "Milestone 2: 0 of 2 new cards", "1 new card waiting" | UI |
-| 19 | Pink only on the counter's number: not the chevron, the popover, the progress bar or the notice | UI (screenshot review) |
-| 20 | Docs: `docs/architecture.md` describes the queue order, `new_today` / `milestone` on `/stats`, the `settings` value as milestone size and the `new_card_milestone` tool, and drops v1's cap. `docs/design-system.md` gets design-lead's lines (accent rule 4, popovers under Glass, the counter component) | review |
+| 1 | (in place) No hold: fresh DB, add 60 one-card notes: `due_cards(limit=200)` returns all 60, `stats.due = 60`; after reviewing 15 the other 45 are still servable at `t + 1 min` | pytest |
+| 2 | (in place) Order is spec 022's: (re)learning by due, reviews by retrievability, then new cards oldest first, batch insertion order kept | pytest |
+| 3 | (in place) `new_today` uses the local day in `tz`: first review at 23:30 local yesterday doesn't count, 00:10 local today does, a card introduced today then deleted still counts | pytest |
+| 4 | `review_card` on a new card writes `stability_before = null, last_review_before = null`; on a started card it writes the card's stability and `last_review` from before the review | pytest |
+| 5 | Migration: a DB whose `reviewlog` lacks both columns gains them at startup, old rows null; a second start changes nothing | pytest |
+| 6 | At risk snapshot, `tz=Europe/Paris`: 12 started cards with retrievability at local midnight < 0.8 and 3 at ≥ 0.8 → `at_risk_total 12, at_risk_done 0`. Reviewing 5 of the 12 at 10:00 (one rated Again) → `12 / 5`. Reviewing one of the 3 → unchanged. One of the 3 whose retrievability crosses 0.8 at 15:00 is not added | pytest |
+| 7 | Threshold: 9 such cards → `at_risk_total 0, at_risk_done 0`, before and after reviewing them; 10 → `10 / 0` | pytest |
+| 8 | At risk exclusions: of 12 at-risk cards, one held by an open report and one deleted unreviewed → `at_risk_total 10`; one reviewed today then deleted still counts in done and total | pytest |
+| 9 | Reviews: 3 servable started cards + 2 new; review 1 started (Good) and 1 new → `reviews_total 3, reviews_done 1`. At the new card's learning step (due again, servable) and after the started card is failed and served again, both stay `3 / 1` until another started card is reviewed. A review card falling due at 15:00 makes `reviews_total 4` from 15:00 | pytest |
+| 10 | `reviews_done = reviewed_today − new_today` on any mixed day (property over the fixtures of AC 6–9) | pytest |
+| 11 | `GET /stats` has exactly 024's keys plus `at_risk_total, at_risk_done, reviews_total, reviews_done`; fresh DB: all four 0, `milestone 15` | pytest (REST) |
+| 12 | MCP `new_card_milestone()` reads 15; `(5)` returns `{milestone: 5}`, then `deck_stats` and `/stats` show 5, persisted across a new engine; `(0)`, `(201)`, `(-1)` raise the tool error and change nothing; a stored 0 reads 15; `new_cards_per_day` is no longer a tool. `add_notes` (60 notes, empty deck) replies `new 60, milestone 15`; `add_cards` too; neither has `new_cards`. `INSTRUCTIONS` contains "never held back" and "new_card_milestone", and neither it nor any tool docstring contains "must review" / "every day" about reviews | pytest (MCP) |
+| 13 | `DecodingTests`: `/stats` JSON with the 7 fields decodes them; JSON without them decodes to 0 (milestone 15) | unit |
+| 14 | `Ladder` reproduces the 5 mockup states of the table above exactly (rows, done flags, fractions, counter text) | unit |
+| 15 | `Ladder` edge rows: W = 0 and `newToday 7` → a done row "7 new" and no current row; `newToday 15, M 15, W 3` → "15 new" done + "30 new 15/30", counter "3 new"; Reviews reopened (at risk 14/14, reviews 52/53, `newToday 20, M 15, W 10`) → rows At risk ✓, Reviews 52/53 only, counter "1 to review" | unit |
+| 16 | Notices (decision 8 / Ladder rules): at risk 13/14 → 14/14 gives "At risk done"; reviews 51/52 → 52/52 gives "Reviews done"; the last at-risk card that is also the last review gives "Reviews done" only; `newToday 14 → 15, M 15` gives "15 new done"; same ladder before and after gives none | unit |
+| 17 | A queue load fetches due cards and stats concurrently; either failing → offline (as today); cards → `.studying`; no cards → `.caughtUp(nextDue)` / `.empty` from the same stats; no second stats request follows | unit |
+| 18 | After a successful rating, one stats fetch updates the ladder and, per AC 16, sets the notice (`expireNotice()`); a rating that empties the batch triggers one queue load instead, which can set the notice. A failed post-rating stats fetch keeps the old ladder and the phase. A load, foreground or auto-refresh never sets a step notice | unit |
+| 19 | Tapping `study.remaining` opens the popover (`isMilestonesShown`) when a ladder is loaded; with no ladder yet, it does nothing | unit |
+| 20 | Mock, `LA_CARTE_STARTED=2 LA_CARTE_AT_RISK=1 LA_CARTE_MILESTONE=1`: counter "1 at risk"; popover shows `study.milestone.atRisk` "At risk 0/1". Rate → notice "At risk done", then counter "1 to review", popover At risk ✓ + Reviews 1/2. Rate → "Reviews done", counter "1 new", popover At risk ✓, Reviews ✓, "1 new 0/1". Rate → "1 new done" over the caught-up screen | UI |
+| 21 | Mock, `LA_CARTE_STARTED=1`: counter "1 to review", popover one row "Reviews 0/1" and no at-risk row | UI |
+| 22 | Mock, `LA_CARTE_MILESTONE=2 LA_CARTE_NEW_TODAY=4`: counter "2 new"; popover "4 new" ✓ then "6 new 4/6" with its progress bar | UI |
+| 23 | The counter is a button: `study.remaining` has the button trait and the accessibility label "Milestones" (value = the counter text); the popover has no title, no button and no text besides its rows | UI |
+| 24 | Pink only on the counter's number: not its unit, the popover, the bar, the checkmarks or the notice (screenshots, light / dark / forest) | UI (screenshot review) |
+| 25 | Docs: `docs/architecture.md` describes `/stats`' four ladder counts, the `ReviewLog` columns, the `settings` value as step size and `new_card_milestone`, and drops the "daily target" text. `docs/design-system.md` gets design-lead's lines: rule 4 names the counter number in any unit; the Glass section lists the counter capsule next to `CircleIconButton` and the popover under system glass | review |
 
 ## Screens & states
-**Study top bar, counter** (`study.remaining`):
-- Text "N to review", `.meta`, secondary ink, the number in accent (rule 4), `.contentTransition(.numericText())`
-  (opacity only under Reduce Motion).
-- When it opens the popover (#16), it's a plain `Button` whose label is the text plus `chevron.down`. The chevron
-  uses `.font(.meta.weight(.semibold))`, `.imageScale(.small)` and secondary ink.
-- Hit area at least 44 pt, `.contentShape(.rect)`, no glass, no capsule: the bar keeps exactly two glass circles.
-- VoiceOver: label "N to review", hint "Shows today's milestones".
-- The `.accessibility2` cap covers the chevron too.
-- The notice slot rules are unchanged: a notice or an edit hides the counter.
+**Study top bar, counter** (`study.remaining`), between the Deck and Add circles:
+- A `Button` that opens the popover, styled `.buttonStyle(.glass)`: the system's glass capsule, the peer of the
+  two `CircleIconButton`s (Study's top bar is custom, not a system toolbar; if the engineer finds a real `.toolbar`
+  item simpler, that's fine too, same look). Height 44 pt like the circles, no extra background or fill.
+- Label text `.meta`, secondary ink, the number in accent (rule 4), `.contentTransition(.numericText())` (opacity
+  only under Reduce Motion), `.monospacedDigit()`. No chevron. Capped at `.accessibility2` like today.
+- VoiceOver: label "Milestones", value the counter text ("8 at risk"), button trait.
+- Shown in the same cases as today (studying, cards loaded, no notice, not editing). A notice or an edit hides it.
 
-**Milestones popover** (`study.milestones`):
-- `.popover(isPresented:arrowEdge: .top)` with `.presentationCompactAdaptation(.popover)`. The system draws the glass:
-  no `.presentationBackground`, no fills.
-- Layout: a VStack, leading-aligned, spacing `s`, padding `m`, `idealWidth` 280. At accessibility sizes it scrolls.
-- No title, no buttons. A tap outside dismisses it.
+**Milestones popover** (`study.milestones`): `.popover(isPresented: $store.isMilestonesShown, arrowEdge: .top)`
+with `.presentationCompactAdaptation(.popover)`. System glass only: no `.presentationBackground`, no fills.
+- VStack, leading, spacing `m`, padding `m`, `idealWidth` 220; scrolls at accessibility sizes. No title, no
+  buttons, no sentences. A tap outside dismisses it. It updates live if the ladder changes while open.
+- Done row: label (`.body`, secondary ink), `Spacer`, `checkmark` (`.fontWeight(.medium)`, secondary ink).
+  VoiceOver: "At risk, done".
+- Current row: label (`.body`, ink), `Spacer`, "done/total" (`.body`, secondary ink, `.monospacedDigit()`); under
+  it, spacing `s`, `ProgressView(value: done, total: total).tint(Theme.ink)`. VoiceOver: "Reviews, 30 of 52".
 
-The popover's rows, top to bottom:
-1. `study.milestoneMarks` (`.body`): `checkmark.circle.fill` in ink for each milestone reached, then one `circle` in
-   secondary ink for the milestone in progress (only while new cards wait). Above 6 reached, it's the text
-   "{reached} milestones today" instead.
-2. `study.milestoneStatus` (`.body`, ink):
-   - new cards wait: "Milestone {reached+1}: {into} of {M} new cards", with
-     `ProgressView(value: into, total: M).tint(Theme.ink)` under it;
-   - none wait: "{newToday} new cards today", with no bar.
-3. `study.milestoneWaiting` (`.meta`, secondary ink): "^[\(new) new card](inflect: true) waiting", or
-   "No new cards waiting".
-4. `study.milestoneNote` (`.meta`, secondary ink):
-   - 0 reached: "New cards come in steps of {M}. Stop at any milestone."
-   - 1 reached: "First milestone done. Going further is up to you."
-   - ≥2 reached: "Each new card today comes back as reviews in the days ahead."
+**Step notice** (`study.milestoneNotice`): "At risk done" / "Reviews done" / "{n} new done", in the notice slot,
+styled like "Reported" (secondary ink, no accent), `.success` haptic.
 
-**Milestone notice** (`study.milestoneNotice`): "Milestone K reached" in the notice slot, secondary ink, no accent.
-
-Screenshots (light + dark, plus forest for the popover), all with the mock and `LA_CARTE_MILESTONE=2`:
-- `study-counter-milestone`: the counter with its chevron (new cards waiting).
-- `study-milestones-first`: popover, 0 reached.
-- `study-milestones-second`: popover, 1 reached (seed `LA_CARTE_NEW_TODAY=2`).
-- `study-milestones-many`: popover, 2 or more reached, still in progress (seed `LA_CARTE_NEW_TODAY=4`).
-- `study-milestones-done`: popover, no new cards waiting (after rating all three fixtures).
-- `study-milestone-notice`: the notice right after a milestone.
-The plain counter (reviews only, no chevron) has no mock fixture: every mock card starts new. A unit test covers it
-(#16), and it gets no screenshot.
+Screenshots (qa-validator; light + dark, plus forest for the popovers), mock env as in AC 20–22:
+- `study-counter-atrisk`, `study-milestones-atrisk` (AC 20 start)
+- `study-milestone-notice` ("At risk done", AC 20)
+- `study-milestones-reviews` (AC 20 after one rating)
+- `study-milestones-new` (AC 20 after two ratings)
+- `study-milestones-normal` (AC 21)
+- `study-milestones-many` (AC 22)
 
 ## TCA shape (iOS)
-Module: `StudyFeature` (no new module, no child reducer: the popover is a few lines of view over state).
+Module: `StudyFeature`. No child reducer: the popover is a few lines of view over state.
 
-State:
-- `var today: Today?` with `struct Today: Equatable { var newToday: Int; var milestone: Int; var waiting: Int }`,
-  set from `DeckStats` on each load.
-- `var isMilestonesShown = false`: a binding, like `isReportMenuShown`.
-- `Notice` gains `.milestoneReached(Int)`.
-- Computed:
-  - `remaining` (decision 6);
-  - `reached`, `into`;
-  - `canShowMilestones`: `today.map { $0.newToday + $0.waiting > 0 } ?? false`.
-
-Actions:
-- `remainingTapped`: guarded by `canShowMilestones`, sets `isMilestonesShown`.
-- The load response becomes one action carrying cards + stats, e.g. `queueResponse(Result<Queue, any Error>)`,
-  replacing the `cardsResponse` / `statsResponse` pair. Naming is up to the engineer.
-- `reviewResponse(.success)`: if the removed card was `.new`, update `today`. On a multiple of M, set the notice
-  (`expireNotice()`) and reload the queue (`fetchDueCards`), keeping the visible card rule.
-
-Dependencies: unchanged (`apiClient.dueCards`, `apiClient.stats`, `clock`).
-
-Delegate actions: none new. The widget and Settings keep reading `stats()` and ignore the new fields.
+- New file `Ladder.swift`: `struct Ladder: Equatable` built from `DeckStats`, with `rows: [Row]`
+  (`Row { label: String, done: Int, total: Int, isDone: Bool }`, a done-only new row has no fraction),
+  `current: Row?`, `counter: (count: Int, unit: String)?` (nil → the fallback batch counter),
+  `func notice(after previous: Ladder) -> String?`. Pure, unit-tested (AC 14–16).
+- State: `var ladder: Ladder?`; `var isMilestonesShown = false` (binding, like `isReportMenuShown`);
+  `Notice` gains `.stepDone(String)` (text "\(label) done"; the haptic trigger includes it).
+- Actions:
+  - `queueResponse(Result<Queue, any Error>, afterRating: Bool)` replaces `cardsResponse` / `statsResponse`
+    (`Queue` = cards + stats; naming up to the engineer). Sets `ladder`; when `afterRating`, sets the notice per
+    `Ladder.notice(after:)`.
+  - `ladderResponse(Result<DeckStats, any Error>)`: the post-rating stats; success updates `ladder` and may set the
+    notice; failure is ignored.
+  - `remainingTapped`: guarded by `ladder != nil`, sets `isMilestonesShown`.
+  - `reviewResponse(.success)`: as today, plus `cards.isEmpty ? fetchQueue(afterRating: true) : fetchLadder()`.
+    `fetchLadder` is cancellable (its own id, `cancelInFlight`) so only the latest answer lands.
+- Dependencies unchanged (`apiClient.dueCards`, `apiClient.stats`, `clock`). No delegate actions. Widget and Settings
+  ignore the new fields.
 
 ## Accessibility identifiers
-- `study.remaining`: the counter, now a button when it opens the popover (unchanged id).
+- `study.remaining`: the counter button (unchanged id).
 - `study.milestones`: popover root.
-- `study.milestoneMarks`, `study.milestoneStatus`, `study.milestoneWaiting`, `study.milestoneNote`: its rows.
-- `study.milestoneNotice`: the "Milestone K reached" notice.
+- `study.milestone.atRisk`, `study.milestone.reviews`, `study.milestone.newDone`, `study.milestone.new`: its rows
+  (`newDone` = the finished new row, `new` = the current new row).
+- `study.milestoneNotice`: the step notice.
 
 ## Implementation order
-1. **api-engineer**: AC 1–10 plus the architecture.md part of 20, on top of the no-hold hotfix. It deploys on its
-   own: the extra `/stats` fields are additive, and today's app ignores them.
-2. **ios-engineer**: AC 11–17 (`APIClient`, `DecodingTests`, in-memory mock + env vars, `StudyFeature`,
-   `StudyView`). **design-lead** writes the design-system.md lines (AC 20) in parallel; ios-engineer doesn't wait
-   for them.
-3. **code-reviewer**, then **qa-validator**: AC 13, 16–19 as UI tests (`StudyMilestonesUITests`), the screenshots
-   above, plus one e2e check that `/stats` carries `new_today` / `milestone`.
+1. **api-engineer**: AC 4–12 (1–3 stay green) plus the architecture.md part of AC 25. Additive on `/stats`; deploys
+   on its own (today's app ignores the new keys).
+2. **ios-engineer**: AC 13–19 (`APIClient` + `DecodingTests`, in-memory mock + env vars, `Ladder`, `StudyFeature`,
+   `StudyView`). Can start in parallel with step 1 against the mock; merge after it. **design-lead** writes the
+   design-system.md lines (AC 25) in parallel.
+3. **code-reviewer**, then **qa-validator**: AC 20–24 as UI tests (`StudyMilestonesUITests`), the screenshots above,
+   plus one e2e check that `/stats` carries the four counts.
 
 ## Out of scope
-- Any hold, cap or "pause new cards". A user who wants fewer new cards simply stops at a milestone.
-- An in-app setting or REST endpoint for M (backlog #44).
-- The widget: it still shows `stats.due`, which now includes every new card ("64 to review" where the app says
-  "14"). Aligning it is backlog #46.
-- Streak-like rewards, confetti, sounds, a milestone history across days.
+- Any hold, cap, reorder or "pause new cards"; the ladder never changes the queue.
+- Explanation text, a ladder screen, confetti, sounds, a history of past days' ladders.
+- An in-app setting or REST endpoint for M (backlog #44); a setting for the 0.8 / 10 thresholds.
+- The widget: it keeps 024's `toReview` count (decision 9 there). Showing the ladder's counter on the widget is
+  backlog #49.
+- Changing the counter's accent or `secondaryInk` contrast (separate decision for the user).
 - A `tz` on `add_notes` / `add_cards`.
-- Reordering new cards (priority, random), or interleaving new cards with reviews.
