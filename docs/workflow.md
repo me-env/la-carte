@@ -32,7 +32,7 @@ agent with its own context, so the hand-off artifact (spec, diff, report) must b
 ## Rules for the manager
 
 - One feature in flight per engineer. Keep specs small (one screen or one flow).
-- Visual changes: `design-lead` annotates the spec with design notes before engineers start. Every design-lead visual goes to `design-critic` (compares with the reference app) and iterates until SHOW TO USER, before the user sees it.
+- Visual changes: `design-lead` annotates the spec with design notes before engineers start. Every design-lead visual goes to `design-critic` (compares with the reference app) and iterates until SHOW TO USER, before the user sees it. Changes to an existing design are judged blind A/B against the current one (`.claude/agents/design-lead.md`); the report must include both scores.
 - Run `secrets-guard` before every push; only `[block]` items stop it.
 - After any change to `.claude/agents/*.md` or a `CLAUDE.md`, run `instructions-keeper`.
 - Spawn `qa-validator` fresh for each validation (no memory of implementation discussions).

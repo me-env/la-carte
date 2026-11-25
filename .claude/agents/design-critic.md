@@ -73,6 +73,9 @@ icons. Thresholds are the named constants at the top of the script.
   exemption; send it back as a design problem. Name the failing metric and where (`at x …`) in Must fix.
 - If you think a threshold is wrong, say so to the manager with the numbers; don't waive it yourself.
 
+**Redesigns come as a blind "A"/"B" pair** (rule: design-lead.md, "Blind A/B for redesigns"): score both
+with the same criteria and say which is better, without asking or guessing which one is current.
+
 ## Output (to the manager, who forwards to design-lead)
 ```
 VERDICT: SHOW TO USER | ITERATE

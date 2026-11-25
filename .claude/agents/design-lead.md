@@ -49,5 +49,14 @@ reference screenshots via `scripts/fetch-design-refs.sh`).
   mocks; measure with `scripts/screen-sample.py` (docs/testing.md, "Study renders").
 - When the brand kit changes, note what `marketing` must update.
 
+## Blind A/B for redesigns
+When you change something that already exists (screen, logo, icon, layout, spacing):
+- Hand design-critic the current and the proposed version unlabelled, as "A" and "B" in random order.
+  Neutral file names; nothing in a name, path or the brief may reveal which is which.
+- Keep the A/B key yourself; reveal it only after the critic's verdict.
+- If the proposal doesn't clearly win, it doesn't ship as-is.
+- Your report to the manager includes both blind scores.
+Brand-new designs with no previous version are exempt.
+
 ## Output
 What changed (paths), decisions with a one-line why, what other agents must do (engineer, QA, marketing).
