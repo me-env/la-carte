@@ -170,7 +170,7 @@ Ready-made prompts: `quiz_me`, `make_cards`.
 | # | Criterion (observable) | Validated by |
 |---|---|---|
 | 1 | `POST /notes` with the person example returns 201 and a `Note` with 2 cards (`["photo"]→["name","description"]`, `["description"]→["name","photo"]`), both `new`, due now | pytest (REST) |
-| 2 | `POST /notes {"type":"basic","fields":{"front":"chat","back":"cat"}}` (no `directions`) creates exactly one card `front → back`; no reverse card exists | pytest |
+| 2 | `POST /notes {"type":"basic","fields":{"front":"chat","back":"cat"}}` (no `directions`) creates exactly one card `front → back`; no reverse card exists. *Amended by [026](026-both-directions-default.md): basic without `directions` now creates both `front → back` and `back → front`.* | pytest |
 | 3 | `person` without `directions` → 422 naming the missing directions; nothing is written | pytest |
 | 3a | *Amended 2026-11-21 (user).* Person: `name → photo` while a description exists (answer not all other non-empty fields), a prompt of two fields, or a direction whose prompt field is empty → 422 listing the three allowed directions; `role`/`context` in `fields` → 422 saying to use `description`; a PATCH adding a description re-derives card answers, keeping card ids | pytest (REST + MCP) |
 | 4 | Validation 1–7 each produce a 422 with a message naming the field/direction (one test per rule), and the same via MCP as a `ToolError` | pytest (REST + MCP) |
