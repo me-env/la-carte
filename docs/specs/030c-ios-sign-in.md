@@ -100,6 +100,81 @@ No Google SDK, no password, no token to type.
 - **Settings**: Account section on top (email, Sign out, Delete account, Privacy policy); delete confirmation
   alert; delete error alert.
 
+## Design note (design-lead, 2026-11-26)
+Renders: `docs/design/renders/030c/` (`sheet-*.png` overviews; prototypes from the real DesignSystem components, light/dark/forest; glass is
+hidden by the renderer; the alert and the web sheet are stand-ins for system UI). Apple components first; the only custom-drawn pieces are the logo and Google's button.
+
+**`ContinueWithGoogleButton(isLoading:action:)`** (DesignSystem, done; gallery `gallery.google`). Checked against
+developers.google.com/identity/branding-guidelines on 2026-11-26: approved text "Continue with Google", Google Sans
+Medium (bundled 8 KB subset, OFL), the standard-colour "G" from Google's iOS asset bundle (unaltered, 20 pt), Google's
+Light theme in light (white, 1 pt `#747775`, `#1F1F1F` text) and Dark theme in dark and forest (`#131314`,
+`#8E918F`, `#E3E3E3`), pill, iOS padding 16/12/16, full width, 50 pt tall. Signing in: label stays, a `ProgressView`
+at the trailing edge (no layout shift). Disabled: 38 % opacity. Use it as is: no tint, no glass, no restyling, no
+other Google mark anywhere. If Sign in with Apple joins later (030 App Store note), it goes **above** with the same
+width and height (Apple's `SignInWithAppleButton`, `.black`/`.white` by scheme), so neither outweighs the other.
+
+**Sign-in screen** (`SignInView`, `.fullScreenCover`, `.interactiveDismissDisabled()`), `Theme.background` edge to
+edge, side margins 24 (`Theme.Spacing.l`), no navigation bar, no toolbar:
+```
+            (flexible space)           the logo block is pinned (centred, 30 pt above the middle) in
+                                       every state; the server field takes room from the gap below it
+          [LaCarteLogo 80 pt]          LaCarteLaunchMark on first appear (Reduce Motion: static)
+                 16
+            la-carte                   .screenTitle, ink          ─┐ one element for VoiceOver:
+                 8                                                 │ "la-carte. Sign in to get your deck."
+     Sign in to get your deck.         .body, secondaryInk        ─┘ (.isHeader on the title)
+            (flexible space)
+   [ Server URL field ]                only when editing (below)
+                 16
+   [ G  Continue with Google ]         signIn.google
+                 16
+   This deck is invite-only for now.   signIn.error: .meta, ink (it must pass AA), centred, 2 lines
+                                       max; reserves one line when empty so nothing moves
+   Server: deck.example.com   Change   signIn.server: .meta; host secondaryInk, "Change" ink, 8 pt apart
+               Privacy                 signIn.privacy: .meta ink, its own line
+                                       each button ≥ 44 pt tall (frame + contentShape)
+```
+- Messages go in the one `signIn.error` slot, ink, never red or pink: not invited, unverified, failed, "You were
+  signed out. Sign in again." (arriving after an expired session). A new tap clears it. `.sensoryFeedback(.error)`
+  when a failure message appears; none on cancel (cancel = back to idle, no message).
+- **Server**: idle shows `signIn.server` ("Server: <host>" + "Change"). "Change" (or no resolvable URL) replaces
+  that caption with a "Server" label (`.meta` secondaryInk, 16 pt inset, 6 pt above) and a capsule `TextField` above
+  the button: `Theme.surface` fill, 50 pt tall, 16 pt inner padding,
+  prompt "Server URL", `.keyboardType(.URL)`, `.textContentType(.URL)`, no autocapitalisation/autocorrect,
+  `.submitLabel(.done)`, `.tint(Theme.accent)` on the field only; id `signIn.serverURL`. Invalid or empty URL:
+  `signIn.google` disabled. "Privacy" stays in the footer always (`signIn.privacy`, opens `<base>/privacy` with
+  `openURL`, i.e. Safari).
+- **Hand-off**: tapping the button starts `ASWebAuthenticationSession`; iOS presents its own sheet (host in the
+  sheet's bar, Cancel top-left). We draw nothing over it and add no "Opening Google…" step; the button's spinner
+  is the only progress, and stays until the session returns.
+- **Signed in**: the cover dismisses with the system slide-down onto Study (already loading the deck);
+  `.sensoryFeedback(.success)`. No welcome screen, no toast.
+- Keyboard: the column sits in a `ScrollView` with `.scrollBounceBehavior(.basedOnSize)` so the field and button
+  stay above the keyboard; the logo block may scroll off.
+
+**Settings** (keeps `Form`, `Theme.surface` rows, `.tint(Theme.ink)`), sections top to bottom:
+1. **Account**: the email row (`settings.account.email`: email `.body` ink, "Signed in with Google" `.meta`
+   secondaryInk below; "Signed in" while `GET /me` loads or offline), "Access tokens" `NavigationLink`
+   (`settings.tokens`, 030d; omit until 030d lands), "Sign Out" (`settings.signOut`, ink, no confirmation).
+2. **Server**: the URL as read-only `secondaryInk` text (`settings.url`, `.textSelection(.enabled)`), "Test
+   connection".
+3. Appearance, Ask AI: unchanged.
+4. Last section: "Privacy Policy" (`settings.privacy`, `Link`, trailing `arrow.up.right` in secondaryInk) and
+   "Delete Account" (`settings.deleteAccount`, `Button(role: .destructive)`, system red), footer "Deletes your
+   account, deck and reviews from the server." Delete sits apart from Sign Out so neither is tapped for the other;
+   still one scroll away from the top (5.1.1(v): easy to find).
+- Delete confirmation: system `.alert` as in decision 9, buttons "Cancel" (`.cancel`) and "Delete Account"
+  (`.destructive`, `settings.deleteAccount.confirm`). While `DELETE /me` runs, the Delete row shows a trailing
+  `ProgressView` and is disabled. Failure: `.alert("Couldn't delete your account. Try again.")` with "OK".
+- After sign out / delete: Settings dismisses and the sign-in screen covers the app, idle, no message.
+
+**Widget, signed out** (no `widget-token` or `api-token`): a new `.signedOut` content, small and medium alike,
+leading-aligned like 007: `LaCarteLogo` 28 pt top-left, bottom-left "Sign in to see your streak" (`.body`
+medium, ink, 2 lines max) over "Open la-carte" (`.meta`, secondaryInk). No grid, no today mark (so the logo's
+line is the only pink). Tap opens the app (default `widgetURL`). Tinted/clear Home Screen: inks per 007 and
+no logo (its colours don't survive tinting). VoiceOver: "Sign in to la-carte to see your
+streak". "Can't reach your deck" stays for a network failure with a token.
+
 ## TCA shape (iOS)
 - New module **`SignInFeature`** (child of `AppFeature`; deps `APIClient`, `DesignSystem`):
   - State: `@Shared(.appStorage("apiURL")) apiURL`, `serverURLText: String`, `isEditingServer: Bool`,
@@ -136,6 +211,7 @@ None beyond 030a/030b. `APIClient` adds `Me`, `TokenResponse`, `PersonalToken` m
 - `settings.signOut`, `settings.deleteAccount`: buttons
 - `settings.deleteAccount.confirm`: the alert's destructive button
 - `settings.privacy`: privacy policy link
+- `settings.tokens`: "Access tokens" row (030d)
 - Removed: `settings.token`, `settings.token.reveal`; `settings.url` becomes read-only text (same id)
 
 ## Out of scope
