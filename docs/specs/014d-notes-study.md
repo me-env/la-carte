@@ -152,6 +152,16 @@ description (± 1 pt). Measured after (real render, same code change): every lin
 200.7. Renders: `docs/design/renders/014d/person-caption-before-after-{light,dark}.png` (top row today, bottom
 row the fix; photo + long, no photo + long, photo + short).
 
+**Wider multi-line text, tested and not adopted (2026-11-25).** User: "when text is more line, it should use more
+width". The cap is `captionWidth` (photo 240 + 2 × `l` = 288 pt) on name and description; the column is 370 pt
+(screen 402 − 2 × `m`). Tried as real renders: full column (370 pt: ink x 17-385, last line 81 pt, a one-phrase
+widow) and column inset by `m` (338 pt: ink x 33-368, lines 325 / 335 / 147 pt). Blind A/B by design-critic
+(random labels, same criteria, light + dark, with and without photo): 288 pt 8/10, 338 pt 6/10, 288 picked: at
+338 the text block outgrows the photo by 1.4× and leaves a short last line; at 288 the lines balance (about
+230 / 194 / 230 at sheet scale) and read as a caption under the photo. **Keep 288 pt** unless the user overrules
+after seeing `docs/design/renders/014d/person-caption-width-288-vs-338-light.png`; if so, the change is
+`.padding(.horizontal, isQuestion ? 0 : Theme.Spacing.m)` on `personText` instead of the `captionWidth` frame.
+
 #### Text prompt: the question moves on reveal (per user 2026-11-22)
 **Exception to spec 017 rule 8 / #13 ("the question never moves on reveal"), for `type == .person` cards whose
 prompt is text (`name → photo + description`, `description → photo + name`) only.** User: centring the text and
