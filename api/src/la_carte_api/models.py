@@ -292,16 +292,24 @@ class NoteCard(BaseModel):
     last_review: datetime | None
 
 
+class NoteNext(BaseModel):
+    """The card of a note Study serves first, and when (spec 028)."""
+
+    card_id: UUID
+    ready_at: datetime
+
+
 class NoteRead(BaseModel):
     id: UUID
     type: NoteType
     fields: dict[str, str]
     cards: list[NoteCard]
+    next: NoteNext | None
     created_at: datetime
     updated_at: datetime
 
     @classmethod
-    def of(cls, note: Note, cards: list[Card]) -> "NoteRead":
+    def of(cls, note: Note, cards: list[Card], next: NoteNext | None) -> "NoteRead":
         return cls(
             id=note.id,
             type=note.type,
@@ -317,6 +325,7 @@ class NoteRead(BaseModel):
                 )
                 for c in cards
             ],
+            next=next,
             created_at=note.created_at,
             updated_at=note.updated_at,
         )

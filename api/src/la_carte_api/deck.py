@@ -36,6 +36,7 @@ from la_carte_api.models import (
     FeedbackStatus,
     Note,
     NoteCreate,
+    NoteNext,
     NoteRead,
     NoteType,
     NoteUpdate,
@@ -304,12 +305,29 @@ def _cards_of(session: Session, note: Note) -> list[Card]:
     return sorted(cards, key=lambda card: _card_order(card, note))
 
 
-def _note_reads(session: Session, notes: list[Note]) -> list[NoteRead]:
+def _next_cards(session: Session, now: datetime) -> dict[UUID, NoteNext]:
+    """Per note, the card Study serves first and when (spec 028), read from `_candidates`: the
+    first card in queue order that is ready now, else the one ready earliest (ties: queue order).
+    A note whose cards are all held by a report has no entry."""
+    nexts: dict[UUID, NoteNext] = {}
+    for card, _, ready in _candidates(session, now):
+        current = nexts.get(card.note_id)
+        if current is None or (current.ready_at > now and ready < current.ready_at):
+            nexts[card.note_id] = NoteNext(card_id=card.id, ready_at=ready)
+    return nexts
+
+
+def _note_reads(session: Session, notes: list[Note], now: datetime | None = None) -> list[NoteRead]:
     cards: dict[UUID, list[Card]] = {note.id: [] for note in notes}
     for card in session.exec(select(Card).where(col(Card.note_id).in_(list(cards)))):
         cards[card.note_id].append(card)
+    nexts = _next_cards(session, now or utcnow())
     return [
-        NoteRead.of(note, sorted(cards[note.id], key=lambda c, n=note: _card_order(c, n)))
+        NoteRead.of(
+            note,
+            sorted(cards[note.id], key=lambda c, n=note: _card_order(c, n)),
+            nexts.get(note.id),
+        )
         for note in notes
     ]
 
@@ -322,7 +340,11 @@ def _matches(note: Note, needle: str) -> bool:
 
 
 def list_notes(
-    session: Session, query: str | None = None, type: NoteType | None = None, limit: int = 100
+    session: Session,
+    query: str | None = None,
+    type: NoteType | None = None,
+    limit: int = 100,
+    now: datetime | None = None,
 ) -> list[NoteRead]:
     """Newest first, optionally filtered by `type` and by `query` (see `_matches`)."""
     statement = select(Note).order_by(col(Note.created_at).desc())
@@ -330,11 +352,11 @@ def list_notes(
         statement = statement.where(Note.type == type)
     needle = (query or "").strip().casefold()
     notes = (note for note in session.exec(statement) if _matches(note, needle))
-    return _note_reads(session, list(islice(notes, limit)))
+    return _note_reads(session, list(islice(notes, limit)), now)
 
 
-def get_note(session: Session, note_id: UUID) -> NoteRead:
-    return _note_reads(session, [_note(session, note_id)])[0]
+def get_note(session: Session, note_id: UUID, now: datetime | None = None) -> NoteRead:
+    return _note_reads(session, [_note(session, note_id)], now)[0]
 
 
 def list_cards(session: Session, query: str | None = None, limit: int = 100) -> list[CardRead]:
@@ -414,7 +436,9 @@ def add_notes(
     duplicate key (basic: front, person: name; trimmed, casefolded) match an existing note or an
     earlier one of the same call is not added; the matching note is reported in `skipped`."""
     added, skipped = _add_notes(session, notes, now, skip_duplicates)
-    return AddNotesResult(added=_note_reads(session, added), skipped=_note_reads(session, skipped))
+    return AddNotesResult(
+        added=_note_reads(session, added, now), skipped=_note_reads(session, skipped, now)
+    )
 
 
 def update_note(
@@ -440,7 +464,7 @@ def update_note(
             session.delete(card)
     session.add_all(_new_card(note, way, now) for way in ways if way not in cards)
     session.commit()
-    return get_note(session, note_id)
+    return get_note(session, note_id, now)
 
 
 def add_direction(
@@ -539,16 +563,16 @@ def delete_card(session: Session, card_id: UUID) -> None:
 # --- Studying ----------------------------------------------------------------------------------
 
 
-def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], datetime | None]:
-    """The servable queue and the next time a card not servable now becomes servable.
+def _candidates(session: Session, now: datetime) -> list[tuple[Card, Note, datetime]]:
+    """Every card not held, with the time it becomes servable, in queue order.
 
     A sibling's latest review at `t` buries a card until `min(t + SIBLING_BURY, sibling.due)`:
     never longer than until that sibling is due again (its own reviews don't bury it). The
     sibling's current `due` is the one set by that latest review. A (re)learning card is never
-    buried: a card the user failed comes back at its own due. Servable = due, not buried, at most
-    one card per note: the first in `order` (a (re)learning card, then the review most at risk of
-    being forgotten, then the oldest new card). The queue keeps that same order.
-    Held cards (an active report, spec 015) are left out entirely: they don't bury siblings."""
+    buried: a card the user failed comes back at its own due. Order: a (re)learning card, then
+    the review most at risk of being forgotten, then the oldest new card.
+    Held cards (an active report, spec 015) are left out entirely: they don't bury siblings.
+    `_queue` (Study) and `_next_cards` (`Note.next`, spec 028) both read this list."""
     held = set(
         session.exec(select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))).all()
     )
@@ -590,11 +614,18 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
             group, risk = 2, 0.0
         return group, risk, card.due, *_card_order(card, note), str(card.id)
 
+    return [(card, note, ready_at(card)) for card, note in sorted(rows, key=order)]
+
+
+def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], datetime | None]:
+    """The servable queue and the next time a card not servable now becomes servable.
+
+    Servable = ready (see `_candidates`), at most one card per note: its first in queue order.
+    The queue keeps that same order."""
     servable: list[tuple[Card, Note]] = []
     served_notes: set[UUID] = set()
     later: list[datetime] = []
-    for card, note in sorted(rows, key=order):
-        ready = ready_at(card)
+    for card, note, ready in _candidates(session, now):
         if ready > now:
             later.append(ready)
         elif card.note_id not in served_notes:

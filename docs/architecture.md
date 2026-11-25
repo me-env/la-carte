@@ -66,7 +66,8 @@ Rules:
   `_card_order`, then id. The first card of a note in that order is its one servable card. It backs
   `/cards/due`, `due_cards`, `stats.due`, and `stats.next_due` (earliest time a card not servable now
   becomes servable: `max(due, every sibling's hold)`, just `due` for a (re)learning card). `total` / `new` count
-  cards.
+  cards. `Note.next` reads the same queue, spec 028 (`deck._candidates`: every non-held card with its ready time,
+  in queue order; `next` = the note's first card ready now, else its earliest ready one, ties by queue order).
 - **Due-date spreading (spec 023)**: `deck._scheduler` runs with `enable_fuzzing=False`; `deck.review_card` does
   the fuzz itself. When the result is a `review` card with an FSRS interval `i` ≥ 3 days, the new due is
   `now + k days` for one `k` in the library's fuzz window around `i` (`fsrs.scheduler.FUZZ_RANGES`), picked at
@@ -112,7 +113,7 @@ Rules:
 |---|---|---|---|
 | GET | `/health` | — | `{status, build}` (no auth); `build` = 12-hex sha256 of the API's `.py` source (`build.py`) |
 | GET | `/favicon.ico`, `/icon.png` (512), `/apple-touch-icon.png` (180), `/icon.svg` | — | The la-carte icon (no auth, cached 1 day), from `docs/design/brand/render.py`; MCP serverInfo `icons` points at it when `LA_CARTE_PUBLIC_URL` is set |
-| GET | `/notes` | `?query=&type=basic\|person&limit=` (≤ 500, default 100; `query` = casefolded substring of any field but `photo`) | `[Note]` newest first |
+| GET | `/notes` | `?query=&type=basic\|person&limit=` (≤ 500, default 100; `query` = casefolded substring of any field but `photo`) | `[Note]` newest first. Every `Note` (all note responses, REST and MCP) has `next`: `{card_id, ready_at}` = the card Study serves first for it and when (`ready_at` ≤ now: in the queue now), or `null` when every card is held by a report (spec 028) |
 | POST | `/notes` | `{type, fields, directions?: [{prompt: [field], answer?: [fields]}]}` (one prompt field, answer = the rest; no duplicate check) | `Note` (201) |
 | GET/PATCH/DELETE | `/notes/{id}` | PATCH `{fields?, directions?}`: `fields` merged key by key (`""` clears); `directions` = the full desired set (kept ones keep card + schedule, new ones due now, missing ones deleted) | `Note` / 204 (note + all its cards) |
 | GET | `/cards` | `?query=&limit=` (matches the card's note) | `[Card]` newest first |
@@ -123,7 +124,7 @@ Rules:
 | POST | `/cards/{id}/report` | `{reason: wrong\|drop\|doubt\|rephrase\|other\|broken_photo, comment?: string}` (`comment` trimmed, 1–500 chars, required for `other`; bad reason/comment → 422 `{"detail": …}`; unknown card → 404 — spec 015) | `Report` (201); the card is held out of study. `broken_photo` (filed by the app) is idempotent: an active one on the card is returned with 200, no new row |
 | GET | `/stats` | `?tz=` (IANA name, default `UTC`; unknown → 422 `{"detail": "Unknown time zone: <name>"}`) | `{total, due, new, reviewed_today, next_due, new_today, milestone, streak, streak_start, history_start, history, due_new, at_risk_total, at_risk_done, reviews_total, reviews_done}` (`due` / `next_due`: servable queue, see burying — spec 014; `due_new`: never-reviewed cards in that queue; `new_today`: distinct cards first reviewed today, `milestone`: the stored new-card step size, 0 → 15, `at_risk_total` / `at_risk_done` (0 / 0 when the step doesn't exist today) and `reviews_total` / `reviews_done`: the daily ladder, display only, see "The daily ladder" — spec 021; `history`: one letter per local day from `history_start` (first review day, or today) to today, `s` studied / `f` frozen / `m` missed / `p` today not yet studied; a missed day is frozen when the day before is studied, no freeze in the 6 days before, and the day after is studied or today; `streak` = trailing `s`/`f` days ending today, or yesterday while today is `p`, starting `streak_start` (null when 0) — spec 024; all per-day fields use local days in `tz` — spec 007) |
 
-`Note` = `{id, type, fields, cards: [{id, prompt, answer, state, due, last_review}], created_at, updated_at}`.
+`Note` = `{id, type, fields, cards: [{id, prompt, answer, state, due, last_review}], next: {card_id, ready_at} | null, created_at, updated_at}`.
 `Card` = `{id, note_id, type, prompt, answer, fields, front, back, state: new|learning|review|relearning, due,
 last_review, created_at, updated_at}`; `fields` = the whole note's; `front` / `back` = prompt / answer values joined
 by `"\n"` (for old clients).
