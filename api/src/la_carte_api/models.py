@@ -266,8 +266,9 @@ class NoteCreate(BaseModel):
     )
     directions: list[Direction] | None = PydanticField(
         default=None,
-        description="The cards to create, one per prompt field. Omit for basic (front -> back "
-        "only); required for person: any of photo, name, description as prompt.",
+        description="The cards to create, one per prompt field. Omit for basic (both: front -> "
+        "back and back -> front; pass one only when the reverse isn't a meaningful question); "
+        "required for person: any of photo, name, description as prompt.",
     )
 
 

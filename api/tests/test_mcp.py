@@ -86,7 +86,7 @@ async def test_instructions_explain_notes_cards_and_directions(engine):
             "`add_direction`",
             "`find_notes`",
             "`add_notes`",
-            "Choose directions deliberately",
+            "pick directions deliberately",
             "minimalist",
             "shortest answer",
             "real people",
@@ -173,7 +173,7 @@ async def test_make_cards_prompt(engine):
             "At most 20",
             "already in my deck",
             "`basic` notes",
-            "never add every direction",
+            "Capital of France",
             "`find_notes`",
             "single `add_notes`",
         ):

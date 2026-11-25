@@ -11,10 +11,11 @@ from sqlmodel import Session
 from la_carte_api import deck
 from la_carte_api.db import make_engine
 from la_carte_api.mcp_server import INSTRUCTIONS, build_mcp
-from la_carte_api.models import CardRead, NoteCreate, NoteType, Rating, Settings
+from la_carte_api.models import CardRead, Direction, NoteCreate, NoteType, Rating, Settings
 
 T0 = datetime(2026, 11, 1, 8, tzinfo=UTC)
 SECOND = timedelta(seconds=1)
+ONE_WAY = Direction(prompt=["front"], answer=["back"])
 
 
 @pytest.fixture
@@ -26,7 +27,9 @@ def _add(session, count: int, now=T0, prefix="w") -> list[CardRead]:
     """`count` one-card basic notes, one second apart (the oldest first)."""
     cards = []
     for i in range(count):
-        note = NoteCreate(type=NoteType.basic, fields={"front": f"{prefix}{i}", "back": "x"})
+        note = NoteCreate(
+            type=NoteType.basic, fields={"front": f"{prefix}{i}", "back": "x"}, directions=[ONE_WAY]
+        )
         [added] = deck.add_notes(session, [note], now=now + i * SECOND).added
         cards.append(deck.get_card(session, added.cards[0].id))
     return cards
@@ -181,11 +184,11 @@ async def test_add_notes_and_add_cards_reply_new_and_milestone(engine):
     async with Client(build_mcp(engine)) as client:
         added = (await client.call_tool("add_notes", {"notes": BASIC})).structured_content
         assert len(added["added"]) == 60
-        assert (added["new"], added["milestone"]) == (60, 15)
+        assert (added["new"], added["milestone"]) == (120, 15)  # spec 026: both directions
         assert "new_cards" not in added
 
         cards = await client.call_tool("add_cards", {"cards": [{"front": "chat", "back": "cat"}]})
-        assert (cards.structured_content["new"], cards.structured_content["milestone"]) == (61, 15)
+        assert (cards.structured_content["new"], cards.structured_content["milestone"]) == (121, 15)
         assert "new_cards" not in cards.structured_content
 
 

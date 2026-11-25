@@ -88,7 +88,7 @@ NOTE_TYPES: dict[NoteType, NoteKind] = {
         fields=("front", "back"),
         required=frozenset({"front", "back"}),
         key="front",
-        default_directions=((("front",), ("back",)),),
+        default_directions=((("front",), ("back",)), (("back",), ("front",))),
         directions_hint="e.g. front -> back",
     ),
     NoteType.person: NoteKind(
@@ -488,7 +488,12 @@ def add_cards(
     matching an existing basic note's front (or an earlier card of the call), ignoring case and
     surrounding whitespace, is skipped and that note's first card is reported instead."""
     notes = [
-        NoteCreate(type=NoteType.basic, fields={"front": c.front, "back": c.back}) for c in cards
+        NoteCreate(
+            type=NoteType.basic,
+            fields={"front": c.front, "back": c.back},
+            directions=[Direction(prompt=["front"], answer=["back"])],
+        )
+        for c in cards
     ]
     added, skipped = _add_notes(session, notes, now, skip_duplicates)
 

@@ -61,10 +61,10 @@ def test_post_person_note_creates_one_card_per_direction(client):
     assert client.get(f"/notes/{note['id']}").json() == note
 
 
-def test_basic_note_without_directions_is_front_to_back_only(client):
+def test_basic_note_without_directions_gets_both_directions(client):  # amended by spec 026
     note = client.post("/notes", json=CHAT).json()
-    assert _ways(note) == [(["front"], ["back"])]
-    assert len(client.get("/cards").json()) == 1
+    assert _ways(note) == [(["front"], ["back"]), (["back"], ["front"])]
+    assert len(client.get("/cards").json()) == 2
 
 
 def test_person_without_directions_is_rejected_and_nothing_is_written(client):

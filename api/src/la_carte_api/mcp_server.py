@@ -40,19 +40,17 @@ those fields: one prompt field -> every other field as the answer (empty ones ar
 its own schedule. Cards of the same note are siblings: editing a field changes every sibling;
 deleting the note deletes them all.
 Note types:
-- basic: front, back (both required). Default direction: front -> back.
+- basic: front, back (both required). No `directions` = both cards: front -> back and back -> front.
+  Pass one direction only when the reverse isn't a meaningful question (e.g. "Capital of France?" ->
+  "Paris").
 - person: photo (public http(s) URL, optional), name (required), description (optional free text,
   e.g. "Mistral CEO"). Directions: photo -> name + description, name -> photo + description,
-  description -> name + photo. No default: pick them deliberately.
+  description -> name + photo. No default: pick directions deliberately (ask the user if they
+  haven't said). Each direction is one more card to review.
 
 Edit the note, not loose cards: to fix a typo use `update_note`; to quiz another angle use
 `add_direction`, never a second note with the same content. Check `find_notes` before adding;
 `add_notes` skips a note whose key (basic: front, person: name) already exists and returns it.
-
-Choose directions deliberately, never "all of them". Add back -> front only when recalling it
-that way is useful to the user (e.g. vocabulary they must produce, not just recognize). For a
-person, pick the prompts the user wants to recall from (photo, name, description); ask if they
-haven't said. Each extra direction is one more card to review.
 
 Cards stay minimalist: front = a word or short question, back = the shortest answer, one fact per
 note. No explanations, no full sentences unless unavoidable.
@@ -127,9 +125,9 @@ Rules:
 - At most {max_cards} notes; keep the most useful facts.
 - Skip what is already in my deck: check with `find_notes` and a `query`. If a note needs
   adjusting, `update_note` it instead of adding a new one.
-- Add the new notes with a single `add_notes` call of `basic` notes. Leave `directions` out
-  (front -> back) unless recalling back -> front is genuinely useful to me (e.g. vocabulary I must
-  produce); never add every direction by default.
+- Add the new notes with a single `add_notes` call of `basic` notes. Leave `directions` out to get
+  both cards (front -> back and back -> front); pass one direction only when the reverse isn't a
+  meaningful question (e.g. "Capital of France?" -> "Paris").
 - Tell me briefly which were added and which were already there.
 
 <text>
@@ -203,13 +201,14 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         """Add one or more notes, each with its cards (directions), due immediately. Add a whole
         batch ("these 30 words") in one call.
 
-        basic: fields front + back; no `directions` = front -> back only. Add back -> front only
-        when recalling that way is useful to the user. person: fields photo (public http(s) URL,
+        basic: fields front + back; no `directions` = both cards, front -> back and back -> front.
+        Pass one direction only when the reverse isn't a meaningful question (e.g. "Capital of
+        France?" -> "Paris"). person: fields photo (public http(s) URL,
         optional), name (required), description (optional, e.g. "Mistral CEO"); `directions`
         required, any of [{"prompt": ["photo"]}, {"prompt": ["name"]}, {"prompt":
         ["description"]}]: one prompt field, the answer is every other field (`answer` may be
         omitted). The prompt field must be set. Each direction is a separate card with its own
-        schedule; pick them deliberately (ask the user if they haven't said).
+        schedule; for person pick them explicitly (ask the user if they haven't said).
 
         Safety net: a note whose type and key (basic: front, person: name; case-insensitive,
         trimmed) match an existing note or an earlier one in this call is not added; the existing
@@ -266,8 +265,8 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
 
     @mcp.tool()
     def add_cards(cards: list[CardCreate], allow_duplicates: bool = False) -> AddCardsReply:
-        """Prefer the note tools (`add_notes`). Adds basic notes, one card front -> back each,
-        due immediately.
+        """Prefer the note tools (`add_notes`, which makes both directions by default). Adds basic
+        notes, one card front -> back per item, due immediately.
 
         Minimalist cards: front = a word or short question, back = the shortest answer (no
         explanations). One fact per card. Check `list_cards` first; if a card exists, don't re-add
