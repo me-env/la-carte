@@ -41,9 +41,12 @@ done
 # deletes it (both net zero; Notes runs after Deck, before Study).
 # Spec 015b #12 posts a card to the EMPTY API, reports it (drop) and deletes it (net zero for the empty-deck check).
 # Spec 021 reads /stats' ladder counts and opens the milestones popover (read-only; StudyMilestones runs before Study).
+# Spec 028 posts three notes to the EMPTY API (one reported, one rated in the app), checks the deck labels against
+# /cards/due, and deletes them (net zero; Deck runs before Study).
 # Spec 010 #16 edits greeting's back to "hello!" then PATCHes it back (net zero); StudyEdit runs before Study.
 UI_WORKERS=1 "$ROOT/scripts/ios-ui-test.sh" "$RUN" \
   "-only-testing:LaCarteUITests/DeckUITests/testDeck_addFromStudyThenDelete_liveAPI" \
+  "-only-testing:LaCarteUITests/DeckUITests/testDeckLabels_matchStudy_liveAPI" \
   "-only-testing:LaCarteUITests/NotesUITests/testNoteEditor_personCreateDelete_liveAPI" \
   "-only-testing:LaCarteUITests/NotesUITests/testNotesStudy_unreachablePhoto_liveAPI" \
   "-only-testing:LaCarteUITests/ReportUITests/testReport_dropCard_liveAPI" \
