@@ -208,6 +208,7 @@ final class DeckUITests: XCTestCase {
     el(app, "deck.add").tap()
     assertNewCardEditor(app)
     snapshot("editor-new", appearance: .light)
+    keepOnlyFrontToBack(app)
     replaceText(app, "editor.front", with: "feline")
     XCTAssertFalse(el(app, "editor.save").isEnabled, "editor.save enabled with an empty back")
     replaceText(app, "editor.back", with: "   ")
@@ -241,6 +242,7 @@ final class DeckUITests: XCTestCase {
     waitForLabel(el(app, "study.message"), "All caught up")
     el(app, "study.add").tap()
     assertNewCardEditor(app)
+    keepOnlyFrontToBack(app)
     replaceText(app, "editor.front", with: "feline")
     replaceText(app, "editor.back", with: "cat")
     el(app, "editor.save").tap()
@@ -288,6 +290,7 @@ final class DeckUITests: XCTestCase {
     openDeck(app)
     el(app, "deck.add").tap()
     assertNewCardEditor(app)
+    keepOnlyFrontToBack(app)
     replaceText(app, "editor.front", with: "feline")
     replaceText(app, "editor.back", with: "cat")
     el(app, "editor.save").tap()
@@ -319,6 +322,7 @@ final class DeckUITests: XCTestCase {
       front.tap()
       waitUntil("editor.front focused after tapping it") { self.hasFocus(front) }
     }
+    keepOnlyFrontToBack(app)
     replaceText(app, "editor.front", with: "feline")
     replaceText(app, "editor.back", with: "cat")
     el(app, "editor.save").tap()
@@ -641,6 +645,19 @@ final class DeckUITests: XCTestCase {
   private func replaceText(_ app: XCUIApplication, _ id: String, with text: String,
                            file: StaticString = #filePath, line: UInt = #line) {
     replaceText(el(app, id), with: text, placeholders: Self.editorPlaceholders, file: file, line: line)
+  }
+
+  /// Spec 027: a new basic note starts with both directions; tests that expect one card uncheck back → front
+  /// (also AC 3 end to end: back-front off, front-back still on).
+  @MainActor
+  private func keepOnlyFrontToBack(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+    let frontBack = el(app, "editor.direction.front-back"), backFront = el(app, "editor.direction.back-front")
+    XCTAssertTrue(backFront.waitFor(timeout: 5), "editor.direction.back-front missing", file: file, line: line)
+    scrollIntoView(app, backFront)
+    XCTAssertTrue(backFront.isSelected, "spec 027: back-front not on by default", file: file, line: line)
+    backFront.tap()
+    XCTAssertTrue(poll(timeout: 3) { !backFront.isSelected }, "back-front still on after tapping it", file: file, line: line)
+    XCTAssertTrue(frontBack.isSelected, "front-back off after unchecking back-front", file: file, line: line)
   }
 
   @MainActor
