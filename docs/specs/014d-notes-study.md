@@ -162,6 +162,15 @@ widow) and column inset by `m` (338 pt: ink x 33-368, lines 325 / 335 / 147 pt).
 after seeing `docs/design/renders/014d/person-caption-width-288-vs-338-light.png`; if so, the change is
 `.padding(.horizontal, isQuestion ? 0 : Theme.Spacing.m)` on `personText` instead of the `captionWidth` frame.
 
+**Re-judged on full screens (2026-11-25, per user: crops hid the screen).** UI-test screenshots of the whole iPhone 17
+Pro screen (status bar, top bar, Forgot / Got it), the centred caption fix applied, widths 288, 338 and 370 pt (370 =
+the column, flush with the top-bar buttons' outer edges), photo and no photo, 1-line and 3-line description, light and
+dark. Blind, random labels, same four criteria (placement in the screen, rag, readability, calm/Apple feel), /40:
+**288 pt 36**, 370 pt 23, 338 pt 20. The 1-line rows are identical at every width. Critic: at 288 the block lines up
+with the photo and sets an even three-line rag with no widow, an Apple-style centred caption; at 370 it runs nearly edge
+to edge (about 50 characters a line) and reads as a banner; at 338 the last word sits alone on the last line.
+**Keep 288 pt.** Sheet: `docs/design/renders/014d/person-caption-width-fullscreen-light.png`.
+
 #### Text prompt: the question moves on reveal (per user 2026-11-22)
 **Exception to spec 017 rule 8 / #13 ("the question never moves on reveal"), for `type == .person` cards whose
 prompt is text (`name → photo + description`, `description → photo + name`) only.** User: centring the text and
