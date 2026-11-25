@@ -26,7 +26,7 @@ explicitly only when the reverse isn't a meaningful question ("Capital of France
    new basic = `front-back` on, spec 014c AC 10), so the server default never applies to it. No contract change:
    `NoteCreate` keeps the same shape (`directions` optional); only the meaning of "omitted" changes for basic.
    No `APIClient` / `DecodingTests` change. Whether the editor should also pre-check `back-front` is a separate
-   UI decision, left to the user (backlog item 52).
+   UI decision: the user said yes, see [027](027-editor-both-directions.md).
 3. **Legacy `add_cards` (MCP) and `POST /cards` stay one card `front → back`.** They are the card-level
    compatibility layer: one `CardCreate` in, one `Card` out (`added: [Card]`), used by REST `POST /cards`, the
    e2e/UI-test seeding and many pytest fixtures. Giving them two cards would break that 1:1 shape. `deck.add_cards`
@@ -93,6 +93,6 @@ None.
 
 ## Out of scope
 - Backfilling reverse cards onto existing notes (decision 5).
-- The iOS editor's default toggles (backlog 52, user decision).
+- The iOS editor's default toggles ([027](027-editor-both-directions.md)).
 - person defaults.
 - Changing `add_cards` / `POST /cards` to two cards (decision 3).
