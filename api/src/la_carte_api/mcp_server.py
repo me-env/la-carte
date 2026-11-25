@@ -20,6 +20,8 @@ from la_carte_api.models import (
     CardUpdate,
     DeckStats,
     Direction,
+    FeedbackKind,
+    FeedbackRead,
     MilestoneSetting,
     NoteCreate,
     NoteRead,
@@ -81,6 +83,10 @@ When you ask the user, first set `waiting_user` with your question as `note`.
 Reports only get handled when an agent checks. Once per conversation, if nothing watches
 `list_reports` yet, suggest the user set up a recurring check in their client (e.g. a scheduled or
 looping agent task every few hours) that runs the `handle_reports` prompt. If they decline, drop it.
+
+Feedback. Bugs, confusing tools or errors, missing capabilities and friction go to the developer
+with `send_feedback` (when the user asks, or on your own when a tool gets in your way). Card content
+goes through the app's card reports, not here.
 """
 
 HANDLE_REPORTS = """Work through my open la-carte reports.
@@ -175,7 +181,8 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
             try:
                 return operation(session, *args)
             except (
-                deck.NotFound, deck.InvalidNote, deck.InvalidReport, deck.InvalidSetting
+                deck.NotFound, deck.InvalidNote, deck.InvalidReport, deck.InvalidSetting,
+                deck.InvalidFeedback,
             ) as error:  # fmt: skip
                 raise ToolError(str(error)) from error
 
@@ -383,6 +390,32 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         A card with several active reports stays held until all are closed. Error on an unknown
         or already closed report."""
         return run(deck.update_report, report_id, outcome, note)
+
+    # --- Feedback (spec 025) --------------------------------------------------------------------
+
+    @mcp.tool()
+    def send_feedback(message: str, kind: FeedbackKind = FeedbackKind.other) -> FeedbackRead:
+        """Send feedback to the developer who runs this la-carte server: a bug, a confusing tool
+        or error message, a missing capability, or friction in the app or the deck experience.
+        Use it when the user asks you to, or on your own when a tool got in your way. Not for one
+        card's content: the user reports cards from the app (card reports).
+        Write one concrete issue per call (which tool or screen, what you expected, what
+        happened); no card contents, photo URLs or personal data unless the issue needs them.
+        `kind`: bug, confusing, missing, friction, other (default). Stored on this server only;
+        returns the saved feedback."""
+        return run(deck.send_feedback, message, kind)
+
+    @mcp.tool()
+    def list_feedback(status: deck.FeedbackFilter = "open") -> list[FeedbackRead]:
+        """Feedback agents sent to the developer, oldest first. `open` (default), `done` or
+        `all`. Read-only. For the developer triaging: handle each, then `close_feedback`."""
+        return run(deck.list_feedback, status)
+
+    @mcp.tool()
+    def close_feedback(feedback_id: UUID, note: str | None = None) -> FeedbackRead:
+        """Mark feedback as done once handled (fixed, won't fix, duplicate). `note` (optional)
+        says what was done. Error on an unknown or already done id."""
+        return run(deck.close_feedback, feedback_id, note)
 
     @mcp.prompt(title="Quiz me")
     def quiz_me(

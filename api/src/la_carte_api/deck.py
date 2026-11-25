@@ -30,6 +30,10 @@ from la_carte_api.models import (
     CardUpdate,
     DeckStats,
     Direction,
+    Feedback,
+    FeedbackKind,
+    FeedbackRead,
+    FeedbackStatus,
     Note,
     NoteCreate,
     NoteRead,
@@ -121,6 +125,15 @@ class ReportNotFound(NotFound):
 
 
 class InvalidReport(ValueError):
+    pass
+
+
+class FeedbackNotFound(NotFound):
+    def __init__(self, feedback_id: UUID) -> None:
+        super().__init__(f"No feedback with id {feedback_id}")
+
+
+class InvalidFeedback(ValueError):
     pass
 
 
@@ -870,6 +883,58 @@ def update_report(
         delete_card(session, report.card_id)  # commits the report too
     session.commit()
     return _report_read(session, report)
+
+
+# --- Feedback (spec 025) ----------------------------------------------------------------------
+
+FEEDBACK_MAX = 2000
+FeedbackFilter = Literal["all"] | FeedbackStatus
+
+
+def _save_feedback(session: Session, feedback: Feedback) -> FeedbackRead:
+    session.add(feedback)
+    session.commit()
+    session.refresh(feedback)  # commit expires the row; model_dump doesn't reload it
+    return FeedbackRead(**feedback.model_dump())
+
+
+def send_feedback(
+    session: Session,
+    message: str,
+    kind: FeedbackKind = FeedbackKind.other,
+    now: datetime | None = None,
+) -> FeedbackRead:
+    """Stores feedback for the developer (trimmed message, 1-2000 chars). Touches nothing else."""
+    message = message.strip()
+    if not message:
+        raise InvalidFeedback("`message` is required: what went wrong, or what's missing.")
+    if len(message) > FEEDBACK_MAX:
+        raise InvalidFeedback(f"`message` is at most {FEEDBACK_MAX} characters.")
+    feedback = Feedback(kind=kind, message=message, created_at=now or utcnow())
+    return _save_feedback(session, feedback)
+
+
+def list_feedback(session: Session, status: FeedbackFilter = "open") -> list[FeedbackRead]:
+    """Oldest first."""
+    statement = select(Feedback).order_by(col(Feedback.created_at))
+    if status != "all":
+        statement = statement.where(Feedback.status == status)
+    return [FeedbackRead(**feedback.model_dump()) for feedback in session.exec(statement)]
+
+
+def close_feedback(
+    session: Session, feedback_id: UUID, note: str | None = None, now: datetime | None = None
+) -> FeedbackRead:
+    """Marks open feedback as done; a blank `note` is stored as no resolution."""
+    feedback = session.get(Feedback, feedback_id)
+    if feedback is None:
+        raise FeedbackNotFound(feedback_id)
+    if feedback.status == FeedbackStatus.done:
+        raise InvalidFeedback(f"Feedback {feedback_id} is already done.")
+    feedback.status = FeedbackStatus.done
+    feedback.resolution = (note or "").strip() or None
+    feedback.closed_at = now or utcnow()
+    return _save_feedback(session, feedback)
 
 
 def _local_midnight(day: date, tz: tzinfo) -> datetime:

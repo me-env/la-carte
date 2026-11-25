@@ -62,6 +62,19 @@ class ReportOutcome(StrEnum):
     deleted = "deleted"
 
 
+class FeedbackKind(StrEnum):
+    bug = "bug"
+    confusing = "confusing"
+    missing = "missing"
+    friction = "friction"
+    other = "other"
+
+
+class FeedbackStatus(StrEnum):
+    open = "open"
+    done = "done"
+
+
 # --- Tables -----------------------------------------------------------------------------------
 
 
@@ -154,6 +167,19 @@ class Report(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
     updated_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
     resolved_at: datetime | None = Field(default=None, sa_type=UTCDateTime)
+
+
+class Feedback(SQLModel, table=True):
+    """An agent's feedback to the developer who runs this server (spec 025). Never touches the
+    deck; closed once with an optional `resolution`."""
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    kind: FeedbackKind = FeedbackKind.other
+    message: str
+    status: FeedbackStatus = FeedbackStatus.open
+    resolution: str | None = None
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    closed_at: datetime | None = Field(default=None, sa_type=UTCDateTime)
 
 
 class Settings(SQLModel, table=True):
@@ -391,3 +417,13 @@ class ReportRead(BaseModel):
     @classmethod
     def of(cls, report: Report, card: CardRead | None) -> "ReportRead":
         return cls(**report.model_dump(), card=card)
+
+
+class FeedbackRead(BaseModel):
+    id: UUID
+    kind: FeedbackKind
+    message: str
+    status: FeedbackStatus
+    resolution: str | None
+    created_at: datetime
+    closed_at: datetime | None
