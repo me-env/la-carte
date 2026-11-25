@@ -44,7 +44,8 @@ Rules:
 
 ### Notes and cards (spec 014)
 - **Note** = one thing the user knows: `type` + named string `fields` (JSON). Types are fixed in `deck.NOTE_TYPES`:
-  `basic` (`front`, `back`; both required; key `front`; default direction `front → back`) and `person` (`photo`
+  `basic` (`front`, `back`; both required; key `front`; default directions both `front → back` and `back → front`,
+  spec 026; legacy `add_cards` / `POST /cards` make one card `front → back`) and `person` (`photo`
   http(s) URL, `name` required, `description` free text e.g. "Mistral CEO"; key `name`; no default: directions
   must be given). `role` / `context` were removed (spec 014a amendment): using them is a 422 "… use description".
 - **Card** = one direction over its note's fields with its own FSRS state: **one prompt field → every other field
@@ -159,7 +160,7 @@ missing | friction | other; `message` trimmed, 1–2000 chars, else `ToolError`)
 (that's a report), and stays in this server's database: nothing is sent anywhere.
 
 Server `instructions` (sent on initialize, `mcp_server.INSTRUCTIONS`) explain notes vs cards and siblings, both
-types, "edit the note, not loose cards", "choose directions deliberately", minimalist cards, photo privacy, and the
+types, "edit the note, not loose cards", "basic defaults to both directions; person: pick directions deliberately", minimalist cards, photo privacy, and the
 burying (until the reviewed sibling is due again, at most 6 hours; (re)learning cards never held), and how to handle
 each report reason (doubt / rephrase: ask the user before changing anything), and new cards (never held back, shown by the app
 in steps of `milestone`; tell the user how many wait (`new`); change the step size with `new_card_milestone` only
