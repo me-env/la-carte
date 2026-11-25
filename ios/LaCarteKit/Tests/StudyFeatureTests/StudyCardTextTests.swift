@@ -68,7 +68,7 @@ struct StudyPersonLayoutTests {
     let rows = ["photo", "name", "description"]
     #expect(StudyView.gap(before: "photo", in: rows) == 0)
     #expect(StudyView.gap(before: "name", in: rows) == Theme.Spacing.m)
-    #expect(StudyView.gap(before: "description", in: rows) == Theme.Spacing.xs)
+    #expect(StudyView.gap(before: "description", in: rows) == Theme.Spacing.s)
     #expect(StudyView.gap(before: "description", in: ["description"]) == 0)  // a text prompt before reveal
     #expect(StudyView.gap(before: "description", in: ["photo", "description"]) == Theme.Spacing.m)
   }

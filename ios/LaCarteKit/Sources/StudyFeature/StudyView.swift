@@ -25,8 +25,6 @@ public struct StudyView: View {
   /// Each side's saved text as laid out in the card's column (spec 017): its line count picks the alignment.
   @State private var frontMeasure = TextMeasure()
   @State private var backMeasure = TextMeasure()
-  /// A person card's description in its caption block (spec 014d).
-  @State private var captionMeasure = TextMeasure()
 
   /// Spec 017's candidate layouts for text of 3+ lines, until the user picks one: the leading full-width column (A),
   /// a leading block as wide as its widest line, centred (B), B with an answer of nearly the question's width
@@ -277,10 +275,6 @@ public struct StudyView: View {
               VStack {
                 probe(card.promptText, font: card.promptFont, into: $frontMeasure)
                 probe(card.answerText, font: card.answerFont, into: $backMeasure)
-                if card.type == .person {
-                  probe(card.fields[Card.descriptionField] ?? "", font: .body, into: $captionMeasure)
-                    .frame(maxWidth: captionWidth)
-                }
               }
             }
             // A person card centres itself, not through the scroll view's alignment (kept for basic cards): that one
@@ -729,7 +723,7 @@ public struct StudyView: View {
   private func personText(_ name: String, of card: Card, revealed: Bool) -> some View {
     let isQuestion = !revealed && card.prompt.contains(name)
     let isName = name == Card.nameField
-    let alignment: TextAlignment = isQuestion ? promptAlignment : isName ? .center : captionAlignment
+    let alignment: TextAlignment = isQuestion ? promptAlignment : .center
     let fills = !isQuestion || promptAlignment == .center || Self.textLayout == .column
     return Text(card.fields[name] ?? "")
       .font(isQuestion ? card.promptFont.font : isName ? .cardFaceSmall : .body)
@@ -737,7 +731,7 @@ public struct StudyView: View {
       .contentTransition(isName ? .interpolate : .identity)
       .multilineTextAlignment(alignment)
       .frame(maxWidth: fills ? .infinity : nil, alignment: Alignment(horizontal: alignment.horizontal, vertical: .center))
-      .frame(maxWidth: isQuestion || isName ? nil : captionWidth)
+      .frame(maxWidth: isQuestion ? nil : captionWidth)
   }
 
   /// What a person card asks to recall, centred under the prompt.
@@ -750,13 +744,13 @@ public struct StudyView: View {
       .accessibilityIdentifier("study.answerHint")
   }
 
-  /// A row's space above it in a person card: none first, `m` under the photo, `xs` between name and description.
+  /// A row's space above it in a person card: none first, `m` under the photo, `s` between name and description.
   static func gap(before name: String, in rows: [String]) -> CGFloat {
     guard let index = rows.firstIndex(of: name), index > 0 else { return 0 }
-    return rows[index - 1] == Card.photoField ? Theme.Spacing.m : Theme.Spacing.xs
+    return rows[index - 1] == Card.photoField ? Theme.Spacing.m : Theme.Spacing.s
   }
 
-  /// A long description reads as one caption under the photo, not a full-width paragraph.
+  /// Name and description share one centred measure under the photo, not a full-width paragraph.
   private var captionWidth: CGFloat {
     Self.captionWidth(isAccessibilitySize: dynamicTypeSize.isAccessibilitySize)
   }
@@ -764,11 +758,6 @@ public struct StudyView: View {
   /// The photo's width plus `l` on each side; the frame keeps it within the column.
   static func captionWidth(isAccessibilitySize: Bool) -> CGFloat {
     (isAccessibilitySize ? Theme.Photo.cardCompact : Theme.Photo.card) + 2 * Theme.Spacing.l
-  }
-
-  /// 1-2 lines centred, 3+ leading inside the caption block.
-  private var captionAlignment: TextAlignment {
-    captionMeasure.isMultiline ? .leading : .center
   }
 
   /// The photo at its public URL, centred; a failed load is reported for its side (spec 014d).
