@@ -481,10 +481,10 @@ final class NotesUITests: XCTestCase {
       XCTAssertEqual(back.midX, photoF.midX, accuracy: 1, "\(ctx): study.back not centred on the photo \(back)")
       XCTAssertEqual(back.midX, cardF.midX, accuracy: 1, "\(ctx): study.back not centred on the card \(back)")
     } else {
-      // The Text's frame is its widest line, leading-aligned in the block: the block (240 + 2 × 24 = 288 pt, centred
-      // on the photo) starts at photo.midX - 144; the text must start there and end inside it.
-      XCTAssertEqual(descF.minX, photoF.midX - 144, accuracy: 1, "\(ctx): caption lines don't start at the block's edge \(descF)")
-      XCTAssertLessThanOrEqual(descF.maxX, photoF.midX + 144 + 1, "\(ctx): caption wider than the block \(descF)")
+      // 014d "Caption alignment and spacing" (2026-11-25): the caption block (240 + 2 × 24 = 288 pt) is centred on
+      // the photo and every line is centred in it (per-line ink centres measured on the screenshot, QA report).
+      XCTAssertEqual(descF.midX, photoF.midX, accuracy: 1, "\(ctx): caption block not centred on the photo \(descF)")
+      XCTAssertLessThanOrEqual(descF.width, photoF.width + 48 + 1, "\(ctx): caption wider than the block \(descF)")
       XCTAssertGreaterThan(descF.height, 60, "\(ctx): long description not 3+ lines \(descF)")
     }
     switch c.prompt {
@@ -496,6 +496,104 @@ final class NotesUITests: XCTestCase {
       XCTAssertEqual(group.midY, cardF.midY, accuracy: 1, "\(ctx): revealed group \(group.minY)…\(group.maxY) not vertically centred in \(cardF)")
     }
     snapshot("study-person-\(c.tag)-revealed", appearance: appearance)
+  }
+
+  // MARK: - 014d caption alignment and spacing (design 2026-11-25)
+
+  static let longName = "Maximilian Alexander Whitfield-Montgomery"
+
+  struct CaptionCase {
+    var tag: String
+    var name: String
+    var description: String
+    var photo: Bool
+    var prompt: PersonPrompt
+  }
+
+  /// With and without a photo, 1-line and 3-line descriptions, a name that wraps to two lines.
+  static let captionCases: [CaptionCase] = [
+    .init(tag: "photo-short", name: "Mia Stone", description: "runs the bakery", photo: true, prompt: .name),
+    .init(tag: "photo-long", name: "Owen Hart", description: longDescription, photo: true, prompt: .name),
+    .init(tag: "nophoto-short", name: "Theo Lane", description: "teaches piano", photo: false, prompt: .name),
+    .init(tag: "nophoto-long", name: "Lena Brook", description: longDescription, photo: false, prompt: .description),
+    .init(tag: "longname-photo", name: longName, description: longDescription, photo: true, prompt: .photo),
+    .init(tag: "longname-nophoto", name: longName, description: "repairs bicycles", photo: false, prompt: .description),
+  ]
+
+  /// 014d "Caption alignment and spacing" (2026-11-25), light + dark: on the revealed person card, with and without a
+  /// photo, short and 3-line descriptions, a wrapping name: name and description centred on one axis (the photo's
+  /// midX, else the card's, ± 1 pt), both ≤ 288 pt wide, name → description `Theme.Spacing.s` (8 ± 1 pt), photo → name
+  /// `Theme.Spacing.m` (16 ± 1 pt). Per-line ink centring is measured on the screenshots (QA report).
+  @MainActor
+  func testNotesStudy_personCaption() throws {
+    for appearance in Self.appearances {
+      XCUIDevice.shared.appearance = appearance
+      let server = StubAPIServer()
+      try server.start()
+      let base = Date(timeIntervalSince1970: 1_767_225_600)
+      let notes = Self.captionCases.enumerated().map { i, c -> StubDeck.Note in
+        var fields = ["name": c.name, "description": c.description]
+        if c.photo { fields["photo"] = server.url + "/photos/c\(i).png" }
+        let (prompt, answer): ([String], [String]) = switch c.prompt {
+        case .photo: (["photo"], ["name", "description"])
+        case .name: (["name"], ["photo", "description"])
+        case .description: (["description"], ["name", "photo"])
+        }
+        return StubDeck.Note(type: "person", fields: fields,
+                             cards: [.init(prompt: prompt, answer: answer, state: "review",
+                                           due: base.addingTimeInterval(Double(i) * 60))])
+      }
+      server.handler = StubDeck([], notes: notes).handle
+      let app = launch(api: .live(server.url))
+      for c in Self.captionCases {
+        XCTContext.runActivity(named: "\(c.tag) \(appearance == .dark ? "dark" : "light")") { _ in
+          checkCaption(app, c, appearance: appearance)
+        }
+        el(app, "study.rate.good").tap()
+      }
+      app.terminate()
+      server.stop()
+    }
+  }
+
+  @MainActor
+  private func checkCaption(_ app: XCUIApplication, _ c: CaptionCase, appearance: XCUIDevice.Appearance) {
+    let ctx = c.tag
+    let reveal = el(app, "study.reveal")
+    XCTAssertTrue(reveal.waitFor(timeout: 10), "\(ctx): no card")
+    if c.prompt == .photo { waitForLabel(el(app, "study.photo"), "Photo") }
+    Thread.sleep(forTimeInterval: 0.5)
+    reveal.tap()
+    XCTAssertTrue(text(app, c.name).waitFor(timeout: 5), "\(ctx): name not shown after reveal")
+    XCTAssertTrue(text(app, c.description).waitFor(timeout: 5), "\(ctx): description not shown after reveal")
+    let photo = el(app, "study.photo")
+    if c.photo {
+      XCTAssertTrue(photo.waitFor(timeout: 5), "\(ctx): no photo after reveal")
+      waitForLabel(photo, "Photo")
+    }
+    Thread.sleep(forTimeInterval: 0.8)  // reveal (0.35 s) + inserted rows' fade
+    snapshot("study-caption-\(c.tag)-revealed", appearance: appearance)
+
+    let cardF = el(app, "study.card").frame
+    let nameF = text(app, c.name).frame, descF = text(app, c.description).frame
+    let photoF = c.photo ? photo.frame : .null
+    XCTContext.runActivity(named: "frames: card \(cardF) photo \(photoF) name \(nameF) desc \(descF)") { _ in }
+    if !c.photo { XCTAssertFalse(photo.exists, "\(ctx): photo shown on a note without one") }
+    let axis = c.photo ? photoF.midX : cardF.midX
+    XCTAssertEqual(nameF.midX, axis, accuracy: 1, "\(ctx): name \(nameF) not centred on x \(axis)")
+    XCTAssertEqual(descF.midX, axis, accuracy: 1, "\(ctx): description \(descF) not centred on x \(axis)")
+    XCTAssertLessThanOrEqual(nameF.width, 288 + 1, "\(ctx): name wider than the caption block \(nameF)")
+    XCTAssertLessThanOrEqual(descF.width, 288 + 1, "\(ctx): description wider than the caption block \(descF)")
+    XCTAssertEqual(descF.minY - nameF.maxY, 8, accuracy: 1, "\(ctx): name → description gap \(descF.minY - nameF.maxY) ≠ s (8)")
+    if c.photo {
+      XCTAssertEqual(nameF.minY - photoF.maxY, 16, accuracy: 1, "\(ctx): photo → name gap \(nameF.minY - photoF.maxY) ≠ m (16)")
+    }
+    if c.name == Self.longName {
+      XCTAssertGreaterThan(nameF.height, 40, "\(ctx): long name doesn't wrap \(nameF)")
+    }
+    if c.description == Self.longDescription {
+      XCTAssertGreaterThan(descF.height, 60, "\(ctx): long description not 3+ lines \(descF)")
+    }
   }
 
   /// 014d Motion: the name-prompt and long-description-prompt reveals for a `--record` clip (light). Pauses around
