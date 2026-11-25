@@ -95,6 +95,8 @@ Rules:
 - **`report` table**: `{id, card_id, note_id, reason: wrong|drop|doubt|rephrase|other|broken_photo, comment, status:
   open|waiting_user|resolved|dismissed, resolution, created_at, updated_at, resolved_at}`. `card_id` / `note_id` have
   no foreign key (like `ReviewLog`): a report outlives its card.
+- **`feedback` table** (spec 025): `{id, kind, message, status: open|done, resolution, created_at, closed_at}`.
+  Created by `create_all` (new table, no existing data touched: no `_migrate` step, no backup).
 - **Migration 014**: when `card` still has `front`, each card becomes a `basic` note **with the same id** and
   `fields = {front, back}`; `card` is rebuilt with `note_id = id`, `prompt ["front"]`, `answer ["back"]`. Card ids,
   FSRS state and review logs are untouched. Backup `<db>.pre-014-<timestamp>.bak`.
@@ -149,6 +151,12 @@ also `all` or one status). `update_report(report_id, outcome, note)` stores `not
 `waiting_user` (card stays held), `fixed` → resolved, `kept` → dismissed (both: card back in study, unchanged),
 `deleted` → resolved + `delete_card` semantics (just closes if the card is gone). Unknown or closed report →
 `ToolError`.
+
+Feedback (spec 025, MCP only): `send_feedback(message, kind="other")` → `Feedback` (`kind`: bug | confusing |
+missing | friction | other; `message` trimmed, 1–2000 chars, else `ToolError`), `list_feedback(status="open")`
+(open | done | all, oldest first), `close_feedback(feedback_id, note=None)` → `done`, `note` stored as
+`resolution` (unknown or already done → `ToolError`). Feedback is about the app / tools / experience, never one card
+(that's a report), and stays in this server's database: nothing is sent anywhere.
 
 Server `instructions` (sent on initialize, `mcp_server.INSTRUCTIONS`) explain notes vs cards and siblings, both
 types, "edit the note, not loose cards", "choose directions deliberately", minimalist cards, photo privacy, and the
