@@ -250,7 +250,11 @@ jobs:
         timeout-minutes: 40  # ≈ 2× a shard; a hung test held run 45037833157 for > 50 min
         env:
           UI_TEST_PRODUCTS: ${{ runner.temp }}/LaCarte.xctestproducts
-        run: ci/ui-test.sh scripts/ios-ui-test.sh ci-${{ matrix.shard.name }} ${{ matrix.shard.tests }}
+        # A failed test is retried once (full suite only, not smoke or E2E): each full run had 1–2 different CI-load
+        # flakes in ≈ 120 tests (docs/ci-cd.md → Flaky tests). ci/ui-test.sh flags every test that needed the retry.
+        run: >-
+          ci/ui-test.sh scripts/ios-ui-test.sh ci-${{ matrix.shard.name }}
+          -retry-tests-on-failure -test-iterations 2 ${{ matrix.shard.tests }}
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
