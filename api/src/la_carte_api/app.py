@@ -5,9 +5,11 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
+from sqlmodel import Session
 from starlette.responses import FileResponse, JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from la_carte_api import deck
 from la_carte_api.build import source_hash
 from la_carte_api.config import Settings
 from la_carte_api.db import make_engine
@@ -37,6 +39,8 @@ def icon_route(file: Path, media_type: str) -> Callable[[], FileResponse]:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     engine = make_engine(settings.database_url)
+    with Session(engine) as session:
+        deck.prune_activity(session)  # spec 029: once per start
     mcp = build_mcp(engine, settings.public_url)
     mcp_app = mcp.streamable_http_app(
         streamable_http_path="/mcp",
