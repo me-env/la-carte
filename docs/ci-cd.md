@@ -21,7 +21,7 @@ push to main ──┬─ API ────────────────�
                └─ iOS UI build (once: build-for-testing → artifact `ui-products`)
                     ├─ iOS E2E (live API), same build ┘    ≈ 19 min after the run starts
                     └─ iOS UI, 4 shards in parallel (light + dark), no build: download, boot, test
-                         deck-settings-study │ setup-report-launch │ theme-ratings │ rest
+                         deck-settings-study │ setup-widget │ theme-ratings-report │ rest
 
 nightly 03:00 UTC (schedule) and manual run (workflow_dispatch): same jobs as a push to main.
 The deploy job runs only on push and on a manual run of main.
@@ -103,19 +103,32 @@ mode. `qa-validator` owns the list. Keep it under about 10 tests and pick tests 
 **Shards** (job `ios-ui`, matrix): whole `XCTestCase` classes, balanced on measured CI durations (sum of the
 `Test Case … (N seconds)` lines per class in the shard logs). The `rest` shard runs `-only-testing:LaCarteUITests`
 minus every class the other shards name, so a new class runs there without any change. Move it to a named shard (and
-add it to `rest`'s skips) when `rest` nears 26 min of tests: the step times out at 40 min. `MarketingUITests` (demo
+add it to `rest`'s skips) when `rest` nears 30 min of tests: the step times out at 40 min. `MarketingUITests` (demo
 frames) never runs on CI. The `*_liveAPI` tests skip in the mock shards and run in E2E.
 
-| Shard | Classes (CI seconds, run 45608039397) | Total |
+| Shard | Classes (CI seconds, runs 45608039397 + 45698139090) | Tests |
 |---|---|---|
-| deck-settings-study | Deck 929, Settings 239, Refresh 178, Study 78, LaCarte 53 | ≈ 25 min |
-| setup-report-launch | Setup 675, Report 544, StudyMilestones 198, Launch 40 | ≈ 24 min |
-| theme-ratings | Ratings 613, Theme 524, StudyLengths 240, Widget (never finished on CI before, est. ≈ 150) | ≈ 25 min |
-| rest | Notes 721, StudyEdit 451, Logo 340 (+ any new class) | ≈ 25 min |
+| deck-settings-study | Deck 929, Settings 239, Refresh 178, Launch 107, Study 78, LaCarte 53 | ≈ 26 min |
+| setup-widget | Widget 726, Setup 593, StudyLengths 247 | ≈ 26 min |
+| theme-ratings-report | Ratings 669, Theme 500, Report 425 | ≈ 27 min |
+| rest | Notes 775, Logo 370, StudyEdit 306, StudyMilestones 213 (+ any new class) | ≈ 28 min |
 
 2026-11-25: `rest` had grown to Logo + Notes + StudyEdit + StudyLengths + StudyMilestones + Refresh + Widget
-(≈ 36 min of tests) and hit the 40 min step timeout on every run since 2026-11-23 (runs 45137446390, 45165043450,
-45398848333, 45608039397; `WidgetUITests` never ran). Rebalanced to the table above.
+(≈ 48 min of tests) and hit the 40 min step timeout on every run since 2026-11-23 (runs 45137446390, 45165043450,
+45398848333, 45608039397; `WidgetUITests`, 12 min on CI, never ran). Rebalanced to the table above.
+
+**Quarantine** (`-skip-testing` in the shard, `ci.yml`). A quarantined test still runs locally and in
+`ui-only.yml`; the owner fixes it, then removes the skip.
+
+| Test | Owner | Failure on CI | Fix |
+|---|---|---|---|
+| `DeckUITests/testDeck_addFromDeck` | qa-validator | "timed out waiting for: editor.front focused on a new card" (3 of the last 5 full runs, e.g. 45698139090). Also in the PR smoke set | wait for focus with a longer, load-tolerant timeout (or assert the keyboard / field value after typing instead of `hasFocus`) |
+| `LogoUITests/testStudy_launchShowsFirstCardNoLogo` | qa-validator | first card 1.52–1.92 s after launch vs a 1.5 s limit (3 of 5 runs) | CI-aware limit (e.g. 2.5 s when `CI` is set) or measure from the first frame, not from `launch()` |
+
+Watch (not quarantined): `StudyLengthsUITests/testStudyLengths_scrollBarOnRevealOnly` failed once in 5 runs on the
+same commit ("no scroll bar flash on revealing a long card"): `barPoints` only counts frames after the tap returns,
+which on a loaded runner can be after the 1.6 s capture window's flash. `ReportUITests/testAsk_copiesCardText`
+failed twice on 2026-11-23/24 (empty pasteboard), passed since.
 
 ## API deploy
 
