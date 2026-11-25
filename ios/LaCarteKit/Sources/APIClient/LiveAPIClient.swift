@@ -37,11 +37,12 @@ extension APIClient: DependencyKey {
 
   /// Launch env > URL stored by Settings > none: there is no built-in server (spec 008).
   /// Only http(s) URLs with a host count; anything else is treated as unset.
-  static func resolvedBaseURL(environment: [String: String], stored: String?) -> URL? {
+  public static func resolvedBaseURL(environment: [String: String], stored: String?) -> URL? {
     environment["LA_CARTE_API_URL"].flatMap(httpURL) ?? stored.flatMap(httpURL)
   }
 
-  private static func httpURL(_ string: String) -> URL? {
+  /// The trimmed string as a URL if it is http(s) with a host, else nil.
+  public static func httpURL(_ string: String) -> URL? {
     guard let url = URL(string: string.trimmingCharacters(in: .whitespacesAndNewlines)),
       url.scheme == "http" || url.scheme == "https",
       url.host() != nil
@@ -50,7 +51,7 @@ extension APIClient: DependencyKey {
   }
 
   /// Launch env > token stored by Settings > none. Empty values count as unset.
-  static func resolvedToken(environment: [String: String], stored: () -> String?) -> String? {
+  public static func resolvedToken(environment: [String: String], stored: () -> String?) -> String? {
     if let token = environment["LA_CARTE_API_TOKEN"], !token.isEmpty {
       return token
     }
@@ -97,6 +98,9 @@ extension APIClient: DependencyKey {
       },
       deleteNote: { id in
         _ = try await http.data("DELETE", "notes/\(id)")
+      },
+      sendActivity: { events in
+        _ = try await http.data("POST", "activity", body: ["events": events])
       },
       isConfigured: {
         baseURL() != nil && token() != nil
