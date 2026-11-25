@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from itertools import islice
 from random import Random
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -1005,27 +1005,31 @@ def _valid_event(raw: object) -> ActivityEventIn | None:
         return None
 
 
-def ingest_activity(session: Session, events: list, now: datetime | None = None) -> ActivityIngest:
+def ingest_activity(
+    session: Session, events: list[Any], now: datetime | None = None
+) -> ActivityIngest:
     """Stores the app's events, validating each on its own: invalid ones are skipped (`rejected`),
     ids already stored are ignored (`duplicates`). More than `ACTIVITY_BATCH_MAX` → `TooManyEvents`,
     nothing stored. Touches nothing else."""
     if len(events) > ACTIVITY_BATCH_MAX:
         raise TooManyEvents()
     valid = [event for raw in events if (event := _valid_event(raw))]
-    ids = {event.id for event in valid}
-    known = set(session.exec(select(ActivityEvent.id).where(col(ActivityEvent.id).in_(ids))))
-    rows = {e.id: e for e in valid if e.id not in known}  # first wins on a repeated id
-    if rows:
+    unique: dict[UUID, ActivityEventIn] = {}
+    for event in valid:
+        unique.setdefault(event.id, event)  # first wins on a repeated id
+    stored = 0
+    if unique:
         received_at = now or utcnow()
         values = [
             ActivityEvent(**event.model_dump(), received_at=received_at).model_dump()
-            for event in rows.values()
+            for event in unique.values()
         ]
-        table = ActivityEvent.__table__
-        session.exec(insert(table).values(values).on_conflict_do_nothing(index_elements=["id"]))
+        statement = insert(ActivityEvent.__table__).values(values)
+        result = session.exec(statement.on_conflict_do_nothing(index_elements=["id"]))
+        stored = result.rowcount  # rows really inserted: right even under a concurrent retry
         session.commit()
     return ActivityIngest(
-        stored=len(rows), duplicates=len(valid) - len(rows), rejected=len(events) - len(valid)
+        stored=stored, duplicates=len(valid) - stored, rejected=len(events) - len(valid)
     )
 
 

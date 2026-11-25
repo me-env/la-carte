@@ -84,6 +84,16 @@ def test_a_repeated_id_within_one_batch_is_stored_once(client):
     assert _post(client, [event, event]).json() == {"stored": 1, "duplicates": 1, "rejected": 0}
 
 
+def test_counts_come_from_the_rows_really_inserted(session):  # 2
+    stored, new = _event(), _event()
+    deck.ingest_activity(session, [stored])  # e.g. a concurrent retry got there first
+
+    result = deck.ingest_activity(session, [stored, new, new, _event(kind="Bad")])
+
+    assert result.model_dump() == {"stored": 1, "duplicates": 2, "rejected": 1}
+    assert len(deck.list_activity(session)) == 2
+
+
 @pytest.mark.parametrize(
     "invalid",
     [
