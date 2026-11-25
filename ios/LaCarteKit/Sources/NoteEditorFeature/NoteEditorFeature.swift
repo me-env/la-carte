@@ -186,10 +186,10 @@ public struct NoteEditorFeature {
 }
 
 extension NoteType {
-  /// Never a reverse unless the user picks it: basic starts with `front → back`, person with nothing.
+  /// Basic starts with both directions, like a note an agent adds (spec 027); person starts with nothing.
   var defaultDirections: [Direction] {
     switch self {
-    case .basic: [Direction(prompt: ["front"], answer: ["back"])]
+    case .basic: [Direction(prompt: ["front"], answer: ["back"]), Direction(prompt: ["back"], answer: ["front"])]
     case .person: []
     }
   }
