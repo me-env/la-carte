@@ -58,6 +58,31 @@ struct InMemoryAPIClientTests {
     await #expect(throws: APIError.self) { try await client.reportCard(UUID(), .wrong, nil) }
   }
 
+  @Test func noteNextIsTheCardStudyServesFirstOrReadyEarliest() async throws {
+    let client = APIClient.inMemory(notes: .fixtures, now: now)
+    let laCarte = [Note].fixtures[2]
+    func next(_ note: Note) async throws -> Note.Next? {
+      try await client.notes(nil).first { $0.id == note.id }?.next
+    }
+
+    #expect(try await next(laCarte) == Note.Next(cardId: laCarte.cards[0].id, readyAt: laCarte.cards[0].due))
+
+    // Good pushes the card a day out and buries its sibling 6 h, which is ready first.
+    _ = try await client.review(laCarte.cards[0].id, .good)
+    #expect(try await next(laCarte) == Note.Next(cardId: laCarte.cards[1].id, readyAt: now + siblingBury))
+
+    // Again: relearning in 10 min, which shortens the sibling's bury to the same time; the learning card goes first.
+    _ = try await client.review(laCarte.cards[0].id, .again)
+    #expect(try await next(laCarte) == Note.Next(cardId: laCarte.cards[0].id, readyAt: now + 600))
+    #expect(try await client.dueCards(100).allSatisfy { $0.noteId != laCarte.id })
+
+    // A held card is skipped; with every card held, there's no next.
+    try await client.reportCard(laCarte.cards[0].id, .drop, nil)
+    #expect(try await next(laCarte) == Note.Next(cardId: laCarte.cards[1].id, readyAt: laCarte.cards[1].due))
+    try await client.reportCard(laCarte.cards[1].id, .drop, nil)
+    #expect(try await next(laCarte) == nil)
+  }
+
   @Test func mockDeckServesTheSameCardsAsBeforeNotes() async throws {
     let client = APIClient.inMemory(cards: .fixtures, now: now)
     #expect(try await client.notes(nil).map(\.id) == [Card].fixtures.map(\.id))

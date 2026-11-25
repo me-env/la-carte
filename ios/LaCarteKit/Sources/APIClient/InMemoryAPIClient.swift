@@ -8,23 +8,48 @@ extension APIClient {
   }
 
   /// A fake deck of notes held in memory; cards are derived from them, like on the server.
-  /// Scheduling is deliberately naive: any review pushes the card one day out. Burying and holding match the API.
+  /// Scheduling is deliberately naive: any review pushes the card one day out. Burying, holding, the queue's order
+  /// (learning first, then by due) and `Note.next` match the API; `held` cards start reported.
   /// Spec 021's ladder: cards last reviewed before `now`'s day are started reviews, `atRisk` of them form the day's
   /// at-risk snapshot (no threshold), and `newToday` new cards count as already introduced today.
   public static func inMemory(
-    notes: [Note], now: Date = Date(), atRisk: Set<Card.ID> = [], milestone: Int = 15, newToday: Int = 0
+    notes: [Note], now: Date = Date(), atRisk: Set<Card.ID> = [], milestone: Int = 15, newToday: Int = 0,
+    held: Set<Card.ID> = []
   ) -> APIClient {
     let deck = LockIsolated(notes)
     let started = Set(
       cards(notes).filter { $0.lastReview.map { !DeckStats.calendar.isDate($0, inSameDayAs: now) } ?? false }.map(\.id)
     )
     /// Reported cards: out of study for good, as no agent closes reports here (spec 015).
-    let held = LockIsolated<Set<Card.ID>>([])
+    let held = LockIsolated(held)
 
-    /// When a card can be served: once due, and 6 h after any sibling's last review (spec 014).
+    /// When a card can be served: once due, and, unless (re)learning, until 6 h after a sibling's last review or that
+    /// sibling's due, whichever comes first (spec 014). Held siblings don't bury.
     @Sendable func readyAt(_ card: Card, _ notes: [Note]) -> Date {
-      let siblings = notes.first { $0.id == card.noteId }?.cards.filter { $0.id != card.id } ?? []
-      return siblings.compactMap { $0.lastReview?.addingTimeInterval(siblingBury) }.reduce(card.due, max)
+      guard !card.isLearning else { return card.due }
+      let siblings =
+        notes.first { $0.id == card.noteId }?.cards.filter { $0.id != card.id && !held.value.contains($0.id) } ?? []
+      return siblings.compactMap { sibling in sibling.lastReview.map { min($0 + siblingBury, sibling.due) } }
+        .reduce(card.due, max)
+    }
+
+    /// Every card not held with its ready time, in queue order: (re)learning first, then by due. `sorted` is
+    /// stable, so cards due at the same time keep fixture order.
+    @Sendable func candidates(_ notes: [Note]) -> [(card: Card, readyAt: Date)] {
+      cards(notes)
+        .filter { !held.value.contains($0.id) }
+        .sorted { ($0.isLearning ? 0 : 1, $0.due) < ($1.isLearning ? 0 : 1, $1.due) }
+        .map { ($0, readyAt($0, notes)) }
+    }
+
+    /// The note with `next` filled as the API does: its first card in queue order that is ready, else the one
+    /// ready earliest; `nil` when all its cards are held.
+    @Sendable func withNext(_ note: Note, _ notes: [Note]) -> Note {
+      let own = candidates(notes).filter { $0.card.noteId == note.id }
+      let pick = own.first { $0.readyAt <= now } ?? own.min { $0.readyAt < $1.readyAt }
+      var note = note
+      note.next = pick.map { Note.Next(cardId: $0.card.id, readyAt: $0.readyAt) }
+      return note
     }
 
     @Sendable func editCard<T: Sendable>(
@@ -42,10 +67,9 @@ extension APIClient {
       dueCards: { limit in
         let notes = deck.value
         var servedNotes = Set<Note.ID>()
-        // `sorted` is stable, so cards due at the same time keep fixture order.
-        let servable = cards(notes)
-          .filter { !held.value.contains($0.id) && readyAt($0, notes) <= now }
-          .sorted { $0.due < $1.due }
+        let servable = candidates(notes)
+          .filter { $0.readyAt <= now }
+          .map(\.card)
           .filter { servedNotes.insert($0.noteId).inserted }
         return Array(servable.prefix(limit))
       },
@@ -109,7 +133,8 @@ extension APIClient {
         )
       },
       notes: { query in
-        deck.value.filter { $0.matches(query) }
+        let notes = deck.value
+        return notes.filter { $0.matches(query) }.map { withNext($0, notes) }
       },
       addNote: { draft in
         let directions =
@@ -123,8 +148,10 @@ extension APIClient {
           createdAt: now,
           updatedAt: now
         )
-        deck.withValue { $0.insert(note, at: 0) }
-        return note
+        return deck.withValue { notes in
+          notes.insert(note, at: 0)
+          return withNext(note, notes)
+        }
       },
       // Ignores `draft.type`: a note's type is fixed at creation, as on the server.
       updateNote: { id, draft in
@@ -137,7 +164,7 @@ extension APIClient {
               ?? Note.Card(id: UUID(), prompt: direction.prompt, answer: direction.answer, due: now)
           }
           notes[index].updatedAt = now
-          return notes[index]
+          return withNext(notes[index], notes)
         }
       },
       deleteNote: { id in
@@ -152,7 +179,9 @@ extension APIClient {
   /// A `LA_CARTE_API=mock*` deck with spec 021's ladder seeded from the launch environment: the first
   /// `LA_CARTE_STARTED` cards are started reviews (served first), the first `LA_CARTE_AT_RISK` of them are at risk,
   /// `LA_CARTE_MILESTONE` (15) is the step size and `LA_CARTE_NEW_TODAY` (0) the new cards already introduced today.
-  static func inMemory(notes: [Note], environment: [String: String], now: Date = Date()) -> APIClient {
+  static func inMemory(
+    notes: [Note], environment: [String: String], now: Date = Date(), held: Set<Card.ID> = []
+  ) -> APIClient {
     func count(_ key: String) -> Int? { environment[key].flatMap { Int($0) } }
     var notes = notes
     var started: [Card.ID] = []
@@ -169,7 +198,8 @@ extension APIClient {
       now: now,
       atRisk: Set(started.prefix(count("LA_CARTE_AT_RISK") ?? 0)),
       milestone: count("LA_CARTE_MILESTONE") ?? 15,
-      newToday: count("LA_CARTE_NEW_TODAY") ?? 0
+      newToday: count("LA_CARTE_NEW_TODAY") ?? 0,
+      held: held
     )
   }
 }
@@ -208,6 +238,8 @@ extension Note {
 }
 
 extension Card {
+  var isLearning: Bool { state == .learning || state == .relearning }
+
   /// The card as `/cards` returns it: the note's data plus this direction's schedule.
   init(note: Note, card: Note.Card) {
     func side(_ names: [String]) -> String {
@@ -331,3 +363,41 @@ let neutralPhoto =
   + "mugAFAtUx8hKZ83T3lDHBSjXyFbHCyjLyFzHESiYyYMmAijGyE8nAsiVyZUmFMjDKEAnFMhKKsYlE2hMKtilBNDYVbkXUHGdZKD6OplA"
   + "EjppQCo6OUBCOglAWjrRQHI6oUCKOnFAojpBQLo6EUDSOu5A6jq+QAvoOAKtoeMFtIyOC9BKOvZAi+ncugL873Jpn08t5wAAAABJRU5E"
   + "rkJggg=="
+
+extension [Note] {
+  /// Sample deck for `LA_CARTE_API=mock-labels` (spec 028): one one-card note per deck row label, relative to `now`,
+  /// in label order. The last one is reported: pass `labelFixturesReported` as `held`.
+  public static func labelFixtures(now: Date, calendar: Calendar = .current) -> [Note] {
+    let hour: TimeInterval = 3600
+    let today = calendar.startOfDay(for: now)
+    func noon(in days: Int) -> Date {
+      calendar.date(byAdding: .day, value: days, to: today)!.addingTimeInterval(12 * hour)
+    }
+    let reviewed = now - 3 * 24 * hour
+    let samples: [(front: String, state: Card.State, due: Date, lastReview: Date?)] = [
+      ("in queue", .review, now - hour, reviewed),
+      ("new", .new, now, nil),
+      ("later today", .learning, now + hour / 2, now - hour / 6),
+      ("tomorrow", .review, noon(in: 1), reviewed),
+      ("in 3 days", .review, noon(in: 3), reviewed),
+      ("in 2 weeks", .review, noon(in: 20), reviewed),
+      ("in 4 months", .review, noon(in: 125), reviewed),
+      ("reported", .review, now - hour, reviewed),
+    ]
+    return samples.enumerated().map { index, sample in
+      Card(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000\(index + 31)")!,
+        front: sample.front,
+        back: "a deck row label",
+        state: sample.state,
+        due: sample.due,
+        lastReview: sample.lastReview,
+        createdAt: now,
+        updatedAt: now
+      ).basicNote
+    }
+  }
+
+  /// The reported card of `labelFixtures`.
+  public static let labelFixturesReported = UUID(uuidString: "00000000-0000-0000-0000-000000000038")!
+}

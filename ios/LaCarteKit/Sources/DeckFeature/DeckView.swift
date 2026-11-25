@@ -174,11 +174,13 @@ public struct DeckView: View {
         }
         VStack(alignment: .leading, spacing: Theme.Spacing.s / 2) {
           HStack(spacing: Theme.Spacing.s) {
-            Text(Self.dueText(note.due))
+            Text(note.queueLabel(now: .now, calendar: .current))
               .accessibilityIdentifier("deck.row.\(note.id).due")
             Spacer(minLength: 0)
-            Text(note.stateText)
-              .accessibilityIdentifier("deck.row.\(note.id).state")
+            if let stateText = note.stateText {
+              Text(stateText)
+                .accessibilityIdentifier("deck.row.\(note.id).state")
+            }
           }
           .font(.meta)
           .foregroundStyle(Theme.secondaryInk)
@@ -198,14 +200,6 @@ public struct DeckView: View {
     // `.contain` keeps the due/state texts queryable by UI tests inside the tappable row.
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("deck.row.\(note.id)")
-  }
-
-  static func dueText(_ due: Date, now: Date = .now, locale: Locale = .current) -> String {
-    guard due > now else { return "Due now" }
-    let formatter = RelativeDateTimeFormatter()
-    formatter.dateTimeStyle = .numeric
-    formatter.locale = locale
-    return "Due " + formatter.localizedString(for: due, relativeTo: now)
   }
 }
 

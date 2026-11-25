@@ -59,6 +59,39 @@ struct DecodingTests {
     #expect(note.updatedAt == Date(timeIntervalSince1970: 1_795_212_892))
   }
 
+  @Test func decodesNoteNext() throws {
+    func note(next: String?) throws -> Note {
+      let json = """
+        {"id":"0b3c8a52-4f43-4a57-9d55-3b0f4c1d9e21","type":"basic","fields":{"front":"bonjour","back":"hello"},
+         "cards":[{"id":"65f15766-7ab3-4c84-bb05-ae180e083bef","prompt":["front"],"answer":["back"],
+                   "state":"review","due":"2026-11-27T10:00:00Z","last_review":"2026-11-20T22:14:52Z"},
+                  {"id":"7a1d2c3e-0000-4000-8000-000000000002","prompt":["back"],"answer":["front"],
+                   "state":"review","due":"2026-11-26T10:00:00Z","last_review":"2026-11-20T22:14:52Z"}],
+        \(next.map { "\"next\":\($0)," } ?? "")
+         "created_at":"2026-11-20T22:14:52.426509Z","updated_at":"2026-11-20T22:14:52Z"}
+        """
+      return try JSONDecoder.api.decode(Note.self, from: Data(json.utf8))
+    }
+
+    let next = try note(next: #"{"card_id":"65f15766-7ab3-4c84-bb05-ae180e083bef","ready_at":"2026-11-25T14:02:11Z"}"#)
+    #expect(
+      next.next
+        == Note.Next(
+          cardId: UUID(uuidString: "65f15766-7ab3-4c84-bb05-ae180e083bef")!,
+          readyAt: Date(timeIntervalSince1970: 1_795_615_331)
+        )
+    )
+    #expect(try note(next: "null").next == nil)
+    // An older server: the earliest-due card stands in, so the row doesn't read as reported.
+    #expect(
+      try note(next: nil).next
+        == Note.Next(
+          cardId: UUID(uuidString: "7a1d2c3e-0000-4000-8000-000000000002")!,
+          readyAt: Date(timeIntervalSince1970: 1_795_687_200)
+        )
+    )
+  }
+
   /// A real `/stats?tz=Europe/Paris` reply (spec 024 step 1) with spec 021's ladder counts.
   static let statsPayload = """
     {"total":120,"due":64,"new":45,"reviewed_today":30,"next_due":"2026-11-20T23:24:08.477041Z",
