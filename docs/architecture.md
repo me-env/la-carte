@@ -270,9 +270,9 @@ Changes flow up as delegates: `CardEditor.saved` → Deck/App; `Settings.serverC
 |---|---|
 | `LA_CARTE_API=mock` | In-memory deck seeded with `[Card].fixtures` (UI tests, demos) |
 | `LA_CARTE_API=mock-notes` | In-memory deck seeded with `[Note].fixtures`: the 3 mock cards as `basic` notes, a `back → front` direction on "la carte", and a made-up person note (generated `data:` image) with 2 cards (spec 014b) |
-| `LA_CARTE_API_URL` | API base URL (no default: without it or a stored URL the app shows "Connect your deck") |
+| `LA_CARTE_API_URL` | API base URL; overrides the build-time `LaCarteDefaultAPIURL` (development, UI tests). Before 030c: no default, a stored URL from Settings |
 | `LA_CARTE_API_TOKEN` | Bearer token (a PAT; skips sign-in) |
-| `LA_CARTE_AUTH=signed-out` / `not-invited` | Mock modes: start signed out; mock sign-in succeeds / is refused (spec 030c) |
+| `LA_CARTE_AUTH=signed-out` / `not-allowed` | Mock modes: start signed out; mock sign-in succeeds / is refused (spec 030c) |
 | `LA_CARTE_ACTIVITY=off` | Activity log disabled (`log` is a no-op; QA baseline, spec 029) |
 | `LA_CARTE_ACTIVITY_URL` | Where activity is sent instead of the API URL; in `mock*` modes activity is sent only when this is set (spec 029) |
 
@@ -290,7 +290,9 @@ Accounts (spec 030c): the sign-in session `{baseURL, accessToken, refreshToken, 
 `session` (app only, no access group), refreshed by `SessionStore` (once per 401, shared in-flight refresh; dead
 refresh token → signed out → `SignInFeature`). The widget uses its own `stats`-scoped PAT, account `widget-token`
 in the App Group access group, and never refreshes. Credential order: launch env > `session` > legacy `api-token`;
-URL order: launch env > stored `apiURL` > Info.plist `LaCarteDefaultAPIURL` (build setting, set by CI).
+URL order: launch env > Info.plist `LaCarteDefaultAPIURL` (build setting `LA_CARTE_DEFAULT_API_URL`, set by CI; app
+and widget). The stored `apiURL` is no longer read, and the app has no server URL setting: self-hosters build from
+source with their own URL (spec 030 "Self-hosting").
 
 Theme (spec 004): `@Shared(.appStorage(AppTheme.storageKey))` (`"theme"`), `system|light|dark|forest`; launch argument `-theme forest`
 overrides it for screenshots.

@@ -17,7 +17,7 @@ No Google SDK, no password, no token to type.
 
 ## User stories
 - As a friend, I install the app, tap "Continue with Google", and see my (empty) deck.
-- As someone not invited yet, I'm told "This deck is invite-only for now." and nothing else happens.
+- As someone whose account the server refuses, I'm told "This account can't be used yet." and nothing else happens.
 - As the user, I'm never asked to sign in again unless I sign out, delete my account, or my session is revoked.
 - As the user, I delete my account in Settings, confirm once, and I'm back on the sign-in screen with nothing left.
 - As the user, my widget keeps showing my stats while I'm signed in.
@@ -31,7 +31,7 @@ No Google SDK, no password, no token to type.
    fine), and the system "wants to use … to sign in" alert is not shown, which also keeps UI tests free of a
    springboard alert (QA confirms on iOS 26/27; if the alert still shows, the UI test taps it).
 2. **Callback checks**: `state` must equal ours; `iss` must equal the base URL's origin; `error=access_denied` maps
-   `error_description` `not_invited` → `.notInvited`, `unverified_email` → `.unverifiedEmail`, `cancelled` /
+   `error_description` `not_allowed` → `.notAllowed`, `unverified_email` → `.unverifiedEmail`, `cancelled` /
    user-cancelled session (`ASWebAuthenticationSessionError.canceledLogin`) → `.cancelled`; anything else →
    `.failed`. Then `POST /token` (form-encoded).
 3. **Session storage**: Keychain generic password, service `la-carte`, account `session`, value JSON
@@ -43,60 +43,65 @@ No Google SDK, no password, no token to type.
    refresh → the session is kept, the request fails as offline (the existing "Can't reach your deck").
 5. **Credential order** (per request, as today): launch env `LA_CARTE_API_TOKEN` > session > legacy Keychain
    `api-token` (the owner's old token, now a PAT: the user's phone keeps working until they sign in). Signing in or
-   out deletes `api-token`. **Server URL**: launch env `LA_CARTE_API_URL` > stored `apiURL` > Info.plist
+   out deletes `api-token`. **Server URL is fixed at build time** (user decision 2026-11-26: the app offers no way
+   to connect another server): launch env `LA_CARTE_API_URL` (UI tests, development) > Info.plist
    `LaCarteDefaultAPIURL` (from build setting `LA_CARTE_DEFAULT_API_URL`, empty in the repo, set by CI from a
-   repository variable). `isConfigured` = a URL and a credential.
+   repository variable; the app's and the widget's Info.plist both carry it). The stored `apiURL` (spec 008) is no
+   longer read or written. `isConfigured` = a URL and a credential. Self-hosters build from source with their own
+   URL (030 "Self-hosting"): ios-engineer adds a commented `LA_CARTE_DEFAULT_API_URL` line to
+   `ios/Config/Signing.local.xcconfig.example`.
 6. **Widget**: after sign-in the app calls `POST /me/tokens {name: "Widget", scope: "stats"}` and stores the token
    in the App Group Keychain group, account `widget-token`. The widget resolves env > `widget-token` > `api-token`
    and never refreshes. Sign-out and delete remove it (`DELETE /me/tokens/{id}` best effort, then the Keychain
    item) and reload widget timelines. If minting fails, sign-in still succeeds; the next launch retries.
 7. **Signed out** = no credential. Study's existing `.notSetUp` check and every `.unauthorized` (after refresh)
    in Study and Deck send `delegate(.signInRequired)`; `AppFeature` presents `SignInFeature` full screen
-   (`.fullScreenCover`, not dismissible). Settings' URL + token entry (spec 008) is replaced: the token field goes
-   away (PATs are for scripts, 030d), the server URL is edited on the sign-in screen only.
+   (`.fullScreenCover`, not dismissible). Settings' URL + token entry (spec 008) is removed: the token field goes
+   away (PATs are for scripts, 030d) and there is no server URL anywhere in the app.
 8. **Sign-in screen** (design-lead finalises): centered `LaCarteLogo`, "la-carte", "Sign in to get your deck.",
    one button "Continue with Google" with Google's "G" mark per their branding guidelines (glass/prominent per
    design-system, design-lead decides), a `ProgressView` in the button while signing in, one caption line for the
-   error, and a footer: "Server: <host>" + "Change" (reveals a URL field) and "Privacy" (opens `<base>/privacy` in
-   Safari). Messages: not invited "This deck is invite-only for now."; unverified "Use a Google account with a
-   verified email."; failed "Couldn't sign in. Try again."; arriving after an expired session "You were signed out.
-   Sign in again."; no URL resolvable: the button is disabled and the URL field is shown.
+   error, and a footer link "Privacy" (opens `<base>/privacy` in Safari). Messages: refused by the server "This
+   account can't be used yet."; unverified "Use a Google account with a verified email."; failed "Couldn't sign
+   in. Try again."; arriving after an expired session "You were signed out. Sign in again."; no URL in the build
+   (a from-source build without `LA_CARTE_DEFAULT_API_URL`): the button is disabled and the error line reads "This
+   build has no server set." (developer-only state; "Privacy" is hidden since there is no base URL).
 9. **Settings → Account section** (first section): the email from `GET /me` (or "Signed in" while loading /
    offline), "Sign out" (no confirmation; revokes the refresh token via `POST /revoke` best effort, deletes the
    session, widget token and `api-token`), "Delete account" (destructive) → alert "Delete your account? Your deck,
    reviews and settings are deleted from the server. This can't be undone." with "Delete Account" (destructive) and
    "Cancel" → `DELETE /me` → on 204 same local cleanup as sign out → sign-in screen; on failure alert "Couldn't
-   delete your account. Try again." and nothing changes. A "Privacy policy" link. Server section: the URL as
-   read-only text + the existing Test button.
+   delete your account. Try again." and nothing changes. A "Privacy policy" link. The Server section (URL, Test
+   connection, status) is removed: the email row already shows the app reaches its server.
 10. **Mock modes**: `LA_CARTE_API=mock*` starts signed in as `you@example.com` (unchanged screens for existing UI
     tests). `LA_CARTE_AUTH=signed-out` starts signed out with a mock `AuthClient` whose sign-in succeeds after
-    0.3 s; `LA_CARTE_AUTH=not-invited` fails with `.notInvited`. No browser in mock modes.
+    0.3 s; `LA_CARTE_AUTH=not-allowed` fails with `.notAllowed`. No browser in mock modes.
 
 ## Acceptance criteria
 | # | Criterion (observable) | Validated by |
 |---|---|---|
-| 1 | Signed out (mock `LA_CARTE_AUTH=signed-out`), launch shows the sign-in screen: `signIn.google`, `signIn.server` showing the host, `signIn.privacy`; Study is not reachable | UI |
+| 1 | Signed out (mock `LA_CARTE_AUTH=signed-out`), launch shows the sign-in screen: `signIn.google`, `signIn.privacy`; no server URL, host or "Change" control exists; Study is not reachable | UI |
 | 2 | Tapping `signIn.google` shows progress in the button, then the sign-in screen goes away and Study shows the mock deck | both |
-| 3 | `LA_CARTE_AUTH=not-invited`: tapping `signIn.google` shows `signIn.error` "This deck is invite-only for now." and stays on the screen | both |
+| 3 | `LA_CARTE_AUTH=not-allowed`: tapping `signIn.google` shows `signIn.error` "This account can't be used yet." and stays on the screen; no text on the screen mentions invites | both |
 | 4 | A cancelled browser sheet returns to the idle screen with no error | unit |
 | 5 | `SignInFeature`: `.failed` → "Couldn't sign in. Try again."; `.unverifiedEmail` → its message; a second tap while signing in does nothing | unit |
-| 6 | No resolvable server URL: `signIn.google` is disabled and `signIn.serverURL` is shown; typing a valid https URL enables it and stores `apiURL` | both |
+| 6 | URL resolution: launch env `LA_CARTE_API_URL` wins over Info.plist `LaCarteDefaultAPIURL`; a stored `apiURL` default is ignored; with neither, `SignInFeature` disables sign-in and shows "This build has no server set." | unit |
 | 7 | Live `AuthClient` (URLProtocol stub + injected web session): builds `/authorize` with `client_id=la-carte-ios`, `redirect_uri=lacarte://oauth`, S256 challenge of the verifier it later sends, `state`, `scope=deck`, `resource=<base>/mcp`; rejects a callback with another `state` or `iss` (`.failed`); exchanges the code at `/token` and stores the session in the Keychain item of decision 3 | unit |
 | 8 | Refresh: an access token expiring in 30 s is refreshed before the request; a 401 triggers exactly one refresh + one retry; two concurrent requests cause one refresh; `invalid_grant` deletes the session and the request fails `.unauthorized`; a network error keeps the session | unit |
 | 9 | Study `.unauthorized` (after refresh) or no credential → `delegate(.signInRequired)` → `AppFeature` presents `.signIn`; `signIn(.delegate(.signedIn))` dismisses it and sends `study(.deckChanged)` | unit |
-| 10 | Settings shows `settings.account.email` = the mock email; no `settings.token` field exists | UI |
+| 10 | Settings shows `settings.account.email` = the mock email; no `settings.token`, `settings.url` or `settings.test` element exists | UI |
 | 11 | Tapping `settings.signOut` calls `authClient.signOut` and shows the sign-in screen | both |
 | 12 | Tapping `settings.deleteAccount` shows the confirmation alert; Cancel changes nothing; "Delete Account" calls `authClient.deleteAccount` and shows the sign-in screen; a failing delete shows "Couldn't delete your account. Try again." and stays signed in | both |
 | 13 | After sign-in the live client mints a `stats` token and stores it under `widget-token`; sign-out removes it; the widget's token resolution prefers it over `api-token` | unit |
 | 14 | A legacy `api-token` in the Keychain keeps the app signed in (no sign-in screen); signing in deletes it | unit |
 | 15 | `DecodingTests`: `TokenResponse` (`access_token`, `token_type`, `expires_in`, `refresh_token`, `scope`), OAuth error `{error, error_description}`, `Me`, `PersonalToken` from the server's JSON | unit |
-| 16 | Live e2e against `scripts/e2e.sh` (fake provider, `LA_CARTE_FAKE_EMAIL` allowlisted, no launch token): tapping `signIn.google` opens and closes the auth sheet by itself and Study shows the seeded cards | UI (live) |
-| 17 | Screenshots, light + dark: `signin-idle`, `signin-not-invited`, `signin-server`, `settings-account`, `settings-delete-confirm` | UI |
+| 16 | Live e2e against `scripts/e2e.sh` (fake provider, no `LA_CARTE_ALLOWED_EMAILS`, no launch token): tapping `signIn.google` opens and closes the auth sheet by itself and Study shows the seeded cards | UI (live) |
+| 17 | Screenshots, light + dark: `signin-idle`, `signin-not-allowed`, `settings-account`, `settings-delete-confirm` | UI |
 | 18 | The user signs in with Google on the iPhone against the deployed server and sees their existing deck; the widget still shows stats (manager with the user) | manual |
 
 ## Screens & states
-- **Sign in**: idle; signing in (progress in the button); error line (not invited / unverified / failed / signed
-  out); server field shown (no URL, or "Change" tapped). Screenshots in AC 17.
+- **Sign in**: idle; signing in (progress in the button); error line (not allowed / unverified / failed / signed
+  out / no server in the build). Screenshots in AC 17.
 - **Settings**: Account section on top (email, Sign out, Delete account, Privacy policy); delete confirmation
   alert; delete error alert.
 
@@ -117,49 +122,37 @@ width and height (Apple's `SignInWithAppleButton`, `.black`/`.white` by scheme),
 edge, side margins 24 (`Theme.Spacing.l`), no navigation bar, no toolbar:
 ```
             (flexible space)           the logo block is pinned (centred, 30 pt above the middle) in
-                                       every state; the server field takes room from the gap below it
+                                       every state
           [LaCarteLogo 80 pt]          LaCarteLaunchMark on first appear (Reduce Motion: static)
                  16
             la-carte                   .screenTitle, ink          ─┐ one element for VoiceOver:
                  8                                                 │ "la-carte. Sign in to get your deck."
      Sign in to get your deck.         .body, secondaryInk        ─┘ (.isHeader on the title)
             (flexible space)
-   [ Server URL field ]                only when editing (below)
-                 16
    [ G  Continue with Google ]         signIn.google
                  16
-   This deck is invite-only for now.   signIn.error: .meta, ink (it must pass AA), centred, 2 lines
+   This account can't be used yet.     signIn.error: .meta, ink (it must pass AA), centred, 2 lines
                                        max; reserves one line when empty so nothing moves
-   Server: deck.example.com   Change   signIn.server: .meta; host secondaryInk, "Change" ink, 8 pt apart
                Privacy                 signIn.privacy: .meta ink, its own line
                                        each button ≥ 44 pt tall (frame + contentShape)
 ```
-- Messages go in the one `signIn.error` slot, ink, never red or pink: not invited, unverified, failed, "You were
+- Messages go in the one `signIn.error` slot, ink, never red or pink: not allowed, unverified, failed, "You were
   signed out. Sign in again." (arriving after an expired session). A new tap clears it. `.sensoryFeedback(.error)`
   when a failure message appears; none on cancel (cancel = back to idle, no message).
-- **Server**: idle shows `signIn.server` ("Server: <host>" + "Change"). "Change" (or no resolvable URL) replaces
-  that caption with a "Server" label (`.meta` secondaryInk, 16 pt inset, 6 pt above) and a capsule `TextField` above
-  the button: `Theme.surface` fill, 50 pt tall, 16 pt inner padding,
-  prompt "Server URL", `.keyboardType(.URL)`, `.textContentType(.URL)`, no autocapitalisation/autocorrect,
-  `.submitLabel(.done)`, `.tint(Theme.accent)` on the field only; id `signIn.serverURL`. Invalid or empty URL:
-  `signIn.google` disabled. "Privacy" stays in the footer always (`signIn.privacy`, opens `<base>/privacy` with
-  `openURL`, i.e. Safari).
+- **No server UI** (user decision 2026-11-26): no host caption, no "Change", no URL field. "Privacy" is the only
+  footer item (`signIn.privacy`, opens `<base>/privacy` with `openURL`, i.e. Safari).
 - **Hand-off**: tapping the button starts `ASWebAuthenticationSession`; iOS presents its own sheet (host in the
   sheet's bar, Cancel top-left). We draw nothing over it and add no "Opening Google…" step; the button's spinner
   is the only progress, and stays until the session returns.
 - **Signed in**: the cover dismisses with the system slide-down onto Study (already loading the deck);
   `.sensoryFeedback(.success)`. No welcome screen, no toast.
-- Keyboard: the column sits in a `ScrollView` with `.scrollBounceBehavior(.basedOnSize)` so the field and button
-  stay above the keyboard; the logo block may scroll off.
 
 **Settings** (keeps `Form`, `Theme.surface` rows, `.tint(Theme.ink)`), sections top to bottom:
 1. **Account**: the email row (`settings.account.email`: email `.body` ink, "Signed in with Google" `.meta`
    secondaryInk below; "Signed in" while `GET /me` loads or offline), "Access tokens" `NavigationLink`
    (`settings.tokens`, 030d; omit until 030d lands), "Sign Out" (`settings.signOut`, ink, no confirmation).
-2. **Server**: the URL as read-only `secondaryInk` text (`settings.url`, `.textSelection(.enabled)`), "Test
-   connection".
-3. Appearance, Ask AI: unchanged.
-4. Last section: "Privacy Policy" (`settings.privacy`, `Link`, trailing `arrow.up.right` in secondaryInk) and
+2. Appearance, Ask AI: unchanged. (The Server section is gone: no URL, no Test connection.)
+3. Last section: "Privacy Policy" (`settings.privacy`, `Link`, trailing `arrow.up.right` in secondaryInk) and
    "Delete Account" (`settings.deleteAccount`, `Button(role: .destructive)`, system red), footer "Deletes your
    account, deck and reviews from the server." Delete sits apart from Sign Out so neither is tapped for the other;
    still one scroll away from the top (5.1.1(v): easy to find).
@@ -177,11 +170,10 @@ streak". "Can't reach your deck" stays for a network failure with a token.
 
 ## TCA shape (iOS)
 - New module **`SignInFeature`** (child of `AppFeature`; deps `APIClient`, `DesignSystem`):
-  - State: `@Shared(.appStorage("apiURL")) apiURL`, `serverURLText: String`, `isEditingServer: Bool`,
-    `status: Status` (`idle`, `signingIn`, `failed(Message)`), `Message` = `notInvited | unverifiedEmail | failed |
-    sessionExpired`.
-  - Actions: `signInButtonTapped`, `signInResponse(Result<Void, SignInError>)`, `changeServerButtonTapped`,
-    `serverURLChanged(String)`, `delegate(.signedIn)`.
+  - State: `status: Status` (`idle`, `signingIn`, `failed(Message)`), `Message` = `notAllowed | unverifiedEmail |
+    failed | sessionExpired | noServer`. `AppFeature` presents it with `.noServer` when `apiClient.baseURL` is nil;
+    the button is disabled while the message is `.noServer`.
+  - Actions: `signInButtonTapped`, `signInResponse(Result<Void, SignInError>)`, `delegate(.signedIn)`.
   - Dependencies: `authClient`, `apiClient` (`baseURL`).
 - **`AuthClient`** (`@DependencyClient`, in `APIClient`, no TCA import): `signIn(URL) async throws(SignInError)`,
   `signOut() async`, `deleteAccount() async throws`, `me() async throws -> Me`. Live = PKCE +
@@ -193,9 +185,9 @@ streak". "Can't reach your deck" stays for a network failure with a token.
   `study(.deckChanged)`.
 - **`StudyFeature` / `DeckFeature`**: add `delegate(.signInRequired)`, sent where they set `.notSetUp` /
   `.unauthorized` today. No other change.
-- **`SettingsFeature`**: State drops `token`; adds `email: String?`, `@Presents alert`. Actions add
+- **`SettingsFeature`**: State drops `token`, `apiURL` and the connection test status; adds `email: String?`, `@Presents alert`. Actions add
   `signOutButtonTapped`, `deleteAccountButtonTapped`, `alert(.presented(.confirmDelete))`, `meResponse`,
-  `deleteResponse`, `delegate(.signedOut)`.
+  `deleteResponse`, `delegate(.signedOut)`; drops `urlChanged`, `tokenChanged`, the test-connection actions.
 - `docs/architecture.md` (architect, done with this spec): module list, runtime configuration, Keychain items.
 
 ## API / MCP changes
@@ -204,16 +196,16 @@ None beyond 030a/030b. `APIClient` adds `Me`, `TokenResponse`, `PersonalToken` m
 ## Accessibility identifiers
 - `signIn.google`: Continue with Google
 - `signIn.error`: the error line
-- `signIn.server`: "Server: <host>" caption + Change button
-- `signIn.serverURL`: the server URL field
 - `signIn.privacy`: privacy link
 - `settings.account.email`: the signed-in email
 - `settings.signOut`, `settings.deleteAccount`: buttons
 - `settings.deleteAccount.confirm`: the alert's destructive button
 - `settings.privacy`: privacy policy link
 - `settings.tokens`: "Access tokens" row (030d)
-- Removed: `settings.token`, `settings.token.reveal`; `settings.url` becomes read-only text (same id)
+- Removed: `settings.token`, `settings.token.reveal`, `settings.url`, `settings.test`, `settings.status` (and the
+  earlier draft ids `signIn.server`, `signIn.serverURL`)
 
 ## Out of scope
 - Sign in with Apple (030 App Store note). PAT management UI (030d). Universal-link callback / associated domains.
-  Signing in to two servers at once. Account switching. VoiceOver, Dynamic Type, localisation (per the user).
+  Any in-app server choice (custom URL, "use your own server"): self-hosters build from source (030
+  "Self-hosting"). Account switching. VoiceOver, Dynamic Type, localisation (per the user).

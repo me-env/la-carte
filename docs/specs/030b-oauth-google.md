@@ -3,19 +3,20 @@
 Status: ready
 Owners: api-engineer → code-reviewer → qa-validator (pytest + a manual Claude connector check with the user)
 Depends on: 030a merged. Overview, principles, flow diagram, env and user actions: [030](030-accounts-google-login.md).
-Design reference: none for the app. The consent and "not invited" pages are plain server HTML (system font, the
+Design reference: none for the app. The consent and error pages are plain server HTML (system font, the
 la-carte icon from `/icon.svg`, one heading, one sentence, one button; light/dark via `prefers-color-scheme`).
 
 ## Goal
 Any MCP client (Claude Code, claude.ai connectors, ChatGPT, Cursor, VS Code) and the iOS app can sign the user in
-with Google against the API itself, and receive la-carte tokens scoped to that user's deck. Only allowlisted
-emails get in during the friends phase.
+with Google against the API itself, and receive la-carte tokens scoped to that user's deck. An optional, silent
+sign-up allowlist can limit who creates an account (030 "Sign-up gate").
 
 ## User stories
 - As the user, I run `claude mcp add --transport http la-carte https://<api>/mcp`, a browser opens, I pick my
   Google account, and Claude can use my deck. No token to copy.
 - As the user, I add the same URL as a custom connector on claude.ai and it works the same way.
-- As a friend who isn't invited yet, I'm told so and no account is created.
+- As someone the optional allowlist refuses, my client gets a neutral `access_denied` (no mention of invites) and
+  no account is created.
 - As the app, I sign the user in through the same endpoints (030c).
 
 ## Verified ground (2026-11-25)
@@ -100,10 +101,12 @@ emails get in during the friends phase.
    - Google `error` (user cancelled) or `IdentityError` → redirect to the client's `redirect_uri` with
      `error=access_denied` (+ `error_description=cancelled|unverified_email|sign_in_failed`), `state`, `iss`.
    - Account (principle 4 of 030): find `identity (provider, subject)` → its user (update `email`, `last_seen_at`).
-     Else, if the email equals `LA_CARTE_OWNER_EMAIL` and that user has no identity → attach. Else, if the email is
-     allowlisted (`LA_CARTE_ALLOWED_EMAILS` ∪ owner) → create user + identity. Else → no row is written; redirect with
-     `error=access_denied&error_description=not_invited`. An existing account whose email is no longer allowlisted is
-     refused the same way (existing tokens keep working until revoked or the account is deleted).
+     Else, if the email equals `LA_CARTE_OWNER_EMAIL` and that user has no identity → attach. Else, if sign-up is
+     open (`LA_CARTE_ALLOWED_EMAILS` unset or empty) or the email is allowlisted (`LA_CARTE_ALLOWED_EMAILS` ∪ owner)
+     → create user + identity. Else → no row is written; redirect with
+     `error=access_denied&error_description=not_allowed`. With an allowlist set, an existing account whose email is
+     no longer listed is refused the same way (existing tokens keep working until revoked or the account is
+     deleted). No user-facing text anywhere mentions invites or a list.
      An email already used by another account (different `sub`) → `access_denied`/`email_in_use`, no row written.
    - Success → mint `authcode {hash, user_id, client_id, redirect_uri, redirect_uri_provided_explicitly,
      code_challenge, scopes, resource, expires_at = now + 5 min}`, delete the pending request, clear `lc_auth`,
@@ -128,8 +131,8 @@ emails get in during the friends phase.
    is deleted; activity 90 days), deletion in the app (Settings → Delete account) or by email to the support address
    (`LA_CARTE_SUPPORT_EMAIL`, optional; the line is omitted when unset), last-updated date. The manager shows the
    text to the user before 030c ships.
-10. **Config**: `LA_CARTE_GOOGLE_CLIENT_ID`, `LA_CARTE_GOOGLE_CLIENT_SECRET`, `LA_CARTE_ALLOWED_EMAILS`,
-    `LA_CARTE_IDENTITY_PROVIDER`, `LA_CARTE_FAKE_EMAIL`, `LA_CARTE_SUPPORT_EMAIL`. Google provider without client
+10. **Config**: `LA_CARTE_GOOGLE_CLIENT_ID`, `LA_CARTE_GOOGLE_CLIENT_SECRET`, `LA_CARTE_ALLOWED_EMAILS` (optional;
+    unset = open sign-up), `LA_CARTE_IDENTITY_PROVIDER`, `LA_CARTE_FAKE_EMAIL`, `LA_CARTE_SUPPORT_EMAIL`. Google provider without client
     id/secret, or with an `http://` non-loopback `LA_CARTE_PUBLIC_URL` → refuse to start with a clear message. With
     no provider configured (no Google id, not fake) the server runs PAT-only (sign-in routes answer
     `temporarily_unavailable`), so 030b can deploy before the user has created the Google client.
@@ -151,7 +154,7 @@ All with the fake provider or an injected `httpx` transport: no test calls Googl
 | 7 | Wrong `code_verifier`, a reused code, a code older than 5 min, a code presented by another `client_id`, a `resource` different from the code's → `invalid_grant` / `invalid_target`; no tokens | pytest |
 | 8 | Refresh rotation: refresh → new pair, the old refresh token now `invalid_grant`; presenting the old one again also kills the new pair (401 on `/mcp` with the new access token); an access token expired by `now` → 401 | pytest |
 | 9 | `/revoke` of a refresh token → its family's access token gets 401 | pytest |
-| 10 | Allowlist: a non-listed email ends at `redirect_uri?error=access_denied&error_description=not_invited`, and `user`, `identity`, `apitoken`, `authcode` gain no row; the owner email is accepted without being listed | pytest |
+| 10 | Allowlist set: a non-listed email ends at `redirect_uri?error=access_denied&error_description=not_allowed`, and `user`, `identity`, `apitoken`, `authcode` gain no row; the owner email is accepted without being listed. Allowlist unset or empty: any verified email creates an account. No response body or page contains "invite" | pytest |
 | 11 | Owner claim: with a migrated owner row (030a), the first sign-in with the verified owner email attaches `(provider, sub)` and the tokens read the migrated deck; a later sign-in with the same email but another `sub` → `email_in_use`, no row; a later sign-in by `sub` with a changed email updates `user.email` | pytest |
 | 12 | Unverified email (fake `unverified…` / Google `email_verified: false`) → `access_denied`/`unverified_email`, no row | pytest |
 | 13 | `GoogleProvider` (injected transport returning a canned token response): sends `scope=openid email`, PKCE, `prompt=select_account`; rejects wrong `iss`, wrong `aud`, expired `exp`, wrong `nonce`; keeps nothing but `sub` + email (no Google token in any table) | pytest |
@@ -160,7 +163,7 @@ All with the fake provider or an injected `httpx` transport: no test calls Googl
 | 16 | `FakeProvider` with `LA_CARTE_PUBLIC_URL=https://example.com` → refuses to start; Google without client secret → refuses to start; no provider → `/authorize` ends in `temporarily_unavailable` while PATs keep working | pytest |
 | 17 | `GET /privacy` is public HTML containing "openid email", "Delete account", and no external resources | pytest |
 | 18 | `scripts/e2e.sh` (qa-validator) runs its APIs with `LA_CARTE_IDENTITY_PROVIDER=fake`, signs in as `la-carte-ios` over HTTP (curl, PKCE), mints a PAT with `POST /me/tokens`, seeds with it, and the live UI tests pass | UI (live) |
-| 19 | On the deployed server: `claude mcp add --transport http la-carte <PUBLIC>/mcp` then `/mcp` → Google → `deck_stats` works; claude.ai custom connector with the same URL works; a non-invited Google account is refused (manager with the user) | manual |
+| 19 | On the deployed server: `claude mcp add --transport http la-carte <PUBLIC>/mcp` then `/mcp` → Google → `deck_stats` works; claude.ai custom connector with the same URL works; if the allowlist is set, an unlisted Google account is refused (manager with the user) | manual |
 
 ## API / MCP changes
 As above. MCP tools: none new. The SDK's routes plus ours; `POST /me/tokens`. New tables `oauthclient`,

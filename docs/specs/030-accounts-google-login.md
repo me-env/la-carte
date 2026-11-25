@@ -28,7 +28,7 @@ Google. No frontend app: the API is its own OAuth 2.1 authorization server and d
    Store note").
 3. **Take the minimum from Google (data minimisation).** We request only the `openid email` scopes: no `profile`,
    so no name and no picture. We store only Google's `sub` (the account key) and the **verified** email (for the
-   friends allowlist and support). A Google sign-in whose `email_verified` is not `true` is rejected. We keep no
+   optional sign-up allowlist and support). A Google sign-in whose `email_verified` is not `true` is rejected. We keep no
    Google access or refresh token: Google's code is exchanged once, the ID token is read, everything else is
    dropped (this also satisfies guideline 5.1.1(v): "An app may not store credentials or tokens to social networks
    off of the device").
@@ -57,7 +57,7 @@ Google. No frontend app: the API is its own OAuth 2.1 authorization server and d
 8. **No token passthrough.** Google's tokens never reach `/mcp` or REST, and our tokens never go to Google
    (MCP authorization spec 2026-07-28, "Token passthrough" is forbidden).
 9. **The API stays the single source of truth** and holds all auth logic. The only HTML it renders: the consent
-   page for agent connectors, the "not invited" page, and `/privacy`. No separate frontend.
+   page for agent connectors, sign-in error pages, and `/privacy`. No separate frontend.
 
 ## The flow
 ```
@@ -86,7 +86,7 @@ client supports today (claude.ai, Claude Code, ChatGPT, Cursor); CIMD is backlog
 ## API ↔ app contract (summary; detail in 030a/030b)
 | Call | Shape |
 |---|---|
-| `GET /authorize` | as above, `client_id=la-carte-ios`, `redirect_uri=lacarte://oauth`, `resource=<base>/mcp` → browser → `lacarte://oauth?code&state&iss` or `lacarte://oauth?error=access_denied&error_description=not_invited&state` |
+| `GET /authorize` | as above, `client_id=la-carte-ios`, `redirect_uri=lacarte://oauth`, `resource=<base>/mcp` → browser → `lacarte://oauth?code&state&iss` or `lacarte://oauth?error=access_denied&error_description=not_allowed&state` |
 | `POST /token` (form) | `grant_type=authorization_code`, `code`, `redirect_uri`, `client_id`, `code_verifier`, `resource` → `{access_token, token_type: "Bearer", expires_in: 3600, refresh_token, scope: "deck"}`; `grant_type=refresh_token`, `refresh_token`, `client_id` → same shape, **new** refresh token; errors `{error, error_description}` (dead refresh token → 400 `invalid_grant`) |
 | `POST /revoke` (form) | `token`, `client_id` → 200 |
 | `GET /me` | `{id, email, created_at}` |
@@ -117,10 +117,14 @@ client supports today (claude.ai, Claude Code, ChatGPT, Cursor); CIMD is backlog
 4. When 030b is live, the owner's first Google sign-in with the verified `LA_CARTE_OWNER_EMAIL` attaches
    `(google, sub)` to that row (principle 4). From then on, the account is found by `sub`.
 
-## Sign-up gate (030b)
-`LA_CARTE_ALLOWED_EMAILS` = comma-separated emails (casefolded). The owner email is always allowed. Checked at
-every Google sign-in, before any account is created. Unset = nobody new. A refused sign-in creates nothing and
-ends with OAuth `access_denied` / `not_invited`.
+## Sign-up gate (030b): optional and silent
+`LA_CARTE_ALLOWED_EMAILS` = comma-separated emails (casefolded). **Optional: unset or empty = open sign-up**
+(any verified Google account gets a deck). When set, only listed emails (and the owner) can create an account;
+checked at every Google sign-in, before any account is created. A refused sign-in creates nothing and ends with
+OAuth `access_denied` / `not_allowed`; the app shows only "This account can't be used yet." (030c).
+**No user-facing text mentions invites or a list** (user decision 2026-11-26): not the app, not server pages, not
+`/privacy`. **Manager: confirm with the user whether to keep the gate at all.** If not, 030b drops the variable,
+the `not_allowed` branch and its AC 10, and 030c drops the `.notAllowed` message and AC 3.
 
 ## Secrets and env (Dokploy only; nothing secret in the repo)
 | Variable | Secret | Note |
@@ -129,13 +133,24 @@ ends with OAuth `access_denied` / `not_invited`.
 | `LA_CARTE_GOOGLE_CLIENT_SECRET` | **yes** | same client |
 | `LA_CARTE_PUBLIC_URL` | no | now **required** when Google is configured (issuer, callback, metadata); https |
 | `LA_CARTE_OWNER_EMAIL` | personal | before 030a deploys |
-| `LA_CARTE_ALLOWED_EMAILS` | personal | friends' emails |
+| `LA_CARTE_ALLOWED_EMAILS` | personal | optional sign-up allowlist; unset = open sign-up |
 | `LA_CARTE_API_TOKEN` | **yes** | imported once as the owner's PAT by 030a, then remove it |
 | `LA_CARTE_SUPPORT_EMAIL` | personal | optional; shown on `/privacy` |
 | `LA_CARTE_IDENTITY_PROVIDER` | no | `google` (default) or `fake` (tests/e2e only; refused unless `LA_CARTE_PUBLIC_URL` is unset or loopback) |
 
 No token-signing key is needed (principle 5). iOS build setting `LA_CARTE_DEFAULT_API_URL` (030c) is supplied by
-CI from a repository **variable**, empty in the repo.
+CI from a repository **variable**, empty in the repo. It is the **only** server the app talks to: the app has no
+server URL field or "use your own server" option (user decision 2026-11-26).
+
+## Self-hosting
+Self-hosting stays supported, from source; the App Store app talks only to the hosted server. A self-hoster:
+1. Runs the API (`docs/deploy.md`) with their own `LA_CARTE_PUBLIC_URL` (https) and `LA_CARTE_OWNER_EMAIL`.
+2. Registers **their own** Google OAuth client ("Web application", authorised redirect URI
+   `<their PUBLIC>/oauth/callback`, scopes `openid email`) as in "User actions" 1, and sets
+   `LA_CARTE_GOOGLE_CLIENT_ID` / `LA_CARTE_GOOGLE_CLIENT_SECRET` (optionally `LA_CARTE_ALLOWED_EMAILS`).
+3. Builds the app from source with `LA_CARTE_DEFAULT_API_URL = https://<their host>` (in
+   `ios/Config/Signing.local.xcconfig`, next to their bundle id prefix and team) and installs it on their own
+   devices. Agents connect to `<their PUBLIC>/mcp` as usual.
 
 ## User actions needed (smallest steps; the manager asks one at a time, before 030b deploys)
 1. **Google Cloud Console** (console.cloud.google.com, the user's Google account):
@@ -144,12 +159,12 @@ CI from a repository **variable**, empty in the repo.
       `<PUBLIC>/privacy`, authorised domain = the API's domain.
    c. Audience: External; **Publish app** (in production). With only `openid email` (non-sensitive) no
       verification is required (support.google.com/cloud/answer/13463073); staying in Testing would force adding
-      every friend as a Google test user (max 100) on top of our allowlist.
+      every friend as a Google test user (max 100).
    d. Data access: add `openid` and `.../auth/userinfo.email` only.
    e. Clients → Create client → **Web application**, authorised redirect URI
       `<PUBLIC>/oauth/callback`. Paste the client id and secret into Dokploy (two env vars).
 2. **Dokploy env**: `LA_CARTE_OWNER_EMAIL` (before 030a), then `LA_CARTE_GOOGLE_CLIENT_ID`,
-   `LA_CARTE_GOOGLE_CLIENT_SECRET`, `LA_CARTE_ALLOWED_EMAILS` (before 030b); remove `LA_CARTE_API_TOKEN` after
+   `LA_CARTE_GOOGLE_CLIENT_SECRET`, and `LA_CARTE_ALLOWED_EMAILS` if the gate is kept (before 030b); remove `LA_CARTE_API_TOKEN` after
    030a has started once.
 3. **GitHub repository variable** `LA_CARTE_DEFAULT_API_URL` = the API URL (release-engineer wires it into the
    Ad Hoc build, 030c).
@@ -175,22 +190,23 @@ Verified 2026-11-25 against developer.apple.com/app-store/review/guidelines/#log
 
 ## App Privacy notes (App Store Connect "App Privacy", for the release-engineer / manager)
 Data linked to the user, used for app functionality only, no tracking, no third-party sharing:
-- Contact info → **Email address** (the verified Google email; allowlist and support).
+- Contact info → **Email address** (the verified Google email; sign-up gate and support).
 - Identifiers → **User ID** (our account id; Google's `sub` stored server-side as the account key).
 - User content → **Other user content** (cards, notes, reports, feedback).
 - Usage data → **Product interaction** (spec 029 activity log, if it ships), app functionality.
 Not collected: name, photo, contacts, location, payment, passwords (principle 1, 3). Person-card photos are
 external URLs the user (or their agent) typed; la-carte hosts no images.
 
-## Rollout (API first, behind the allowlist)
+## Rollout (API first)
 1. 030a merged → deploy with `LA_CARTE_OWNER_EMAIL` set (keep `LA_CARTE_API_TOKEN` for this first start).
    Check: the user's app, widget and Claude Code still work; `GET /me` answers the owner. Then remove the token var.
 2. 030b merged → user does "User actions" 1–2 → deploy. Check: Claude Code `claude mcp add --transport http
-   la-carte <PUBLIC>/mcp` signs in with Google (no `--header`); claude.ai custom connector does the same; a
-   non-allowlisted Google account is refused.
+   la-carte <PUBLIC>/mcp` signs in with Google (no `--header`); claude.ai custom connector does the same; if
+   the allowlist is set, an unlisted Google account is refused. (Set it, e.g. to the owner's email, before the
+   Google vars if sign-up should not be open yet.)
 3. 030c (then 030d) merged + QA PASS → Ad Hoc build with the default URL → user signs in on the iPhone (claims nothing new:
-   the owner row is already claimed in step 2 or claimed now) → friends' emails added to the allowlist → friends
-   install.
+   the owner row is already claimed in step 2 or claimed now) → friends' emails added to the allowlist (if
+   the gate is kept) → friends install.
 
 ## Out of scope (backlog)
 - Sign in with Apple (App Store blocker, see note). CIMD client registration. An admin view of all users'
