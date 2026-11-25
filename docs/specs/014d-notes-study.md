@@ -86,7 +86,7 @@ picture: name, then description.
 |---|---|---|---|---|
 | Hint (before reveal) | `.subheadline` (was `.meta`: the user looks for it, and it is the only text on a photo prompt) | `secondaryInk` | centred | top of the answer slot, `Theme.Spacing.m` under the prompt (the stack's existing gap) |
 | Name, in the answer | `.cardFaceSmall` (title2 medium) | `ink` | always centred (`multilineTextAlignment(.center)`), wraps, never truncated, never measured | `Theme.Spacing.m` under a photo; first in the slot otherwise |
-| Description, in the answer | `.body` (`CardFont.body`) | `secondaryInk` | in the caption block (below): 1-2 lines centred, 3+ leading | `Theme.Spacing.xs` under the name; `Theme.Spacing.m` under a photo |
+| Description, in the answer | `.body` (`CardFont.body`) | `secondaryInk` | centred, every line, in the caption block (2026-11-25 below) | `Theme.Spacing.s` under the name (was `xs`); `Theme.Spacing.m` under a photo |
 | Photo, in the answer | `CardPhoto(.card)` | — | centred | first in the slot |
 | Name or description as the **prompt** | spec 017 tier (`CardText.promptFont`), unchanged | `ink` | spec 017, unchanged | — |
 
@@ -120,6 +120,37 @@ picture: name, then description.
 - **One revealed composition for every direction:** photo · name (`.cardFaceSmall` ink) · description (caption
   block, `.body` `secondaryInk`), top to bottom, centred as a group, whatever was asked. No description: photo ·
   name. The name is always the emphasised text once the answer shows.
+
+#### Caption alignment and spacing (design 2026-11-25 per user, supersedes the caption rows above)
+User, on the revealed person card (photo + name + description, and name + description with no photo): "not sure
+padding and alignment between these is clean. seems off". Measured on `StudyRenders/personCards()` (402 pt
+screen, ink boxes via `screen-sample.py`), identical for photo, name and description prompts:
+- **Three left edges.** Photo x 81-321 and name centred on x 201, but a 3+-line description is leading in its
+  288 pt block: lines start at x 58, 23 pt left of the photo's edge, ragged right (ink ends 315-333), so the
+  paragraph's ink centre sits 5.5 pt left of the axis. Same on the no-photo card under its centred name.
+- **Name glued to the paragraph.** Name→description ink gap 13.7 pt (layout `xs` 4) vs the description's own
+  line gap 10 pt: the name reads as the paragraph's first line. Photo→name 24.3 pt ink (layout `m`) is fine.
+- No leftovers: the `CrossFadeStack` sizes by the shown layer, the folded hint takes 0 pt (its `m` included),
+  the photo-prompt and text-prompt paths land on the same y (± 0), and all spacing is `Theme.Spacing`.
+
+The rule, one for every person card, photo or not (the photo stays the axis; Contacts, Photos and Fitness award
+detail centre every line of a stacked caption):
+| Element | Change |
+|---|---|
+| Description, in the answer | **always centred** (`.multilineTextAlignment(.center)`, frame alignment `.center`), any line count, in the caption block (`captionWidth`, 288 pt; 208 at AX sizes) |
+| Name, in the answer | also capped at `captionWidth`, so name and description share one measure and one axis (a long name wraps like the description, never wider) |
+| Name → description | `Theme.Spacing.s` (8, was `xs`): 17.7 pt ink, clearly more than the 10 pt line gap, less than photo→name |
+| Photo → name | `Theme.Spacing.m`, unchanged |
+
+In `StudyView.swift` (ios-engineer): `personText`: alignment `isQuestion ? promptAlignment : .center`, and
+`.frame(maxWidth: isQuestion ? nil : captionWidth)`; `gap(before:in:)`: `Theme.Spacing.s` instead of `xs`;
+delete `captionAlignment` and the description probe (`captionMeasure`, its `background` probe) now unused.
+A description *prompt* keeps spec 017 alignment. Acceptance #6 becomes: a 3+-line answer description's lines are
+each centred on `study.photo`'s midX (± 1 pt), block width ≤ photo width + 48 pt; with no photo, on
+`study.card`'s midX. A name wrapping to two lines stays centred within 288 pt and keeps the `s` gap to the
+description (± 1 pt). Measured after (real render, same code change): every line's ink centre 201.2-201.3 pt, name
+200.7. Renders: `docs/design/renders/014d/person-caption-before-after-{light,dark}.png` (top row today, bottom
+row the fix; photo + long, no photo + long, photo + short).
 
 #### Text prompt: the question moves on reveal (per user 2026-11-22)
 **Exception to spec 017 rule 8 / #13 ("the question never moves on reveal"), for `type == .person` cards whose

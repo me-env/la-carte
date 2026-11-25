@@ -139,7 +139,7 @@ struct StudyRenders {
   }
 
   /// Person cards (spec 014d), light and dark: every direction with a short, a long and no description, before and
-  /// after reveal (`screen-study-person-<photo|name|desc>-<short|long|none>-<q|rev>-<theme>-<scheme>.png`). The photo
+  /// after reveal, with and without a photo (`screen-study-person-<photo|name|desc|nophoto-name|nophoto-desc>-<short|long|none>-<q|rev>-<theme>-<scheme>.png`). The photo
   /// URL never loads, so the placeholder stands in for it.
   @Test func personCards() throws {
     let dir = try #require(ProcessInfo.processInfo.environment["LA_CARTE_RENDER_DIR"])
@@ -154,10 +154,13 @@ struct StudyRenders {
       ("photo", ["photo"], ["name", "description"]),
       ("name", ["name"], ["photo", "description"]),
       ("desc", ["description"], ["photo", "name"]),
+      ("nophoto-name", ["name"], ["description"]),
+      ("nophoto-desc", ["description"], ["name"]),
     ]
     for (length, description) in descriptions {
-      for (direction, prompt, answer) in directions where !(description.isEmpty && direction == "desc") {
-        let fields = ["photo": "https://invalid.example/p.jpg", "name": "Ada Example", "description": description]
+      for (direction, prompt, answer) in directions where !(description.isEmpty && direction.hasSuffix("desc")) {
+        let photo = direction.hasPrefix("nophoto") ? "" : "https://invalid.example/p.jpg"
+        let fields = ["photo": photo, "name": "Ada Example", "description": description]
         let card = Card(id: UUID(), type: .person, prompt: prompt, answer: answer, fields: fields,
                         front: "", back: "", due: date, createdAt: date, updatedAt: date)
         for revealed in [false, true] {
