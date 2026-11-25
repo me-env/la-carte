@@ -57,6 +57,7 @@ When you change something that already exists (screen, logo, icon, layout, spaci
 - If the proposal doesn't clearly win, it doesn't ship as-is.
 - Your report to the manager includes both blind scores.
 Brand-new designs with no previous version are exempt.
+Both A and B are full screens at the same scale (docs/workflow.md, "Visuals shown for judgment").
 
 ## Output
 What changed (paths), decisions with a one-line why, what other agents must do (engineer, QA, marketing).

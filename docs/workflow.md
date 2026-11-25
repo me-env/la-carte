@@ -36,8 +36,18 @@ agent with its own context, so the hand-off artifact (spec, diff, report) must b
 - Run `secrets-guard` before every push; only `[block]` items stop it.
 - After any change to `.claude/agents/*.md` or a `CLAUDE.md`, run `instructions-keeper`.
 - Spawn `qa-validator` fresh for each validation (no memory of implementation discussions).
-- Never mark a spec `done` without a PASS report. Show the user the key screenshots.
+- Never mark a spec `done` without a PASS report. Show the user the key screenshots (full screens, see below).
 - If two agents disagree (e.g. reviewer vs engineer), decide using the docs; if the docs are silent, ask the user, then update the docs.
+
+## Visuals shown for judgment
+
+Applies to renders opened for the user, design-critic inputs (blind A/B pairs too) and QA screenshots behind a verdict.
+- Show the **whole device screen** at its real aspect ratio: status bar, top bar and bottom controls. Never a crop
+  of one region. Study renders have no status bar or glass, so a screen verdict uses the UI-test screenshot.
+- A zoomed detail (`image-ops.py crop --zoom`) only as an extra next to the full screen, never instead of it.
+- Comparisons: full screens side by side at the same scale (`image-ops.py montage`).
+- Commits: no Vyst or Apple app icons; the app's own screens (status bar included) are fine. Vyst/Apple reference
+  screens stay local and uncommitted, but are still shown full screen.
 
 ## Definition of done
 

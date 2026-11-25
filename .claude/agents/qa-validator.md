@@ -29,6 +29,7 @@ in `docs/design/reference/` that the spec points to.
    `scripts/ios-ui-test.sh --split <NNN>-mock -only-testing:…` (docs/testing.md, Splitting a run).
 3. **Open every screenshot** (Read the PNG) and check it against the spec and the
    `docs/design-system.md` QA visual checklist. Compare with the reference images for feel.
+   Judge and cite full screens, never crops (docs/workflow.md, "Visuals shown for judgment").
    Measure colour/contrast/spacing criteria with `uv run scripts/screen-sample.py` (layout: `bbox`, `compare`
    for "nothing moved"); time animation criteria from the run's recording with `scripts/image-ops.py track`
    (or `frames`). Commands: docs/testing.md.

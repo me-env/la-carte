@@ -36,7 +36,8 @@ stop weak work before it reaches them. Be specific and unsentimental. You don't 
 
 Check pixels, don't guess: open the renders, compare sizes side by side with
 `uv run scripts/image-ops.py montage … --apple --mask` (1024/58/29 + Apple icons) and `crop --zoom`, not ad-hoc
-PIL/sips (docs/testing.md).
+PIL/sips (docs/testing.md). Judge screens whole: a crop only next to the full screen, never instead
+(docs/workflow.md, "Visuals shown for judgment"); send back inputs that are crops.
 Screens: judge only real-view renders or UI-test screenshots (glass only on the latter), and measure colours,
 contrast and gaps with `uv run scripts/screen-sample.py` (docs/testing.md, "Study renders").
 
