@@ -36,6 +36,10 @@ order (the deploy job also has its own `deploy-api` group). A run per commit is 
 5 macOS jobs and a full run uses 6.
 The free plan runs at most 5 macOS jobs at once: unit tests + the UI build start together; the 4 shards and E2E
 start when the build ends (unit tests are done by then).
+A `pending` run on `main` is waiting for the running one (a full run is ≈ 45–55 min), not stuck. GitHub can also
+cancel a macOS job it cannot place ("The job was not acquired by Runner of type hosted", run 45692283093): the run
+ends red/cancelled, the next run retests it. While `main` has no green run, `ci/changes.sh` diffs against the last
+green one, so even API-only pushes run the full iOS suite: fix red `main` first.
 
 Speed settings (measured 2026-11-22, run 45032373007):
 - `BUILD_SLOTS: 1` (workflow env): `scripts/_ios-env.sh` splits CPUs over 2 build slots by default, which gave
@@ -96,11 +100,22 @@ every test's recording (`recordings/`) and the runner output (`logs/`). No deplo
 **Smoke set** (in `ci.yml`, job `ios-ui-smoke`): core study, deck, settings/setup and refresh flows in light
 mode. `qa-validator` owns the list. Keep it under about 10 tests and pick tests that are not flaky.
 
-**Shards** (job `ios-ui`, matrix): whole `XCTestCase` classes, balanced on measured durations (local
-`ui-test-durations.tsv`; CI is ≈ 1.6–1.9× slower). The `rest` shard runs `-only-testing:LaCarteUITests` minus
-every class the other shards name, so a new class runs there without any change. Move it to a named shard (and
-add it to `rest`'s skips) when `rest` gets too long. `MarketingUITests` (demo frames) never runs on CI. The
-`*_liveAPI` tests skip in the mock shards and run in E2E.
+**Shards** (job `ios-ui`, matrix): whole `XCTestCase` classes, balanced on measured CI durations (sum of the
+`Test Case … (N seconds)` lines per class in the shard logs). The `rest` shard runs `-only-testing:LaCarteUITests`
+minus every class the other shards name, so a new class runs there without any change. Move it to a named shard (and
+add it to `rest`'s skips) when `rest` nears 26 min of tests: the step times out at 40 min. `MarketingUITests` (demo
+frames) never runs on CI. The `*_liveAPI` tests skip in the mock shards and run in E2E.
+
+| Shard | Classes (CI seconds, run 45608039397) | Total |
+|---|---|---|
+| deck-settings-study | Deck 929, Settings 239, Refresh 178, Study 78, LaCarte 53 | ≈ 25 min |
+| setup-report-launch | Setup 675, Report 544, StudyMilestones 198, Launch 40 | ≈ 24 min |
+| theme-ratings | Ratings 613, Theme 524, StudyLengths 240, Widget (never finished on CI before, est. ≈ 150) | ≈ 25 min |
+| rest | Notes 721, StudyEdit 451, Logo 340 (+ any new class) | ≈ 25 min |
+
+2026-11-25: `rest` had grown to Logo + Notes + StudyEdit + StudyLengths + StudyMilestones + Refresh + Widget
+(≈ 36 min of tests) and hit the 40 min step timeout on every run since 2026-11-23 (runs 45137446390, 45165043450,
+45398848333, 45608039397; `WidgetUITests` never ran). Rebalanced to the table above.
 
 ## API deploy
 

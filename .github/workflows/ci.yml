@@ -189,9 +189,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Balanced on measured class durations (local seconds, CI ≈ ×1.8; docs/ci-cd.md → Shards). The last shard runs
-        # every class the others don't name (-skip-testing), so a new UI test class always runs somewhere.
-        # MarketingUITests is not a test suite (demo frames, owner: marketing) and never runs on CI.
+        # Balanced on measured CI class durations (run 45608039397, docs/ci-cd.md → Shards): ≈ 23–26 min of tests each.
+        # The last shard runs every class the others don't name (-skip-testing), so a new UI test class always runs
+        # somewhere: move it to a named shard when `rest` nears 26 min. MarketingUITests is not a test suite (demo
+        # frames, owner: marketing) and never runs on CI.
         shard:
           - name: deck-settings-study
             tests: >-
@@ -199,15 +200,19 @@ jobs:
               -only-testing:LaCarteUITests/SettingsUITests
               -only-testing:LaCarteUITests/StudyUITests
               -only-testing:LaCarteUITests/LaCarteUITests
+              -only-testing:LaCarteUITests/RefreshUITests
           - name: setup-report-launch
             tests: >-
               -only-testing:LaCarteUITests/SetupUITests
               -only-testing:LaCarteUITests/ReportUITests
               -only-testing:LaCarteUITests/LaunchUITests
+              -only-testing:LaCarteUITests/StudyMilestonesUITests
           - name: theme-ratings
             tests: >-
               -only-testing:LaCarteUITests/ThemeUITests
               -only-testing:LaCarteUITests/RatingsUITests
+              -only-testing:LaCarteUITests/StudyLengthsUITests
+              -only-testing:LaCarteUITests/WidgetUITests
           - name: rest
             tests: >-
               -only-testing:LaCarteUITests
@@ -215,11 +220,15 @@ jobs:
               -skip-testing:LaCarteUITests/SettingsUITests
               -skip-testing:LaCarteUITests/StudyUITests
               -skip-testing:LaCarteUITests/LaCarteUITests
+              -skip-testing:LaCarteUITests/RefreshUITests
               -skip-testing:LaCarteUITests/SetupUITests
               -skip-testing:LaCarteUITests/ReportUITests
               -skip-testing:LaCarteUITests/LaunchUITests
+              -skip-testing:LaCarteUITests/StudyMilestonesUITests
               -skip-testing:LaCarteUITests/ThemeUITests
               -skip-testing:LaCarteUITests/RatingsUITests
+              -skip-testing:LaCarteUITests/StudyLengthsUITests
+              -skip-testing:LaCarteUITests/WidgetUITests
               -skip-testing:LaCarteUITests/MarketingUITests
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
