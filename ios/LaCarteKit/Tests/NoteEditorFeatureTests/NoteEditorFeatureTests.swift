@@ -23,11 +23,11 @@ struct NoteEditorFeatureTests {
     return state
   }
 
-  @Test func aNewNoteIsBasicWithOnlyFrontToBackOn() {
+  @Test func aNewNoteIsBasicWithBothDirectionsOn() {
     let state = NoteEditorFeature.State()
     #expect(state.type == .basic)
     #expect(state.fields == ["front": "", "back": ""])
-    #expect(state.directions == [d("front")])
+    #expect(state.directions == [d("front"), d("back")])
     #expect(state.catalog == [d("front"), d("back")])
     #expect(!state.hasChanges)
   }
@@ -71,6 +71,7 @@ struct NoteEditorFeatureTests {
 
     await store.send(.fieldChanged("front", "chat")) {
       $0.fields["front"] = "chat"
+      $0.directions = [self.d("front"), self.d("back", "front")]
     }
     await store.send(.typeChanged(.person)) {
       $0.type = .person
@@ -82,7 +83,7 @@ struct NoteEditorFeatureTests {
     await store.send(.typeChanged(.basic)) {
       $0.type = .basic
       $0.fields = ["front": "", "back": ""]
-      $0.directions = [self.d("front")]
+      $0.directions = [self.d("front"), self.d("back")]
     }
   }
 
@@ -103,6 +104,9 @@ struct NoteEditorFeatureTests {
   @Test func aDirectionWithAnEmptyPromptCantBeTurnedOnButOneAlreadyOnStaysOn() async {
     let store = TestStore(initialState: NoteEditorFeature.State()) { NoteEditorFeature() }
 
+    await store.send(.directionToggled(d("back"))) {
+      $0.directions = [self.d("front")]
+    }
     #expect(store.state.isUnavailable(d("back")))
     await store.send(.directionToggled(d("back")))
 
@@ -278,8 +282,132 @@ struct NoteEditorFeatureTests {
     #expect(state.hasChanges)
 
     state = NoteEditorFeature.State()
-    state.directions = [d("front"), d("back")]
+    state.directions = [d("front")]
     #expect(state.hasChanges)
+  }
+
+  @Test func savingANewBasicNoteSendsBothDirections() async {
+    let added = LockIsolated<NoteDraft?>(nil)
+    let store = TestStore(initialState: NoteEditorFeature.State()) {
+      NoteEditorFeature()
+    } withDependencies: { [laCarte] in
+      $0.apiClient.addNote = { draft in
+        added.setValue(draft)
+        return laCarte
+      }
+      $0.dismiss = DismissEffect {}
+    }
+
+    await store.send(.fieldChanged("front", "chat")) {
+      $0.fields["front"] = "chat"
+      $0.directions = [self.d("front"), self.d("back", "front")]
+    }
+    await store.send(.fieldChanged("back", "cat")) {
+      $0.fields["back"] = "cat"
+      $0.directions = [self.d("front", "back"), self.d("back", "front")]
+    }
+    await store.send(.saveButtonTapped) {
+      $0.isSaving = true
+    }
+    await store.receive(\.saveResponse.success)
+    await store.receive(\.delegate.saved)
+    #expect(
+      added.value
+        == NoteDraft(
+          type: .basic, fields: ["front": "chat", "back": "cat"],
+          directions: [d("front", "back"), d("back", "front")]
+        )
+    )
+  }
+
+  @Test(arguments: [("back", "front"), ("front", "back")])
+  func uncheckingOneDefaultDirectionSavesOnlyTheOther(off: String, kept: String) async {
+    let added = LockIsolated<NoteDraft?>(nil)
+    let store = TestStore(initialState: NoteEditorFeature.State()) {
+      NoteEditorFeature()
+    } withDependencies: { [laCarte] in
+      $0.apiClient.addNote = { draft in
+        added.setValue(draft)
+        return laCarte
+      }
+      $0.dismiss = DismissEffect {}
+    }
+
+    await store.send(.directionToggled(d(off))) {
+      $0.directions = [self.d(kept)]
+    }
+    await store.send(.fieldChanged("front", "chat")) {
+      $0.fields["front"] = "chat"
+      $0.directions = [off == "back" ? self.d("front") : self.d("back", "front")]
+    }
+    await store.send(.fieldChanged("back", "cat")) {
+      $0.fields["back"] = "cat"
+      $0.directions = [self.d(kept, off)]
+    }
+    await store.send(.saveButtonTapped) {
+      $0.isSaving = true
+    }
+    await store.receive(\.saveResponse.success)
+    await store.receive(\.delegate.saved)
+    #expect(added.value?.directions == [d(kept, off)])
+  }
+
+  @Test func uncheckingBothDefaultDirectionsBlocksSave() async {
+    let store = TestStore(initialState: NoteEditorFeature.State()) { NoteEditorFeature() }
+
+    await store.send(.directionToggled(d("front"))) {
+      $0.directions = [self.d("back")]
+    }
+    await store.send(.directionToggled(d("back"))) {
+      $0.directions = []
+    }
+    #expect(!store.state.canSave)
+  }
+
+  @Test func editingAOneCardBasicNoteNeverAddsTheReverse() async {
+    var note = laCarte
+    note.cards = note.cards.filter { $0.direction == d("front", "back") }
+    let patched = LockIsolated<NoteDraft?>(nil)
+    let store = TestStore(initialState: NoteEditorFeature.State(note: note)) {
+      NoteEditorFeature()
+    } withDependencies: { [note] in
+      $0.apiClient.updateNote = { _, draft in
+        patched.setValue(draft)
+        return note
+      }
+      $0.dismiss = DismissEffect {}
+    }
+    #expect(store.state.directions == [d("front", "back")])
+    #expect(!store.state.hasChanges)
+
+    await store.send(.fieldChanged("back", "the menu")) {
+      $0.fields["back"] = "the menu"
+    }
+    await store.send(.saveButtonTapped) {
+      $0.isSaving = true
+    }
+    await store.receive(\.saveResponse.success)
+    await store.receive(\.delegate.saved)
+    #expect(patched.value?.directions == [d("front", "back")])
+  }
+
+  @Test func aNewNoteWithTheDefaultDirectionsClosesWithoutAskingButUncheckingOneAsks() async {
+    let dismissed = LockIsolated(false)
+    let untouched = TestStore(initialState: NoteEditorFeature.State()) {
+      NoteEditorFeature()
+    } withDependencies: {
+      $0.dismiss = DismissEffect { dismissed.setValue(true) }
+    }
+    await untouched.send(.closeButtonTapped)
+    #expect(dismissed.value)
+
+    let unchecked = TestStore(initialState: NoteEditorFeature.State()) { NoteEditorFeature() }
+    await unchecked.send(.directionToggled(d("back"))) {
+      $0.directions = [self.d("front")]
+    }
+    await unchecked.send(.closeButtonTapped) {
+      $0.isDiscardDialogPresented = true
+    }
   }
 
   @Test func closeWithoutChangesDismissesWithoutCallingTheAPI() async {

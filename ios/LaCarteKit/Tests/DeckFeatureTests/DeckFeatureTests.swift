@@ -467,12 +467,15 @@ struct DeckFeatureTests {
       $0.destination = .editor(NoteEditorFeature.State())
     }
     await store.send(\.destination.editor.fieldChanged, ("front", "chat")) {
-      $0.destination?.modify(\.editor) { $0.fields["front"] = "chat" }
+      $0.destination?.modify(\.editor) {
+        $0.fields["front"] = "chat"
+        $0.directions = [Direction(prompt: ["front"], answer: []), Direction(prompt: ["back"], answer: ["front"])]
+      }
     }
     await store.send(\.destination.editor.fieldChanged, ("back", "cat")) {
       $0.destination?.modify(\.editor) {
         $0.fields["back"] = "cat"
-        $0.directions = [Direction(prompt: ["front"], answer: ["back"])]
+        $0.directions = [Direction(prompt: ["front"], answer: ["back"]), Direction(prompt: ["back"], answer: ["front"])]
       }
     }
     await store.send(\.destination.editor.saveButtonTapped) {

@@ -61,8 +61,9 @@ final class NotesUITests: XCTestCase {
       let basic = typeSegment(app, "Basic"), person = typeSegment(app, "Person")
       XCTAssertTrue(basic.waitFor(timeout: 3), "editor.type has no Basic segment")
       XCTAssertTrue(basic.isSelected, "Basic not selected by default")
+      // Spec 027 AC 9: a new basic note starts with both directions.
       XCTAssertTrue(el(app, "editor.direction.front-back").isSelected, "basic default: front-back off")
-      XCTAssertFalse(el(app, "editor.direction.back-front").isSelected, "basic default: back-front on (no auto reverse)")
+      XCTAssertTrue(el(app, "editor.direction.back-front").isSelected, "basic default: back-front off (spec 027)")
       snapshot("editor-basic-new", appearance: appearance)
       person.tap()
       waitForSheet(app, "New person")
@@ -147,6 +148,107 @@ final class NotesUITests: XCTestCase {
         server.requests.contains { $0.method == "DELETE" && StubDeck.route($0.path).lowercased() == "/notes/\(id.lowercased())" }
       }, "no DELETE /notes/\(id)")
       XCTAssertTrue(deck.notes.isEmpty, "stub still has the person note")
+      app.terminate()
+      server.stop()
+    }
+  }
+
+  // MARK: - 027 editor: new basic notes check both directions
+
+  /// 027 #12: an existing one-card basic row opens with only front-back on. #8 (UI side): a new note left at its
+  /// defaults closes without the discard prompt. #9: a new note has both directions on. #10: chat/cat saved with the
+  /// defaults → POST /notes with both directions, row "2 directions". #11: unchecking back-front keeps front-back,
+  /// save → one direction, row "new". #4: unchecking both → hint "Choose at least one direction", Save off.
+  @MainActor
+  func testNoteEditor_basicBothDirections() throws {
+    for appearance in Self.appearances {
+      XCUIDevice.shared.appearance = appearance
+      let existing = "aaaaaaaa-0000-0000-0000-000000000001"
+      let deck = StubDeck([.init(id: existing, front: "greeting", back: "hello")])
+      let server = StubAPIServer(handler: deck.handle)
+      try server.start()
+      let app = launch(api: .live(server.url))
+      openDeck(app)
+      waitUntil("1 row") { self.rowIDs(app).count == 1 }
+      let frontBack = el(app, "editor.direction.front-back"), backFront = el(app, "editor.direction.back-front")
+
+      // #12: existing one-card basic note: front-back on, back-front off; closes untouched.
+      row(app, existing).tap()
+      waitForSheet(app, "Edit card")
+      XCTAssertTrue(frontBack.waitFor(timeout: 5), "editor.direction.front-back missing when editing")
+      scrollIntoView(app, backFront)
+      XCTAssertTrue(frontBack.isSelected, "existing note: front-back off")
+      XCTAssertFalse(backFront.isSelected, "existing one-card note: back-front on (reverse added)")
+      snapshot("editor-basic-edit-one-card", appearance: appearance)
+      el(app, "editor.close").tap()
+      waitForAbsence(editorBar(app), "edit sheet still open after Close with no change")
+
+      // #8 + #9: new note, both on; Close at the defaults dismisses at once.
+      el(app, "deck.add").tap()
+      waitForSheet(app, "New card")
+      XCTAssertTrue(frontBack.waitFor(timeout: 5), "editor.direction.front-back missing")
+      scrollIntoView(app, backFront)
+      XCTAssertTrue(frontBack.isSelected, "new basic: front-back off")
+      XCTAssertTrue(backFront.isSelected, "new basic: back-front off (spec 027 #9)")
+      el(app, "editor.close").tap()
+      waitForAbsence(editorBar(app), "new note at its defaults asked to discard (spec 027 #8)")
+
+      // #10: chat / cat with both directions → 2 directions.
+      el(app, "deck.add").tap()
+      waitForSheet(app, "New card")
+      type(app, "editor.front", "chat")
+      type(app, "editor.back", "cat")
+      scrollIntoView(app, backFront)
+      XCTAssertTrue(frontBack.isSelected && backFront.isSelected, "both directions not on after filling")
+      snapshot("editor-basic-filled-both", appearance: appearance)
+      el(app, "editor.save").tap()
+      waitForAbsence(editorBar(app), "editor still open after saving chat/cat")
+      let post = try XCTUnwrap(server.requests.last { $0.method == "POST" && StubDeck.route($0.path) == "/notes" },
+                               "no POST /notes for chat/cat")
+      XCTAssertEqual(prompts(try json(post.body)), [["front"], ["back"]], "POST directions: \(post.body)")
+      waitUntil("2 rows") { self.rowIDs(app).count == 2 }
+      let chat = rowIDs(app).first { $0 != existing.uppercased() } ?? ""
+      waitForLabel(el(app, "deck.row.\(chat).state"), "2 directions")
+      snapshot("deck-basic-two-directions", appearance: appearance)
+
+      // #11: uncheck back-front → one card.
+      el(app, "deck.add").tap()
+      waitForSheet(app, "New card")
+      XCTAssertTrue(backFront.waitFor(timeout: 5), "editor.direction.back-front missing")
+      scrollIntoView(app, backFront)
+      backFront.tap()
+      XCTAssertTrue(poll(timeout: 3) { !backFront.isSelected }, "back-front still on after tapping it")
+      XCTAssertTrue(frontBack.isSelected, "front-back off after unchecking back-front")
+      type(app, "editor.front", "Capital of France?")
+      type(app, "editor.back", "Paris")
+      scrollIntoView(app, backFront)
+      XCTAssertFalse(backFront.isSelected, "back-front back on after filling the fields")
+      XCTAssertTrue(el(app, "editor.save").isEnabled, "save disabled with one direction and both fields")
+      snapshot("editor-basic-one-direction", appearance: appearance)
+      let posts = server.requests.filter { $0.method == "POST" }.count
+      el(app, "editor.save").tap()
+      waitForAbsence(editorBar(app), "editor still open after saving Paris")
+      XCTAssertTrue(poll(timeout: 3) { server.requests.filter { $0.method == "POST" }.count > posts }, "no POST for Paris")
+      if let last = server.requests.last(where: { $0.method == "POST" }) {
+        XCTAssertEqual(prompts(try json(last.body)), [["front"]], "POST directions: \(last.body)")
+      }
+      waitUntil("3 rows") { self.rowIDs(app).count == 3 }
+      let paris = rowIDs(app).first { $0 != existing.uppercased() && $0 != chat } ?? ""
+      waitForLabel(el(app, "deck.row.\(paris).state"), "new")
+      snapshot("deck-basic-one-direction", appearance: appearance)
+
+      // #4: uncheck both → hint, Save off even with both fields filled.
+      el(app, "deck.add").tap()
+      waitForSheet(app, "New card")
+      type(app, "editor.front", "dog")
+      type(app, "editor.back", "chien")
+      scrollIntoView(app, backFront)
+      backFront.tap()
+      frontBack.tap()
+      XCTAssertTrue(poll(timeout: 3) { !frontBack.isSelected && !backFront.isSelected }, "a direction still on")
+      waitForLabel(el(app, "editor.directionsHint"), "Choose at least one direction")
+      XCTAssertFalse(el(app, "editor.save").isEnabled, "save enabled with no direction")
+      snapshot("editor-basic-no-direction", appearance: appearance)
       app.terminate()
       server.stop()
     }

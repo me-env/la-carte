@@ -66,12 +66,15 @@ struct AppFeatureTests {
       $0.destination = .addNote(NoteEditorFeature.State())
     }
     await store.send(\.destination.addNote.fieldChanged, ("front", "chat")) {
-      $0.destination?.modify(\.addNote) { $0.fields["front"] = "chat" }
+      $0.destination?.modify(\.addNote) {
+        $0.fields["front"] = "chat"
+        $0.directions = [Direction(prompt: ["front"], answer: []), Direction(prompt: ["back"], answer: ["front"])]
+      }
     }
     await store.send(\.destination.addNote.fieldChanged, ("back", "cat")) {
       $0.destination?.modify(\.addNote) {
         $0.fields["back"] = "cat"
-        $0.directions = [Direction(prompt: ["front"], answer: ["back"])]
+        $0.directions = [Direction(prompt: ["front"], answer: ["back"]), Direction(prompt: ["back"], answer: ["front"])]
       }
     }
     await store.send(\.destination.addNote.saveButtonTapped) {
