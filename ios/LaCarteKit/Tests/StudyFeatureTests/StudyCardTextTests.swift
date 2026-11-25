@@ -118,6 +118,22 @@ struct StudyTextLayoutTests {
     #expect(StudyView.referenceWidth(question: line, answer: .center) == nil)
   }
 
+  /// Spec 017 reveal lift: the distance from the question centred in the card to its place in the centred pair, or
+  /// the top when the pair overflows; up to `Spacing.xl` (40 pt) the question starts in place.
+  @Test func revealLiftStartsAboveFortyPoints() {
+    #expect(StudyView.revealLift(card: 650, question: 100, pair: 178) == 0)  // 39 pt
+    #expect(StudyView.revealLift(card: 650, question: 100, pair: 180) == 0)  // 40 pt
+    #expect(StudyView.revealLift(card: 650, question: 100, pair: 182) == 41)
+  }
+
+  @Test func revealLiftOfAnOverflowingPairEndsAtTheTop() {
+    #expect(StudyView.revealLift(card: 650, question: 100, pair: 900) == 275)
+  }
+
+  @Test func revealLiftOfAnOverflowingQuestionIsZero() {
+    #expect(StudyView.revealLift(card: 650, question: 800, pair: 900) == 0)
+  }
+
   /// SwiftUI measures "Who composed The " with its break space; the line is drawn without it. Laid out greedily,
   /// "Magic" would fit on the first line: the standard strategy pushes it down, as SwiftUI does.
   @Test func drawnWidthIsTheWidestLineWithoutItsBreakSpace() {

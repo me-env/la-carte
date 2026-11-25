@@ -19,6 +19,9 @@ public struct StudyView: View {
   @State private var isCardScrollable = false
   /// The card's visible height: a person card centres itself in it, see `studying`.
   @State private var cardHeight: CGFloat = 0
+  /// A basic card's question and question + answer heights: a question that would sit high starts centred (017 lift).
+  @State private var questionHeight: CGFloat = 0
+  @State private var pairHeight: CGFloat = 0
   /// Flashes the scroll indicators on each reveal, never as a card leaves.
   @State private var revealCount = 0
   @State private var reportMenuHeight: CGFloat = 360
@@ -242,10 +245,12 @@ public struct StudyView: View {
   }
 
   /// The back and a hidden copy of the rating row are always laid out, so the front never moves on reveal (except a
-  /// person card's text prompt, spec 014d).
+  /// person card's text prompt, spec 014d, and a basic question that would sit high: it starts centred, spec 017).
   /// The rating row shares the card text's `.accessibility2` cap so it never outgrows the card.
   private func studying(_ card: Card) -> some View {
-    VStack(spacing: Theme.Spacing.m) {
+    let lift = card.type == .person || reduceMotion
+      ? 0 : Self.revealLift(card: cardHeight, question: questionHeight, pair: pairHeight)
+    return VStack(spacing: Theme.Spacing.m) {
       ScrollViewReader { proxy in
         ScrollView {
           // Without a container, the card's id change as the scroll view's direct content never runs its
@@ -257,8 +262,9 @@ public struct StudyView: View {
               } else {
                 VStack(spacing: Theme.Spacing.m) {
                   prompt(card).placed(promptAlignment, asBlock: Self.textLayout != .column)
+                    .onGeometryChange(for: CGFloat.self, of: \.size.height) { questionHeight = $0 }
                   answer(card)
-                    .opacity(store.isRevealed ? 1 : 0)
+                    .animation(Theme.Motion.standard) { $0.opacity(store.isRevealed ? 1 : 0) }
                     .accessibilityHidden(!store.isRevealed)
                     .placed(answerAlignment, asBlock: answerIsBlock, width: answerWidth)
                     // Layout D: a leading answer's column is the question's widest line as drawn, at that line's place.
@@ -268,6 +274,8 @@ public struct StudyView: View {
                     )
                     .offset(x: answerSnap)
                 }
+                .onGeometryChange(for: CGFloat.self, of: \.size.height) { pairHeight = $0 }
+                .offset(y: store.isRevealed ? 0 : lift)
               }
             }
             .frame(maxWidth: .infinity)
@@ -293,10 +301,10 @@ public struct StudyView: View {
           }
         }
         .onChange(of: card.id) { _, id in proxy.scrollTo(id, anchor: .top) }
-        // Every path that reveals a person card's text prompt moves it in one transaction (Reduce Motion: none, the
-        // cross-fade animates its own opacity).
+        // Every path that reveals a person card's text prompt or lifts a basic card's question moves it in one
+        // transaction (Reduce Motion: none, the cross-fade animates its own opacity).
         .transaction(value: store.isRevealed) { transaction in
-          guard store.isRevealed, card.isPersonWithTextPrompt else { return }
+          guard store.isRevealed, card.isPersonWithTextPrompt || lift > 0 else { return }
           transaction.animation = reduceMotion ? nil : Theme.Motion.reveal
         }
         .onScrollGeometryChange(for: Bool.self, of: { $0.contentSize.height > $0.containerSize.height }) {
@@ -536,6 +544,13 @@ public struct StudyView: View {
   private var answerSnap: CGFloat {
     guard Self.textLayout == .snappedBlocks, promptAlignment == .leading else { return 0 }
     return Self.snap(answer: backMeasure.width, toQuestion: frontMeasure.width, column: cardSize.width)
+  }
+
+  /// How far a basic card's question, centred in the card, moves up to its place in the centred pair (or the top, when
+  /// the pair overflows). Up to `Spacing.xl` it still reads as centred, so it starts in place: 0 (spec 017 lift).
+  static func revealLift(card: CGFloat, question: CGFloat, pair: CGFloat) -> CGFloat {
+    let lift = max(0, (card - question) / 2 - max(0, (card - pair) / 2))
+    return lift > Theme.Spacing.xl ? lift : 0
   }
 
   /// Layout C: how far to move a leading answer block so its left edge meets the question's, when the two widths are
