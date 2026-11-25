@@ -98,6 +98,10 @@ Rules:
   no foreign key (like `ReviewLog`): a report outlives its card.
 - **`feedback` table** (spec 025): `{id, kind, message, status: open|done, resolution, created_at, closed_at}`.
   Created by `create_all` (new table, no existing data touched: no `_migrate` step, no backup).
+- **`activityevent` table** (spec 029): what the user did in the app, `{id (client UUID), kind, at (UTC), tz,
+  session, card_id, app_version, build, os, data (JSON), received_at}`, indexed on `at`, `card_id`, `kind`. Created by
+  `create_all` like `feedback`. Ingest is idempotent on `id` and skips invalid events one by one. Events older than
+  `deck.ACTIVITY_RETENTION` (90 days, by `at`) are pruned once at startup. Never touches the deck.
 - **Migration 014**: when `card` still has `front`, each card becomes a `basic` note **with the same id** and
   `fields = {front, back}`; `card` is rebuilt with `note_id = id`, `prompt ["front"]`, `answer ["back"]`. Card ids,
   FSRS state and review logs are untouched. Backup `<db>.pre-014-<timestamp>.bak`.
@@ -122,6 +126,8 @@ Rules:
 | POST | `/cards/{id}/review` | `{rating: again\|hard\|good\|easy, confidence?: 0–1}` (`confidence`: optional measured drag value, stored in `ReviewLog`, not used by FSRS; outside [0, 1] → 422 — spec 013) | rescheduled `Card` |
 | POST | `/cards/{id}/report` | `{reason: wrong\|drop\|doubt\|rephrase\|other\|broken_photo, comment?: string}` (`comment` trimmed, 1–500 chars, required for `other`; bad reason/comment → 422 `{"detail": …}`; unknown card → 404 — spec 015) | `Report` (201); the card is held out of study. `broken_photo` (filed by the app) is idempotent: an active one on the card is returned with 200, no new row |
 | GET | `/stats` | `?tz=` (IANA name, default `UTC`; unknown → 422 `{"detail": "Unknown time zone: <name>"}`) | `{total, due, new, reviewed_today, next_due, new_today, milestone, streak, streak_start, history_start, history, due_new, at_risk_total, at_risk_done, reviews_total, reviews_done}` (`due` / `next_due`: servable queue, see burying — spec 014; `due_new`: never-reviewed cards in that queue; `new_today`: distinct cards first reviewed today, `milestone`: the stored new-card step size, 0 → 15, `at_risk_total` / `at_risk_done` (0 / 0 when the step doesn't exist today) and `reviews_total` / `reviews_done`: the daily ladder, display only, see "The daily ladder" — spec 021; `history`: one letter per local day from `history_start` (first review day, or today) to today, `s` studied / `f` frozen / `m` missed / `p` today not yet studied; a missed day is frozen when the day before is studied, no freeze in the 6 days before, and the day after is studied or today; `streak` = trailing `s`/`f` days ending today, or yesterday while today is `p`, starting `streak_start` (null when 0) — spec 024; all per-day fields use local days in `tz` — spec 007) |
+| POST | `/activity` | `{events: [{id, kind, at, tz, session, app_version, build, os, card_id, data}]}` (≤ 500, else 413; each event validated on its own — spec 029) | `{stored, duplicates, rejected}` |
+| GET | `/activity` | `?since=&until=&card_id=&kind=&session=&limit=` (≤ 1000, default 100) | `[ActivityEvent]` newest first (`ActivityEventRead`, + `local_at`) |
 
 `Note` = `{id, type, fields, cards: [{id, prompt, answer, state, due, last_review}], created_at, updated_at}`.
 `Card` = `{id, note_id, type, prompt, answer, fields, front, back, state: new|learning|review|relearning, due,
@@ -158,6 +164,9 @@ missing | friction | other; `message` trimmed, 1–2000 chars, else `ToolError`)
 (open | done | all, oldest first), `close_feedback(feedback_id, note=None)` → `done`, `note` stored as
 `resolution` (unknown or already done → `ToolError`). Feedback is about the app / tools / experience, never one card
 (that's a report), and stays in this server's database: nothing is sent anywhere.
+
+Activity (spec 029): `activity_log(since, until, card_id, kind, session, limit=100)` → `[ActivityEventRead]` newest
+first, the same as `GET /activity`. `list_feedback` / `list_reports` descriptions point to it for correlation.
 
 Server `instructions` (sent on initialize, `mcp_server.INSTRUCTIONS`) explain notes vs cards and siblings, both
 types, "edit the note, not loose cards", "basic defaults to both directions; person: pick directions deliberately", minimalist cards, photo privacy, and the
@@ -197,6 +206,7 @@ ios/
     │   ├── <Name>Feature/     one module per feature (StudyFeature, DeckFeature, …)
     │   ├── APIClient/         @DependencyClient + live/in-memory implementations + models, AppGroup, TokenStore
     │   ├── AskAIClient/       copy to clipboard + open the chosen AI app, `AIApp` (spec 016)
+    │   ├── ActivityClient/    fire-and-forget activity log: file buffer + lazy uploader to `POST /activity` (spec 029)
     │   ├── DeckWidget/        Home Screen widget + its debug gallery (SwiftUI + WidgetKit, no TCA)
     │   └── DesignSystem/      tokens + reusable views (no TCA)
     └── Tests/<Module>Tests/   TestStore / Swift Testing
@@ -204,7 +214,7 @@ ios/
 
 Module dependency rule (no cycles, arrows point down):
 ```
-AppFeature → <Name>Feature → APIClient
+AppFeature → <Name>Feature → ActivityClient → APIClient
            → DeckWidget    → DesignSystem
 ```
 `DeckWidget` (deps `APIClient`, `DesignSystem`) is also the only product the widget extension links.
@@ -227,6 +237,8 @@ Changes flow up as delegates: `CardEditor.saved` → Deck/App; `Settings.serverC
 | `LA_CARTE_API=mock-notes` | In-memory deck seeded with `[Note].fixtures`: the 3 mock cards as `basic` notes, a `back → front` direction on "la carte", and a made-up person note (generated `data:` image) with 2 cards (spec 014b) |
 | `LA_CARTE_API_URL` | API base URL (no default: without it or a stored URL the app shows "Connect your deck") |
 | `LA_CARTE_API_TOKEN` | Bearer token |
+| `LA_CARTE_ACTIVITY=off` | Activity log disabled (`log` is a no-op; QA baseline, spec 029) |
+| `LA_CARTE_ACTIVITY_URL` | Where activity is sent instead of the API URL; in `mock*` modes activity is sent only when this is set (spec 029) |
 
 On device the URL (`apiURL`) and the theme live in the **App Group suite** `UserDefaults(suiteName: AppGroup.id)`
 (spec 007): `bootstrap()` sets `defaultAppStorage` to it, so `@Shared(.appStorage)` reads and writes there, and the
