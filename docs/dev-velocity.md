@@ -207,6 +207,45 @@ only a reboot fixes it.
 - Recovery by hand: kill the hung `clang-stat-cache` and its `xcodebuild` (lockf frees the slot), and delete the
   `*.sdkstatcache` it was waiting on (literal path; regenerable). Don't kill other projects' builds without asking.
 
+### Stuck file coordination (2026-11-26)
+
+Symptom: after the shim fixed FSEvents, `build-for-testing` hung again at 0% CPU from ~11:45 (stall guard, exit
+124). `sample`: main thread in `IDEWorkspace initWithFilePath` → `NSFileCoordinator coordinateReadingItemAtURL` →
+`_blockOnAccessClaim`. A 10-line test program doing one coordinated read of a scratch file also never returned, so
+filecoordinationd (root, not `U`, but no sudo for us to restart it) stopped answering for every process; the
+Xcode app is hung the same way (main thread waiting on an `NSProgress` file subscription). A reboot fixes it;
+so would `sudo killall filecoordinationd` (launchd restarts it), which needs the user.
+- Workaround: the shim dylib also makes `NSFileCoordinator`'s coordinate methods run their accessor at once and
+  `addFilePresenter:` a no-op. A command-line build has no presenters to coordinate with. Same on/off switch as the
+  FSEvents part (it's on while fseventsd is in `U`).
+- Apple's `xcodebuild test-without-building` of the UI tests (the shim hands tests to it) was not blocked: two
+  `StudyUITests` runs passed at 12:07 and 12:12 (5 passed, 2 skipped each, ~62 s).
+- Not covered: `ios-test.sh`'s unit `test-without-building` (LaCarteKit package products) can still hang in SwiftPM's
+  `FSEventStream.start` (seen 11:25, 0% CPU for 35+ min, outside the build-slot stall guard). Until the reboot,
+  bound unit runs with the tool timeout and kill a run that shows no output.
+
+### Stuck simulator audio (2026-11-26)
+
+Symptom: UI runs fail at launch with "Failed to prepare device 'iPhone 17 Pro' for impending launch. (Underlying
+Error: Bundle com.apple.CoreSimulator.SimAudioProcessorServices failed to create an audio route descriptor.
+Input/output error)". Only on device `iPhone 17 Pro` (42891DD3…, UI pool slot 1), never on `la-carte-ui-*`.
+Cause: the host has one `SimAudioProcessorService` per user (started with CoreSimulator, here since 2026-11-22). It
+was in state `U` with 34 threads blocked forever in `read()` of that one device's
+`data/var/run/com.apple.coresimulator.audio.plist` (`sample` + `lsof -p`): one stuck thread and one open handle per
+launch ever attempted there. Each launch on that device asks for its audio route, waits, and gets the I/O error.
+Other devices' reads return. Slot 1 is the first slot every run tries, so it failed whenever slot 1 was free:
+"more and more often" as fewer other runs held it. Not too many booted simulators (2 at the time), not
+CoreSimulatorService itself. Kernel-side reason unknown (same Mac, same weeks as the fseventsd `U` hang); a `U`
+process can't be killed, so only a reboot clears it.
+- Guard: `_sim-pool.sh` checks `sim_audio_stuck <udid>` (`_ios-env.sh`: `lsof` on the service, ~70 ms) before
+  using a slot. A stuck device is skipped with one line naming this section and the run takes the next free slot;
+  if every slot is stuck it exits 70 ("reboot"). A healthy read takes microseconds, so an open handle is a stuck one.
+- Don't erase, rename or delete the stuck device to work around it: that goes through CoreSimulatorService, which
+  could block on the same volume and stall every simulator. After the reboot it works again as is.
+- Worktrees get the guard once they merge main; older checkouts still fail when they land on slot 1.
+- `ios-ui-test-split.sh` counts a stuck slot as free, so it may start one shard more than there are usable slots;
+  that shard waits for the next slot to free up (correct, a little slower).
+
 ### Unit-test pool: before / after (2026-11-21)
 
 Before (one unit simulator, 17:30–17:46): 6 worktree/main runs of `ios-test.sh` queued. Slot holder acquired

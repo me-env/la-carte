@@ -124,4 +124,41 @@ struct DecodingTests {
     let data = try JSONEncoder().encode(ReportReason.allCases)
     #expect(String(decoding: data, as: UTF8.self) == #"["wrong","drop","doubt","rephrase","other","broken_photo"]"#)
   }
+
+  /// Spec 029 AC 19: the `POST /activity` request example, key for key.
+  @Test func activityEventEncodesTheEnvelope() throws {
+    let event = ActivityEvent(
+      id: UUID(uuidString: "6f1c0000-0000-4000-8000-000000000001")!,
+      kind: "rated",
+      at: Date(timeIntervalSince1970: 1_795_598_043.1204),
+      timeZone: TimeZone(identifier: "Europe/Paris")!,
+      session: UUID(uuidString: "a2d40000-0000-4000-8000-000000000002")!,
+      appVersion: "1.0",
+      build: "42",
+      os: "iOS 26.1",
+      cardID: UUID(uuidString: "9b3e0000-0000-4000-8000-000000000003")!,
+      data: ["rating": .string("good"), "input": .string("drag"), "ms_to_reveal": .int(1830), "ms_to_rate": .int(2410)]
+    )
+    let json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(event)) as? NSDictionary)
+    let expected = """
+      {"id": "6F1C0000-0000-4000-8000-000000000001", "kind": "rated", "at": "2026-11-25T10:14:03.120+01:00",
+       "tz": "Europe/Paris", "session": "A2D40000-0000-4000-8000-000000000002", "app_version": "1.0", "build": "42",
+       "os": "iOS 26.1", "card_id": "9B3E0000-0000-4000-8000-000000000003",
+       "data": {"rating": "good", "input": "drag", "ms_to_reveal": 1830, "ms_to_rate": 2410}}
+      """
+    #expect(json == (try JSONSerialization.jsonObject(with: Data(expected.utf8)) as? NSDictionary))
+  }
+
+  @Test func activityEventSendsANullCardIDAndRoundTrips() throws {
+    let event = ActivityEvent(
+      id: UUID(), kind: "app_foreground", at: Date(timeIntervalSince1970: 0), timeZone: .gmt, session: UUID(),
+      appVersion: "1.0", build: "1", os: "iOS 26.1", cardID: nil,
+      data: ["next_due": .null, "query": .bool(true), "prompt": .array([.string("photo")])]
+    )
+    let data = try JSONEncoder().encode(event)
+    let json = try #require(JSONSerialization.jsonObject(with: data) as? NSDictionary)
+    #expect(json["card_id"] is NSNull)
+    #expect(json["at"] as? String == "1970-01-01T00:00:00.000Z")
+    #expect(try JSONDecoder().decode(ActivityEvent.self, from: data) == event)
+  }
 }

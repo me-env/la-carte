@@ -143,6 +143,7 @@ extension APIClient {
       deleteNote: { id in
         deck.withValue { $0.removeAll { $0.id == id } }
       },
+      sendActivity: { _ in },
       isConfigured: { true }
     )
   }

@@ -1,5 +1,6 @@
 """MCP server: lets any agent read and edit the deck ("add these words to my deck")."""
 
+from datetime import datetime
 from functools import partial
 from typing import Annotated
 from uuid import UUID
@@ -13,6 +14,7 @@ from sqlmodel import Session
 
 from la_carte_api import deck
 from la_carte_api.models import (
+    ActivityEventRead,
     AddCardsReply,
     AddNotesReply,
     CardCreate,
@@ -85,6 +87,9 @@ looping agent task every few hours) that runs the `handle_reports` prompt. If th
 Feedback. Bugs, confusing tools or errors, missing capabilities and friction go to the developer
 with `send_feedback` (when the user asks, or on your own when a tool gets in your way). Card content
 goes through the app's card reports, not here.
+
+Activity. `activity_log` lists what the user did in the app (dated); read it when handling feedback
+or reports. It holds no card text.
 """
 
 HANDLE_REPORTS = """Work through my open la-carte reports.
@@ -373,7 +378,8 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         (wrong, drop, doubt, rephrase, other), optional `comment` and the current `card` (null
         once deleted). `active` (default) = open + waiting_user: those cards are held out of
         study. Also "all" or one status (open, waiting_user, resolved, dismissed). Read-only.
-        Handle each by its reason (see the server instructions), then `update_report`."""
+        Handle each by its reason (see the server instructions), then `update_report`.
+        `activity_log(card_id=…)` shows how the card was shown and rated."""
         return run(deck.list_reports, status)
 
     @mcp.tool()
@@ -407,7 +413,8 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
     @mcp.tool()
     def list_feedback(status: deck.FeedbackFilter = "open") -> list[FeedbackRead]:
         """Feedback agents sent to the developer, oldest first. `open` (default), `done` or
-        `all`. Read-only. For the developer triaging: handle each, then `close_feedback`."""
+        `all`. Read-only. For the developer triaging: handle each, then `close_feedback`.
+        To see what the user was doing, call `activity_log` around each item's `created_at`."""
         return run(deck.list_feedback, status)
 
     @mcp.tool()
@@ -415,6 +422,28 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         """Mark feedback as done once handled (fixed, won't fix, duplicate). `note` (optional)
         says what was done. Error on an unknown or already done id."""
         return run(deck.close_feedback, feedback_id, note)
+
+    # --- Activity (spec 029) --------------------------------------------------------------------
+
+    @mcp.tool()
+    def activity_log(
+        since: datetime | None = None,
+        until: datetime | None = None,
+        card_id: UUID | None = None,
+        kind: str | None = None,
+        session: UUID | None = None,
+        limit: Annotated[int, Field(ge=1, le=deck.ACTIVITY_LIST_MAX)] = 100,
+    ) -> list[ActivityEventRead]:
+        """What the user did in the app, newest first: cards shown, answers revealed, ratings
+        (with time to reveal and to rate), notes created / edited / deleted, reports, app
+        foreground / background, queue fetches (how many cards were served) and errors (failed
+        requests, broken photos). `at` is UTC, `local_at` the user's local time. Use it to
+        understand feedback or a report: query around its `created_at` (e.g. 15 minutes before
+        to 5 after) or by `card_id`. Filters: `since <= at < until` (ISO 8601, naive = UTC),
+        `card_id`, `kind`, `session` (one app launch / foreground); `limit` 1-1000.
+        Read-only; kept 90 days; events reach the server lazily, so the last minute may be
+        missing."""
+        return run(deck.list_activity, since, until, card_id, kind, session, limit)
 
     @mcp.prompt(title="Quiz me")
     def quiz_me(

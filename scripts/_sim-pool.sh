@@ -44,6 +44,11 @@ print(next((d["udid"] for d in devices if d["name"] == sys.argv[2] and d["isAvai
     echo "📱 creating simulator $NAME ($MODEL, $RUNTIME), about 2 GB once used" >&2
     UDID="$(sim_create "$NAME" "$MODEL" "$RUNTIME")"
   fi
+  if sim_audio_stuck "$UDID"; then  # never usable until a reboot: let the caller try the next slot
+    echo "🔒 skipping $NAME ($UDID): the simulator audio service is stuck on it, every launch there fails until a reboot (docs/dev-velocity.md, \"Stuck simulator audio\")" >&2
+    if [ -n "${POOL_MARK:-}" ]; then : >"$POOL_MARK"; : >"$POOL_MARK.stuck"; fi
+    exit 70
+  fi
   sim_appearance_ready "$UDID"
   if [ "$SLOT" -eq 1 ]; then export POOL_DESTINATION="$FIRST_DEST"; else export POOL_DESTINATION="platform=iOS Simulator,id=$UDID"; fi
   [ -z "${CI:-}" ] || exec "$@"
@@ -67,12 +72,15 @@ for k in $(seq 1 "$SIZE"); do  # an outer caller already holds a slot: use it
 done
 export LACARTE_LOCK_LABEL="${LACARTE_LOCK_LABEL:-$(ps -o command= -p $PPID | cut -c1-120)}"
 TIMEOUT="${LOCK_TIMEOUT:-3600}"
-MARK="$(mktemp)"; trap 'rm -f "$MARK"' EXIT   # removed by the locked command once it starts
+MARK="$(mktemp)"; trap 'rm -f "$MARK" "$MARK.stuck"' EXIT   # removed by the locked command once it starts
+export POOL_MARK="$MARK"   # --on-slot recreates it (+ .stuck) when it refuses a stuck device: try the next slot
+STUCK=""                   # slots refused this run
 holders() { for k in $(seq 1 "$SIZE"); do printf '\n  %s: %s' "$(slot_lock "$k")" \
   "$(cat "$DIR/$(slot_lock "$k").lock.holder" 2>/dev/null || echo '?')"; done; }
 WAITING=""
 while :; do
   for k in $(seq 1 "$SIZE"); do
+    case " $STUCK " in *" $k "*) continue ;; esac
     NAME="$(slot_lock "$k")"; FILE="$DIR/$NAME.lock"
     HOLDER="${LACARTE_AGENT:-unnamed agent} · $LACARTE_LOCK_LABEL · pid $$ · since $(date +%H:%M:%S)"
     : >"$MARK"
@@ -84,7 +92,12 @@ while :; do
     STATUS=$?
     set -e
     [ -e "$MARK" ] || exit "$STATUS"   # the command ran on this slot: its exit code is ours
+    if [ -e "$MARK.stuck" ]; then rm -f "$MARK.stuck"; STUCK="$STUCK $k"; fi
   done
+  if [ "$(echo $STUCK | wc -w)" -ge "$SIZE" ]; then
+    echo "❌ every $KIND-test simulator is stuck on the simulator audio service: reboot the Mac (docs/dev-velocity.md)" >&2
+    exit 70
+  fi
   if [ -z "$WAITING" ]; then
     WAITING=$SECONDS
     echo "🔒 all $SIZE $KIND-test simulators busy, waiting (up to ${TIMEOUT}s), held by:$(holders)" >&2

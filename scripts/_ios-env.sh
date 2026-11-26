@@ -126,3 +126,14 @@ sim_appearance_ready() {  # <udid>
   echo "🌗 $1: writing the appearance preference first (one boot, ~30 s)" >&2
   sim_prewarm "$1"
 }
+# A device whose audio route can never be prepared (docs/dev-velocity.md, "Stuck simulator audio"): the host's one
+# SimAudioProcessorService has a read of this device's audio plist that never returns. Every launch on it then fails
+# with "SimAudioProcessorServices failed to create an audio route descriptor" (and leaks one more stuck thread);
+# only a reboot clears it. A normal read takes microseconds, so an open handle seen by lsof is a stuck one.
+sim_audio_stuck() {  # <udid>
+  local pid
+  for pid in $(pgrep -U "$(id -u)" -f 'SimAudioProcessorService.xpc/Contents/MacOS/SimAudioProcessorService'); do
+    lsof -p "$pid" -Fn 2>/dev/null | grep -qF "/$1/data/var/run/com.apple.coresimulator.audio.plist" && return 0
+  done
+  return 1
+}

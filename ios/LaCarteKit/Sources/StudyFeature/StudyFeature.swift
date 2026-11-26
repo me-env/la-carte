@@ -1,4 +1,5 @@
 import APIClient
+import ActivityClient
 import AskAIClient
 import ComposableArchitecture
 import DesignSystem
@@ -34,6 +35,7 @@ public struct StudyFeature {
     var reportedBrokenPhotos: Set<Card.ID> = []
     /// Picked in Settings (spec 016b).
     @Shared(.appStorage(AIApp.storageKey)) var aiApp: AIApp = .vibe
+    @ObservationStateIgnored var activityTrail = ActivityTrail()
 
     /// What releasing the drag now would send.
     var swipeRating: Rating? { swipeEase.flatMap(StudyFeature.rating(forEase:)) }
@@ -148,6 +150,7 @@ public struct StudyFeature {
     }
   }
 
+  @Dependency(\.activity) var activity
   @Dependency(\.apiClient) var apiClient
   @Dependency(\.askAI) var askAI
   @Dependency(\.continuousClock) var clock
@@ -441,6 +444,7 @@ public struct StudyFeature {
         return .none
       }
     }
+    activityLogging
   }
 
   private func review(_ rating: Rating, state: inout State) -> Effect<Action> {
