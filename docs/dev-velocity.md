@@ -174,6 +174,24 @@ to save, so recover at once:
    by hand; if it was deleted, the next build re-fetches it.
 3. Rebuild: `scripts/ios-build.sh` (~25 s warm after the wipe), `scripts/ios-test.sh`.
 
+### Hung builds: clang-stat-cache / fseventsd (2026-11-26)
+
+Symptom: both build slots held 80+ min by `xcodebuild`s at 0% CPU, each waiting on a child
+`clang-stat-cache <SDK> -o <DerivedData>/SDKStatCaches.noindex/*.sdkstatcache` (also hit a non-la-carte build).
+Cause: when that cache file already exists, `clang-stat-cache` replays FSEvents history since the cache was written
+and sits in `CFRunLoopRun` until fseventsd answers. fseventsd (uptime 31 days) was stuck in state `U` and never
+answered, so every build after the first hung forever. A fresh cache (file absent) builds in ~2 s; reproduce with
+`clang-stat-cache <dir> -o x.cache` twice (2nd hangs). Later even `xcodebuild` itself hung at 0% CPU in
+`FSEventStreamStart` (`sample <pid>` shows `f2d_register_rpc`), so no build can run until fseventsd restarts:
+reboot, or `sudo killall fseventsd` (launchd respawns it). Both need the user.
+- Prevention: `BUILD_JOBS_FLAGS` passes `SDK_STAT_CACHE_ENABLE=NO`, so our builds never run clang-stat-cache.
+  Worktrees on older branches don't have it until they merge main.
+- Guard: `_lock.sh --slots` kills a build whose process tree used < `STALL_CPU` s (5) of CPU over `STALL_MIN` min
+  (10; `0` = off), frees the slot and exits 124 with a message naming this section. A live build burns minutes of
+  CPU in that window; a hung xcodebuild ~0.1 s/min.
+- Recovery by hand: kill the hung `clang-stat-cache` and its `xcodebuild` (lockf frees the slot), and delete the
+  `*.sdkstatcache` it was waiting on (literal path; regenerable). Don't kill other projects' builds without asking.
+
 ### Unit-test pool: before / after (2026-11-21)
 
 Before (one unit simulator, 17:30–17:46): 6 worktree/main runs of `ios-test.sh` queued. Slot holder acquired

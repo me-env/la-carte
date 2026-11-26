@@ -40,7 +40,9 @@ UNIT_SIM_LOCK="sim-${UNIT_SIMULATOR// /-}-$LOCK_OS"   # same name as SIM_LOCK wh
 BUILD_SLOTS="${BUILD_SLOTS:-2}"
 BUILD_JOBS="${BUILD_JOBS:-$(( $(sysctl -n hw.ncpu 2>/dev/null || echo 4) / BUILD_SLOTS ))}"
 [ "$BUILD_JOBS" -ge 1 ] || BUILD_JOBS=1
-BUILD_JOBS_FLAGS="-jobs $BUILD_JOBS"
+# SDK_STAT_CACHE_ENABLE=NO: clang-stat-cache reuses its cache by replaying FSEvents history and waits forever (0% CPU)
+# when fseventsd is stuck; it only saves clang a few stat()s. See "Hung builds" in docs/dev-velocity.md.
+BUILD_JOBS_FLAGS="-jobs $BUILD_JOBS SDK_STAT_CACHE_ENABLE=NO"
 BUILD_SLOT="$ROOT/scripts/_lock.sh --slots $BUILD_SLOTS xcodebuild-slot"  # unquoted on purpose: expands to 4 words
 export BUILD_SLOT BUILD_JOBS_FLAGS
 
