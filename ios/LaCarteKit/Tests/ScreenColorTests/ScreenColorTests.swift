@@ -268,7 +268,7 @@ struct Palette: Sendable {
 /// searchable), which `ImageRenderer` can't draw and which crashed the test process when it tried.
 @MainActor
 struct Screen {
-  static let scale: CGFloat = 3
+  nonisolated static let scale: CGFloat = 3
   let size: CGSize
   /// What the screen must show.
   let palette: Palette
