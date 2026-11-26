@@ -25,7 +25,7 @@ extension ActivityClient: DependencyKey {
       api: api,
       isConfigured: { activityURL != nil || api.isConfigured() },
       fileURL: .applicationSupportDirectory.appending(path: "activity.jsonl")
-    )
+    ).client
   }
 
   /// No-op: logging never feeds back into state, so features that log don't force every test to stub it.
@@ -45,21 +45,22 @@ extension ActivityClient: DependencyKey {
   }
 
   /// `log` stamps the envelope on the calling thread and hands it to an `ActivityLog`, created on the first call.
+  /// `finish` stops logging and returns once every logged event is in the file: the sync point for tests.
   static func live(
     api: APIClient,
     isConfigured: @escaping @Sendable () -> Bool,
     fileURL: URL
-  ) -> ActivityClient {
+  ) -> (client: ActivityClient, finish: @Sendable () async -> Void) {
     let info = Bundle.main.infoDictionary ?? [:]
     let appVersion = info["CFBundleShortVersionString"] as? String ?? ""
     let build = info["CFBundleVersion"] as? String ?? ""
     let os = ProcessInfo.processInfo.operatingSystemVersion
     let osName = "iOS \(os.majorVersion).\(os.minorVersion)" + (os.patchVersion > 0 ? ".\(os.patchVersion)" : "")
     let session = LockIsolated(Session())
-    let isStarted = LockIsolated(false)
+    let buffering = LockIsolated<Task<Void, Never>?>(nil)
     let (stream, continuation) = AsyncStream.makeStream(of: ActivityEvent.self)
 
-    return ActivityClient(
+    let client = ActivityClient(
       log: { activity in
         let event = session.withValue { session in
           ActivityEvent(
@@ -67,12 +68,9 @@ extension ActivityClient: DependencyKey {
             appVersion: appVersion, build: build, os: osName, cardID: activity.cardID, data: activity.data
           )
         }
-        let isFirst = isStarted.withValue { isStarted in
-          defer { isStarted = true }
-          return !isStarted
-        }
-        if isFirst {
-          Task.detached(priority: .utility) {
+        buffering.withValue { buffering in
+          guard buffering == nil else { return }
+          buffering = Task.detached(priority: .utility) {
             await ActivityLog(fileURL: fileURL, isConfigured: isConfigured, send: api.sendActivity).run(stream)
           }
         }
@@ -80,6 +78,10 @@ extension ActivityClient: DependencyKey {
       },
       now: { Date() }
     )
+    return (client, {
+      continuation.finish()
+      await buffering.value?.value
+    })
   }
 
   /// The app's server and token, or `LA_CARTE_ACTIVITY_URL`, on a session of its own so a slow activity request
