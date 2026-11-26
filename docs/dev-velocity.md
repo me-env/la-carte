@@ -182,8 +182,23 @@ Cause: when that cache file already exists, `clang-stat-cache` replays FSEvents 
 and sits in `CFRunLoopRun` until fseventsd answers. fseventsd (uptime 31 days) was stuck in state `U` and never
 answered, so every build after the first hung forever. A fresh cache (file absent) builds in ~2 s; reproduce with
 `clang-stat-cache <dir> -o x.cache` twice (2nd hangs). Later even `xcodebuild` itself hung at 0% CPU in
-`FSEventStreamStart` (`sample <pid>` shows `f2d_register_rpc`), so no build can run until fseventsd restarts:
-reboot, or `sudo killall fseventsd` (launchd respawns it). Both need the user.
+`FSEventStreamStart` (`sample <pid>` shows `f2d_register_rpc`): it starts a file watcher for every local Swift
+package while opening the project (`IDESwiftPackage.createPackageDirectoryFileSystemWatcher`, our LaCarteKit), and
+every `FSEventStreamStart` on the Mac blocks while fseventsd is in `U`. The package flags
+(`-disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile -skipPackageUpdates`) don't avoid it
+(measured: `xcodebuild -list` hangs with and without them). `sudo killall fseventsd` doesn't kill a `U` process:
+only a reboot fixes it.
+- Workaround until the reboot: `scripts/_fsevents-shim.sh` (sourced by `_ios-env.sh`, never on CI). When fseventsd
+  is in state `U`, `xcodebuild` resolves to a shim in `/tmp/la-carte-fsevents-shim/`: a copy of Xcode's xcodebuild,
+  ad-hoc signed (Apple's copy has library validation, so it ignores `DYLD_INSERT_LIBRARIES`), plus a dylib whose
+  `FSEventStreamStart`/`Stop` do nothing. A command-line build doesn't need file watchers. Off with
+  `LA_CARTE_FSEVENTS_SHIM=0`, on with `=1`. Worktrees get it once they merge main; older checkouts still hang.
+- The shim can't run tests: simulators only accept an xcodebuild with Apple's private entitlements ("DTServiceHubClient
+  failed to bless service hub"; an ad-hoc copy with them is killed at launch). `test-without-building` opens no
+  project, so the shim hands it to Apple's xcodebuild, which then doesn't hang; plain `xcodebuild test` exits 69 with a
+  message. `ios-test.sh` therefore runs build-for-testing + test-without-building while the shim is on (~500 MB
+  products copy in a temp dir per run); `ios-ui-test.sh` always does.
+- Fail fast: `_lock.sh --slots` prints one line when fseventsd is in `U` (shim active, or "this build will likely stall").
 - Prevention: `BUILD_JOBS_FLAGS` passes `SDK_STAT_CACHE_ENABLE=NO`, so our builds never run clang-stat-cache.
   Worktrees on older branches don't have it until they merge main.
 - Guard: `_lock.sh --slots` kills a build whose process tree used < `STALL_CPU` s (5) of CPU over `STALL_MIN` min

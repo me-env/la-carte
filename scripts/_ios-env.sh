@@ -45,6 +45,8 @@ BUILD_JOBS="${BUILD_JOBS:-$(( $(sysctl -n hw.ncpu 2>/dev/null || echo 4) / BUILD
 BUILD_JOBS_FLAGS="-jobs $BUILD_JOBS SDK_STAT_CACHE_ENABLE=NO"
 BUILD_SLOT="$ROOT/scripts/_lock.sh --slots $BUILD_SLOTS xcodebuild-slot"  # unquoted on purpose: expands to 4 words
 export BUILD_SLOT BUILD_JOBS_FLAGS
+# fseventsd hung (state U)? xcodebuild then runs through a shim that skips FSEvents (local only, see that file).
+source "$ROOT/scripts/_fsevents-shim.sh"
 
 # Big, regenerable outputs (xcresults now; per-agent DerivedData/worktrees later) go to $LA_CARTE_SCRATCH, e.g. an
 # external SSD. Set it per machine in scripts/.local.env (gitignored, never read on CI). If its volume isn't

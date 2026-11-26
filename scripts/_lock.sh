@@ -55,6 +55,13 @@ if [ "${1:-}" = --slots ]; then
   DIR="${LOCK_DIR:-/tmp/la-carte-locks}"; TIMEOUT="${LOCK_TIMEOUT:-3600}"; mkdir -p "$DIR"
   case " ${LACARTE_HELD_LOCKS:-} " in *" $NAME-held "*) exec "$@" ;; esac  # an outer caller already holds a slot
   LABEL="${LACARTE_LOCK_LABEL:-$(ps -o command= -p $PPID | cut -c1-120)}"
+  # fseventsd hung (state U): Xcode stalls at 0% CPU unless xcodebuild runs through the shim (_fsevents-shim.sh).
+  if ps -axo stat=,comm= | awk '$2 ~ /\/fseventsd$/ && $1 ~ /^U/ { f = 1 } END { exit !f }'; then
+    case "${FSEVENTS_SHIM_DIR:-}" in
+      "") echo "⚠️  fseventsd is hung (state U): this build will likely stall. See 'Hung builds' in docs/dev-velocity.md" >&2 ;;
+      *) echo "⚠️  fseventsd is hung (state U): xcodebuild runs through the no-FSEvents shim. See 'Hung builds' in docs/dev-velocity.md" >&2 ;;
+    esac
+  fi
   MARK="$(mktemp)"; trap 'rm -f "$MARK" "$MARK.stalled"' EXIT
   WAITING=""
   while :; do

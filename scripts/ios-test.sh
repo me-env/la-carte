@@ -27,9 +27,16 @@ set +e
 # First free unit-test simulator of the pool ($POOL_DESTINATION). No failure diagnostics: `simctl diagnose`
 # kept the simulator for up to 10 min after a failing run (measured 2026-11-21, docs/dev-velocity.md).
 # Keeps errors plus located notes: an error inside #expect/#require points at the test file only in its note.
-"$LOCK" "$KIT_BUILD_LOCK" "$ROOT/scripts/_sim-pool.sh" \
-  /bin/sh -c 'exec $BUILD_SLOT xcodebuild test $BUILD_JOBS_FLAGS -scheme LaCarteKit-Package -destination "$POOL_DESTINATION" "$@"' sh \
-  -skipMacroValidation -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} 2>&1 \
+# fseventsd hung (FSEVENTS_SHIM_DIR, _fsevents-shim.sh): `xcodebuild test` can't run, so build-for-testing (shim) then
+# test-without-building (Apple's xcodebuild); the products copy costs ~500 MB in $TMP for the run.
+if [ -n "${FSEVENTS_SHIM_DIR:-}" ]; then
+  export KIT_PRODUCTS="$TMP/unit.xctestproducts"
+  RUN='$BUILD_SLOT xcodebuild build-for-testing $BUILD_JOBS_FLAGS -scheme LaCarteKit-Package -destination "$POOL_DESTINATION" -skipMacroValidation -testProductsPath "$KIT_PRODUCTS" -quiet && exec xcodebuild test-without-building -destination "$POOL_DESTINATION" -testProductsPath "$KIT_PRODUCTS" "$@"'
+else
+  RUN='exec $BUILD_SLOT xcodebuild test $BUILD_JOBS_FLAGS -scheme LaCarteKit-Package -destination "$POOL_DESTINATION" -skipMacroValidation "$@"'
+fi
+"$LOCK" "$KIT_BUILD_LOCK" "$ROOT/scripts/_sim-pool.sh" /bin/sh -c "$RUN" sh \
+  -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} 2>&1 \
   | grep --line-buffered -E "^(✔|✘|🔒|StudyRenders:)|Test [Cc]ase .*(passed|failed|skipped)|error:|\.swift:[0-9]+:[0-9]+: note:|TEST( EXECUTE)? (SUCCEEDED|FAILED)"
 STATUS=${PIPESTATUS[0]}
 set -e
