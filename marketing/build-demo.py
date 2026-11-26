@@ -6,11 +6,12 @@
 
     LACARTE_AGENT=marketing UI_WORKERS=1 scripts/ios-ui-test.sh marketing \
         -only-testing:LaCarteUITests/MarketingUITests
-    uv run marketing/build-demo.py [frames_dir] [out_dir]
+    uv run marketing/build-demo.py [--readme] [frames_dir] [out_dir]
 
 frames_dir defaults to qa/screenshots/marketing, out_dir to $LA_CARTE_MARKETING_OUT (default: build/marketing)
 (big media: never committed). ffmpeg comes from the imageio-ffmpeg wheel (no Homebrew).
-Writes: out/app-demo.mp4, out/frames/NN.png (composed 1920x1080 shots), out/readme/*.png.
+Writes: out/app-demo.mp4, out/frames/NN.png (composed 1920x1080 shots), and the README images in
+marketing/readme/ (committed). --readme: only the README images.
 Shot list and captions: docs/marketing/app-demo.md (keep both in sync).
 """
 
@@ -23,6 +24,8 @@ import imageio_ffmpeg
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
+README_ONLY = "--readme" in sys.argv
+sys.argv = [a for a in sys.argv if a != "--readme"]
 FRAMES = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "qa/screenshots/marketing"
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(os.environ.get("LA_CARTE_MARKETING_OUT", "build/marketing"))
 
@@ -51,7 +54,7 @@ SHOTS = [
     (2.6, "phone", ["v09-copied-light"], "Ask an AI about it"),
     (2.4, "phone", ["v10-report-menu-light"], "Something wrong? Report it"),
     (2.4, "phone", ["v11-reported-light"], "Your agent fixes it over MCP"),
-    (3.0, "widget", ["widget-due-light", "widget-due-dark"], "Your deck on the Home Screen"),
+    (3.0, "widget", ["widget-small-nine-light", "widget-small-nine-dark"], "Your deck on the Home Screen"),
     (3.0, "phones", ["theme-light-light", "theme-dark-light", "theme-forest-light"], "Light, dark or forest"),
     (3.2, "end", [], ""),
 ]
@@ -130,22 +133,43 @@ def compose(kind: str, sources: list[str], caption: str) -> Image.Image:
     return canvas
 
 
+def sheet(names: list[str], scheme: str, height: int = 1000, gap: int = 70) -> Image.Image:
+    """Phones side by side on the brand background."""
+    ps = [phone(n, height, scheme) for n in names]
+    out = Image.new("RGB", (sum(p.width for p in ps) + gap * (len(ps) + 1), height + 2 * gap), BG[scheme])
+    x = gap
+    for p in ps:
+        out.paste(p, (x, gap), p)
+        x += p.width + gap
+    return out
+
+
+def widgets(names: list[str], size: int = 420, gap: int = 70) -> Image.Image:
+    """Widget tiles (light, dark) side by side on the light background, rounded with a hairline edge."""
+    out = Image.new("RGB", (size * len(names) + gap * (len(names) + 1), size + 2 * gap), BG["light"])
+    r = round(size * 0.21)
+    for i, n in enumerate(names):
+        t = Image.open(FRAMES / f"{n}.png").convert("RGB").resize((size, size), Image.LANCZOS)
+        mask = Image.new("L", (size * 4, size * 4), 0)
+        ImageDraw.Draw(mask).rounded_rectangle([0, 0, size * 4 - 1, size * 4 - 1], r * 4, fill=255)
+        edge = Image.new("L", ((size + 4) * 4, (size + 4) * 4), 0)
+        ImageDraw.Draw(edge).rounded_rectangle([0, 0, (size + 4) * 4 - 1, (size + 4) * 4 - 1], (r + 2) * 4, fill=255)
+        x = gap + i * (size + gap)
+        out.paste(HAIRLINE["light"], (x - 2, gap - 2), edge.resize((size + 4, size + 4), Image.LANCZOS))
+        out.paste(t, (x, gap), mask.resize((size, size), Image.LANCZOS))
+    return out
+
+
 def readme() -> None:
-    """Three phones side by side, light and dark, plus the cleaned single screens."""
-    out = OUT / "readme"
+    """The README images (committed, small PNGs): marketing/readme/."""
+    out = ROOT / "marketing/readme"
     out.mkdir(parents=True, exist_ok=True)
-    names = ["readme-1-front", "readme-2-reveal", "readme-3-person", "readme-4-deck"]
     for scheme in ("light", "dark"):
-        ps = [phone(f"{n}-{scheme}", 1000, scheme) for n in names[1:]]
-        gap = 70
-        sheet = Image.new("RGB", (sum(p.width for p in ps) + gap * 4, 1000 + 2 * gap), BG[scheme])
-        x = gap
-        for p in ps:
-            sheet.paste(p, (x, gap), p)
-            x += p.width + gap
-        sheet.save(out / f"readme-hero-{scheme}.png", optimize=True)
-        for n in names:
-            screen(f"{n}-{scheme}").save(out / f"{n}-{scheme}.png", optimize=True)
+        names = [f"readme-1-front-{scheme}", f"readme-2-reveal-{scheme}", f"readme-3-person-{scheme}"]
+        sheet(names, scheme).save(out / f"study-{scheme}.png", optimize=True)
+    sheet(["v03-ring-easy-light", "v08-menu-light", "theme-forest-light"], "light").save(
+        out / "more-light.png", optimize=True)
+    widgets(["widget-small-nine-light", "widget-small-nine-dark"]).save(out / "widget.png", optimize=True)
 
 
 def video() -> None:
@@ -173,6 +197,7 @@ def video() -> None:
 
 
 if __name__ == "__main__":
-    OUT.mkdir(parents=True, exist_ok=True)
-    video()
+    if not README_ONLY:
+        OUT.mkdir(parents=True, exist_ok=True)
+        video()
     readme()

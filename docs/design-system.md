@@ -75,6 +75,11 @@ Spacing `Theme.Spacing.xs/s/m/l/xl` = 4/8/16/24/40 (`xs` only for a caption tigh
   non-token color; keep `.tint(Theme.ink)` off the `List` so it doesn't turn the action ink.
 - `CardPhoto(url:style:)` (spec 014) — a person's photo from a URL (`AsyncImage`) in a fixed frame: `.thumbnail`/`.preview` circles (deck row, editor), `.card` 4:5 rounded rect (Study). Loading = `hairline` fill, failure/none = `person.fill` in `secondaryInk`, 1 pt `hairline` stroke, label "Photo". Never logs the URL.
 - Multi-select rows (note directions, spec 014c): checkmark rows (ink `checkmark`, `.isSelected` trait), not `Toggle` switches, so no green or low-contrast track.
+- `ContinueWithGoogleButton(isLoading:action:)` (spec 030c) — Google's "Continue with Google" pill to their
+  branding guidelines: Google Sans Medium (bundled subset), the unaltered standard-colour "G" (`Brand.xcassets`),
+  Google's Light theme in light and Dark theme in dark/forest, 50 pt, full width. Google's colours are the one
+  third-party literal palette, kept inside this file. Never tint, glass or restyle it; a future Sign in with Apple
+  button gets the same size.
 - Settings rows (spec 003): text field on a `surface` row, radius 12, 44pt min height, like the deck search field.
 
 ## Liquid Glass (iOS 26; audit `docs/design/glass-audit-2026-11-22.md`)

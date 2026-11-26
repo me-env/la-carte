@@ -7,111 +7,81 @@
 
 <h1 align="center">la carte</h1>
 
-<p align="center">One flashcard deck. Spaced repetition. No account. Any agent can add to it over MCP.</p>
+<p align="center">Minimalist flashcards for iPhone. One deck, spaced repetition,<br>and any AI agent can add cards to it over MCP.</p>
 
-<!-- Demo GIF (≤ 8 s, study flow) goes here once recorded: see docs/marketing/shot-list.md -->
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="marketing/readme/study-dark.png">
+    <img src="marketing/readme/study-light.png" width="840" alt="Three iPhone screens: the word petrichor alone on the screen; the same card with its answer, the smell of rain on dry earth, and Forgot / Got it; a person card with a placeholder portrait, Nora Vale, runs the corner bakery">
+  </picture>
+</p>
 
-## What it is
+## How it works
 
-An iPhone app and a small server for one deck of flashcards. Open the app and you are already reviewing:
-one card in the middle of the screen, tap to see the answer, rate how well you knew it. The server schedules
-each card with [FSRS](https://github.com/open-spaced-repetition/py-fsrs), so it comes back just before you
-would forget it.
+Open the app and you are already reviewing: one card in the middle of the screen. Tap to see the answer,
+then *Forgot* or *Got it*. Each card is scheduled with [FSRS](https://github.com/open-spaced-repetition/py-fsrs),
+so it comes back just before you would forget it.
 
-## Why
+<p align="center">
+  <img src="marketing/readme/more-light.png" width="840" alt="Three iPhone screens: dragging to rate a card, the double-tap menu with Ask about this card and report options, and the forest theme">
+</p>
 
-Making cards is the chore that stops most people. la carte's server speaks
-[MCP](https://modelcontextprotocol.io), so you can ask any agent, in the middle of whatever you are doing,
-"add these to my deck", and the cards are on your phone the next time you look. The agent can also quiz you,
-and its reviews count toward the same schedule.
+- **One deck.** Words, facts, people (a face, a name, who they are). Search it, add and edit cards.
+- **Fix in place.** Double-tap to edit a card, ask an AI about it, or report it as wrong.
+- **Calm.** Light, dark or forest. Large centered text, native controls, nothing else on screen.
+- **Widget.** What's left to review and your streak, on the Home Screen.
 
-## Features
+<p align="center">
+  <img src="marketing/readme/widget.png" width="420" alt="The Home Screen widget in light and dark: 8 to review, a grid of days, 9-day streak">
+</p>
 
-- **Study first.** The app opens on the next due card. Again, Hard, Good, Easy. "All caught up" says when the
-  next card is due.
-- **One deck.** Search it, add and edit cards, swipe to delete. Pull to refresh after an agent adds cards.
-- **Calm by design.** Light, dark, or forest theme. Large centered text, small round controls, Dynamic Type.
-- **Agents built in.** MCP tools to add, find, edit and review cards, with duplicate-safe adding, plus two
-  ready-made prompts: *Quiz me* and *Make cards from text*.
-- **Yours.** Self-hosted: one SQLite file behind one token. No account, no tracking.
-- **Home Screen widget** (in progress): cards to review and your study streak.
+## Connect your agent
 
-## Screenshots
-
-<!-- Study · Deck · Forest theme · Widget: added from qa/screenshots once the launch takes are recorded -->
-
-## Quick start
-
-Requirements: [uv](https://docs.astral.sh/uv/) (Python 3.13) and Xcode with the iOS 26 SDK or later.
+Making cards is the chore that stops most people. la carte's server speaks [MCP](https://modelcontextprotocol.io),
+so you can tell any agent, in the middle of whatever you are doing, "add these to my deck", and the cards are on
+your phone the next time you look.
 
 ```bash
-scripts/api-dev.sh                      # API on http://127.0.0.1:8000
-open ios/LaCarte.xcodeproj              # run the LaCarte scheme on a simulator
+claude mcp add --transport http la-carte https://deck.example.com/mcp \
+  --header "Authorization: Bearer <your-token>"
 ```
-In the app, open Settings and enter `http://127.0.0.1:8000` and any token (a local server started without
-`LA_CARTE_API_TOKEN` doesn't check it).
 
-Add the deck to Claude Code:
-```bash
-claude mcp add --transport http la-carte http://127.0.0.1:8000/mcp
-```
-Then ask: *"Add these to my deck: aurora, zenith, solace."*
+Then ask: *"Add these to my deck: aurora, zenith, solace."* Any MCP client with streamable HTTP works the same way.
 
-When the server isn't local, set `LA_CARTE_API_TOKEN` on it and pass `--header "Authorization: Bearer …"`.
+An agent can add, find, edit and delete cards (duplicate-safe), quiz you (its reviews count toward the same
+schedule), read your stats, and fix the cards you reported. Ready-made prompts: *Quiz me*, *Make cards from text*,
+*Add people*, *Handle reports*. The server asks agents to keep cards minimal: a word or short question on the
+front, the shortest answer on the back.
 
 ## Self-host
 
-**API.** Any host with Docker:
-```bash
-echo "LA_CARTE_API_TOKEN=$(openssl rand -hex 32)" > .env   # keep this token, the app and agents need it
-docker compose up -d --build                               # deck in the volume la-carte-data
-```
-Put it behind an HTTPS reverse proxy (the token must not travel over plain HTTP). Port 8000 is only
-exposed on the Docker network: run the proxy there, or publish `127.0.0.1:8000:8000` for a proxy on the
-host. Dokploy is one option: `docs/deploy.md`.
+The deck lives on your own server: one SQLite file behind one token. No account, no tracking.
 
-**App.** The simulator needs no Apple account: open `ios/LaCarte.xcodeproj` and run. On your iPhone
-(paid Apple Developer account): copy `ios/Config/Signing.local.xcconfig.example` to
-`Signing.local.xcconfig`, set your team ID and bundle ID prefix, register the phone on your team, then
-`scripts/ios-adhoc.sh` and `scripts/ios-install-device.sh build/export/LaCarte.ipa` (`docs/release.md`).
-In the app, open Settings and enter your server URL and token.
-
-**Agents.** Any MCP client:
 ```bash
-claude mcp add --transport http la-carte https://<your-host>/mcp --header "Authorization: Bearer <token>"
+echo "LA_CARTE_API_TOKEN=$(openssl rand -hex 32)" > .env   # the app and your agents need this token
+docker compose up -d --build                               # REST for the app, MCP at /mcp
 ```
 
-## What an agent can do
+Put it behind HTTPS, then enter the server URL and token in the app's Settings. Reverse proxy, backups and a
+Dokploy setup: [`docs/deploy.md`](docs/deploy.md). Building the app for your own iPhone:
+[`docs/release.md`](docs/release.md).
 
-The server is at `/mcp` (streamable HTTP), next to the REST API the app uses.
+To try it locally, run `scripts/api-dev.sh` (API on `http://127.0.0.1:8000`, no token needed) and the `LaCarte`
+scheme from `ios/LaCarte.xcodeproj` on a simulator (Xcode with the iOS 26 SDK or later).
 
-| Tool | What it does |
-|---|---|
-| `add_cards` | Add one or more cards; skips fronts already in the deck (case-insensitive) |
-| `list_cards` | List or search cards |
-| `update_card`, `delete_card` | Fix or remove a card |
-| `due_cards`, `review_card` | Study from the agent; reviews update the same schedule as the app |
-| `deck_stats` | Totals, due now, next due card, streak |
+## Status
 
-Prompts: **Quiz me** (`quiz_me`), **Make cards from text** (`make_cards`), **Add people** (`add_people`) and **Handle reports** (`handle_reports`, also what a recurring report watcher runs). The server also tells agents to keep
-cards minimal: a word or short question on the front, the shortest answer on the back.
+Early access: a few friends are trying it, and it is on its way to the App Store. Sign in with Google is coming
+soon. Expect things to change.
 
-## Docs
+## Contributing
 
-- API on a server (Dokploy, Docker Compose, HTTPS, backups): `docs/deploy.md`
-- App on the iPhone (Ad Hoc .ipa): `docs/release.md`
-- Architecture and API contract: `docs/architecture.md`
-- Design system: `docs/design-system.md`
-
-## How it's built
-
-- `api/`: Python, FastAPI, SQLite, FSRS, MCP server
-- `ios/`: SwiftUI and The Composable Architecture
-- `docs/`: architecture, conventions, design system, specs
-
-Built by a team of Claude Code agents (spec, implement, review, validate): see `CLAUDE.md` and
-`docs/workflow.md`. Contributions follow the same rules and `scripts/`.
+Issues and pull requests are welcome. The app is SwiftUI with The Composable Architecture (`ios/`), the server
+is Python, FastAPI and SQLite (`api/`). Build and test only through `scripts/` (see [`CLAUDE.md`](CLAUDE.md)),
+and keep it simple: [`docs/architecture.md`](docs/architecture.md),
+[`docs/design-system.md`](docs/design-system.md). The project is built by a team of Claude Code agents
+(spec, implement, review, validate): [`docs/workflow.md`](docs/workflow.md).
 
 ## License
 
-MIT, see `LICENSE`.
+MIT, see [`LICENSE`](LICENSE).

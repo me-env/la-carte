@@ -26,7 +26,8 @@ Rules:
 - New behavior goes in `deck.py` first, then exposed via REST **and** MCP when both make sense.
 - REST and MCP return the same schemas (`NoteRead`, `CardRead`, `DeckStats`).
 - Times are UTC everywhere; `now` is injectable in `deck` functions for tests.
-- No login. Optional single bearer token (`LA_CARTE_API_TOKEN`) protects REST + MCP when deployed.
+- Accounts (spec 030): every request resolves to one user through a bearer token; every owned row has a `user_id`
+  and every `deck` function filters on it. See "Accounts and auth".
 - MCP tool docstrings are the agent-facing docs: write them for an LLM reader (what, when, effects).
 - Schema changes on existing tables go in `db._migrate`: idempotent, checked with `PRAGMA`, run at startup
   **before** `create_all` (so a backup is an exact copy of the old file; a missing table = fresh database, skipped).
@@ -45,7 +46,7 @@ Rules:
 ### Notes and cards (spec 014)
 - **Note** = one thing the user knows: `type` + named string `fields` (JSON). Types are fixed in `deck.NOTE_TYPES`:
   `basic` (`front`, `back`; both required; key `front`; default directions both `front → back` and `back → front`,
-  spec 026; legacy `add_cards` / `POST /cards` make one card `front → back`) and `person` (`photo`
+  spec 026; legacy REST `POST /cards` makes one card `front → back`) and `person` (`photo`
   http(s) URL, `name` required, `description` free text e.g. "Mistral CEO"; key `name`; no default: directions
   must be given). `role` / `context` were removed (spec 014a amendment): using them is a 422 "… use description".
 - **Card** = one direction over its note's fields with its own FSRS state: **one prompt field → every other field
@@ -110,12 +111,41 @@ Rules:
   role/context mapped to `description`; a card duplicating a sibling's direction is deleted (reviews stay). Backup
   `<db>.pre-014a-<timestamp>.bak`.
 
+### Accounts and auth (spec 030)
+Principles (non-negotiable):
+- **Never passwords.** No passwords or password hashes are stored; no password login, reset or magic link, ever.
+  Identity is always OAuth / OpenID Connect with an external provider.
+- **Google is the only identity provider for now**, behind `identity.IdentityProvider` (`google`, and `fake` for
+  tests/e2e only) so another one can be added without changing the flow, tables or token endpoints.
+- **Minimum from Google**: scopes `openid email` only (no name, no picture); stored: Google's `sub` + the verified
+  email; unverified emails are refused; no Google token is kept.
+- **Account = (provider, `sub`)**, never the email alone. The only email match: the migrated owner row (no identity
+  yet) is claimed by the first verified sign-in with `LA_CARTE_OWNER_EMAIL`. A future provider links by signing in
+  while already signed in.
+- **Our tokens, opaque, hashed**: `lc_at_` access (1 h), `lc_rt_` refresh (rotated; reuse revokes the family),
+  `lc_pat_` personal access tokens; only SHA-256 stored (`apitoken`), so no signing key. No token passthrough.
+- **OAuth first, PATs second**: agents connect with OAuth; PATs (scripts, CI/e2e, MCP clients without OAuth) are
+  minted only from the app by a Google-signed-in user (`POST /me/tokens` needs an `la-carte-ios` access token),
+  shown once, revocable, optional expiry. The old `LA_CARTE_API_TOKEN` is imported once as the owner's PAT `legacy`.
+- Cross-user access answers "not found", never "forbidden"; a pytest matrix covers every REST route and MCP tool.
+
+Pieces: `auth.py` (mint/verify tokens, `CurrentUser` dependency, MCP token verification), `oauth.py` (the MCP SDK
+`OAuthAuthorizationServerProvider`: `/authorize`, `/token`, `/register` (DCR), `/revoke`, metadata), `identity.py`
+(providers). Tables `user`, `identity`, `apitoken`, `oauthclient`, `authrequest`, `authcode`; `user_id` on `note`,
+`card`, `reviewlog`, `report`, `feedback`, `activityevent`; `settings` keyed by `user_id`. Sign-up gate:
+`LA_CARTE_ALLOWED_EMAILS` (+ the owner). Flow: client → `/authorize` → (agents: `/oauth/consent`) → Google →
+`/oauth/callback` → our code → client → `/token`. Public paths: `/health`, icons, `/privacy`, `/.well-known/*`,
+`/authorize`, `/token`, `/register`, `/revoke`, `/oauth/*`. Detail: specs 030, 030a, 030b.
+
 ### REST contract
 
 | Method | Path | Body / query | Returns |
 |---|---|---|---|
 | GET | `/health` | — | `{status, build}` (no auth); `build` = 12-hex sha256 of the API's `.py` source (`build.py`) |
 | GET | `/favicon.ico`, `/icon.png` (512), `/apple-touch-icon.png` (180), `/icon.svg` | — | The la-carte icon (no auth, cached 1 day), from `docs/design/brand/render.py`; MCP serverInfo `icons` points at it when `LA_CARTE_PUBLIC_URL` is set |
+| GET/DELETE | `/me` | — | `{id, email, created_at}` / 204 (deletes the account and everything it owns — spec 030a) |
+| GET/POST | `/me/tokens` | POST `{name, scope: deck\|stats, expires_in_days?}` (only with an app access token) | `[PersonalToken]` / `PersonalToken` + `token` once (201) — specs 030a/b |
+| DELETE | `/me/tokens/{id}` | — | 204 (revokes) |
 | GET | `/notes` | `?query=&type=basic\|person&limit=` (≤ 500, default 100; `query` = casefolded substring of any field but `photo`) | `[Note]` newest first |
 | POST | `/notes` | `{type, fields, directions?: [{prompt: [field], answer?: [fields]}]}` (one prompt field, answer = the rest; no duplicate check) | `Note` (201) |
 | GET/PATCH/DELETE | `/notes/{id}` | PATCH `{fields?, directions?}`: `fields` merged key by key (`""` clears); `directions` = the full desired set (kept ones keep card + schedule, new ones due now, missing ones deleted) | `Note` / 204 (note + all its cards) |
@@ -142,16 +172,14 @@ key (basic `front`, person `name`; casefolded, trimmed) matches an existing note
 nothing on a validation error), `find_notes(query, type, limit=50)`, `update_note(note_id, fields)`,
 `add_direction(note_id, prompt, answer=None)`, `remove_direction(card_id)` (refuses the last card), `delete_note(note_id)`.
 
-Cards (thin wrappers with the `/cards` semantics; docstrings start "Prefer the note tools"): `add_cards` (basic
-notes; same duplicate rule on basic fronts, returns `{added: [Card], skipped: [Card]}`), `list_cards`, `update_card`,
-`delete_card`, `due_cards` (servable queue), `review_card(card_id, rating, confidence=None)`, `deck_stats(tz="UTC")`
+Cards: `due_cards` (servable queue), `review_card(card_id, rating, confidence=None)`, `deck_stats(tz="UTC")`
 (the same `DeckStats` as `/stats`; fields, the ladder, freezes and the `history` alphabet explained in its docstring).
 REST `POST /notes` / `POST /cards` always add.
 
 New-card milestone (spec 021, MCP only): `new_card_milestone(value=None)` reads the step size, or sets it (1–200,
 else `ToolError` "new_card_milestone must be between 1 and 200."), and returns `MilestoneSetting` = `{milestone}`.
-The MCP replies of `add_notes` (`AddNotesReply`) and `add_cards` (`AddCardsReply`) add `new` (never-reviewed cards
-after the insert) and `milestone`; REST `POST /notes`, `POST /cards` keep their models.
+The MCP reply of `add_notes` (`AddNotesReply`) adds `new` (never-reviewed cards after the insert) and `milestone`;
+REST `POST /notes`, `POST /cards` keep their models.
 
 Reports (spec 015): `list_reports(status="active")` → `[Report]`, oldest first (`active` = open + waiting_user;
 also `all` or one status). `update_report(report_id, outcome, note)` stores `note` (non-blank) as `resolution`:
@@ -167,6 +195,15 @@ missing | friction | other; `message` trimmed, 1–2000 chars, else `ToolError`)
 
 Activity (spec 029): `activity_log(since, until, card_id, kind, session, limit=100)` → `[ActivityEventRead]` newest
 first, the same as `GET /activity`. `list_feedback` / `list_reports` descriptions point to it for correlation.
+
+History (spec 031, MCP only): `review_history(since, until, card_id, note_id, rating, limit=100)` → `[ReviewEntry]`
+= `{card_id, reviewed_at, rating, confidence, card: Card | null}` over `ReviewLog` (app and MCP ratings, never
+pruned), newest first; `struggling_cards(since, limit=20)` → `[StrugglingCard]` = `{card, reviews, again,
+last_again_at}`, existing cards with ≥ 1 `again`, most `again` first.
+
+Removed in spec 031 (superseded by the note tools; REST `/cards` unchanged): `add_cards` → `add_notes` (one card:
+`directions: [{"prompt": ["front"]}]`), `list_cards` → `find_notes`, `update_card` → `update_note`, `delete_card` →
+`remove_direction` / `delete_note`.
 
 Server `instructions` (sent on initialize, `mcp_server.INSTRUCTIONS`) explain notes vs cards and siblings, both
 types, "edit the note, not loose cards", "basic defaults to both directions; person: pick directions deliberately", minimalist cards, photo privacy, and the
@@ -184,11 +221,12 @@ given; asks which directions when `directions` is not given),
 `handle_reports()` (works through active `list_reports` per the server instructions, asks the user where they say to;
 also what a recurring report watcher runs).
 
-Connect an agent (Claude Code example):
+Connect an agent (Claude Code example; OAuth, a browser opens for Google — spec 030b):
 ```bash
-claude mcp add --transport http la-carte http://127.0.0.1:8000/mcp \
-  --header "Authorization: Bearer $LA_CARTE_API_TOKEN"
+claude mcp add --transport http la-carte https://<api>/mcp
 ```
+Without OAuth (scripts, clients that only send headers): `--header "Authorization: Bearer lc_pat_…"` with a PAT
+created in the app (spec 030d).
 
 ## iOS (`ios/`)
 
@@ -204,7 +242,9 @@ ios/
     ├── Sources/
     │   ├── AppFeature/        root reducer, composes child features, RootView entry point
     │   ├── <Name>Feature/     one module per feature (StudyFeature, DeckFeature, …)
-    │   ├── APIClient/         @DependencyClient + live/in-memory implementations + models, AppGroup, TokenStore
+    │   ├── APIClient/         @DependencyClient + live/in-memory implementations + models, AppGroup, TokenStore,
+│   │                      AuthClient + SessionStore (sign-in, refresh — spec 030c)
+│   ├── SignInFeature/     the sign-in screen (spec 030c)
     │   ├── AskAIClient/       copy to clipboard + open the chosen AI app, `AIApp` (spec 016)
     │   ├── ActivityClient/    fire-and-forget activity log: file buffer + lazy uploader to `POST /activity` (spec 029)
     │   ├── DeckWidget/        Home Screen widget + its debug gallery (SwiftUI + WidgetKit, no TCA)
@@ -218,11 +258,13 @@ AppFeature → <Name>Feature → ActivityClient → APIClient
            → DeckWidget    → DesignSystem
 ```
 `DeckWidget` (deps `APIClient`, `DesignSystem`) is also the only product the widget extension links.
-Feature tree (specs 001–004):
+Feature tree (specs 001–004, 030c/d):
 ```
 AppFeature ── study: StudyFeature                      (home, always on screen)
            └─ destination: .deck(DeckFeature)          ── destination: .editor(NoteEditorFeature)
                            .addNote(NoteEditorFeature)                 .settings(SettingsFeature)
+                           .settings(SettingsFeature)  ── AccessTokensFeature (030d)
+                           .signIn(SignInFeature)      (full-screen cover while signed out — 030c)
 ```
 Changes flow up as delegates: `CardEditor.saved` → Deck/App; `Settings.serverChanged` → Deck;
 `Deck.deckChanged` → App, which sends `study(.deckChanged)` so study re-fetches.
@@ -235,8 +277,9 @@ Changes flow up as delegates: `CardEditor.saved` → Deck/App; `Settings.serverC
 |---|---|
 | `LA_CARTE_API=mock` | In-memory deck seeded with `[Card].fixtures` (UI tests, demos) |
 | `LA_CARTE_API=mock-notes` | In-memory deck seeded with `[Note].fixtures`: the 3 mock cards as `basic` notes, a `back → front` direction on "la carte", and a made-up person note (generated `data:` image) with 2 cards (spec 014b) |
-| `LA_CARTE_API_URL` | API base URL (no default: without it or a stored URL the app shows "Connect your deck") |
-| `LA_CARTE_API_TOKEN` | Bearer token |
+| `LA_CARTE_API_URL` | API base URL; overrides the build-time `LaCarteDefaultAPIURL` (development, UI tests). Before 030c: no default, a stored URL from Settings |
+| `LA_CARTE_API_TOKEN` | Bearer token (a PAT; skips sign-in) |
+| `LA_CARTE_AUTH=signed-out` / `not-allowed` | Mock modes: start signed out; mock sign-in succeeds / is refused (spec 030c) |
 | `LA_CARTE_ACTIVITY=off` | Activity log disabled (`log` is a no-op; QA baseline, spec 029) |
 | `LA_CARTE_ACTIVITY_URL` | Where activity is sent instead of the API URL; in `mock*` modes activity is sent only when this is set (spec 029) |
 
@@ -250,6 +293,13 @@ The widget fetches `/stats?tz=<device zone>` itself, caches the last result unde
 reloads its timeline when it goes to the background. The live `APIClient` resolves URL and token **per request**:
 launch env > stored value > none. Without both a URL and a token the app shows "Connect your deck" and makes
 no request (`APIClient.isConfigured`, spec 008); a 401/403 shows "Token rejected".
+Accounts (spec 030c): the sign-in session `{baseURL, accessToken, refreshToken, expiresAt}` is Keychain account
+`session` (app only, no access group), refreshed by `SessionStore` (once per 401, shared in-flight refresh; dead
+refresh token → signed out → `SignInFeature`). The widget uses its own `stats`-scoped PAT, account `widget-token`
+in the App Group access group, and never refreshes. Credential order: launch env > `session` > legacy `api-token`;
+URL order: launch env > Info.plist `LaCarteDefaultAPIURL` (build setting `LA_CARTE_DEFAULT_API_URL`, set by CI; app
+and widget). The stored `apiURL` is no longer read, and the app has no server URL setting: self-hosters build from
+source with their own URL (spec 030 "Self-hosting").
 
 Theme (spec 004): `@Shared(.appStorage(AppTheme.storageKey))` (`"theme"`), `system|light|dark|forest`; launch argument `-theme forest`
 overrides it for screenshots.

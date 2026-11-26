@@ -120,7 +120,8 @@ let package = Package(
     .testTarget(name: "DeckWidgetTests", dependencies: ["DeckWidget", "APIClient"]),
 
     // MARK: UI foundation (no TCA)
-    .target(name: "DesignSystem"),
+    // Resources: Google's "G" and a Google Sans subset for `ContinueWithGoogleButton` (spec 030c).
+    .target(name: "DesignSystem", resources: [.process("Resources")]),
     .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"]),
   ],
   swiftLanguageModes: [.v6]

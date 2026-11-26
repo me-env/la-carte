@@ -86,9 +86,16 @@ Then ask "add these words to my deck". `claude mcp list` should show `la-carte` 
 
 ## Point the iPhone app at it
 
-The Settings screen (spec 003, backlog #5) is where you do this. Once it ships: Deck → gear icon → URL
-`https://carte.example.com`, token, then *Test connection* ("Connected · N cards"). The app has no built-in
-server (spec 008): until both are set it shows "Connect your deck" with an "Open Settings" button.
+Today (spec 008): Deck → gear icon → URL `https://carte.example.com`, token, then *Test connection*
+("Connected · N cards"). Until both are set the app shows "Connect your deck" with an "Open Settings" button.
+
+From accounts (spec 030c) the app has **no server setting**: it talks only to the URL baked in at build time
+(`LA_CARTE_DEFAULT_API_URL`; the App Store build points at the hosted server). To self-host, build the app from
+source with `LA_CARTE_DEFAULT_API_URL = https://carte.example.com` in `ios/Config/Signing.local.xcconfig`, and
+register your own Google OAuth client ("Web application", redirect URI
+`https://carte.example.com/oauth/callback`) for the API's `LA_CARTE_GOOGLE_CLIENT_ID` / `_SECRET`. Sign-up is
+open unless `LA_CARTE_ALLOWED_EMAILS` is set. Full steps: `docs/specs/030-accounts-google-login.md`
+("Self-hosting").
 
 ## Run the production image locally
 
