@@ -58,6 +58,12 @@ Google. No frontend app: the API is its own OAuth 2.1 authorization server and d
    (MCP authorization spec 2026-07-28, "Token passthrough" is forbidden).
 9. **The API stays the single source of truth** and holds all auth logic. The only HTML it renders: the consent
    page for agent connectors, sign-in error pages, and `/privacy`. No separate frontend.
+10. **Everyone sees only their own data, except the owner reads feedback** (user decision 2026-11-26). The owner
+   (the `user` whose email equals `LA_CARTE_OWNER_EMAIL`; nobody when unset) gets, **over MCP only**: every user's
+   feedback in `list_feedback` (each item carries its sender's `user_email`), `close_feedback` on any of it, and
+   `activity_log(user=<email>)` for a user who has sent at least one feedback, scoped to that user. Nothing else is
+   cross-user (deck, reviews, reports, stats, tokens), no admin UI, no REST route, no role table. `/privacy` says
+   so (030b). Detail and tests in 030a.
 
 ## The flow
 ```
@@ -209,7 +215,7 @@ external URLs the user (or their agent) typed; la-carte hosts no images.
    the gate is kept) → friends install.
 
 ## Out of scope (backlog)
-- Sign in with Apple (App Store blocker, see note). CIMD client registration. An admin view of all users'
-  feedback/activity (each user sees only their own; friends' feedback reaches the developer only if forwarded).
+- Sign in with Apple (App Store blocker, see note). CIMD client registration. An admin UI or roles beyond the
+  owner's MCP access to feedback (decision 10).
   Rate limiting. Email sending of any kind. Linking a second
   provider. Hosting photos. Multiple decks per user. Shared decks.

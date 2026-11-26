@@ -73,7 +73,18 @@ user's app, widget and agents keep working with no change. No Google yet (030b).
    last_used_at}]` (PATs only, not revoked, newest first; never the token or its hash); `DELETE /me/tokens/{id}` →
    204 (sets `revoked_at`; unknown or another user's → 404). Creating PATs (`POST /me/tokens`) is 030b (it needs
    the app's OAuth token).
-9. `docker-compose.yml`: `LA_CARTE_API_TOKEN` becomes optional, `LA_CARTE_OWNER_EMAIL` is passed through.
+9. **Owner access to feedback** (030 decision 10; MCP only). `deck.is_owner(session, user_id)`: the user's email
+   equals `LA_CARTE_OWNER_EMAIL` (unset → false). For the owner only:
+   - `list_feedback(status)` returns every user's feedback, newest first. `FeedbackRead` gains
+     `user_email: str` (the sender; for a non-owner it is always their own).
+   - `close_feedback(feedback_id, note)` accepts any user's feedback id.
+   - `activity_log(..., user: str | None = None)`: `user` is an email; the result is that user's events (same
+     filters). Allowed when the user exists and has at least one `feedback` row (any status); else `ToolError`
+     "user not found".
+   For anyone else: `list_feedback` / `close_feedback` stay scoped (another user's id → "not found"), and a `user`
+   other than the caller's own email → `ToolError` "user not found". REST (`GET /activity`) gets no `user`
+   parameter. Docstrings: `activity_log`'s `user` arg says "owner only: a user who sent feedback".
+10. `docker-compose.yml`: `LA_CARTE_API_TOKEN` becomes optional, `LA_CARTE_OWNER_EMAIL` is passed through.
    `docs/deploy.md`: the new env vars and the deploy order (owner email first).
 
 ## Acceptance criteria
@@ -82,7 +93,7 @@ user's app, widget and agents keep working with no change. No Google yet (030b).
 | 1 | A request to any REST route but `/health` and the icons without `Authorization`, with an unknown token, a revoked PAT or an expired PAT → 401 `{"detail": "Unauthorized"}` with `WWW-Authenticate: Bearer` | pytest |
 | 2 | `/mcp` without a valid token → 401 whose `WWW-Authenticate` holds `resource_metadata=`; with a valid `deck` PAT `tools/list` works over HTTP | pytest |
 | 3 | A `stats` PAT gets 200 on `GET /stats`, 403 on `GET /notes`, 401/403 on `/mcp` | pytest |
-| 4 | **Cross-user matrix**: users A and B, each with notes, cards, reviews, a report, feedback, activity, a milestone. For **every** REST route and **every** MCP tool, B using A's ids gets 404 / `ToolError` "not found", B's lists/stats/queue/activity/feedback/reports contain nothing of A's, and A's data is byte-for-byte unchanged afterwards. The test enumerates `app.routes` and the MCP tool list and **fails when a route or tool has no case** | pytest |
+| 4 | **Cross-user matrix** (neither A nor B is the owner): users A and B, each with notes, cards, reviews, a report, feedback, activity, a milestone. For **every** REST route and **every** MCP tool, B using A's ids gets 404 / `ToolError` "not found", B's lists/stats/queue/activity/feedback/reports contain nothing of A's, and A's data is byte-for-byte unchanged afterwards. The test enumerates `app.routes` and the MCP tool list and **fails when a route or tool has no case** | pytest |
 | 5 | Per-user behavior: B adding a basic note whose front equals one of A's is not skipped as a duplicate; A's due cards don't count in B's `stats.due`, `history`, `streak`, ladder or spec 023 day counts; `new_card_milestone` set by A leaves B at 15 | pytest |
 | 6 | Every `card.user_id` equals its note's `user_id` after `add_notes`, `add_direction`, `PATCH /notes` | pytest |
 | 7 | Migration: a pre-030 database file with data + `LA_CARTE_OWNER_EMAIL` starts; a `.pre-030-*.bak` exists and equals the old file; every row belongs to the owner; ids, FSRS fields, review logs, reports and the milestone are unchanged; a second start changes nothing (no new backup) | pytest |
@@ -93,6 +104,8 @@ user's app, widget and agents keep working with no change. No Google yet (030b).
 | 12 | No token, token hash or email appears in the log output of a full test run (caplog check on the auth paths) | pytest |
 | 13 | `scripts/e2e.sh` (qa-validator) starts its APIs with `LA_CARTE_OWNER_EMAIL=e2e@example.com` + `LA_CARTE_API_TOKEN=e2e-token` and the existing live UI tests pass unchanged | UI (live) |
 | 14 | The user's deployed app, widget and Claude Code (`--header` with the old token) work unchanged after deploy (manager checks with the user) | manual |
+| 15 | Non-owner gets nothing cross-user (owner O, users A, B; each sent feedback and has activity): B's `list_feedback` (every `status`) holds only B's items; B's `close_feedback(<A's id>)` → `ToolError` "not found" and A's item is unchanged; B's `activity_log(user=<A's email>)` and `(user=<O's email>)` → `ToolError` "user not found"; with `LA_CARTE_OWNER_EMAIL` unset, O behaves exactly like B | pytest |
+| 16 | Owner reads feedback across users: O's `list_feedback` holds A's, B's and O's items, each with the right `user_email`; O's `close_feedback(<A's id>)` closes it (A then sees it `closed` with the resolution); O's `activity_log(user=<A's email>)` returns only A's events and honours `since`/`until`/`card_id`/`kind`; for a user C with activity but no feedback, or an unknown email → `ToolError` "user not found"; O still gets 404 / "not found" on A's notes, cards, reports and stats (REST and MCP) | pytest |
 
 ## API / MCP changes
 - New: `GET /me`, `DELETE /me`, `GET /me/tokens`, `DELETE /me/tokens/{id}`. Every route now requires a token and
@@ -106,4 +119,4 @@ user's app, widget and agents keep working with no change. No Google yet (030b).
 None.
 
 ## Out of scope
-- Google, `/authorize`, `/token`, `POST /me/tokens` (030b). App UI (030c, 030d). Admin roles. Rate limiting.
+- Google, `/authorize`, `/token`, `POST /me/tokens` (030b). App UI (030c, 030d). Admin roles or UI beyond decision 9. Rate limiting.

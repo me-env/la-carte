@@ -126,7 +126,9 @@ sign-up allowlist can limit who creates an account (030 "Sign-up gate").
    Allowed **only** with an access token whose `client_id` is `la-carte-ios` (a PAT, a refresh token or an agent's
    access token → 403 `{"detail": "Create access tokens from the la-carte app"}`). Max 20 live PATs per user (422).
 9. **`/privacy`**: static HTML (English), public: what is stored (verified Google email, Google account id, the deck,
-   reviews, reports, feedback, activity log if 029 ships), why (the app works; support), never sold or shared, no
+   reviews, reports, feedback, activity log if 029 ships), why (the app works; support), this sentence verbatim:
+   "The developer can read the feedback you send and your related activity in the app, to improve la-carte.",
+   never sold or shared, no
    ads, no tracking, the only third party is Google for sign-in (scopes `openid email`), retention (until the account
    is deleted; activity 90 days), deletion in the app (Settings → Delete account) or by email to the support address
    (`LA_CARTE_SUPPORT_EMAIL`, optional; the line is omitted when unset), last-updated date. The manager shows the
@@ -161,7 +163,7 @@ All with the fake provider or an injected `httpx` transport: no test calls Googl
 | 14 | Unknown or expired `state` on the callback → 400 HTML page, no redirect | pytest |
 | 15 | `POST /me/tokens` with an `la-carte-ios` access token → 201 with `token` once (`lc_pat_…`), `expires_at` = now + N days when given; the PAT works on REST and `/mcp` (`deck`) or only `/stats` (`stats`); with a PAT, an agent client's access token or a refresh token → 403 | pytest |
 | 16 | `FakeProvider` with `LA_CARTE_PUBLIC_URL=https://example.com` → refuses to start; Google without client secret → refuses to start; no provider → `/authorize` ends in `temporarily_unavailable` while PATs keep working | pytest |
-| 17 | `GET /privacy` is public HTML containing "openid email", "Delete account", and no external resources | pytest |
+| 17 | `GET /privacy` is public HTML containing "openid email", "Delete account", "The developer can read the feedback you send", and no external resources | pytest |
 | 18 | `scripts/e2e.sh` (qa-validator) runs its APIs with `LA_CARTE_IDENTITY_PROVIDER=fake`, signs in as `la-carte-ios` over HTTP (curl, PKCE), mints a PAT with `POST /me/tokens`, seeds with it, and the live UI tests pass | UI (live) |
 | 19 | On the deployed server: `claude mcp add --transport http la-carte <PUBLIC>/mcp` then `/mcp` → Google → `deck_stats` works; claude.ai custom connector with the same URL works; if the allowlist is set, an unlisted Google account is refused (manager with the user) | manual |
 
