@@ -114,10 +114,11 @@ public enum Activity: Equatable, Sendable {
     }
   }
 
-  /// The server's `{"detail": "…"}` message, or the raw body when it has no string detail.
+  /// The server's `{"detail": "…"}` message, or nothing when it has no string detail: other bodies (a 422's `input`)
+  /// can echo the user's text.
   private static func detail(_ body: String) -> String {
     struct Body: Decodable { var detail: String }
-    return (try? JSONDecoder().decode(Body.self, from: Data(body.utf8)).detail) ?? body
+    return (try? JSONDecoder().decode(Body.self, from: Data(body.utf8)).detail) ?? ""
   }
 
   private static func name(_ code: URLError.Code) -> String {

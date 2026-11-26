@@ -79,7 +79,8 @@ public struct StudyFeature {
   `testValue` (unimplemented via the macro) and `previewValue`.
   Exception: fire-and-forget clients whose calls never feed back into state (`ActivityClient`, spec 029) have a
   no-op `testValue`; tests that assert what was logged use `ActivityClient.recording()`. Features log from one
-  trailing `Reduce` that maps `(action, state)` to an event, so the core reducer stays unchanged.
+  trailing `Reduce` that maps `(action, state)` to an event, so the core reducer stays unchanged. It measures durations with
+  `ActivityClient.now` (not `\.date`), and keeps its bookkeeping in state whose `==` is always `true` (`ActivityTrail`).
 - Shared/persisted state (e.g. user settings): `@Shared(.appStorage(…))` / `@Shared(.fileStorage(…))`.
 
 **Views**

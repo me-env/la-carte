@@ -55,16 +55,15 @@ extension ActivityClient: DependencyKey {
     let build = info["CFBundleVersion"] as? String ?? ""
     let os = ProcessInfo.processInfo.operatingSystemVersion
     let osName = "iOS \(os.majorVersion).\(os.minorVersion)" + (os.patchVersion > 0 ? ".\(os.patchVersion)" : "")
-    let session = LockIsolated(UUID())
+    let session = LockIsolated(Session())
     let isStarted = LockIsolated(false)
     let (stream, continuation) = AsyncStream.makeStream(of: ActivityEvent.self)
 
     return ActivityClient(
       log: { activity in
         let event = session.withValue { session in
-          if activity == .appForeground { session = UUID() }
-          return ActivityEvent(
-            id: UUID(), kind: activity.kind, at: Date(), timeZone: .current, session: session,
+          ActivityEvent(
+            id: UUID(), kind: activity.kind, at: Date(), timeZone: .current, session: session.id(for: activity),
             appVersion: appVersion, build: build, os: osName, cardID: activity.cardID, data: activity.data
           )
         }
@@ -74,7 +73,7 @@ extension ActivityClient: DependencyKey {
         }
         if isFirst {
           Task.detached(priority: .utility) {
-            await ActivityLog(fileURL: fileURL,isConfigured: isConfigured, send: api.sendActivity).run(stream)
+            await ActivityLog(fileURL: fileURL, isConfigured: isConfigured, send: api.sendActivity).run(stream)
           }
         }
         continuation.yield(event)
@@ -102,6 +101,21 @@ extension ActivityClient: DependencyKey {
       token: { APIClient.resolvedToken(environment: environment, stored: TokenStore.liveValue.load) },
       load: { try await session.data(for: $0) }
     )
+  }
+}
+
+/// The `session` of each event: one per launch, and a new one each time the app comes back to the foreground. The
+/// launch's own first `app_foreground` keeps the launch session, so one launch is one session.
+struct Session {
+  private var id = UUID()
+  private var hasForegrounded = false
+
+  mutating func id(for activity: Activity) -> UUID {
+    if activity == .appForeground {
+      if hasForegrounded { id = UUID() }
+      hasForegrounded = true
+    }
+    return id
   }
 }
 

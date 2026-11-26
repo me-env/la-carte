@@ -221,6 +221,30 @@ struct ActivityLogTests {
     }
   }
 
+  @Test func apiErrorsKeepTheServerDetailButNeverTheRawBody() {
+    let detail = APIError(statusCode: 404, message: #"{"detail": "Card not found"}"#)
+    #expect(Activity.failed(.review, detail) == .apiError(request: .review, cardID: nil, status: 404, error: "Card not found"))
+    let validation = APIError(
+      statusCode: 422,
+      message: #"{"detail": [{"type": "missing", "loc": ["body", "front"], "input": {"back": "secret words"}}]}"#
+    )
+    #expect(Activity.failed(.addNote, validation) == .apiError(request: .addNote, cardID: nil, status: 422, error: ""))
+    let html = APIError(statusCode: 502, message: "<html>Bad Gateway</html>")
+    #expect(Activity.failed(.queue, html) == .apiError(request: .queue, cardID: nil, status: 502, error: ""))
+  }
+
+  @Test func oneLaunchIsOneSessionAndEachLaterForegroundStartsANewOne() {
+    let shown = Activity.cardShown(cardID: UUID(), noteID: UUID(), type: .basic, prompt: ["front"])
+    var session = Session()
+    let launch = session.id(for: shown)
+    #expect(session.id(for: .appForeground) == launch)
+    #expect(session.id(for: shown) == launch)
+    #expect(session.id(for: .appBackground) == launch)
+    let next = session.id(for: .appForeground)
+    #expect(next != launch)
+    #expect(session.id(for: shown) == next)
+  }
+
   // MARK: Helpers
 
   private static func event(_ kind: String = "card_shown") -> ActivityEvent {
