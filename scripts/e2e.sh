@@ -19,15 +19,26 @@ export TEST_RUNNER_LA_CARTE_EMPTY_API_URL="http://127.0.0.1:$EMPTY_PORT"
 (cd "$ROOT/api" && LA_CARTE_DATABASE_URL="sqlite:///$TMP/e2e-empty.db" LA_CARTE_PORT="$EMPTY_PORT" \
   exec uv run la-carte-api) >"$TMP/api-empty.log" 2>&1 &
 EMPTY_PID=$!
+# Third API for spec 029 #32 (activity log): 4 cards of its own, so studying 3 leaves the other suites' decks alone.
+ACTIVITY_PORT="${E2E_ACTIVITY_PORT:-$(free_port)}"
+export TEST_RUNNER_LA_CARTE_ACTIVITY_API_URL="http://127.0.0.1:$ACTIVITY_PORT"
+(cd "$ROOT/api" && LA_CARTE_DATABASE_URL="sqlite:///$TMP/e2e-activity.db" LA_CARTE_PORT="$ACTIVITY_PORT" \
+  exec uv run la-carte-api) >"$TMP/api-activity.log" 2>&1 &
+ACTIVITY_PID=$!
 # The trap keeps the exit code: e2e.sh exits with ios-ui-test.sh's (xcodebuild's).
-trap 'kill $API_PID $EMPTY_PID 2>/dev/null; rm -rf "$TMP"' EXIT
-for url in "$LA_CARTE_API_URL" "$TEST_RUNNER_LA_CARTE_EMPTY_API_URL"; do
+trap 'kill $API_PID $EMPTY_PID $ACTIVITY_PID 2>/dev/null; rm -rf "$TMP"' EXIT
+for url in "$LA_CARTE_API_URL" "$TEST_RUNNER_LA_CARTE_EMPTY_API_URL" "$TEST_RUNNER_LA_CARTE_ACTIVITY_API_URL"; do
   for _ in $(seq 1 50); do curl -sf "$url/health" >/dev/null && break; sleep 0.2; done
 done
 
 # Seed order matters: spec 001 #10 studies `greeting` then `gratitude` (due order = creation order).
 for pair in "greeting|hello" "gratitude|thank you"; do
   curl -sf -X POST "$LA_CARTE_API_URL/cards" -H "Authorization: Bearer $LA_CARTE_API_TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d "{\"front\":\"${pair%%|*}\",\"back\":\"${pair##*|}\"}" >/dev/null
+done
+for pair in "river|flowing water" "mountain|a high hill" "lantern|a portable light" "harbor|a sheltered port"; do
+  curl -sf -X POST "$TEST_RUNNER_LA_CARTE_ACTIVITY_API_URL/cards" -H "Authorization: Bearer $LA_CARTE_API_TOKEN" \
     -H 'Content-Type: application/json' \
     -d "{\"front\":\"${pair%%|*}\",\"back\":\"${pair##*|}\"}" >/dev/null
 done
@@ -42,7 +53,9 @@ done
 # Spec 015b #12 posts a card to the EMPTY API, reports it (drop) and deletes it (net zero for the empty-deck check).
 # Spec 021 reads /stats' ladder counts and opens the milestones popover (read-only; StudyMilestones runs before Study).
 # Spec 010 #16 edits greeting's back to "hello!" then PATCHes it back (net zero); StudyEdit runs before Study.
+# Spec 029 #32 studies 3 of the ACTIVITY API's 4 cards (its own deck, so order doesn't matter).
 UI_WORKERS=1 "$ROOT/scripts/ios-ui-test.sh" "$RUN" \
+  "-only-testing:LaCarteUITests/ActivityUITests/testActivity_eventsArriveAfterRelaunch_liveAPI" \
   "-only-testing:LaCarteUITests/DeckUITests/testDeck_addFromStudyThenDelete_liveAPI" \
   "-only-testing:LaCarteUITests/NotesUITests/testNoteEditor_personCreateDelete_liveAPI" \
   "-only-testing:LaCarteUITests/NotesUITests/testNotesStudy_unreachablePhoto_liveAPI" \
