@@ -7,11 +7,11 @@ import Testing
 
 /// Spec 029 AC 12-18: the buffer file and its uploader, driven directly.
 struct ActivityLogTests {
-  @Test func logReturnsAtOnceWhileSendingIsStuck() async throws {
+  @Test func logReturnsAtOnceWhileSendingIsStuck() async {
     let file = Self.newFile()
     var api = APIClient()
     api.sendActivity = { _ in try await Task.never() }
-    let client = ActivityClient.live(api: api, isConfigured: { true }, fileURL: file)
+    let (client, finish) = ActivityClient.live(api: api, isConfigured: { true }, fileURL: file)
 
     let start = ContinuousClock.now
     for count in 0..<1_000 {
@@ -19,9 +19,7 @@ struct ActivityLogTests {
     }
     #expect(ContinuousClock.now - start < .milliseconds(50))
 
-    for _ in 0..<500 where Self.lines(file).count < 1_000 {
-      try await Task.sleep(for: .milliseconds(10))
-    }
+    await finish()
     #expect(Self.lines(file).map(\.data["count"]) == (0..<1_000).map { .int($0) })
   }
 
