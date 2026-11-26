@@ -52,7 +52,17 @@ print(next((d["udid"] for d in devices if d["name"] == sys.argv[2] and d["isAvai
   sim_appearance_ready "$UDID"
   if [ "$SLOT" -eq 1 ]; then export POOL_DESTINATION="$FIRST_DEST"; else export POOL_DESTINATION="platform=iOS Simulator,id=$UDID"; fi
   [ -z "${CI:-}" ] || exec "$@"
-  set +e; "$@"; STATUS=$?; set -e
+  # Stall guard (local only): the command's whole tree used < POOL_STALL_CPU s (1) of CPU for POOL_STALL_MIN min (15;
+  # 0 = off) -> killed, exit 124. A test run that waits on a hung simulator/daemon sits at 0% CPU for hours otherwise
+  # (2026-11-26: three runs, 4-5 h). It doesn't count the simulator's own processes, only xcodebuild's tree.
+  STALLED="$(mktemp)"; rm -f "$STALLED"
+  set +e
+  "$@" & CHILD=$!; trap 'kill $CHILD 2>/dev/null' INT TERM
+  stall_guard "$CHILD" "$STALLED" "${POOL_STALL_MIN:-15}" "${POOL_STALL_CPU:-1}" & GUARD=$!
+  wait "$CHILD"; STATUS=$?; trap - INT TERM
+  kill "$GUARD" 2>/dev/null; wait "$GUARD" 2>/dev/null
+  set -e
+  if [ -e "$STALLED" ]; then rm -f "$STALLED"; STATUS=124; fi
   # Stop the regrowth (docs/dev-velocity.md): past SIM_TRIM_GB, erase the device and boot it once again, still
   # under its lock, so the next run gets a small, warm device.
   # du exits 1 on any unreadable entry (an image's .fseventsd, files vanishing while the device shuts down): under
@@ -70,7 +80,7 @@ fi
 for k in $(seq 1 "$SIZE"); do  # an outer caller already holds a slot: use it
   case " ${LACARTE_HELD_LOCKS:-} " in *" $(slot_lock "$k") "*) exec "$0" --on-slot "$k" "$@" ;; esac
 done
-export LACARTE_LOCK_LABEL="${LACARTE_LOCK_LABEL:-$(ps -o command= -p $PPID | cut -c1-120)}"
+export LACARTE_LOCK_LABEL="${LACARTE_LOCK_LABEL:-$({ bounded 5 ps -o command= -p $PPID || true; } | cut -c1-120)}"
 TIMEOUT="${LOCK_TIMEOUT:-3600}"
 MARK="$(mktemp)"; trap 'rm -f "$MARK" "$MARK.stuck"' EXIT   # removed by the locked command once it starts
 export POOL_MARK="$MARK"   # --on-slot recreates it (+ .stuck) when it refuses a stuck device: try the next slot

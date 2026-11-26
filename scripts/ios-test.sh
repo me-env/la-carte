@@ -8,6 +8,7 @@
 # Each finished test prints as it finishes (also into a file), then a `TESTS: …` summary line.
 # Exit code = xcodebuild's (65 test failure, 75 lock timeout); the summary only warns if it fails.
 set -euo pipefail
+source "$(dirname "$0")/_proc.sh"; stage "ios-test: setup"  # stage lines + "still waiting at" warnings
 source "$(dirname "$0")/_ios-env.sh"
 ARGS=()
 for arg in "$@"; do
@@ -35,11 +36,13 @@ if [ -n "${FSEVENTS_SHIM_DIR:-}" ]; then
 else
   RUN='exec $BUILD_SLOT xcodebuild test $BUILD_JOBS_FLAGS -scheme LaCarteKit-Package -destination "$POOL_DESTINATION" -skipMacroValidation "$@"'
 fi
+stage "ios-test: build + unit tests (DerivedData lock, pool simulator, xcodebuild)"
 "$LOCK" "$KIT_BUILD_LOCK" "$ROOT/scripts/_sim-pool.sh" /bin/sh -c "$RUN" sh \
   -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} 2>&1 \
   | grep --line-buffered -E "^(✔|✘|🔒|StudyRenders:)|Test [Cc]ase .*(passed|failed|skipped)|error:|\.swift:[0-9]+:[0-9]+: note:|TEST( EXECUTE)? (SUCCEEDED|FAILED)"
 STATUS=${PIPESTATUS[0]}
 set -e
+stage "ios-test: summary (xcresulttool)"
 if [ ! -d "$RESULT" ]; then
   echo "TESTS: none run (exit $STATUS: build failed or lock timeout)"
 else  # TESTS: 120 passed, 0 failed, 3 skipped (41.2 s), then one line per failed test.

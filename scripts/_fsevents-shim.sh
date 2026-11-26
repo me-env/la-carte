@@ -15,7 +15,7 @@
 # ios-test.sh then runs build-for-testing + test-without-building, as ios-ui-test.sh always does.
 # Built once per Xcode into /tmp (~100 KB). Off with LA_CARTE_FSEVENTS_SHIM=0; forced on with =1.
 
-fseventsd_hung() { ps -axo stat=,comm= | awk '$2 ~ /\/fseventsd$/ && $1 ~ /^U/ { f = 1 } END { exit !f }'; }
+source "$ROOT/scripts/_proc.sh"  # fseventsd_hung: pgrep + per-pid ps, bounded (a full-table ps can hang for good)
 
 fsevents_shim_build() {  # prints the shim dir (contains an `xcodebuild` wrapper)
   local dev real key dir tmp

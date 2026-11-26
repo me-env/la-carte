@@ -132,8 +132,9 @@ sim_appearance_ready() {  # <udid>
 # only a reboot clears it. A normal read takes microseconds, so an open handle seen by lsof is a stuck one.
 sim_audio_stuck() {  # <udid>
   local pid
-  for pid in $(pgrep -U "$(id -u)" -f 'SimAudioProcessorService.xpc/Contents/MacOS/SimAudioProcessorService'); do
-    lsof -p "$pid" -Fn 2>/dev/null | grep -qF "/$1/data/var/run/com.apple.coresimulator.audio.plist" && return 0
+  for pid in $({ bounded 5 pgrep -U "$(id -u)" -f 'SimAudioProcessorService.xpc/Contents/MacOS/SimAudioProcessorService' || true; }); do
+    { bounded 10 lsof -p "$pid" -Fn || true; } | grep -F "/$1/data/var/run/com.apple.coresimulator.audio.plist" >/dev/null \
+      && return 0
   done
   return 1
 }
