@@ -270,6 +270,11 @@ Symptom: every repo test script hung for hours with an empty log; three runs sat
   (15; `0` = off), the tree is killed, the slot freed, exit 124. It counts xcodebuild's tree, not the simulator's
   processes: a test bundle that keeps xcodebuild silent and idle for 15 min would be killed (none locally today; on
   CI the guard is off). Set `POOL_STALL_MIN=0` for such a run.
+- Both guards (pool and build slots) run the command through `guarded` (`_proc.sh`): its output reaches the caller
+  through relays that are cut once the command is gone, so a leftover the kill can't reach (state `U`, or reparented)
+  no longer holds the caller's `| grep` open. Before (2026-11-26): a unit run killed at 15 min sat "still waiting"
+  until its leftover died at 72 min. A stalled pool run (124) also skips the device trim (no `simctl` on a suspect
+  device). The test scripts never exit 0 without proof that tests ran (`docs/testing.md`, exit codes).
 - `scripts/unstick.sh [--dry-run]`: the hourly watchdog (cron in the manager session runs
   `cd <repo> && scripts/unstick.sh`). Finds la-carte runs (`xcodebuild`, `xctest`, `lockf`, our scripts, `*-Runner`,
   only when args or cwd mention `la-carte`/`LaCarte`: other projects are never touched), samples each process tree

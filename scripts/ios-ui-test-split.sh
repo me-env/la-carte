@@ -155,7 +155,8 @@ cat "$WORK"/*.refused >"$WORK/refused.list" 2>/dev/null || true
 if [ ${#BUNDLES[@]} -eq 0 ] && [ -s "$WORK/refused.list" ] && [ ! -s "$WORK/nosim.list" ]; then
   echo "TESTS: infra failure ($REFUSED)"; exit "$STATUS"
 fi
-[ ${#BUNDLES[@]} -gt 0 ] || { echo "TESTS: none run (exit $STATUS: no shard produced results$([ -s "$WORK/nosim.list" ] && echo ", $NOSIM"))"; exit "$STATUS"; }
+[ ${#BUNDLES[@]} -gt 0 ] || { echo "TESTS: none run (exit $STATUS: no shard produced results$([ -s "$WORK/nosim.list" ] && echo ", $NOSIM"))"
+  [ "$STATUS" -ne 0 ] || STATUS=66; exit "$STATUS"; }
 
 # 5. Selected tests with no result in any bundle (a crash ends a shard early): retry them once, in one run.
 not_run() {  # writes the not-run tests as -only-testing args to $WORK/$1.args; true if there are any

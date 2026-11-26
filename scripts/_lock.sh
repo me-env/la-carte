@@ -33,21 +33,18 @@ if [ "${1:-}" = --slots ]; then
       *) echo "⚠️  fseventsd is hung (state U): xcodebuild runs through the no-FSEvents shim. See 'Hung builds' in docs/dev-velocity.md" >&2 ;;
     esac
   fi
-  MARK="$(mktemp)"; trap 'rm -f "$MARK" "$MARK.stalled"' EXIT
+  MARK="$(mktemp)"; trap 'rm -f "$MARK"' EXIT
   WAITING=""
   while :; do
     for k in $(seq 1 "$N"); do
       FILE="$DIR/$NAME-$k.lock"
       HOLDER="${LACARTE_AGENT:-unnamed agent} · $LABEL · pid $$ · since $(date +%H:%M:%S)"
-      : >"$MARK"; rm -f "$MARK.stalled"; set +e
+      : >"$MARK"; STATUS=0
+      # guarded (_proc.sh): stall guard (exit 124), and leftovers of a killed build can't hold our output open.
       # shellcheck disable=SC2016
-      LACARTE_HELD_LOCKS="${LACARTE_HELD_LOCKS:-} $NAME-held" lockf -s -k -t 0 "$FILE" \
-        /bin/sh -c 'rm -f "$1"; printf "%s\n" "$2" >"$3.holder"; shift 3; exec "$@"' sh "$MARK" "$HOLDER" "$FILE" "$@" &
-      CHILD=$!; trap 'kill $CHILD 2>/dev/null' INT TERM
-      stall_guard "$CHILD" "$MARK.stalled" "${STALL_MIN:-10}" "${STALL_CPU:-5}" & GUARD=$!
-      wait "$CHILD"; STATUS=$?; trap - INT TERM
-      kill "$GUARD" 2>/dev/null; wait "$GUARD" 2>/dev/null; set -e
-      if [ -e "$MARK.stalled" ]; then rm -f "$MARK.stalled"; exit 124; fi
+      guarded "${STALL_MIN:-10}" "${STALL_CPU:-5}" env LACARTE_HELD_LOCKS="${LACARTE_HELD_LOCKS:-} $NAME-held" \
+        lockf -s -k -t 0 "$FILE" /bin/sh -c 'rm -f "$1"; printf "%s\n" "$2" >"$3.holder"; shift 3; exec "$@"' \
+        sh "$MARK" "$HOLDER" "$FILE" "$@" || STATUS=$?
       [ -e "$MARK" ] || exit "$STATUS"
     done
     if [ -z "$WAITING" ]; then

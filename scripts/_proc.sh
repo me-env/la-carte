@@ -80,6 +80,31 @@ stall_guard() {
   done
 }
 
+# guarded <minutes> <cpu-seconds> <command> [args...]: run the command under stall_guard (0 minutes = no guard).
+# Returns the command's exit code, or 124 if the guard killed it. Its stdout/stderr reach ours through two relays
+# (FIFO + cat) that we stop once the command is gone: a leftover that kept the output open (a child stuck in state U,
+# or one that left the tree) otherwise blocks the caller's `| grep` for as long as it lives (2026-11-26: a run killed
+# at 15 min held ios-test.sh until 72 min, "still waiting" all along). Safe under set -e.
+guarded() {
+  local min="$1" cpu="$2" dir child guard out err status=0 i=0; shift 2
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/la-carte-guard.XXXXXX")"
+  mkfifo "$dir/out" "$dir/err"
+  cat "$dir/out" & out=$!
+  cat "$dir/err" >&2 & err=$!
+  "$@" >"$dir/out" 2>"$dir/err" & child=$!
+  trap 'kill $child 2>/dev/null' INT TERM
+  stall_guard "$child" "$dir/stalled" "$min" "$cpu" & guard=$!
+  wait "$child" || status=$?
+  trap - INT TERM
+  kill "$guard" 2>/dev/null || true; wait "$guard" 2>/dev/null || true
+  # Normally both relays end at once (EOF). Give them 2 s to drain, then cut them.
+  while { kill -0 "$out" || kill -0 "$err"; } 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.05; i=$((i + 1)); done
+  kill "$out" "$err" 2>/dev/null || true; wait "$out" "$err" 2>/dev/null || true
+  [ ! -e "$dir/stalled" ] || status=124
+  rm -rf "$dir"
+  return "$status"
+}
+
 # stage <text>: log "▶ <text>"; if the script is still at that step STAGE_WARN_SECS (120) later, warn "still waiting
 # at <text>" (again every 10 min), so a hang shows in the log instead of an empty file. The watcher ends with the script.
 stage() {

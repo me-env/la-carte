@@ -55,14 +55,10 @@ print(next((d["udid"] for d in devices if d["name"] == sys.argv[2] and d["isAvai
   # Stall guard (local only): the command's whole tree used < POOL_STALL_CPU s (1) of CPU for POOL_STALL_MIN min (15;
   # 0 = off) -> killed, exit 124. A test run that waits on a hung simulator/daemon sits at 0% CPU for hours otherwise
   # (2026-11-26: three runs, 4-5 h). It doesn't count the simulator's own processes, only xcodebuild's tree.
-  STALLED="$(mktemp)"; rm -f "$STALLED"
-  set +e
-  "$@" & CHILD=$!; trap 'kill $CHILD 2>/dev/null' INT TERM
-  stall_guard "$CHILD" "$STALLED" "${POOL_STALL_MIN:-15}" "${POOL_STALL_CPU:-1}" & GUARD=$!
-  wait "$CHILD"; STATUS=$?; trap - INT TERM
-  kill "$GUARD" 2>/dev/null; wait "$GUARD" 2>/dev/null
-  set -e
-  if [ -e "$STALLED" ]; then rm -f "$STALLED"; STATUS=124; fi
+  # Leftovers of a killed run can't hold our output open (guarded, _proc.sh).
+  STATUS=0; guarded "${POOL_STALL_MIN:-15}" "${POOL_STALL_CPU:-1}" "$@" || STATUS=$?
+  # A stalled run (124) leaves the device suspect: return now, no simctl call that could hang as well.
+  [ "$STATUS" -ne 124 ] || exit 124
   # Stop the regrowth (docs/dev-velocity.md): past SIM_TRIM_GB, erase the device and boot it once again, still
   # under its lock, so the next run gets a small, warm device.
   # du exits 1 on any unreadable entry (an image's .fseventsd, files vanishing while the device shuts down): under
