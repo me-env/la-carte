@@ -77,6 +77,9 @@ public struct StudyFeature {
   (`\.continuousClock`, `\.date.now`, `\.uuid`) — never `Date()` / `UUID()` in reducers.
 - Clients: `@DependencyClient` struct of closures, in its own module, with `liveValue`,
   `testValue` (unimplemented via the macro) and `previewValue`.
+  Exception: fire-and-forget clients whose calls never feed back into state (`ActivityClient`, spec 029) have a
+  no-op `testValue`; tests that assert what was logged use `ActivityClient.recording()`. Features log from one
+  trailing `Reduce` that maps `(action, state)` to an event, so the core reducer stays unchanged.
 - Shared/persisted state (e.g. user settings): `@Shared(.appStorage(…))` / `@Shared(.fileStorage(…))`.
 
 **Views**

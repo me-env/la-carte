@@ -11,5 +11,8 @@
 	<!-- The App Group shared with the widget (spec 007), read by AppGroup.id (LaCarteKit/APIClient). -->
 	<key>LaCarteAppGroup</key>
 	<string>$(LA_CARTE_APP_GROUP)</string>
+	<!-- OS encryption only (HTTPS, Keychain): exempt, see docs/release-app-store.md. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

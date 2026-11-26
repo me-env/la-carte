@@ -14,8 +14,8 @@ LACARTE_AGENT=marketing UI_WORKERS=1 scripts/ios-ui-test.sh marketing \
 uv run marketing/build-demo.py                            # → $LA_CARTE_MARKETING_OUT (default build/marketing/)
 ```
 
-Outputs (not committed): `app-demo.mp4`, `frames/NN.png` (each composed shot), `readme/` (cleaned screens and
-`readme-hero-{light,dark}.png`: reveal, person, deck side by side). Second argument of the script changes the
+Outputs: `app-demo.mp4` and `frames/NN.png` (not committed); the README images in `marketing/readme/` (committed:
+`study-{light,dark}`, `more-light`, `widget`; `--readme` rebuilds only those). Second argument changes the
 output folder when the SSD isn't mounted.
 
 Data: the in-process stub deck in `ios/LaCarteUITests/MarketingUITests.swift` (demo deck words, one made-up
@@ -39,7 +39,7 @@ person "Nora Vale, runs the corner bakery", the stub's generated silhouette phot
 | 10 | 2.6 | `v09-copied`: "Copied" in the counter slot (Ask, copy-only app) | Ask an AI about it |
 | 11 | 2.4 | `v10-report-menu`: **Largest planet? / Saturn** (deliberately wrong) + menu | Something wrong? Report it |
 | 12 | 2.4 | `v11-reported`: "Reported", next card | Your agent fixes it over MCP |
-| 13 | 3.0 | `widget-due-{light,dark}`: widget gallery tiles, "8 to review", streak | Your deck on the Home Screen |
+| 13 | 3.0 | `widget-small-nine-{light,dark}`: widget gallery tiles, "8 to review", streak grid | Your deck on the Home Screen |
 | 14 | 3.0 | `theme-{light,dark,forest}`: three phones | Light, dark or forest |
 | 15 | 3.2 | End card: "Open source. No account." / "Any agent can add cards over MCP" / `github.com/me-env/la-carte` | |
 

@@ -59,7 +59,8 @@ Speed settings (measured 2026-11-22, run 45032373007):
 - A runner refused by the simulator ("Application failed preflight checks … Busy") is retried once inside
   `scripts/ios-ui-test.sh` (`scripts/_ui-retry.sh`, `CI infra` warning); refused twice prints
   `TESTS: infra failure (…)` and fails. `ci/ui-test.sh` wraps every UI run and only covers prebuilt products
-  that ran no test at all (`TESTS: none run`): it waits 30 s and retries once. A failing test is never retried.
+  that ran no test at all (`TESTS: none run`): it waits 30 s and retries once. A failing test is retried once only in
+  the full-suite shards (see *Flaky tests*); smoke, E2E and local runs never retry.
 
 Screenshots: each UI job uploads its own artifact (`screenshots-smoke`, `screenshots-<shard>`, `screenshots-e2e`).
 
@@ -125,10 +126,20 @@ frames) never runs on CI. The `*_liveAPI` tests skip in the mock shards and run 
 | `DeckUITests/testDeck_addFromDeck` | qa-validator | "timed out waiting for: editor.front focused on a new card" (3 of the last 5 full runs, e.g. 45698139090). Also in the PR smoke set | wait for focus with a longer, load-tolerant timeout (or assert the keyboard / field value after typing instead of `hasFocus`) |
 | `LogoUITests/testStudy_launchShowsFirstCardNoLogo` | qa-validator | first card 1.52–1.92 s after launch vs a 1.5 s limit (3 of 5 runs) | CI-aware limit (e.g. 2.5 s when `CI` is set) or measure from the first frame, not from `launch()` |
 
-Watch (not quarantined): `StudyLengthsUITests/testStudyLengths_scrollBarOnRevealOnly` failed once in 5 runs on the
+**Flaky tests.** The full-suite shards run with `-retry-tests-on-failure -test-iterations 2`: a test that fails
+then passes keeps the shard green, and `ci/ui-test.sh` prints a `Flaky UI test (passed on retry)` warning on the
+run's summary page. Why: from 2026-11-23 to 25, every full run (≈ 120 tests) had 1–2 failures, each time a different
+test, on the same or unrelated commits (Ratings, Report, StudyLengths, Deck, Logo): CI-load timing, not regressions,
+and `main` never went green (so `ci/changes.sh` ran the full suite on every push). The owner (`qa-validator` for UI
+tests) fixes any test that shows up in those warnings; one that fails both attempts turns the run red as before, and
+a test that is red in 2 runs gets quarantined above.
+
+Seen once or twice (not quarantined): `StudyLengthsUITests/testStudyLengths_scrollBarOnRevealOnly` failed once in 5 runs on the
 same commit ("no scroll bar flash on revealing a long card"): `barPoints` only counts frames after the tap returns,
 which on a loaded runner can be after the 1.6 s capture window's flash. `ReportUITests/testAsk_copiesCardText`
-failed twice on 2026-11-23/24 (empty pasteboard), passed since.
+failed twice on 2026-11-23/24 (empty pasteboard), passed since. `ReportUITests/testReport_menuOpensAndCancels` failed
+once (run 45706902438, "dialog still shown after Cancel"), passed in the 4 runs before. `RatingsUITests/testRatings_dragReviewFailureThenRetry` failed
+once (rerun of 45706902438, '"study.front" Any missing').
 
 ## API deploy
 

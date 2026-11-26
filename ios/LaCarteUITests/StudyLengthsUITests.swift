@@ -378,7 +378,7 @@ final class StudyLengthsUITests: XCTestCase {
     for (i, c) in cards.enumerated() {
       waitForLabel(front, c.front)
       Thread.sleep(forTimeInterval: 0.5)
-      let q = front.frame
+      var q = front.frame
       if i == 1 { oneLineQuestionHeight = q.height }  // "Speed of light (km/s)?" is one line
       note("QA017D \(names[i]) card \(card.frame) front \(q) ratio \(q.width / card.frame.width)")
       XCTAssertEqual(q.midX, card.frame.midX, accuracy: 1, "\(names[i]): question not centred \(q)")
@@ -395,7 +395,20 @@ final class StudyLengthsUITests: XCTestCase {
       reveal(app, c.back)
       let a = back.frame
       note("QA017D \(names[i]) back \(a)")
-      XCTAssertEqual(front.frame, q, "\(names[i]): question moved on reveal \(q) → \(front.frame)")
+      // AC 14 (amends 9/13): the question keeps its frame when the reveal lift is ≤ 40 pt; above, it starts centred
+      // in the card and rises by the lift to the centred pair. Its horizontal place and size never change.
+      let qa = front.frame, lift = (a.maxY - qa.minY - q.height) / 2
+      note("QA017D \(names[i]) lift \(lift) moved \(q.minY - qa.minY)")
+      if lift <= 40 {
+        XCTAssertEqual(qa, q, "\(names[i]): question moved on reveal \(q) → \(qa)")
+      } else {
+        XCTAssertEqual(q.midY, card.frame.midY, accuracy: 1, "\(names[i]): lifted question not centred before reveal \(q)")
+        XCTAssertEqual(q.minY - qa.minY, lift, accuracy: 1, "\(names[i]): lifted \(q.minY - qa.minY), expected \(lift)")
+        XCTAssertEqual(qa.minX, q.minX, accuracy: 0.5, "\(names[i]): question moved sideways \(q) → \(qa)")
+        XCTAssertEqual(qa.width, q.width, accuracy: 0.5, "\(names[i]): question resized \(q) → \(qa)")
+        XCTAssertEqual(qa.height, q.height, accuracy: 0.5, "\(names[i]): question resized \(q) → \(qa)")
+      }
+      q = qa  // the checks below are about the revealed layout
       XCTAssertGreaterThanOrEqual(a.minY, q.maxY - 1, "\(names[i]): answer not below the question")
       if c.leadingBack {
         if c.wide {

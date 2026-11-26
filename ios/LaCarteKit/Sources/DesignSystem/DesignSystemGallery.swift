@@ -79,6 +79,11 @@ struct DesignSystemGalleryContent: View {
             .font(.meta)
             .foregroundStyle(Theme.secondaryInk)
             .accessibilityIdentifier("gallery.lastTapped")
+          // Spec 030c: idle, signing in, disabled (no server URL).
+          ContinueWithGoogleButton { lastTapped = "google" }
+            .accessibilityIdentifier("gallery.google")
+          ContinueWithGoogleButton(isLoading: true) {}
+          ContinueWithGoogleButton {}.disabled(true)
         }
       }
     }
