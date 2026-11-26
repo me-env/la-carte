@@ -50,7 +50,7 @@ one-card note: the raw FSRS state (`new`, `review`, `relearning`) duplicated the
 ## Acceptance criteria
 | # | Criterion (observable) | Validated by |
 |---|---|---|
-| 1 | `GET /notes`, `GET /notes/{id}`, `POST /notes`, `PATCH /notes/{id}` and MCP `list_notes` / `add_notes` / `update_note` return every note with `next`: `{card_id, ready_at}` or `null` | pytest |
+| 1 | `GET /notes`, `GET /notes/{id}`, `POST /notes`, `PATCH /notes/{id}` and MCP `find_notes` / `add_notes` / `update_note` return every note with `next`: `{card_id, ready_at}` or `null` | pytest |
 | 2 | **One source of truth**: on a deck mixing new, review, learning, relearning, buried siblings and reported cards, at a fixed `now`: the notes with `next.ready_at <= now` are exactly the notes of `due_cards(limit=all)`, and for each such note `next.card_id` is the card `due_cards` serves for it | pytest |
 | 3 | For the same deck, `stats.due` equals the number of notes with `next.ready_at <= now` | pytest |
 | 4 | A new note's `next` is its first card in queue order with `ready_at` = its `due` (≤ now) | pytest |
@@ -104,7 +104,7 @@ Implementation (api-engineer): split `deck._queue` so one function yields every 
 in queue order (held filtering, sibling bury, `order` unchanged); `_queue` builds the servable list from it and
 `_note_reads` derives `next` from it, with one `now = utcnow()`. No scheduling change, no new endpoint, `CardRead`
 and `/stats` unchanged. Update `docs/architecture.md` (the `/notes` row and the burying paragraph: "`Note.next`
-reads the same queue, spec 028") and the MCP `list_notes` description ("`next.ready_at` <= now = in the study
+reads the same queue, spec 028") and the MCP `find_notes` description ("`next.ready_at` <= now = in the study
 queue now; `null` = reported").
 
 ## Accessibility identifiers
@@ -123,3 +123,6 @@ queue now; `null` = reported").
 - Sorting or filtering the list by label.
 - Showing `next` on the widget or in Study.
 - `CardRead` / `GET /cards` (the app's list uses notes).
+
+*Amended by [031](031-mcp-cleanup.md): the MCP tool is `find_notes` (there is no `list_notes`); 031's
+`INSTRUCTIONS` point to `next` for "why don't I see this card".*
