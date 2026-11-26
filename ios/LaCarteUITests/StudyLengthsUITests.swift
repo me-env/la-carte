@@ -513,7 +513,7 @@ final class StudyLengthsUITests: XCTestCase {
 
     // 1. Easy drag on the revealed short card → Chlorophyll 1.
     reveal(app, backs[0])
-    var bar = barPoints(app, strip, "easy-next") {
+    var bar = barPoints(app, strip, "easy-next", afterRelease: true) {
       let card = el(app, "study.card"), w = card.frame.width
       let start = card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
       start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0.3 * w, dy: 0)))
@@ -546,12 +546,17 @@ final class StudyLengthsUITests: XCTestCase {
     server.stop()
   }
 
-  /// Most changed points in `strip` over frames taken after `action` returns, versus a screenshot 3 s later.
+  /// Most changed points in `strip` over frames taken from the start of `action` (`afterRelease`: only once it
+  /// returns, for a drag whose finger moves the card through the strip), versus a screenshot 3 s later.
+  /// From the start, not from when a tap returns: on a loaded CI runner the tap's idle wait outlasted the flash
+  /// (CI: "no scroll bar flash on revealing a long card"). 2.5 s window: the flash fades within ≈ 1.5 s.
   @MainActor
-  private func barPoints(_ app: XCUIApplication, _ strip: CGRect, _ name: String, _ action: () -> Void) -> Int {
-    var released: TimeInterval = 0
+  private func barPoints(_ app: XCUIApplication, _ strip: CGRect, _ name: String, afterRelease: Bool = false,
+                         _ action: () -> Void) -> Int {
+    var pressed: TimeInterval = 0, released: TimeInterval = 0
     let start = Date()
-    let frames = captureFrames(during: 1.6) {
+    let frames = captureFrames(during: 2.5) {
+      pressed = Date().timeIntervalSince(start)
       action()
       released = Date().timeIntervalSince(start)
     }
@@ -563,11 +568,11 @@ final class StudyLengthsUITests: XCTestCase {
     }
     let base = image(settled)
     var worst = 0, worstFrame: (t: TimeInterval, png: Data)?
-    for f in frames where f.t > released {
+    for f in frames where f.t >= (afterRelease ? released : pressed) {
       let n = changedPoints(image(f.png), base, in: strip)
       if n > worst { worst = n; worstFrame = f }
     }
-    note("QA017S \(name): released +\(released) s, \(frames.count) frames, worst \(worst) points")
+    note("QA017S \(name): pressed +\(pressed) s, released +\(released) s, \(frames.count) frames, worst \(worst) points")
     if let worstFrame { attach([worstFrame], "study-scrollbar-\(name)-worst") }
     return worst
   }

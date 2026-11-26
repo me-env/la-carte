@@ -130,7 +130,7 @@ shard() {  # <name>: runs the tests in $WORK/<name>.args into $WORK/<name>.xcres
   ARGS=(); while IFS= read -r a; do ARGS+=("$a"); done <"$WORK/$1.args"
   set +e
   ui_test_with_retry "shard $1" "$WORK/$1.xcresult" \
-    env TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \
+    env TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" TEST_RUNNER_CI="${CI:-}" \
     SIM_POOL=ui "$ROOT/scripts/_sim-pool.sh" /bin/sh -c 'exec xcodebuild test-without-building -destination "$POOL_DESTINATION" "$@"' \
     sh -testProductsPath "$PRODUCTS" -collect-test-diagnostics never -resultBundlePath "$WORK/$1.xcresult" \
     "${ARGS[@]}" "${PASS[@]+"${PASS[@]}"}" | grep --line-buffered -E "$FILTER" | sed -l "s/^/[$1] /"

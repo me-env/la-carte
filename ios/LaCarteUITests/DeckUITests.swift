@@ -665,9 +665,16 @@ final class DeckUITests: XCTestCase {
     waitForSheet(app, "New card", file: file, line: line)
     XCTAssertEqual(fieldText(app, "editor.front"), "", "editor.front not empty", file: file, line: line)
     XCTAssertEqual(fieldText(app, "editor.back"), "", "editor.back not empty", file: file, line: line)
-    // The app focuses the field when it appears; on CI (no GPU) the sheet + Form take several seconds to build.
-    waitUntil("editor.front focused on a new card", timeout: 15, file: file, line: line) {
-      self.hasFocus(self.el(app, "editor.front"))
+    // The app focuses the field when it appears; on CI (no GPU) the sheet + Form take several seconds to build, and
+    // each accessibility query took ≈ 1 s (one 15 s), so a 15 s wait was ≈ 14 checks. If `hasKeyboardFocus` never
+    // reads true, prove the focus by typing without tapping: typeText fails unless the field is first responder.
+    let front = el(app, "editor.front")
+    if !poll(timeout: 30, { self.hasFocus(front) }) {
+      front.typeText("x")
+      waitUntil("editor.front focused on a new card (typing without a tap lands there)", timeout: 15,
+                file: file, line: line) { self.fieldText(app, "editor.front") == "x" }
+      front.typeText(XCUIKeyboardKey.delete.rawValue)
+      waitUntil("editor.front empty again", file: file, line: line) { self.fieldText(app, "editor.front") == "" }
     }
     XCTAssertFalse(el(app, "editor.save").isEnabled, "editor.save enabled with empty fields", file: file, line: line)
     assertEditorChrome(app, file: file, line: line)

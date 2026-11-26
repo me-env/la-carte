@@ -203,7 +203,6 @@ jobs:
               -only-testing:LaCarteUITests/LaCarteUITests
               -only-testing:LaCarteUITests/RefreshUITests
               -only-testing:LaCarteUITests/LaunchUITests
-              -skip-testing:LaCarteUITests/DeckUITests/testDeck_addFromDeck
           - name: setup-widget
             tests: >-
               -only-testing:LaCarteUITests/SetupUITests
@@ -230,7 +229,6 @@ jobs:
               -skip-testing:LaCarteUITests/RatingsUITests
               -skip-testing:LaCarteUITests/ReportUITests
               -skip-testing:LaCarteUITests/MarketingUITests
-              -skip-testing:LaCarteUITests/LogoUITests/testStudy_launchShowsFirstCardNoLogo
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90  # v1.7.0
