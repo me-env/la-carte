@@ -380,6 +380,25 @@ class DeckStats(BaseModel):
     reviews_done: int  # = reviewed_today - new_today
 
 
+class ReviewEntry(BaseModel):
+    """MCP `review_history` (spec 031): one `ReviewLog` row with the card as it is now."""
+
+    card_id: UUID
+    reviewed_at: datetime  # UTC
+    rating: Rating
+    confidence: float | None
+    card: CardRead | None  # null once the card was deleted
+
+
+class StrugglingCard(BaseModel):
+    """MCP `struggling_cards` (spec 031): an existing card's `again` count in the window."""
+
+    card: CardRead
+    reviews: int  # all ratings of the card in the window
+    again: int
+    last_again_at: datetime  # UTC
+
+
 class MilestoneSetting(BaseModel):
     """MCP `new_card_milestone`: the size of the new-card steps the app shows (spec 021)."""
 
@@ -394,13 +413,6 @@ class AddCardsResult(BaseModel):
 class AddNotesResult(BaseModel):
     added: list[NoteRead]
     skipped: list[NoteRead]  # existing notes whose duplicate key matched
-
-
-class AddCardsReply(AddCardsResult):
-    """MCP only: never-reviewed cards after the insert, and the milestone size."""
-
-    new: int
-    milestone: int
 
 
 class AddNotesReply(AddNotesResult):

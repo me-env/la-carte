@@ -160,7 +160,7 @@ async def test_feedback_never_changes_the_deck(engine):  # 12
     async def snapshot(client) -> list:
         return [
             (await client.call_tool(tool, {})).structured_content
-            for tool in ("list_cards", "find_notes", "list_reports", "due_cards", "deck_stats")
+            for tool in ("find_notes", "list_reports", "due_cards", "deck_stats")
         ]
 
     async with Client(build_mcp(engine)) as client:

@@ -19,7 +19,7 @@ import fsrs
 from fsrs.scheduler import FUZZ_RANGES
 from pydantic import ValidationError
 from sqlalchemy.dialects.sqlite import insert
-from sqlmodel import Session, col, delete, func, select
+from sqlmodel import Session, case, col, delete, func, select
 
 from la_carte_api.models import (
     ACTIVE_REPORT,
@@ -53,8 +53,10 @@ from la_carte_api.models import (
     ReportRead,
     ReportReason,
     ReportStatus,
+    ReviewEntry,
     ReviewLog,
     Settings,
+    StrugglingCard,
     utcnow,
 )
 
@@ -1102,3 +1104,88 @@ def prune_activity(session: Session, now: datetime | None = None) -> int:
     result = session.exec(delete(ActivityEvent).where(col(ActivityEvent.at) < cutoff))
     session.commit()
     return result.rowcount
+
+
+# --- History (spec 031) ------------------------------------------------------------------------
+
+HISTORY_LIST_MAX = 1000
+STRUGGLING_LIST_MAX = 100
+
+
+def _card_reads(session: Session, card_ids: set[UUID]) -> dict[UUID, CardRead]:
+    """The cards that still exist among `card_ids`, as `CardRead`."""
+    rows = session.exec(
+        select(Card, Note)
+        .join(Note, col(Card.note_id) == col(Note.id))
+        .where(col(Card.id).in_(card_ids))
+    )
+    return {card.id: CardRead.of(card, note) for card, note in rows}
+
+
+def review_history(
+    session: Session,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    card_id: UUID | None = None,
+    note_id: UUID | None = None,
+    rating: Rating | None = None,
+    limit: int = 100,
+) -> list[ReviewEntry]:
+    """Ratings newest first, `since <= reviewed_at < until`, optionally of one card, of the
+    note's current cards, or of one rating. Each with the card as it is now (null once deleted)."""
+    statement = select(ReviewLog)
+    if since is not None:
+        statement = statement.where(ReviewLog.reviewed_at >= _utc(since))
+    if until is not None:
+        statement = statement.where(ReviewLog.reviewed_at < _utc(until))
+    if card_id is not None:
+        statement = statement.where(ReviewLog.card_id == card_id)
+    if note_id is not None:
+        note_cards = select(Card.id).where(Card.note_id == note_id)
+        statement = statement.where(col(ReviewLog.card_id).in_(note_cards))
+    if rating is not None:
+        statement = statement.where(ReviewLog.rating == rating)
+    statement = statement.order_by(
+        col(ReviewLog.reviewed_at).desc(), col(ReviewLog.id).desc()
+    ).limit(limit)
+    logs = session.exec(statement).all()
+    cards = _card_reads(session, {log.card_id for log in logs})
+    return [
+        ReviewEntry(
+            card_id=log.card_id,
+            reviewed_at=log.reviewed_at,
+            rating=log.rating,
+            confidence=log.confidence,
+            card=cards.get(log.card_id),
+        )
+        for log in logs
+    ]
+
+
+def struggling_cards(
+    session: Session, since: datetime | None = None, limit: int = 20
+) -> list[StrugglingCard]:
+    """Existing cards with at least one `again` since `since`: most `again` first, then the
+    highest again / reviews, then the latest `again`, then card id."""
+    failed = ReviewLog.rating == Rating.again
+    again = func.sum(case((failed, 1), else_=0))
+    reviews = func.count(col(ReviewLog.id))
+    last_again_at = func.max(case((failed, col(ReviewLog.reviewed_at))))
+    statement = (
+        select(Card, Note, reviews, again, last_again_at)
+        .select_from(ReviewLog)
+        .join(Card, col(Card.id) == col(ReviewLog.card_id))
+        .join(Note, col(Note.id) == col(Card.note_id))
+        .group_by(col(Card.id), col(Note.id))
+        .having(again > 0)
+        .order_by(again.desc(), (again * 1.0 / reviews).desc(), last_again_at.desc(), col(Card.id))
+        .limit(limit)
+    )
+    if since is not None:
+        statement = statement.where(ReviewLog.reviewed_at >= _utc(since))
+    return [
+        StrugglingCard(
+            card=CardRead.of(card, note), reviews=total, again=failures, last_again_at=last
+        )
+        for card, note, total, failures, last in session.exec(statement)
+    ]

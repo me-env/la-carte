@@ -185,7 +185,7 @@ REST `POST /notes`, `POST /cards` keep their models.
 Reports (spec 015): `list_reports(status="active")` → `[Report]`, oldest first (`active` = open + waiting_user;
 also `all` or one status). `update_report(report_id, outcome, note)` stores `note` (non-blank) as `resolution`:
 `waiting_user` (card stays held), `fixed` → resolved, `kept` → dismissed (both: card back in study, unchanged),
-`deleted` → resolved + `delete_card` semantics (just closes if the card is gone). Unknown or closed report →
+`deleted` → resolved + `deck.delete_card` semantics (just closes if the card is gone). Unknown or closed report →
 `ToolError`.
 
 Feedback (spec 025, MCP only): `send_feedback(message, kind="other")` → `Feedback` (`kind`: bug | confusing |

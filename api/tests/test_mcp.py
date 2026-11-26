@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 
 import pytest
@@ -7,9 +8,30 @@ from sqlmodel import Session, select
 
 from la_carte_api import deck
 from la_carte_api.mcp_server import build_mcp
-from la_carte_api.models import CardCreate, Rating, ReviewLog, utcnow
+from la_carte_api.models import NoteCreate, Rating, ReviewLog, utcnow
 
 pytestmark = pytest.mark.anyio
+
+TOOLS = {
+    "add_notes", "find_notes", "update_note", "add_direction", "remove_direction", "delete_note",
+    "due_cards", "review_card", "deck_stats", "new_card_milestone", "list_reports",
+    "update_report", "send_feedback", "list_feedback", "close_feedback", "activity_log",
+    "review_history", "struggling_cards",
+}  # fmt: skip
+REMOVED_TOOLS = ("add_cards", "list_cards", "update_card", "delete_card")
+
+
+def one_way(front: str, back: str) -> dict:
+    """A basic note with the single card front -> back."""
+    fields = {"front": front, "back": back}
+    return {"type": "basic", "fields": fields, "directions": [{"prompt": ["front"]}]}
+
+
+async def add_one_way(client: Client, *pairs: tuple[str, str]) -> list[dict]:
+    """Adds one-way basic notes; returns their cards."""
+    added = await client.call_tool("add_notes", {"notes": [one_way(f, b) for f, b in pairs]})
+    assert not added.is_error, added.content
+    return [note["cards"][0] for note in added.structured_content["added"]]
 
 
 @pytest.fixture
@@ -20,22 +42,16 @@ def anyio_backend():
 async def test_agent_can_add_and_review_cards(engine):
     async with Client(build_mcp(engine)) as client:
         tools = {t.name for t in (await client.list_tools()).tools}
-        assert tools == {
-            "add_cards", "list_cards", "update_card", "delete_card",
-            "due_cards", "review_card", "deck_stats",
-            "add_notes", "find_notes", "update_note", "add_direction", "remove_direction",
-            "delete_note", "list_reports", "update_report", "new_card_milestone",
-            "send_feedback", "list_feedback", "close_feedback", "activity_log",
-        }  # fmt: skip
+        assert tools == TOOLS
 
-        added = await client.call_tool(
-            "add_cards",
-            {"cards": [{"front": "chat", "back": "cat"}, {"front": "chien", "back": "dog"}]},
-        )
+        notes = [one_way("chat", "cat"), one_way("chien", "dog")]
+        added = await client.call_tool("add_notes", {"notes": notes})
         assert not added.is_error
-        cards = added.structured_content["added"]
-        assert [c["front"] for c in cards] == ["chat", "chien"]
-        assert added.structured_content["skipped"] == []
+        reply = added.structured_content
+        assert [n["fields"]["front"] for n in reply["added"]] == ["chat", "chien"]
+        cards = [note["cards"][0] for note in reply["added"]]
+        assert reply["skipped"] == []
+        assert (reply["new"], reply["milestone"]) == (2, 15)
 
         await client.call_tool("review_card", {"card_id": cards[0]["id"], "rating": "easy"})
 
@@ -47,28 +63,60 @@ async def test_agent_can_add_and_review_cards(engine):
 async def test_unknown_card_is_a_tool_error(engine):
     async with Client(build_mcp(engine)) as client:
         result = await client.call_tool(
-            "delete_card", {"card_id": "00000000-0000-0000-0000-000000000000"}
+            "remove_direction", {"card_id": "00000000-0000-0000-0000-000000000000"}
         )
         assert result.is_error
 
 
-async def test_add_cards_skips_duplicates_unless_allowed(engine):
+@pytest.mark.parametrize(("name", "arguments"), [
+    ("add_cards", {"cards": [{"front": "x", "back": "y"}]}),
+    ("list_cards", {}),
+    ("update_card", {"card_id": "CARD", "front": "changed"}),
+    ("delete_card", {"card_id": "CARD"}),
+])  # fmt: skip
+async def test_removed_card_tools_are_unknown_and_change_nothing(engine, name, arguments):
     async with Client(build_mcp(engine)) as client:
-        first = await client.call_tool("add_cards", {"cards": [{"front": "chat", "back": "cat"}]})
+        [card] = await add_one_way(client, ("chat", "cat"))
+        before = (await client.call_tool("find_notes", {})).structured_content
+        arguments = {k: card["id"] if v == "CARD" else v for k, v in arguments.items()}
+        try:
+            result = await client.call_tool(name, arguments)
+        except MCPError:
+            pass
+        else:
+            assert result.is_error
+            assert "Unknown tool" in result.content[0].text
+        assert (await client.call_tool("find_notes", {})).structured_content == before
+
+
+async def test_no_text_names_a_removed_tool(engine):
+    removed = re.compile(rf"\b({'|'.join(REMOVED_TOOLS)})\b")
+    async with Client(build_mcp(engine)) as client:
+        texts = [client.instructions or ""]
+        texts += [t.description or "" for t in (await client.list_tools()).tools]
+        for name, arguments in (
+            ("quiz_me", {}), ("make_cards", {"text": "x"}), ("add_people", {"text": "x"}),
+            ("handle_reports", {}),
+        ):  # fmt: skip
+            texts += [m.content.text for m in (await client.get_prompt(name, arguments)).messages]
+        assert [text for text in texts if removed.search(text)] == []
+
+
+async def test_add_notes_skips_duplicates_unless_allowed(engine):
+    async with Client(build_mcp(engine)) as client:
+        first = await client.call_tool("add_notes", {"notes": [one_way("chat", "cat")]})
         [chat] = first.structured_content["added"]
 
         result = await client.call_tool(
-            "add_cards",
-            {"cards": [{"front": " Chat", "back": "a cat"}, {"front": "chien", "back": "dog"}]},
+            "add_notes", {"notes": [one_way(" Chat", "a cat"), one_way("chien", "dog")]}
         )
-        assert [c["front"] for c in result.structured_content["added"]] == ["chien"]
-        assert result.structured_content["skipped"] == [chat]  # the existing card, as it is
+        assert [n["fields"]["front"] for n in result.structured_content["added"]] == ["chien"]
+        assert result.structured_content["skipped"] == [chat]  # the existing note, as it is
 
         forced = await client.call_tool(
-            "add_cards",
-            {"cards": [{"front": "chat", "back": "cat"}], "allow_duplicates": True},
+            "add_notes", {"notes": [one_way("chat", "cat")], "allow_duplicates": True}
         )
-        assert [c["front"] for c in forced.structured_content["added"]] == ["chat"]
+        assert [n["fields"]["front"] for n in forced.structured_content["added"]] == ["chat"]
         assert forced.structured_content["skipped"] == []
 
 
@@ -96,17 +144,7 @@ async def test_instructions_explain_notes_cards_and_directions(engine):
             assert expected in instructions
 
         tools = {t.name: t.description for t in (await client.list_tools()).tools}
-        for expected in (
-            "Minimalist",
-            "shortest answer",
-            "Check `list_cards` first",
-            "`update_card`",
-            "only when the user explicitly asks",
-        ):
-            assert expected in tools["add_cards"]
-        assert "already exists" in tools["list_cards"]
-        for name in ("add_cards", "list_cards", "update_card", "delete_card"):
-            assert tools[name].startswith("Prefer the note tools")
+        assert "already exists" in tools["find_notes"]
         assert "siblings" in tools["update_note"]
         assert "only when the user explicitly asks" in tools["add_notes"]
         assert "6 hours" in tools["due_cards"]
@@ -198,8 +236,7 @@ async def test_prompt_counts_must_be_at_least_one(engine, name, arguments):
 
 async def test_mcp_review_counts_in_rest_stats(client):
     async with Client(build_mcp(client.app.state.engine)) as mcp:
-        added = await mcp.call_tool("add_cards", {"cards": [{"front": "chat", "back": "cat"}]})
-        [card] = added.structured_content["added"]
+        [card] = await add_one_way(mcp, ("chat", "cat"))
         await mcp.call_tool("review_card", {"card_id": card["id"], "rating": "good"})
 
     stats = client.get("/stats").json()
@@ -208,8 +245,7 @@ async def test_mcp_review_counts_in_rest_stats(client):
 
 async def test_deck_stats_takes_a_time_zone(client):
     async with Client(build_mcp(client.app.state.engine)) as mcp:
-        added = await mcp.call_tool("add_cards", {"cards": [{"front": "chat", "back": "cat"}]})
-        [card] = added.structured_content["added"]
+        [card] = await add_one_way(mcp, ("chat", "cat"))
         await mcp.call_tool("review_card", {"card_id": card["id"], "rating": "good"})
 
         stats = await mcp.call_tool("deck_stats", {"tz": "UTC"})
@@ -228,29 +264,28 @@ async def test_deck_stats_takes_a_time_zone(client):
         assert "`streak`" in tool.description
 
 
-async def test_deck_stats_streak_survives_delete_card(engine):
+async def test_deck_stats_streak_survives_delete_note(engine):
     with Session(engine) as session:
-        [card] = deck.add_cards(session, [CardCreate(front="chat", back="cat")]).added
+        basic = NoteCreate(type="basic", fields={"front": "chat", "back": "cat"})
+        [note] = deck.add_notes(session, [basic]).added
+        card = note.cards[0]
         deck.review_card(session, card.id, Rating.good, now=utcnow() - timedelta(days=1))
         deck.review_card(session, card.id, Rating.good)
 
     async with Client(build_mcp(engine)) as client:
         assert (await client.call_tool("deck_stats", {})).structured_content["streak"] == 2
-        deleted = await client.call_tool("delete_card", {"card_id": str(card.id)})
+        deleted = await client.call_tool("delete_note", {"note_id": str(note.id)})
         assert not deleted.is_error
         stats = (await client.call_tool("deck_stats", {})).structured_content
         assert (stats["total"], stats["reviewed_today"], stats["streak"]) == (0, 1, 2)
 
-        [tool] = [t for t in (await client.list_tools()).tools if t.name == "delete_card"]
+        [tool] = [t for t in (await client.list_tools()).tools if t.name == "delete_note"]
         assert "review history is kept" in tool.description
 
 
 async def test_review_card_takes_an_optional_confidence(engine):
     async with Client(build_mcp(engine)) as client:
-        added = await client.call_tool(
-            "add_cards", {"cards": [{"front": "a", "back": "a"}, {"front": "b", "back": "b"}]}
-        )
-        a, b = added.structured_content["added"]
+        a, b = await add_one_way(client, ("a", "a"), ("b", "b"))
         measured = {"card_id": a["id"], "rating": "good", "confidence": 0.72}
         assert not (await client.call_tool("review_card", measured)).is_error
         plain = {"card_id": b["id"], "rating": "good"}

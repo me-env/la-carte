@@ -53,9 +53,9 @@ async def test_ac3_explicit_single_direction_makes_one_card(engine):
     one = {**CHAT, "directions": [{"prompt": ["front"], "answer": ["back"]}]}
     async with Client(build_mcp(engine)) as client:
         [note] = (await client.call_tool("add_notes", {"notes": [one]})).structured_content["added"]
-        cards = (await client.call_tool("list_cards", {})).structured_content["result"]
+        notes = (await client.call_tool("find_notes", {})).structured_content["result"]
     assert _ways(note) == [(["front"], ["back"])]
-    assert len(cards) == 1
+    assert [len(n["cards"]) for n in notes] == [1]
 
 
 async def test_ac4_person_without_directions_still_fails_mcp(engine):
@@ -72,15 +72,6 @@ def test_ac4_person_without_directions_still_fails_rest(client):
     assert response.status_code == 422
     assert "photo -> name + description" in response.json()["detail"]
     assert client.get("/notes").json() == []
-
-
-async def test_ac5_mcp_add_cards_makes_one_card(engine):
-    async with Client(build_mcp(engine)) as client:
-        reply = await client.call_tool("add_cards", {"cards": [{"front": "chat", "back": "cat"}]})
-        [card] = reply.structured_content["added"]
-        [note] = (await client.call_tool("find_notes", {})).structured_content["result"]
-    assert (card["front"], card["back"]) == ("chat", "cat")
-    assert _ways(note) == [(["front"], ["back"])]
 
 
 def test_ac5_rest_post_cards_makes_one_card(client):
@@ -124,12 +115,6 @@ async def test_ac9_make_cards_prompt_and_add_notes_description(engine):
     add_notes = (await _tools(engine))["add_notes"]
     assert "back -> front" in add_notes
     assert "front -> back only" not in add_notes
-
-
-async def test_ac10_add_cards_description_one_card_and_points_to_add_notes(engine):
-    add_cards = (await _tools(engine))["add_cards"]
-    assert "one card front -> back per item" in add_cards
-    assert "`add_notes`" in add_cards
 
 
 def test_ac11_openapi_note_create_directions_says_basic_defaults_to_both(client):
