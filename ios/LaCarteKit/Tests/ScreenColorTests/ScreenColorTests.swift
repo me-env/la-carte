@@ -186,12 +186,37 @@ struct ScreenColorTests {
   /// Spec 000 #4: the gallery on the theme's background, with its circle buttons on `surface`.
   @Test(arguments: looks)
   func gallery(_ look: Look) throws {
-    let screen = try Screen(DesignSystemGalleryContent().background(Theme.background), look, pointHeight: nil)
+    let gallery = DesignSystemGalleryContent(showsGoogleButtons: false)  // the G's blue: `googleButton`
+    let screen = try Screen(gallery.background(Theme.background), look, pointHeight: nil)
 
     screen.expect(at: CGPoint(x: 3, y: 3), screen.palette.background, "gallery background top-left")
     screen.expect(at: CGPoint(x: 3, y: screen.size.height - 3), screen.palette.background, "gallery background bottom")
     #expect(screen.share(of: screen.palette.background) > 0.5, "gallery mostly \(Screen.hex(screen.palette.background))")
     screen.expectNoBlue()
+  }
+
+  /// Spec 030c: Google's branding requires its multicolour G unaltered, so it's the one blue allowed on screen. Every
+  /// saturated pixel stays within the 20 pt G, which shows Google's colours; the rest of the button has no blue.
+  @Test(arguments: looks)
+  func googleButton(_ look: Look) throws {
+    let variants: [(String, AnyView)] = [
+      ("idle", AnyView(ContinueWithGoogleButton {})),
+      ("loading", AnyView(ContinueWithGoogleButton(isLoading: true) {})),
+      ("disabled", AnyView(ContinueWithGoogleButton {}.disabled(true))),
+    ]
+    for (name, button) in variants {
+      let view = button.padding(Theme.Spacing.l).background(Theme.background)
+      let screen = try Screen(view, look, pointHeight: nil, name: "googleButton-\(name)")
+
+      let g = try #require(screen.saturatedBounds(), "\(name): no G drawn")
+      #expect(g.width <= 21 && g.height <= 21, "\(name): colour outside the 20 pt G: \(g)")
+      if name != "disabled" {  // disabled fades the whole pill to 38 %, so its G isn't Google's colours
+        for (colour, hex) in [("blue", 0x4285F4), ("red", 0xEA4335), ("yellow", 0xFBBC04), ("green", 0x34A853)] {
+          #expect(screen.share(of: UInt32(hex), in: g, tolerance: 10) > 0.02, "\(name): G has no Google \(colour)")
+        }
+      }
+      screen.expectNoBlue(outside: g)
+    }
   }
 }
 
@@ -308,10 +333,10 @@ struct Screen {
     return (n, xs.count * ys.count)
   }
 
-  /// Fraction of pixels in `rect` (default: the whole screen) within ±4 per channel of `color`.
-  func share(of color: UInt32, in rect: CGRect? = nil) -> Double {
+  /// Fraction of pixels in `rect` (default: the whole screen) within ±`tolerance` per channel of `color`.
+  func share(of color: UInt32, in rect: CGRect? = nil, tolerance: Int = 4) -> Double {
     let (r, g, b) = (Int(color >> 16), Int(color >> 8 & 0xFF), Int(color & 0xFF))
-    let n = count(in: rect) { abs($0 - r) <= 4 && abs($1 - g) <= 4 && abs($2 - b) <= 4 }
+    let n = count(in: rect) { abs($0 - r) <= tolerance && abs($1 - g) <= tolerance && abs($2 - b) <= tolerance }
     return n.total == 0 ? 0 : Double(n.matching) / Double(n.total)
   }
 
@@ -378,9 +403,28 @@ struct Screen {
   }
 
   /// Design system "no default blue tint": no saturated blue pixel anywhere (same rule as the UI tests).
-  func expectNoBlue(sourceLocation: SourceLocation = #_sourceLocation) {
-    let blue = count { r, g, b in b > r + 60 && b > g + 30 }.matching
+  /// `outside` is only for Google's G (`googleButton`).
+  func expectNoBlue(outside allowed: CGRect? = nil, sourceLocation: SourceLocation = #_sourceLocation) {
+    let isBlue = { (r: Int, g: Int, b: Int) in b > r + 60 && b > g + 30 }
+    let blue = count(where: isBlue).matching - (allowed.map { count(in: $0, where: isBlue).matching } ?? 0)
     #expect(blue == 0, "\(blue) blue pixels", sourceLocation: sourceLocation)
+  }
+
+  /// The bounding box, in points, of the saturated pixels (channels more than 60 apart): no palette token is.
+  func saturatedBounds() -> CGRect? {
+    var box: (x0: Int, y0: Int, x1: Int, y1: Int)?
+    for y in 0..<height {
+      for x in 0..<width {
+        let i = (y * width + x) * 4
+        let channels = [pixels[i], pixels[i + 1], pixels[i + 2]]
+        guard channels.max()! - channels.min()! > 60 else { continue }
+        box = box.map { (min($0.x0, x), min($0.y0, y), max($0.x1, x), max($0.y1, y)) } ?? (x, y, x, y)
+      }
+    }
+    return box.map {
+      CGRect(x: CGFloat($0.x0) / Self.scale, y: CGFloat($0.y0) / Self.scale,
+             width: CGFloat($0.x1 - $0.x0 + 1) / Self.scale, height: CGFloat($0.y1 - $0.y0 + 1) / Self.scale)
+    }
   }
 
   static func isClose(_ a: UInt32, _ b: UInt32, tolerance: Int = 4) -> Bool {
