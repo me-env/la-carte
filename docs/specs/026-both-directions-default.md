@@ -32,6 +32,7 @@ explicitly only when the reverse isn't a meaningful question ("Capital of France
    e2e/UI-test seeding and many pytest fixtures. Giving them two cards would break that 1:1 shape. `deck.add_cards`
    therefore passes `directions=[front → back]` explicitly instead of relying on the default. Its MCP docstring
    says it makes one card per item and that `add_notes` makes both directions by default.
+   *Amended by [031](031-mcp-cleanup.md): the MCP `add_cards` tool is deleted; `POST /cards` keeps this rule.*
 4. **person notes: unchanged.** No default; `directions` stay required and chosen explicitly (ask the user
    if they haven't said).
 5. **Existing notes: no backfill.** Notes created before this change keep their cards; nothing adds reverse
@@ -62,12 +63,12 @@ above plus "Each direction is one more card to review."
 | 2 | REST `POST /notes {"type":"basic","fields":{"front":"chat","back":"cat"}}` (no `directions`) returns 201 and a `Note` with the same 2 cards (replaces 014a AC 2) | pytest (REST) |
 | 3 | MCP `add_notes` with a basic note and `directions: [{"prompt":["front"],"answer":["back"]}]` creates exactly 1 card `front → back`; no reverse card exists | pytest (MCP) |
 | 4 | MCP `add_notes` with a person note and no `directions` still fails with a `ToolError` naming the allowed directions; nothing is written (REST: 422) | pytest (MCP + REST) |
-| 5 | MCP `add_cards` with one `{"front":"chat","back":"cat"}` and REST `POST /cards` each create a note with exactly 1 card `front → back` | pytest (MCP + REST) |
+| 5 | (MCP part removed by 031) MCP `add_cards` with one `{"front":"chat","back":"cat"}` and REST `POST /cards` each create a note with exactly 1 card `front → back` | pytest (MCP + REST) |
 | 6 | `add_notes` reply `new` counts both cards of each default basic note (one basic note into an empty deck → `new == 2`) | pytest (MCP) |
 | 7 | A note created with 1 card before the change keeps 1 card after `update_note` with only `fields` (no directions re-derived, no backfill) | pytest |
 | 8 | `INSTRUCTIONS` contain "back -> front" in the basic line and "Capital of France"; do **not** contain "never \"all of them\"" or "Default direction: front -> back" | pytest (substring) |
 | 9 | The `make_cards` prompt text does **not** contain "never add every direction by default" and contains "Capital of France"; the `add_notes` tool description contains "back -> front" and does not contain "front -> back only" | pytest (substring) |
-| 10 | The `add_cards` tool description says it makes one card `front -> back` per item and points to `add_notes` | pytest (substring) |
+| 10 | (Removed by 031: the tool is gone) The `add_cards` tool description says it makes one card `front -> back` per item and points to `add_notes` | pytest (substring) |
 | 11 | `NoteCreate.directions` field description (OpenAPI `/openapi.json`) says basic defaults to both directions | pytest |
 | 12 | `scripts/api-test.sh` passes; existing tests that asserted the old wording (`test_mcp.py` "Choose directions deliberately") or 1 card from a basic `add_notes`/`POST /notes` without directions are updated to the new rule, not deleted | pytest + review |
 

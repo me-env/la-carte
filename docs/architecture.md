@@ -46,7 +46,7 @@ Rules:
 ### Notes and cards (spec 014)
 - **Note** = one thing the user knows: `type` + named string `fields` (JSON). Types are fixed in `deck.NOTE_TYPES`:
   `basic` (`front`, `back`; both required; key `front`; default directions both `front → back` and `back → front`,
-  spec 026; legacy `add_cards` / `POST /cards` make one card `front → back`) and `person` (`photo`
+  spec 026; legacy REST `POST /cards` makes one card `front → back`) and `person` (`photo`
   http(s) URL, `name` required, `description` free text e.g. "Mistral CEO"; key `name`; no default: directions
   must be given). `role` / `context` were removed (spec 014a amendment): using them is a 422 "… use description".
 - **Card** = one direction over its note's fields with its own FSRS state: **one prompt field → every other field
@@ -172,16 +172,14 @@ key (basic `front`, person `name`; casefolded, trimmed) matches an existing note
 nothing on a validation error), `find_notes(query, type, limit=50)`, `update_note(note_id, fields)`,
 `add_direction(note_id, prompt, answer=None)`, `remove_direction(card_id)` (refuses the last card), `delete_note(note_id)`.
 
-Cards (thin wrappers with the `/cards` semantics; docstrings start "Prefer the note tools"): `add_cards` (basic
-notes; same duplicate rule on basic fronts, returns `{added: [Card], skipped: [Card]}`), `list_cards`, `update_card`,
-`delete_card`, `due_cards` (servable queue), `review_card(card_id, rating, confidence=None)`, `deck_stats(tz="UTC")`
+Cards: `due_cards` (servable queue), `review_card(card_id, rating, confidence=None)`, `deck_stats(tz="UTC")`
 (the same `DeckStats` as `/stats`; fields, the ladder, freezes and the `history` alphabet explained in its docstring).
 REST `POST /notes` / `POST /cards` always add.
 
 New-card milestone (spec 021, MCP only): `new_card_milestone(value=None)` reads the step size, or sets it (1–200,
 else `ToolError` "new_card_milestone must be between 1 and 200."), and returns `MilestoneSetting` = `{milestone}`.
-The MCP replies of `add_notes` (`AddNotesReply`) and `add_cards` (`AddCardsReply`) add `new` (never-reviewed cards
-after the insert) and `milestone`; REST `POST /notes`, `POST /cards` keep their models.
+The MCP reply of `add_notes` (`AddNotesReply`) adds `new` (never-reviewed cards after the insert) and `milestone`;
+REST `POST /notes`, `POST /cards` keep their models.
 
 Reports (spec 015): `list_reports(status="active")` → `[Report]`, oldest first (`active` = open + waiting_user;
 also `all` or one status). `update_report(report_id, outcome, note)` stores `note` (non-blank) as `resolution`:
@@ -197,6 +195,15 @@ missing | friction | other; `message` trimmed, 1–2000 chars, else `ToolError`)
 
 Activity (spec 029): `activity_log(since, until, card_id, kind, session, limit=100)` → `[ActivityEventRead]` newest
 first, the same as `GET /activity`. `list_feedback` / `list_reports` descriptions point to it for correlation.
+
+History (spec 031, MCP only): `review_history(since, until, card_id, note_id, rating, limit=100)` → `[ReviewEntry]`
+= `{card_id, reviewed_at, rating, confidence, card: Card | null}` over `ReviewLog` (app and MCP ratings, never
+pruned), newest first; `struggling_cards(since, limit=20)` → `[StrugglingCard]` = `{card, reviews, again,
+last_again_at}`, existing cards with ≥ 1 `again`, most `again` first.
+
+Removed in spec 031 (superseded by the note tools; REST `/cards` unchanged): `add_cards` → `add_notes` (one card:
+`directions: [{"prompt": ["front"]}]`), `list_cards` → `find_notes`, `update_card` → `update_note`, `delete_card` →
+`remove_direction` / `delete_note`.
 
 Server `instructions` (sent on initialize, `mcp_server.INSTRUCTIONS`) explain notes vs cards and siblings, both
 types, "edit the note, not loose cards", "basic defaults to both directions; person: pick directions deliberately", minimalist cards, photo privacy, and the
