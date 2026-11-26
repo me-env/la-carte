@@ -111,7 +111,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.app == 'true'
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 40  # ScreenColorTests ≈14 min of a ≈22 min job; a slow runner overran 30 in 45865720258
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90  # v1.7.0
