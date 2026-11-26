@@ -197,7 +197,7 @@ final class RatingsUITests: XCTestCase {
         assertTwoButtons(app, context: "after dead-zone \(f)")
       }
       snapshot("study-swipe-cancelled", appearance: appearance)
-      XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, 0,
+      XCTAssertEqual(server.reviewPosts.count, 0,
                      "dead-zone or unrevealed drag sent a review: \(server.requests.map(\.path))")
       app.terminate()
       server.stop()
@@ -221,7 +221,7 @@ final class RatingsUITests: XCTestCase {
       XCTAssertFalse(ring(app).exists, "ring shown while editing (\(f))")
     }
     snapshot("study-editing-after-drag", appearance: .light)
-    XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, 0,
+    XCTAssertEqual(server.reviewPosts.count, 0,
                    "drag while editing sent a review: \(server.requests.map { "\($0.method) \($0.path)" })")
     server.stop()
   }
@@ -247,13 +247,13 @@ final class RatingsUITests: XCTestCase {
     XCTAssertLessThanOrEqual(after.maxY, cardArea(app).frame.maxY + 1, "end of the back not scrolled into view: \(after)")
     XCTAssertFalse(ring(app).exists, "ring after a vertical scroll")
     snapshot("study-long-scrolled", appearance: .light)
-    XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, 0, "scroll sent a review")
+    XCTAssertEqual(server.reviewPosts.count, 0, "scroll sent a review")
     // 019 #2: at the end of the scroll, a vertical drag up is still the scroll view's (bounce), not a rating.
     let start = el(app, "study.card").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
     start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -250)), withVelocity: .slow,
                 thenHoldForDuration: 0.1)
     Thread.sleep(forTimeInterval: 1)
-    XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, 0,
+    XCTAssertEqual(server.reviewPosts.count, 0,
                    "vertical drag up at the end of a long card sent a review: \(server.requests.last?.body ?? "")")
     // 019 #8: a near-vertical drag (dx = 0.3 |dy|, within 30°) still scrolls (back down) and doesn't rate.
     let mid = el(app, "study.back").frame
@@ -261,7 +261,7 @@ final class RatingsUITests: XCTestCase {
     Thread.sleep(forTimeInterval: 0.8)
     XCTAssertGreaterThan(el(app, "study.back").frame.minY, mid.minY + 5, "near-vertical drag did not scroll")
     XCTAssertFalse(ring(app).exists, "ring after a near-vertical drag")
-    XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, 0, "near-vertical drag sent a review")
+    XCTAssertEqual(server.reviewPosts.count, 0, "near-vertical drag sent a review")
     // A 45° up-right drag rates (projection 0.2 w · √2 ≈ 0.28 w → easy) without scrolling first.
     drag(app, dx: 0.2, dy: -0.2, hold: 0.4)
     let post = try waitForPost(server, count: 1)
@@ -309,8 +309,8 @@ final class RatingsUITests: XCTestCase {
       if let rating = step.rating {
         posts += 1
         let deadline = Date().addingTimeInterval(4)
-        while server.requests.filter({ $0.method == "POST" }).count < posts, Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
-        let got = server.requests.filter { $0.method == "POST" }
+        while server.reviewPosts.count < posts, Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+        let got = server.reviewPosts
         let sent = got.count >= posts ? ((try? JSONSerialization.jsonObject(with: Data(got[posts - 1].body.utf8))) as? [String: Any])?["rating"] as? String : nil
         results.append("\(step.name): dial \(ringShown), sent \(sent ?? "nothing")")
         XCTAssertEqual(sent, rating, "\(step.name) (\(step.dx), \(step.dy)) on the long card")
@@ -321,7 +321,7 @@ final class RatingsUITests: XCTestCase {
         results.append(String(format: "%@: dial %@, scrolled %.0f pt", step.name, ringShown ? "true" : "false", moved))
         XCTAssertFalse(ringShown, "\(step.name): dial during a near-vertical drag")
         XCTAssertGreaterThan(abs(moved), 5, "\(step.name): near-vertical drag did not scroll")
-        XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, posts, "\(step.name) sent a review")
+        XCTAssertEqual(server.reviewPosts.count, posts, "\(step.name) sent a review")
       }
       if step.name == "45deg" { snapshot("study-long-45deg-rated", appearance: .light) }
     }
@@ -369,7 +369,7 @@ final class RatingsUITests: XCTestCase {
       XCTAssertTrue(seen.isEmpty, "dial in the accessibility tree after a \(step.rating) release:\n" + seen.joined(separator: "\n"))
       // On a loaded CI runner one synthesized drag was once lost (run 45071709294: no POST, the same card still
       // revealed). Redo it once; a release that really doesn't rate still fails `waitForPost`.
-      if !poll(timeout: 5, { server.requests.filter { $0.method == "POST" }.count > i }),
+      if !poll(timeout: 5, { server.reviewPosts.count > i }),
          el(app, "study.back").label == "back \(i)" {
         print("019 reward: release \(i) (\(step.rating)) sent nothing, card unchanged; dragging once more")
         drag(app, dx: step.dx, dy: step.dy)
@@ -424,7 +424,7 @@ final class RatingsUITests: XCTestCase {
                           i, step.rating, sincePrevious, returned, next))
     }
     _ = try waitForPost(server, count: plan.count)
-    let bodies = server.requests.filter { $0.method == "POST" }.map(\.body)
+    let bodies = server.reviewPosts.map(\.body)
     for (i, step) in plan.enumerated() where i < bodies.count {
       XCTAssertTrue(bodies[i].contains("\"\(step.rating)\""), "release \(i) sent \(bodies[i]), expected \(step.rating)")
     }
@@ -471,7 +471,7 @@ final class RatingsUITests: XCTestCase {
         i += 1
       } else {
         Thread.sleep(forTimeInterval: 1)
-        XCTAssertEqual(server.requests.filter { $0.method == "POST" }.count, posts, "drag \(step.name) sent a review")
+        XCTAssertEqual(server.reviewPosts.count, posts, "drag \(step.name) sent a review")
         XCTAssertEqual(el(app, "study.back").label, "back \(i)", "card not revealed after drag \(step.name)")
         waitForAbsence(ring(app), "dial still shown after drag \(step.name)")
         assertTwoButtons(app, context: "after drag \(step.name)")
@@ -650,10 +650,10 @@ final class RatingsUITests: XCTestCase {
 
   private func waitForPost(_ server: StubAPIServer, count: Int, timeout: TimeInterval = 5) throws -> StubAPIServer.Request {
     let deadline = Date().addingTimeInterval(timeout)
-    while server.requests.filter({ $0.method == "POST" }).count < count, Date() < deadline {
+    while server.reviewPosts.count < count, Date() < deadline {
       Thread.sleep(forTimeInterval: 0.1)
     }
-    let posts = server.requests.filter { $0.method == "POST" }
+    let posts = server.reviewPosts
     XCTAssertEqual(posts.count, count, "expected \(count) review POSTs, got \(posts.map(\.path))")
     return try XCTUnwrap(posts.last)
   }
