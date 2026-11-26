@@ -67,7 +67,8 @@ Rules:
   `_card_order`, then id. The first card of a note in that order is its one servable card. It backs
   `/cards/due`, `due_cards`, `stats.due`, and `stats.next_due` (earliest time a card not servable now
   becomes servable: `max(due, every sibling's hold)`, just `due` for a (re)learning card). `total` / `new` count
-  cards.
+  cards. `Note.next` reads the same queue, spec 028 (`deck._candidates`: every non-held card with its ready time,
+  in queue order; `next` = the note's first card ready now, else its earliest ready one, ties by queue order).
 - **Due-date spreading (spec 023)**: `deck._scheduler` runs with `enable_fuzzing=False`; `deck.review_card` does
   the fuzz itself. When the result is a `review` card with an FSRS interval `i` ≥ 3 days, the new due is
   `now + k days` for one `k` in the library's fuzz window around `i` (`fsrs.scheduler.FUZZ_RANGES`), picked at
@@ -146,7 +147,7 @@ Pieces: `auth.py` (mint/verify tokens, `CurrentUser` dependency, MCP token verif
 | GET/DELETE | `/me` | — | `{id, email, created_at}` / 204 (deletes the account and everything it owns — spec 030a) |
 | GET/POST | `/me/tokens` | POST `{name, scope: deck\|stats, expires_in_days?}` (only with an app access token) | `[PersonalToken]` / `PersonalToken` + `token` once (201) — specs 030a/b |
 | DELETE | `/me/tokens/{id}` | — | 204 (revokes) |
-| GET | `/notes` | `?query=&type=basic\|person&limit=` (≤ 500, default 100; `query` = casefolded substring of any field but `photo`) | `[Note]` newest first |
+| GET | `/notes` | `?query=&type=basic\|person&limit=` (≤ 500, default 100; `query` = casefolded substring of any field but `photo`) | `[Note]` newest first. Every `Note` (all note responses, REST and MCP) has `next`: `{card_id, ready_at}` = the card Study serves first for it and when (`ready_at` ≤ now: in the queue now), or `null` when every card is held by a report (spec 028) |
 | POST | `/notes` | `{type, fields, directions?: [{prompt: [field], answer?: [fields]}]}` (one prompt field, answer = the rest; no duplicate check) | `Note` (201) |
 | GET/PATCH/DELETE | `/notes/{id}` | PATCH `{fields?, directions?}`: `fields` merged key by key (`""` clears); `directions` = the full desired set (kept ones keep card + schedule, new ones due now, missing ones deleted) | `Note` / 204 (note + all its cards) |
 | GET | `/cards` | `?query=&limit=` (matches the card's note) | `[Card]` newest first |
@@ -159,7 +160,7 @@ Pieces: `auth.py` (mint/verify tokens, `CurrentUser` dependency, MCP token verif
 | POST | `/activity` | `{events: [{id, kind, at, tz, session, app_version, build, os, card_id, data}]}` (≤ 500, else 413; each event validated on its own — spec 029) | `{stored, duplicates, rejected}` |
 | GET | `/activity` | `?since=&until=&card_id=&kind=&session=&limit=` (≤ 1000, default 100) | `[ActivityEvent]` newest first (`ActivityEventRead`, + `local_at`) |
 
-`Note` = `{id, type, fields, cards: [{id, prompt, answer, state, due, last_review}], created_at, updated_at}`.
+`Note` = `{id, type, fields, cards: [{id, prompt, answer, state, due, last_review}], next: {card_id, ready_at} | null, created_at, updated_at}`.
 `Card` = `{id, note_id, type, prompt, answer, fields, front, back, state: new|learning|review|relearning, due,
 last_review, created_at, updated_at}`; `fields` = the whole note's; `front` / `back` = prompt / answer values joined
 by `"\n"` (for old clients).

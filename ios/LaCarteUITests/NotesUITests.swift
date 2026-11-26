@@ -158,7 +158,7 @@ final class NotesUITests: XCTestCase {
   /// 027 #12: an existing one-card basic row opens with only front-back on. #8 (UI side): a new note left at its
   /// defaults closes without the discard prompt. #9: a new note has both directions on. #10: chat/cat saved with the
   /// defaults → POST /notes with both directions, row "2 directions". #11: unchecking back-front keeps front-back,
-  /// save → one direction, row "new". #4: unchecking both → hint "Choose at least one direction", Save off.
+  /// save → one direction, row "New" (spec 028). #4: unchecking both → hint "Choose at least one direction", Save off.
   @MainActor
   func testNoteEditor_basicBothDirections() throws {
     for appearance in Self.appearances {
@@ -236,7 +236,9 @@ final class NotesUITests: XCTestCase {
       }
       waitUntil("3 rows") { self.rowIDs(app).count == 3 }
       let paris = rowIDs(app).first { $0 != existing.uppercased() && $0 != chat } ?? ""
-      waitForLabel(el(app, "deck.row.\(paris).state"), "new")
+      // Spec 028 #11: a one-card note says "New" on the left and nothing on the right.
+      waitForLabel(el(app, "deck.row.\(paris).due"), "New")
+      XCTAssertFalse(el(app, "deck.row.\(paris).state").exists, "one-card note still shows deck.row.<id>.state")
       snapshot("deck-basic-one-direction", appearance: appearance)
 
       // #4: uncheck both → hint, Save off even with both fields filled.

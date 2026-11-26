@@ -35,12 +35,75 @@ struct DeckFeatureTests {
     #expect(store.state.message == nil)
   }
 
-  @Test func dueTextSaysNowOnceDueAndRelativeTimeBefore() {
-    let now = Date(timeIntervalSince1970: 1_795_000_000)
-    let english = Locale(identifier: "en_US")
-    #expect(DeckView.dueText(now, now: now, locale: english) == "Due now")
-    #expect(DeckView.dueText(now.addingTimeInterval(-60), now: now, locale: english) == "Due now")
-    #expect(DeckView.dueText(now.addingTimeInterval(3 * 86_400 + 60), now: now, locale: english) == "Due in 3 days")
+  @Test func queueLabelSaysWhatStudyDoesWithTheNote() {
+    var paris = Calendar(identifier: .gregorian)
+    paris.timeZone = TimeZone(identifier: "Europe/Paris")!
+    func date(_ day: Int, _ hour: Int, _ minute: Int = 0, month: Int = 11) -> Date {
+      paris.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour, minute: minute))!
+    }
+    let now = date(25, 15)
+    let reviewCard = Note.Card(id: UUID(), prompt: ["front"], answer: ["back"], state: .review, due: now)
+    let newCard = Note.Card(id: UUID(), prompt: ["back"], answer: ["front"], state: .new, due: now)
+    func label(_ card: Note.Card? = nil, readyAt: Date?, now: Date = now) -> String {
+      let card = card ?? reviewCard
+      let note = Note(
+        id: UUID(), type: .basic, fields: [:], cards: [reviewCard, newCard],
+        next: readyAt.map { Note.Next(cardId: card.id, readyAt: $0) }, createdAt: now, updatedAt: now
+      )
+      return note.queueLabel(now: now, calendar: paris)
+    }
+
+    #expect(label(readyAt: nil) == "Reported")
+    #expect(label(newCard, readyAt: now) == "New")
+    #expect(label(readyAt: now - 60) == "In queue")
+    #expect(label(newCard, readyAt: now + 60) == "Later today")
+    #expect(label(readyAt: date(26, 0, 30), now: date(25, 23, 30)) == "Tomorrow")
+    #expect(label(readyAt: date(25, 23, 50), now: date(25, 0, 10)) == "Later today")
+    #expect(label(readyAt: date(28, 9)) == "In 3 days")
+    #expect(label(readyAt: date(15, 9, month: 12)) == "In 2 weeks")
+    #expect(label(readyAt: paris.date(byAdding: .day, value: 125, to: now)!) == "In 4 months")
+    #expect(label(readyAt: paris.date(byAdding: .day, value: 400, to: now)!) == "In 1 year")
+    #expect(label(readyAt: paris.date(byAdding: .day, value: 800, to: now)!) == "In 2 years")
+  }
+
+  @Test func queueLabelWithoutNextFromAnOlderServer() throws {
+    var paris = Calendar(identifier: .gregorian)
+    paris.timeZone = TimeZone(identifier: "Europe/Paris")!
+    let now = paris.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 15))!
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    decoder.dateDecodingStrategy = .iso8601
+    func label(_ cards: String) throws -> String {
+      let json = """
+        {"id":"0b3c8a52-4f43-4a57-9d55-3b0f4c1d9e21","type":"basic","fields":{"front":"bonjour","back":"hello"},
+         "cards":[\(cards)],"created_at":"2026-11-20T22:14:52Z","updated_at":"2026-11-20T22:14:52Z"}
+        """
+      return try decoder.decode(Note.self, from: Data(json.utf8)).queueLabel(now: now, calendar: paris)
+    }
+    func card(_ state: String, due: String) -> String {
+      #"{"id":"\#(UUID())","prompt":["front"],"answer":["back"],"state":"\#(state)","due":"\#(due)"}"#
+    }
+
+    #expect(try label(card("review", due: "2026-11-28T09:00:00Z")) == "In 3 days")
+    let later = card("review", due: "2026-12-01T09:00:00Z")
+    let past = card("review", due: "2026-11-25T10:00:00Z")
+    #expect(try label("\(later),\(past)") == "In queue")
+    #expect(try label(card("new", due: "2026-11-20T22:14:52Z")) == "New")
+  }
+
+  @Test func mockLabelsDeckShowsOneRowPerLabel() async throws {
+    var paris = Calendar(identifier: .gregorian)
+    paris.timeZone = TimeZone(identifier: "Europe/Paris")!
+    let now = paris.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 15))!
+    let client = APIClient.inMemory(
+      notes: .labelFixtures(now: now, calendar: paris), now: now, held: [[Note].labelFixturesReported]
+    )
+    let labels = try await client.notes(nil).map { $0.queueLabel(now: now, calendar: paris) }
+    #expect(
+      labels == [
+        "In queue", "New", "Later today", "Tomorrow", "In 3 days", "In 2 weeks", "In 4 months", "Reported",
+      ]
+    )
   }
 
   @Test func searchIsDebouncedAndClearingShowsEveryNote() async {
@@ -524,16 +587,9 @@ struct DeckFeatureTests {
     let basic = notes[1]
     #expect(basic.title == "serendipity")
     #expect(basic.subtitle == "finding something good without looking for it")
-    #expect(basic.stateText == "new")
+    #expect(basic.stateText == nil)
     #expect(basic.photoURL == nil)
     #expect(notes[2].stateText == "2 directions")
-  }
-
-  @Test func aRowIsDueWhenItsEarliestCardIs() {
-    var note = notes[0]
-    let early = Date(timeIntervalSince1970: 1_000)
-    note.cards[1].due = early
-    #expect(note.due == early)
   }
 
   private func loaded(_ notes: [Note]) -> DeckFeature.State {

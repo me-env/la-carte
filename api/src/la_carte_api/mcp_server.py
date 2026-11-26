@@ -232,7 +232,9 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
     ) -> list[NoteRead]:
         """List notes, newest first, each with its cards (directions and schedule). `query`
         filters on any field except photo (substring, case-insensitive); `type` on basic/person.
-        Use it to check whether a note already exists before adding. Read-only."""
+        Use it to check whether a note already exists before adding. Read-only.
+        Each note has `next` {card_id, ready_at}: the card study serves first for it, and when.
+        `next.ready_at` <= now = in the study queue now; `null` = reported (every card held)."""
         return run(deck.list_notes, query, type, limit)
 
     @mcp.tool()
