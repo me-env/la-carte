@@ -1,7 +1,7 @@
 name: CI
 # Pipeline map, gates and timings: docs/ci-cd.md.
 #   pull_request            API + API image + iOS unit + UI smoke (≈10 min)
-#   push to main            API + API image + E2E → Deploy API; iOS unit; UI build once → full UI suite (4 shards) + E2E
+#   push to main            API + API image + E2E → Deploy API; iOS unit; UI build once → full UI suite (5 shards) + E2E
 #   nightly, manual run     everything, same as a push to main (manual run on main also re-tries the deploy)
 # Path filters (job "changes", ci/changes.sh): PRs and pushes run only what their changes need. docs-only: nothing;
 # api-only: API jobs (+ on main: UI build, E2E, deploy), no iOS unit or UI shards. A push compares with the last green
@@ -189,7 +189,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Balanced on measured CI class durations (runs 45608039397, 45698139090; docs/ci-cd.md → Shards): ≈ 26–28 min
+        # Balanced on measured CI class durations (runs 45721818305, 45811826958; docs/ci-cd.md → Shards): ≈ 19–26 min
         # of tests each, step timeout 40. The last shard runs every class the others don't name (-skip-testing), so a
         # new UI test class always runs somewhere: move it to a named shard when `rest` nears 30 min.
         # MarketingUITests is not a test suite (demo frames, owner: marketing) and never runs on CI.
@@ -214,6 +214,12 @@ jobs:
               -only-testing:LaCarteUITests/ThemeUITests
               -only-testing:LaCarteUITests/RatingsUITests
               -only-testing:LaCarteUITests/ReportUITests
+          - name: notes-logo-milestones
+            tests: >-
+              -only-testing:LaCarteUITests/NotesUITests
+              -only-testing:LaCarteUITests/LogoUITests
+              -only-testing:LaCarteUITests/StudyMilestonesUITests
+              -skip-testing:LaCarteUITests/LogoUITests/testStudy_launchShowsFirstCardNoLogo
           - name: rest
             tests: >-
               -only-testing:LaCarteUITests
@@ -229,8 +235,10 @@ jobs:
               -skip-testing:LaCarteUITests/ThemeUITests
               -skip-testing:LaCarteUITests/RatingsUITests
               -skip-testing:LaCarteUITests/ReportUITests
+              -skip-testing:LaCarteUITests/NotesUITests
+              -skip-testing:LaCarteUITests/LogoUITests
+              -skip-testing:LaCarteUITests/StudyMilestonesUITests
               -skip-testing:LaCarteUITests/MarketingUITests
-              -skip-testing:LaCarteUITests/LogoUITests/testStudy_launchShowsFirstCardNoLogo
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90  # v1.7.0
@@ -265,7 +273,7 @@ jobs:
 
   ios-e2e:
     name: iOS E2E (live API)
-    needs: ios-ui-build  # with the 4 shards: 5 macOS jobs, the free plan's limit (unit tests end before the build)
+    needs: ios-ui-build  # free plan: 5 macOS jobs at once; the last 2 shards start when unit tests and E2E end
     runs-on: macos-26
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0

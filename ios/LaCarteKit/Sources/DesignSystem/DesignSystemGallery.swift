@@ -15,6 +15,8 @@ public struct DesignSystemGallery: View {
 
 /// The gallery without its scroll view, so `ImageRenderer` can draw it (`RenderTests`).
 struct DesignSystemGalleryContent: View {
+  /// Off in the palette check (`ScreenColorTests.gallery`): Google's G is the one allowed blue, checked on its own.
+  var showsGoogleButtons = true
   @State private var lastTapped = "none"
 
   var body: some View {
@@ -80,10 +82,12 @@ struct DesignSystemGalleryContent: View {
             .foregroundStyle(Theme.secondaryInk)
             .accessibilityIdentifier("gallery.lastTapped")
           // Spec 030c: idle, signing in, disabled (no server URL).
-          ContinueWithGoogleButton { lastTapped = "google" }
-            .accessibilityIdentifier("gallery.google")
-          ContinueWithGoogleButton(isLoading: true) {}
-          ContinueWithGoogleButton {}.disabled(true)
+          if showsGoogleButtons {
+            ContinueWithGoogleButton { lastTapped = "google" }
+              .accessibilityIdentifier("gallery.google")
+            ContinueWithGoogleButton(isLoading: true) {}
+            ContinueWithGoogleButton {}.disabled(true)
+          }
         }
       }
     }

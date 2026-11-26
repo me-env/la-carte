@@ -1,4 +1,5 @@
 import APIClient
+import ActivityClient
 import ComposableArchitecture
 import Foundation
 import NoteEditorFeature
@@ -101,6 +102,7 @@ public struct DeckFeature {
     }
   }
 
+  @Dependency(\.activity) var activity
   @Dependency(\.apiClient) var apiClient
   @Dependency(\.continuousClock) var clock
 
@@ -198,6 +200,21 @@ public struct DeckFeature {
       }
     }
     .ifLet(\.$destination, action: \.destination)
+    Reduce { state, action in
+      guard let event = activityEvent(action, state) else { return .none }
+      return .run { [activity] _ in activity.log(event) }
+    }
+  }
+
+  /// Spec 029: what a deck action tells the activity log; never the search text.
+  private func activityEvent(_ action: Action, _ state: State) -> Activity? {
+    switch action {
+    case let .notesResponse(.success(notes)): .deckLoaded(count: notes.count, query: !state.query.isEmpty)
+    case let .notesResponse(.failure(error)): .failed(.notes, error)
+    case let .deleteResponse(.success(id)): .noteDeleted(noteID: id)
+    case let .deleteResponse(.failure(error)): .failed(.deleteNote, error)
+    default: nil
+    }
   }
 
   /// Loads the notes matching the search field; without a server URL and a token, makes no request (spec 008).

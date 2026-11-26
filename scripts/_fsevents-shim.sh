@@ -6,7 +6,9 @@
 # file watcher: LaCarteKit), so it hangs at 0% CPU before printing anything. Package flags don't avoid it.
 # Shim: a copy of xcodebuild, ad-hoc signed (Apple's has library validation, which ignores DYLD_INSERT_LIBRARIES),
 # with a tiny dylib whose FSEventStreamStart/Stop do nothing. xcodebuild only loses its file watchers, which a
-# one-shot command-line build never needs. The dylib drops DYLD_INSERT_LIBRARIES once loaded, so no child inherits it.
+# one-shot command-line build never needs. The same dylib makes NSFileCoordinator run its accessor at once without
+# asking filecoordinationd, which also hung (2026-11-26, "Stuck file coordination"): a CLI build has no file
+# presenters to coordinate with. The dylib drops DYLD_INSERT_LIBRARIES once loaded, so no child inherits it.
 # Limit: the shim can't run tests. Simulators only talk to an xcodebuild holding Apple's private entitlements
 # (DTServiceHub "failed to bless service hub"; an ad-hoc copy with them is killed at launch). So the wrapper hands
 # test-without-building (and -exportArchive), which open no project, to Apple's xcodebuild, and refuses plain `test`:
@@ -19,11 +21,13 @@ fsevents_shim_build() {  # prints the shim dir (contains an `xcodebuild` wrapper
   local dev real key dir tmp
   dev="${DEVELOPER_DIR:-$(xcode-select -p)}"; real="$dev/usr/bin/xcodebuild"
   key="$(cksum <"$real" | cut -d' ' -f1)"
-  dir="/tmp/la-carte-fsevents-shim/v2-$key"  # bump v<n> when this function changes
+  dir="/tmp/la-carte-fsevents-shim/v3-$key"  # bump v<n> when this function changes
   if [ ! -x "$dir/xcodebuild" ]; then
     tmp="$(mktemp -d /tmp/la-carte-fsevents-shim.XXXXXX)"
-    cat >"$tmp/nofse.c" <<'C'
-#include <CoreServices/CoreServices.h>
+    cat >"$tmp/nofse.m" <<'C'
+#import <CoreServices/CoreServices.h>
+#import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 #include <stdlib.h>
 #define INTERPOSE(r, e) __attribute__((used)) static struct { const void *r_; const void *e_; } i_##e \
   __attribute__((section("__DATA,__interpose"))) = { (const void *)&r, (const void *)&e };
@@ -31,7 +35,27 @@ static Boolean start(FSEventStreamRef s) { (void)s; return true; }
 static void stop(FSEventStreamRef s) { (void)s; }
 INTERPOSE(start, FSEventStreamStart)
 INTERPOSE(stop, FSEventStreamStop)
-__attribute__((constructor)) static void init(void) { unsetenv("DYLD_INSERT_LIBRARIES"); }
+// NSFileCoordinator without filecoordinationd: run the accessor at once ("Stuck file coordination").
+typedef void (^A1)(NSURL *); typedef void (^A2)(NSURL *, NSURL *);
+static void one(id s, SEL c, NSURL *u, NSUInteger o, NSError **e, A1 a) { a(u); }
+static void two(id s, SEL c, NSURL *u, NSUInteger o, NSURL *v, NSUInteger p, NSError **e, A2 a) { a(u, v); }
+static void prep(id s, SEL c, NSArray *r, NSUInteger ro, NSArray *w, NSUInteger wo, NSError **e,
+                 void (^a)(void (^)(void))) { a(^{}); }
+static void intents(id s, SEL c, NSArray *i, NSOperationQueue *q, void (^a)(NSError *)) { [q addOperationWithBlock:^{ a(nil); }]; }
+static void nop(id s, SEL c, id p) {}
+static void put(Class k, SEL sel, IMP imp) { Method m = class_getInstanceMethod(k, sel); if (m) method_setImplementation(m, imp); }
+__attribute__((constructor)) static void init(void) {
+  unsetenv("DYLD_INSERT_LIBRARIES");
+  Class k = [NSFileCoordinator class], mk = object_getClass(k);
+  put(k, @selector(coordinateReadingItemAtURL:options:error:byAccessor:), (IMP)one);
+  put(k, @selector(coordinateWritingItemAtURL:options:error:byAccessor:), (IMP)one);
+  put(k, @selector(coordinateReadingItemAtURL:options:writingItemAtURL:options:error:byAccessor:), (IMP)two);
+  put(k, @selector(coordinateWritingItemAtURL:options:writingItemAtURL:options:error:byAccessor:), (IMP)two);
+  put(k, @selector(prepareForReadingItemsAtURLs:options:writingItemsAtURLs:options:error:byAccessor:), (IMP)prep);
+  put(k, @selector(coordinateAccessWithIntents:queue:byAccessor:), (IMP)intents);
+  put(mk, @selector(addFilePresenter:), (IMP)nop);
+  put(mk, @selector(removeFilePresenter:), (IMP)nop);
+}
 C
     cp "$real" "$tmp/xcodebuild.bin"
     # Its rpaths are relative to its own location (@executable_path/../../..): point them at the real Xcode.
@@ -39,7 +63,7 @@ C
     for r in "" /Frameworks /SharedFrameworks; do
       install_name_tool -rpath "@executable_path/../../..$r" "${dev%/Developer}$r" "$tmp/xcodebuild.bin" 2>/dev/null
     done
-    /usr/bin/clang -dynamiclib -framework CoreServices -o "$tmp/nofse.dylib" "$tmp/nofse.c" \
+    /usr/bin/clang -dynamiclib -framework CoreServices -framework Foundation -o "$tmp/nofse.dylib" "$tmp/nofse.m" \
       && codesign -s - -f "$tmp/xcodebuild.bin" 2>/dev/null && codesign -s - -f "$tmp/nofse.dylib" 2>/dev/null \
       || { rm -rf "$tmp"; return 1; }
     cat >"$tmp/xcodebuild" <<SH

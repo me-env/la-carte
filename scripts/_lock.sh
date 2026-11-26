@@ -14,7 +14,10 @@
 # Stall guard (slots only): if the command's whole process tree uses < STALL_CPU s of CPU (default 5) for STALL_MIN
 # minutes (default 10; 0 = off), it is killed, the slot is freed and the script exits 124 ("Hung builds" in
 # docs/dev-velocity.md). A live build burns minutes of CPU; a hung one (e.g. clang-stat-cache waiting on fseventsd) ~0.
+# Off on CI (no hung fseventsd there): it only counts the command's own tree, not the simulator's test processes, so
+# a test suite that prints nothing for 10 min (ScreenColorTests, ≈14 min on CI) looked hung (run 45811826958).
 set -euo pipefail
+if [ -n "${CI:-}" ]; then STALL_MIN="${STALL_MIN:-0}"; fi
 
 # Total CPU time (centiseconds) of process $1 and all its descendants.
 tree_cpu() {

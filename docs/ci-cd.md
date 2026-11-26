@@ -20,8 +20,8 @@ push to main ──┬─ API ────────────────�
                ├─ iOS unit tests                     ├─► Deploy API (Dokploy) → wait → scripts/api-live-check.sh
                └─ iOS UI build (once: build-for-testing → artifact `ui-products`)
                     ├─ iOS E2E (live API), same build ┘    ≈ 19 min after the run starts
-                    └─ iOS UI, 4 shards in parallel (light + dark), no build: download, boot, test
-                         deck-settings-study │ setup-widget │ theme-ratings-report │ rest
+                    └─ iOS UI, 5 shards in parallel (light + dark), no build: download, boot, test
+                         deck-settings-study │ setup-widget │ theme-ratings-report │ notes-logo-milestones │ rest
 
 nightly 03:00 UTC (schedule) and manual run (workflow_dispatch): same jobs as a push to main.
 The deploy job runs only on push and on a manual run of main.
@@ -34,8 +34,9 @@ always the newest commit, and its `What changed` diff starts at the last green r
 changes of every commit in between. One run at a time on `main` also means deploys run one at a time and in commit
 order (the deploy job also has its own `deploy-api` group). A run per commit is not possible: the free plan has
 5 macOS jobs and a full run uses 6.
-The free plan runs at most 5 macOS jobs at once: unit tests + the UI build start together; the 4 shards and E2E
-start when the build ends (unit tests are done by then).
+The free plan runs at most 5 macOS jobs at once: unit tests + the UI build start together; when the build ends,
+E2E and 3 shards start (unit tests still run, ≈ 22 min since `ScreenColorTests` takes ≈ 14 min on CI); the last 2
+shards start as soon as the unit job and E2E end.
 A `pending` run on `main` is waiting for the running one (a full run is ≈ 45–55 min), not stuck. GitHub can also
 cancel a macOS job it cannot place ("The job was not acquired by Runner of type hosted", run 45692283093): the run
 ends red/cancelled, the next run retests it. While `main` has no green run, `ci/changes.sh` diffs against the last
@@ -107,16 +108,20 @@ minus every class the other shards name, so a new class runs there without any c
 add it to `rest`'s skips) when `rest` nears 30 min of tests: the step times out at 40 min. `MarketingUITests` (demo
 frames) never runs on CI. The `*_liveAPI` tests skip in the mock shards and run in E2E.
 
-| Shard | Classes (CI seconds, runs 45608039397 + 45698139090) | Tests |
+| Shard | Classes (CI seconds, runs 45721818305 + 45811826958) | Tests |
 |---|---|---|
-| deck-settings-study | Deck 929, Settings 239, Refresh 178, Launch 107, Study 78, LaCarte 53 | ≈ 26 min |
-| setup-widget | Widget 726, Setup 593, StudyLengths 247 | ≈ 26 min |
-| theme-ratings-report | Ratings 669, Theme 500, Report 425 | ≈ 27 min |
-| rest | Notes 775, Logo 370, StudyEdit 306, StudyMilestones 213 (+ any new class) | ≈ 28 min |
+| deck-settings-study | Deck 924, Settings 258, Refresh 144, Study 78, LaCarte 72, Launch 36 | ≈ 25 min |
+| setup-widget | Widget 672, Setup 654, StudyLengths 234 | ≈ 26 min |
+| theme-ratings-report | Ratings 642, Theme 498, Report 354 | ≈ 25 min |
+| notes-logo-milestones | Notes 1000, StudyMilestones 228, Logo 185 | ≈ 24 min |
+| rest | Activity ≈ 535, StudyEdit 384, StudyRevealLift (new, not yet measured) (+ any new class) | ≈ 17 min + new |
 
 2026-11-25: `rest` had grown to Logo + Notes + StudyEdit + StudyLengths + StudyMilestones + Refresh + Widget
 (≈ 48 min of tests) and hit the 40 min step timeout on every run since 2026-11-23 (runs 45137446390, 45165043450,
 45398848333, 45608039397; `WidgetUITests`, 12 min on CI, never ran). Rebalanced to the table above.
+2026-11-26: 029 added `ActivityUITests` (≈ 9 min, its timing test ≈ 8 min per attempt) to `rest`, and `NotesUITests` grew
+to ≈ 17 min: `rest` hit the 40 min timeout again (run 45811826958; StudyEdit, StudyMilestones and StudyRevealLift
+never ran). Notes, Logo and StudyMilestones moved to a 5th shard.
 
 **Quarantine** (`-skip-testing` in the shard, `ci.yml`). A quarantined test still runs locally and in
 `ui-only.yml`; the owner fixes it, then removes the skip.
@@ -140,6 +145,12 @@ which on a loaded runner can be after the 1.6 s capture window's flash. `ReportU
 failed twice on 2026-11-23/24 (empty pasteboard), passed since. `ReportUITests/testReport_menuOpensAndCancels` failed
 once (run 45706902438, "dialog still shown after Cancel"), passed in the 4 runs before. `RatingsUITests/testRatings_dragReviewFailureThenRetry` failed
 once (rerun of 45706902438, '"study.front" Any missing').
+
+**Stall guard** (`scripts/_lock.sh --slots`, dev-velocity's fix for a hung `fseventsd` on the Mac) is off on CI
+(`CI` set → `STALL_MIN=0`), like the FSEvents shim. It counts only the CPU of the wrapped command's own process
+tree, not the simulator's test processes, so in run 45811826958 it killed `scripts/ios-test.sh` 10 min into
+`ScreenColorTests` (which prints nothing until it ends) and the unit job failed with exit 124 and "result bundle
+Info.plist does not exist".
 
 ## API deploy
 
@@ -205,5 +216,5 @@ most runs stay full: the filters mainly stop docs pushes from holding the slot; 
 
 Before: every UI job built the app itself at `-jobs 1`. Test steps have timeouts (shard 40, E2E 30, smoke 20 min;
 unit and build jobs 30): a hung test held a shard for over 50 min (and main's run queue behind it).
-Next levers: the artifact download (2.3 min for 224 MB), a 5th shard once the unit job is shorter (free-plan limit
-of 5 macOS jobs), caching SwiftPM/DerivedData for the PR build.
+Next levers: the unit job (≈ 22 min, ≈ 14 of them `ScreenColorTests`; it holds a macOS slot the 4th/5th shards wait
+for), the artifact download (2.3 min for 224 MB), caching SwiftPM/DerivedData for the PR build.

@@ -2,7 +2,7 @@
 # requires-python = ">=3.12"
 # dependencies = ["pillow", "imageio-ffmpeg"]
 # ///
-"""Builds the app demo video and the README images from the MarketingUITests frames.
+"""Builds the app demo video, the README images and the README motion (--clips, --streak; docs/marketing/app-demo.md).
 
     LACARTE_AGENT=marketing UI_WORKERS=1 scripts/ios-ui-test.sh marketing \
         -only-testing:LaCarteUITests/MarketingUITests
@@ -24,8 +24,9 @@ import imageio_ffmpeg
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
-README_ONLY = "--readme" in sys.argv
-sys.argv = [a for a in sys.argv if a != "--readme"]
+FLAGS = {a for a in sys.argv[1:] if a.startswith("--")}
+README_ONLY = "--readme" in FLAGS
+sys.argv = [a for a in sys.argv if not a.startswith("--")]
 FRAMES = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "qa/screenshots/marketing"
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(os.environ.get("LA_CARTE_MARKETING_OUT", "build/marketing"))
 
@@ -196,7 +197,202 @@ def video() -> None:
     print(f"{OUT / 'app-demo.mp4'}: {len(SHOTS)} shots, about {total:.1f} s")
 
 
+# MARK: - README motion: the widget streak growing (real DeckWidgetTile renders) and the app clips (UI-test recordings)
+
+STREAK_RENDERS = Path(os.environ.get("LA_CARTE_STREAK_RENDERS", ROOT / "build/renders/streak"))
+RECORDINGS = ROOT / "qa/screenshots/marketing/recordings"
+MOTION_FPS = 30
+# (to day, travel s, hold s, linear): the streak runs from day 1; linear segments step one day at a time.
+STREAK = [(1, 0.0, 1.2, True), (7, 2.4, 1.1, True), (14, 1.5, 0.9, False), (30, 1.5, 0.9, False),
+          (91, 1.8, 1.0, False), (365, 2.4, 1.1, False), (730, 2.4, 2.0, False)]
+DAY_FADE = 0.25  # s, crossfade between two days (brand: standard motion)
+WIDGET_SCALE = 2  # the renders' scale; the README shows them at 1x points
+# The 4 x 7 grids in a streak frame (px; tiles at x 80 and 468, y 80): measured on the 2x renders.
+GRID_BOXES = [(80 + 24, 80 + 100, 80 + 310, 80 + 256), (468 + 420, 80 + 100, 468 + 704, 80 + 256)]
+
+
+def time_label(day: int) -> str:
+    """Day 1…13, Week 2…4, Month 1…11, Year 1, 2."""
+    if day < 14:
+        return f"Day {day}"
+    if day < 30:
+        return f"Week {day // 7}"
+    if day < 365:
+        return f"Month {min(11, max(1, round(day / 30.44)))}"
+    return f"Year {day // 365}"
+
+
+def ease(u: float) -> float:
+    return 4 * u ** 3 if u < 0.5 else 1 - (-2 * u + 2) ** 3 / 2
+
+
+def streak_timeline() -> list[tuple[int, float, float]]:
+    """Per frame: (day, alpha towards day + 1, days per second)."""
+    frames: list[tuple[int, float, float]] = []
+    day = 1.0
+    for to, travel, hold, linear in STREAK:
+        n = round(travel * MOTION_FPS)
+        rate = (to - day) / travel if travel else 0
+        for i in range(n):
+            u = (i + 1) / n
+            frames.append((day + (to - day) * (u if linear else ease(u)), rate))
+        day = float(to)
+        frames += [(day, 0.0)] * round(hold * MOTION_FPS)
+    out = []
+    for d, rate in frames:
+        base, frac = int(d), d - int(d)
+        k = min(1.0, DAY_FADE * rate) if rate else 1.0  # slow: hold each day, fade over DAY_FADE; fast: blend
+        alpha = min(1.0, max(0.0, (frac - (1 - k)) / k)) if k else 0.0
+        out.append((base, ease(alpha) if k < 1 else alpha, rate))
+    return out
+
+
+def streak_frame(day: int, scheme: str, cache: dict) -> Image.Image:
+    """Small and medium tiles side by side, hairline-edged on the theme's background, the time label below."""
+    if (day, scheme) in cache:
+        return cache[(day, scheme)]
+    pad, gap, label_gap = 80, 48, 56
+    tiles = [Image.open(STREAK_RENDERS / f"streak-{f}-{scheme}-{day:04d}.png").convert("RGBA") for f in ("small", "medium")]
+    h = tiles[0].height
+    w = sum(t.width for t in tiles) + gap + 2 * pad
+    canvas = Image.new("RGB", (w, pad + h + label_gap + 52 + pad - 16), BG[scheme])
+    x = pad
+    r = 22 * WIDGET_SCALE
+    for t in tiles:
+        edge = Image.new("L", ((t.width + 4) * 4, (h + 4) * 4), 0)
+        ImageDraw.Draw(edge).rounded_rectangle([0, 0, (t.width + 4) * 4 - 1, (h + 4) * 4 - 1], (r + 2) * 4, fill=255)
+        canvas.paste(HAIRLINE[scheme], (x - 2, pad - 2), edge.resize((t.width + 4, h + 4), Image.LANCZOS))
+        canvas.paste(t, (x, pad), t)
+        x += t.width + gap
+    draw = ImageDraw.Draw(canvas)
+    text = time_label(day)
+    f = font(44)
+    draw.text(((w - draw.textlength(text, font=f)) / 2, pad + h + label_gap), text, font=f, fill=INK[scheme])
+    cache[(day, scheme)] = canvas
+    return canvas
+
+
+def seam(last: Image.Image, first: Image.Image, blank: Image.Image) -> list[Image.Image]:
+    """Loop seam: `last` fades to `blank`, then `first` fades in (SEAM s each), so two screens never overlap."""
+    n = round(SEAM * MOTION_FPS)
+    return ([Image.blend(last, blank, ease((i + 1) / n)) for i in range(n)]
+            + [Image.blend(blank, first, ease((i + 1) / n)) for i in range(n - 1)])
+
+
+def save_webp(frames: list[Image.Image], path: Path, fps: int = MOTION_FPS, lossless: bool = False,
+              quality: int = 82) -> None:
+    """Looping animated WebP (GitHub renders it inline). Identical neighbours merge into one longer frame."""
+    merged: list[Image.Image] = []
+    durations: list[int] = []
+    step = 1000 / fps
+    for i, im in enumerate(frames):
+        if merged and im is merged[-1]:
+            durations[-1] += step
+        else:
+            merged.append(im)
+            durations.append(step)
+    ms = [round(sum(durations[:i + 1])) - round(sum(durations[:i])) for i in range(len(durations))]
+    merged[0].save(path, save_all=True, append_images=merged[1:], duration=ms, loop=0, lossless=lossless,
+                   quality=quality, method=6, minimize_size=True)
+    print(f"{path.relative_to(ROOT)}: {len(frames) / fps:.1f} s, {path.stat().st_size / 1e6:.2f} MB")
+
+
+def streak_webp() -> None:
+    """marketing/readme/streak-<light|dark>.webp: the streak grid growing from day 1 to year 2."""
+    timeline = streak_timeline()
+    for scheme in ("light", "dark"):
+        cache: dict = {}
+        frames = []
+        for day, alpha, _ in timeline:
+            a = streak_frame(day, scheme, cache)
+            if alpha <= 0.001:
+                frames.append(a)
+                continue
+            # Only the dot grids blend; text (labels, the streak count) switches on the nearer day, never ghosts.
+            b = streak_frame(day + 1, scheme, cache)
+            frame = (b if alpha >= 0.5 else a).copy()
+            for box in GRID_BOXES:
+                frame.paste(Image.blend(a.crop(box), b.crop(box), alpha), box[:2])
+            frames.append(frame)
+        frames += seam(frames[-1], frames[0], Image.new("RGB", frames[0].size, BG[scheme]))
+        save_webp(frames, ROOT / f"marketing/readme/streak-{scheme}.webp")
+
+
+# (clip, recording): the MarketingUITests motion tests, cut between their clip-<name>-start/end screenshots.
+CLIPS = [("reveal", "testMotion_1_reveal"), ("tap", "testMotion_2_tap"), ("drag", "testMotion_3_drag"),
+         ("finish", "testMotion_4_finish")]
+CLIP_W, CLIP_H = 600, 1304  # 2x of the README's 300 pt wide phones (device 1206 x 2622)
+LEAD_IN, TAIL, SEAM = 1.6, {"finish": 3.0}, 0.15  # s: still before the first move, after the last (default 1.8)
+# SEAM: the loop fades the last frame out to the bare background, then the first frame in, SEAM s each (no double exposure)
+
+
+def recording_frames(path: Path) -> list[Image.Image]:
+    """The recording (variable frame rate) resampled to MOTION_FPS at clip size, via the imageio-ffmpeg binary."""
+    cmd = [imageio_ffmpeg.get_ffmpeg_exe(), "-loglevel", "error", "-i", str(path),
+           "-vf", f"fps={MOTION_FPS},scale={CLIP_W}:{CLIP_H}:flags=lanczos", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    raw = subprocess.run(cmd, check=True, capture_output=True).stdout
+    size = CLIP_W * CLIP_H * 3
+    return [Image.frombytes("RGB", (CLIP_W, CLIP_H), raw[i:i + size]) for i in range(0, len(raw) - size + 1, size)]
+
+
+def matches(a: Image.Image, b: Image.Image) -> bool:
+    """Same screen: under 0.1% of pixels differ visibly, ignoring the status bar (its clock differs)."""
+    bar = round(STATUS_BAR * CLIP_H / 2622) + 4
+    small = lambda im: im.crop((0, bar, CLIP_W, CLIP_H)).convert("L").resize((200, 400)).tobytes()
+    x, y = small(a), small(b)
+    return sum(abs(p - q) > 48 for p, q in zip(x, y)) < len(x) / 1000
+
+
+def still_run(frames: list[Image.Image], shot: Image.Image, after: int = 0) -> tuple[int, int]:
+    """First run of frames (from `after`) that match `shot`: (first, last) index."""
+    first = next(i for i in range(after, len(frames)) if matches(frames[i], shot))
+    last = first
+    while last + 1 < len(frames) and matches(frames[last + 1], shot):
+        last += 1
+    return first, last
+
+
+def framed(im: Image.Image) -> Image.Image:
+    """The whole screen, status bar painted over, rounded like the device with a hairline edge, transparent outside."""
+    im = im.copy()
+    bar = round(STATUS_BAR * CLIP_H / 2622)
+    ImageDraw.Draw(im).rectangle([0, 0, CLIP_W, bar], fill=im.getpixel((4, bar + 3)))
+    if "mask" not in framed.__dict__:
+        r = round(CLIP_W * 0.12)
+        big = lambda w, h, rad: Image.new("L", (w * 4, h * 4), 0)
+        m = big(CLIP_W, CLIP_H, r)
+        ImageDraw.Draw(m).rounded_rectangle([8, 8, CLIP_W * 4 - 9, CLIP_H * 4 - 9], r * 4 - 8, fill=255)
+        e = big(CLIP_W, CLIP_H, r)
+        ImageDraw.Draw(e).rounded_rectangle([0, 0, CLIP_W * 4 - 1, CLIP_H * 4 - 1], r * 4, fill=255)
+        framed.mask, framed.edge = m.resize((CLIP_W, CLIP_H), Image.LANCZOS), e.resize((CLIP_W, CLIP_H), Image.LANCZOS)
+    out = Image.new("RGBA", (CLIP_W, CLIP_H), HAIRLINE["light"] + (0,))
+    out.putalpha(framed.edge)
+    out.paste(im, (0, 0), framed.mask)
+    return out
+
+
+def clips_webp() -> None:
+    """marketing/readme/clip-<name>.webp from the --record run `marketing-motion` (light, whole screen)."""
+    shots = ROOT / "qa/screenshots/marketing-motion"
+    for name, test in CLIPS:
+        frames = recording_frames(shots / "recordings" / f"{test}.mp4")
+        load = lambda what: Image.open(shots / f"clip-{name}-{what}.png").convert("RGB").resize((CLIP_W, CLIP_H), Image.LANCZOS)
+        s0, s1 = still_run(frames, load("start"))
+        e0, e1 = still_run(frames, load("end"), after=s1)
+        start = max(s0, s1 - round(LEAD_IN * MOTION_FPS))
+        end = min(e1, e0 + round(TAIL.get(name, 1.8) * MOTION_FPS))
+        cut = [framed(f) for f in frames[start:end + 1]]
+        cut += seam(cut[-1], cut[0], framed(Image.new("RGB", (CLIP_W, CLIP_H), BG["light"])))
+        save_webp(cut, ROOT / f"marketing/readme/clip-{name}.webp", quality=80)
+
+
 if __name__ == "__main__":
+    if "--clips" in FLAGS:
+        clips_webp()
+        sys.exit()
+    if "--streak" in FLAGS:
+        streak_webp()
+        sys.exit()
     if not README_ONLY:
         OUT.mkdir(parents=True, exist_ok=True)
         video()

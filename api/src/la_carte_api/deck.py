@@ -10,17 +10,23 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from itertools import islice
 from random import Random
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import fsrs
 from fsrs.scheduler import FUZZ_RANGES
+from pydantic import ValidationError
+from sqlalchemy.dialects.sqlite import insert
 from sqlmodel import Session, col, delete, func, select
 
 from la_carte_api.models import (
     ACTIVE_REPORT,
+    ActivityEvent,
+    ActivityEventIn,
+    ActivityEventRead,
+    ActivityIngest,
     AddCardsResult,
     AddNotesResult,
     Card,
@@ -1009,3 +1015,90 @@ def _streak(history: str, start: date) -> tuple[int, date | None]:
     run = history.removesuffix("p")
     streak = len(run) - len(run.rstrip("sf"))
     return streak, start + (len(run) - streak) * _DAY if streak else None
+
+
+# --- Activity (spec 029) ----------------------------------------------------------------------
+
+ACTIVITY_RETENTION = timedelta(days=90)
+ACTIVITY_BATCH_MAX = 500
+ACTIVITY_LIST_MAX = 1000
+
+
+class TooManyEvents(ValueError):
+    def __init__(self) -> None:
+        super().__init__(f"At most {ACTIVITY_BATCH_MAX} events per request.")
+
+
+def _valid_event(raw: object) -> ActivityEventIn | None:
+    try:
+        return ActivityEventIn.model_validate(raw)
+    except ValidationError:
+        return None
+
+
+def ingest_activity(
+    session: Session, events: list[Any], now: datetime | None = None
+) -> ActivityIngest:
+    """Stores the app's events, validating each on its own: invalid ones are skipped (`rejected`),
+    ids already stored are ignored (`duplicates`). More than `ACTIVITY_BATCH_MAX` → `TooManyEvents`,
+    nothing stored. Touches nothing else."""
+    if len(events) > ACTIVITY_BATCH_MAX:
+        raise TooManyEvents()
+    valid = [event for raw in events if (event := _valid_event(raw))]
+    unique: dict[UUID, ActivityEventIn] = {}
+    for event in valid:
+        unique.setdefault(event.id, event)  # first wins on a repeated id
+    stored = 0
+    if unique:
+        received_at = now or utcnow()
+        values = [
+            ActivityEvent(**event.model_dump(), received_at=received_at).model_dump()
+            for event in unique.values()
+        ]
+        statement = insert(ActivityEvent.__table__).values(values)
+        result = session.exec(statement.on_conflict_do_nothing(index_elements=["id"]))
+        stored = result.rowcount  # rows really inserted: right even under a concurrent retry
+        session.commit()
+    return ActivityIngest(
+        stored=stored, duplicates=len(valid) - stored, rejected=len(events) - len(valid)
+    )
+
+
+def _utc(moment: datetime) -> datetime:
+    """A naive query bound is read as UTC."""
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def list_activity(
+    session: Session,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    card_id: UUID | None = None,
+    kind: str | None = None,
+    session_id: UUID | None = None,
+    limit: int = 100,
+) -> list[ActivityEventRead]:
+    """Events newest first, `since <= at < until`, optionally of one card, kind or app session."""
+    statement = select(ActivityEvent)
+    if since is not None:
+        statement = statement.where(ActivityEvent.at >= _utc(since))
+    if until is not None:
+        statement = statement.where(ActivityEvent.at < _utc(until))
+    if card_id is not None:
+        statement = statement.where(ActivityEvent.card_id == card_id)
+    if kind is not None:
+        statement = statement.where(ActivityEvent.kind == kind)
+    if session_id is not None:
+        statement = statement.where(ActivityEvent.session == session_id)
+    statement = statement.order_by(
+        col(ActivityEvent.at).desc(), col(ActivityEvent.received_at).desc()
+    ).limit(limit)
+    return [ActivityEventRead.of(event) for event in session.exec(statement)]
+
+
+def prune_activity(session: Session, now: datetime | None = None) -> int:
+    """Deletes events whose `at` is older than `ACTIVITY_RETENTION`; returns how many."""
+    cutoff = (now or utcnow()) - ACTIVITY_RETENTION
+    result = session.exec(delete(ActivityEvent).where(col(ActivityEvent.at) < cutoff))
+    session.commit()
+    return result.rowcount
