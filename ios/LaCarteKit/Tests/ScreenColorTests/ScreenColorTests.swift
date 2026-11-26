@@ -65,26 +65,46 @@ struct ScreenColorTests {
   /// pixel of it, and short, 2-line and 4-line answers leave it at the same horizontal place (the stack's vertical
   /// centring may differ). In layout D, a leading answer under a wide question (widest line ≥ 85 % of the column)
   /// stays within its width, and under any other question starts at the column's edge.
+  /// Amended by #14 (reveal lift): with a 4-line answer the question sits > 40 pt high, so it starts centred in the
+  /// card and rises on reveal into the place it has under Reduce Motion (no lift), which is today's revealed place.
   @Test(arguments: StudyView.TextLayout.allCases, CardLines.questions.map(\.1) + CardLines.singleLines.map(\.1))
   func questionStaysPut(_ layout: StudyView.TextLayout, _ question: String) throws {
     let defaultLayout = StudyView.textLayout
     StudyView.textLayout = layout
     defer { StudyView.textLayout = defaultLayout }
     var columns: [ClosedRange<CGFloat>] = []
+    var cardCentre: CGFloat?
     let questionLines = (CardLines.questions.first { $0.1 == question })?.0 ?? 1
     for (answerLines, answer) in CardLines.answers {
       let card = CardLines.card(question, answer)
-      func screen(revealed: Bool) throws -> Screen {
+      func screen(revealed: Bool, reduceMotion: Bool = false) throws -> Screen {
         var state = StudyFeature.State()
         state.cards = [card]
         state.phase = .studying
         state.isRevealed = revealed
-        return try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), Self.looks[0],
-                          name: "study-reveal-check")
+        let view = StudyView(store: Store(initialState: state) { EmptyReducer() })
+          .environment(\._accessibilityReduceMotion, reduceMotion)
+        return try Screen(view, Self.looks[0], name: "study-reveal-check")
       }
       let front = try screen(revealed: false), revealed = try screen(revealed: true)
-      let ink = try #require(front.inkBounds(in: front.band(0.14, 0.85)), "no question drawn")
-      #expect(revealed.changedPixels(from: front, in: ink) == 0, "question moved on reveal (answer: \(answer))")
+      let still = try screen(revealed: false, reduceMotion: true)
+      let ink = try #require(still.inkBounds(in: still.band(0.14, 0.85)), "no question drawn")
+      #expect(revealed.changedPixels(from: still, in: ink) == 0, "question moved on reveal (answer: \(answer))")
+      let lifted = try #require(front.inkBounds(in: front.band(0.14, 0.85)), "no question drawn")
+      #expect(lifted.minX == ink.minX && lifted.maxX == ink.maxX, "lift moved the question sideways: \(lifted) vs \(ink)")
+      if answerLines <= 2 {
+        #expect(front.changedPixels(from: still, in: ink.union(lifted)) == 0, "question lifted (answer: \(answer))")
+        if answerLines == 1 {
+          // The 1-line pair is centred in the card: its centre is midway between the question's top and the answer's
+          // bottom (ink, so within a few points of the frames).
+          let below = CGRect(x: 0, y: ink.maxY + 1, width: revealed.size.width, height: revealed.band(0, 0.85).maxY - ink.maxY - 1)
+          cardCentre = try #require(revealed.inkBounds(in: below)).maxY / 2 + ink.minY / 2
+        }
+      } else {
+        #expect(lifted.midY - ink.midY > 40, "question not lifted: \(lifted) vs \(ink) (answer: \(answer))")
+        let centre = try #require(cardCentre)
+        #expect(abs(lifted.midY - centre) <= 4, "lifted question off the card's centre: \(lifted.midY) vs \(centre)")
+      }
       columns.append(ink.minX...ink.maxX)
       guard layout == .questionWidth else { continue }
       let bottom = revealed.band(0, 0.85).maxY
