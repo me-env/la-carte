@@ -23,7 +23,21 @@ then *Forgot* or *Got it*. Each card is scheduled with [FSRS](https://github.com
 so it comes back just before you would forget it.
 
 <p align="center">
-  <img src="marketing/readme/more-light.png" width="840" alt="Three iPhone screens: dragging to rate a card, the double-tap menu with Ask about this card and report options, and the forest theme">
+  <img src="marketing/readme/clip-reveal.webp" width="260" alt="Animation: tap to show the answer of petrichor, then a person card: a placeholder portrait, then Nora Vale, runs the corner bakery">
+  &nbsp;
+  <img src="marketing/readme/clip-tap.webp" width="260" alt="Animation: tapping Forgot, then Got it; each card leaves and the next one fades in">
+  &nbsp;
+  <img src="marketing/readme/clip-drag.webp" width="260" alt="Animation: dragging the card left to Forgot and right to Got it, a ring of dots following the finger">
+</p>
+
+<p align="center"><sub>Tap to see the answer · tap <i>Forgot</i> or <i>Got it</i> · or drag: left to forget, right if you got it</sub></p>
+
+When the last card is done, the deck says so, and the logo lays itself down:
+
+<p align="center">
+  <img src="marketing/readme/clip-finish.webp" width="260" alt="Animation: the last card rated Got it, then All caught up, the la carte logo tilting flat as its line draws in">
+  &nbsp;
+  <img src="marketing/readme/more-light.png" width="560" alt="Three iPhone screens: dragging to rate a card, the double-tap menu with Ask about this card and report options, and the forest theme">
 </p>
 
 - **One deck.** Words, facts, people (a face, a name, who they are). Search it, add and edit cards.
@@ -32,8 +46,13 @@ so it comes back just before you would forget it.
 - **Widget.** What's left to review and your streak, on the Home Screen.
 
 <p align="center">
-  <img src="marketing/readme/widget.png" width="420" alt="The Home Screen widget in light and dark: 8 to review, a grid of days, 9-day streak">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="marketing/readme/streak-dark.webp">
+    <img src="marketing/readme/streak-light.webp" width="638" alt="Animation: the small and medium widgets as a streak grows from day 1 to year 2; one dot per day, then squares for weeks, pentagons for months and stars for years">
+  </picture>
 </p>
+
+<p align="center"><sub>The widget's streak: a dot a day, then a square a week, a pentagon a month, a star a year</sub></p>
 
 ## Connect your agent
 
@@ -55,16 +74,12 @@ front, the shortest answer on the back.
 
 ## Self-host
 
-The deck lives on your own server: one SQLite file behind one token. No account, no tracking.
+The App Store app connects only to the hosted server. To run your own:
 
-```bash
-echo "LA_CARTE_API_TOKEN=$(openssl rand -hex 32)" > .env   # the app and your agents need this token
-docker compose up -d --build                               # REST for the app, MCP at /mcp
-```
-
-Put it behind HTTPS, then enter the server URL and token in the app's Settings. Reverse proxy, backups and a
-Dokploy setup: [`docs/deploy.md`](docs/deploy.md). Building the app for your own iPhone:
-[`docs/release.md`](docs/release.md).
+1. Run the API with Docker Compose (or Dokploy): `docker compose up -d --build` (REST for the app, MCP at `/mcp`),
+   behind HTTPS. Setup, reverse proxy and backups: [`docs/deploy.md`](docs/deploy.md).
+2. Create your own Google OAuth client for your server.
+3. Build the app from source with your server's URL: [`docs/release.md`](docs/release.md).
 
 To try it locally, run `scripts/api-dev.sh` (API on `http://127.0.0.1:8000`, no token needed) and the `LaCarte`
 scheme from `ios/LaCarte.xcodeproj` on a simulator (Xcode with the iOS 26 SDK or later).
