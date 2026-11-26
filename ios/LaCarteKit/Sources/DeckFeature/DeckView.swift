@@ -184,8 +184,6 @@ public struct DeckView: View {
           }
           .font(.meta)
           .foregroundStyle(Theme.secondaryInk)
-          // Without its own container, a lone due Text (one-card note) hands its id to the row button.
-          .accessibilityElement(children: .contain)
           Text(note.title)
             .foregroundStyle(Theme.ink)
           Text(note.subtitle)
@@ -194,6 +192,8 @@ public struct DeckView: View {
         .font(.body)
         .lineLimit(1)
       }
+      // Without its own container, a lone identified leaf (photo, due) hands its id to the row button.
+      .accessibilityElement(children: .contain)
       .padding(Theme.Spacing.m)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.row))
