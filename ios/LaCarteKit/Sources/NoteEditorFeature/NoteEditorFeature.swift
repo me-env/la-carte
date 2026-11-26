@@ -1,4 +1,5 @@
 import APIClient
+import ActivityClient
 import ComposableArchitecture
 import Foundation
 
@@ -111,6 +112,7 @@ public struct NoteEditorFeature {
     }
   }
 
+  @Dependency(\.activity) var activity
   @Dependency(\.apiClient) var apiClient
   @Dependency(\.dismiss) var dismiss
 
@@ -181,6 +183,24 @@ public struct NoteEditorFeature {
       case .binding, .delegate:
         return .none
       }
+    }
+    Reduce { state, action in
+      guard let event = activityEvent(action, state) else { return .none }
+      return .run { [activity] _ in activity.log(event) }
+    }
+  }
+
+  /// Spec 029: what a save tells the activity log; never the field values.
+  private func activityEvent(_ action: Action, _ state: State) -> Activity? {
+    switch action {
+    case let .saveResponse(.success(note)) where state.note == nil:
+      .noteCreated(noteID: note.id, type: note.type, directions: note.cards.count)
+    case let .saveResponse(.success(note)):
+      .noteEdited(noteID: note.id, cardID: nil, source: .editor)
+    case let .saveResponse(.failure(error)):
+      .failed(state.note == nil ? .addNote : .updateNote, error)
+    default:
+      nil
     }
   }
 }

@@ -45,15 +45,17 @@ let package = Package(
       name: "NoteEditorFeature",
       dependencies: [
         "APIClient",
+        "ActivityClient",
         "DesignSystem",
         .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
       ]
     ),
-    .testTarget(name: "NoteEditorFeatureTests", dependencies: ["NoteEditorFeature", "APIClient"]),
+    .testTarget(name: "NoteEditorFeatureTests", dependencies: ["NoteEditorFeature", "ActivityClient", "APIClient"]),
     .target(
       name: "DeckFeature",
       dependencies: [
         "APIClient",
+        "ActivityClient",
         "DesignSystem",
         "NoteEditorFeature",
         "SettingsFeature",
@@ -62,7 +64,7 @@ let package = Package(
     ),
     .testTarget(
       name: "DeckFeatureTests",
-      dependencies: ["DeckFeature", "APIClient", "NoteEditorFeature", "SettingsFeature"]
+      dependencies: ["DeckFeature", "ActivityClient", "APIClient", "NoteEditorFeature", "SettingsFeature"]
     ),
     .target(
       name: "SettingsFeature",
@@ -78,14 +80,24 @@ let package = Package(
       name: "StudyFeature",
       dependencies: [
         "APIClient",
+        "ActivityClient",
         "AskAIClient",
         "DesignSystem",
         .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
       ]
     ),
-    .testTarget(name: "StudyFeatureTests", dependencies: ["StudyFeature", "APIClient", "AskAIClient", "DesignSystem"]),
+    .testTarget(name: "StudyFeatureTests", dependencies: ["StudyFeature", "ActivityClient", "APIClient", "AskAIClient", "DesignSystem"]),
 
     // MARK: Clients (dependencies, no UI, no TCA)
+    .target(
+      name: "ActivityClient",
+      dependencies: [
+        "APIClient",
+        .product(name: "Dependencies", package: "swift-dependencies"),
+        .product(name: "DependenciesMacros", package: "swift-dependencies"),
+      ]
+    ),
+    .testTarget(name: "ActivityClientTests", dependencies: ["ActivityClient", "APIClient"]),
     .target(
       name: "APIClient",
       dependencies: [
