@@ -192,13 +192,13 @@ public struct DeckView: View {
         .font(.body)
         .lineLimit(1)
       }
-      // Without its own container, a lone identified leaf (photo, due) hands its id to the row button.
-      .accessibilityElement(children: .contain)
       .padding(Theme.Spacing.m)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.row))
     }
     .buttonStyle(.plain)
+    // The button's own id: without it, it takes the id of its only identified leaf (photo or due).
+    .accessibilityIdentifier("deck.row.\(note.id)")
     // `.contain` keeps the due/state texts queryable by UI tests inside the tappable row.
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("deck.row.\(note.id)")
