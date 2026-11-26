@@ -131,8 +131,11 @@ struct InMemoryAPIClientTests {
     }
     let client = APIClient.inMemory(cards: [started("due", due: now - 60), started("later", due: now + 3 * 86_400)], now: now)
     let stats = try await client.stats()
-    #expect(try await client.dueCards(100).map(\.front) == ["due"])
-    #expect([stats.due, stats.reviewsDone, stats.reviewsTotal] == [1, 0, 1])
+    let served = try await client.dueCards(100).map(\.front)
+    #expect(served == ["due"])
+    #expect(stats.due == 1)
+    #expect(stats.reviewsDone == 0)
+    #expect(stats.reviewsTotal == 1)
   }
 
   @Test func updateNoteKeepsTheScheduleOfKeptDirections() async throws {
