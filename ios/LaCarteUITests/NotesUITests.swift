@@ -225,11 +225,13 @@ final class NotesUITests: XCTestCase {
       XCTAssertFalse(backFront.isSelected, "back-front back on after filling the fields")
       XCTAssertTrue(el(app, "editor.save").isEnabled, "save disabled with one direction and both fields")
       snapshot("editor-basic-one-direction", appearance: appearance)
-      let posts = server.requests.filter { $0.method == "POST" }.count
+      // Only `POST /notes`: the app also POSTs `/activity` (spec 029).
+      let notePosts = { server.requests.filter { $0.method == "POST" && StubDeck.route($0.path) == "/notes" } }
+      let posts = notePosts().count
       el(app, "editor.save").tap()
       waitForAbsence(editorBar(app), "editor still open after saving Paris")
-      XCTAssertTrue(poll(timeout: 3) { server.requests.filter { $0.method == "POST" }.count > posts }, "no POST for Paris")
-      if let last = server.requests.last(where: { $0.method == "POST" }) {
+      XCTAssertTrue(poll(timeout: 3) { notePosts().count > posts }, "no POST for Paris")
+      if let last = notePosts().last {
         XCTAssertEqual(prompts(try json(last.body)), [["front"]], "POST directions: \(last.body)")
       }
       waitUntil("3 rows") { self.rowIDs(app).count == 3 }
