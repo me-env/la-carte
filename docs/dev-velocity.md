@@ -203,7 +203,9 @@ only a reboot fixes it.
   Worktrees on older branches don't have it until they merge main.
 - Guard: `_lock.sh --slots` kills a build whose process tree used < `STALL_CPU` s (5) of CPU over `STALL_MIN` min
   (10; `0` = off), frees the slot and exits 124 with a message naming this section. A live build burns minutes of
-  CPU in that window; a hung xcodebuild ~0.1 s/min.
+  CPU in that window; a hung xcodebuild ~0.1 s/min. Off on CI (`CI` set): test processes run under the simulator's
+  launchd, outside the tree, so `xcodebuild test` (scripts/ios-test.sh) during a silent 14 min `ScreenColorTests`
+  looked hung and was killed (CI run 45811826958, docs/ci-cd.md). The same can happen locally on a slow test bundle.
 - Recovery by hand: kill the hung `clang-stat-cache` and its `xcodebuild` (lockf frees the slot), and delete the
   `*.sdkstatcache` it was waiting on (literal path; regenerable). Don't kill other projects' builds without asking.
 
