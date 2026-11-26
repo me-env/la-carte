@@ -397,30 +397,42 @@ struct Screen {
             sourceLocation: sourceLocation)
   }
 
+  // The pixel loops below read raw buffers with per-channel comparisons and no per-pixel arrays or closures: in Debug
+  // the allocating versions made this bundle run 14 min on CI.
+
   /// The bounding box, in points, of the pixels in `rect` more than 24 per channel away from the background.
   func inkBounds(in rect: CGRect) -> CGRect? {
     let (xs, ys) = pixelRanges(rect)
-    var box: (x0: Int, y0: Int, x1: Int, y1: Int)?
-    for y in ys {
-      for x in xs where Self.distances(color(atPixel: x, y), palette.background).contains(where: { $0 > 24 }) {
-        box = box.map { (min($0.x0, x), min($0.y0, y), max($0.x1, x), max($0.y1, y)) } ?? (x, y, x, y)
+    let (r, g, b) = (Int(palette.background >> 16), Int(palette.background >> 8 & 0xFF), Int(palette.background & 0xFF))
+    var box = PixelBox()
+    pixels.withUnsafeBufferPointer { p in
+      for y in ys {
+        for x in xs {
+          let i = (y * width + x) * 4
+          if abs(Int(p[i]) - r) > 24 || abs(Int(p[i + 1]) - g) > 24 || abs(Int(p[i + 2]) - b) > 24 {
+            box.add(x, y)
+          }
+        }
       }
     }
-    return box.map {
-      CGRect(x: CGFloat($0.x0) / Self.scale, y: CGFloat($0.y0) / Self.scale,
-             width: CGFloat($0.x1 - $0.x0 + 1) / Self.scale, height: CGFloat($0.y1 - $0.y0 + 1) / Self.scale)
-    }
+    return box.points
   }
 
-  /// How many pixels in `rect` differ between the two screens.
+  /// How many pixels in `rect` differ (in RGB) between the two screens.
   func changedPixels(from other: Screen, in rect: CGRect) -> Int {
     let (xs, ys) = pixelRanges(rect)
-    return ys.reduce(0) { n, y in n + xs.count { color(atPixel: $0, y) != other.color(atPixel: $0, y) } }
-  }
-
-  private func color(atPixel x: Int, _ y: Int) -> UInt32 {
-    let i = (y * width + x) * 4
-    return UInt32(pixels[i]) << 16 | UInt32(pixels[i + 1]) << 8 | UInt32(pixels[i + 2])
+    var n = 0
+    pixels.withUnsafeBufferPointer { p in
+      other.pixels.withUnsafeBufferPointer { q in
+        for y in ys {
+          for x in xs {
+            let i = (y * width + x) * 4
+            if p[i] != q[i] || p[i + 1] != q[i + 1] || p[i + 2] != q[i + 2] { n += 1 }
+          }
+        }
+      }
+    }
+    return n
   }
 
   /// Design system "no default blue tint": no saturated blue pixel anywhere (same rule as the UI tests).
@@ -433,32 +445,41 @@ struct Screen {
 
   /// The bounding box, in points, of the saturated pixels (channels more than 60 apart): no palette token is.
   func saturatedBounds() -> CGRect? {
-    var box: (x0: Int, y0: Int, x1: Int, y1: Int)?
-    for y in 0..<height {
-      for x in 0..<width {
-        let i = (y * width + x) * 4
-        let channels = [pixels[i], pixels[i + 1], pixels[i + 2]]
-        guard channels.max()! - channels.min()! > 60 else { continue }
-        box = box.map { (min($0.x0, x), min($0.y0, y), max($0.x1, x), max($0.y1, y)) } ?? (x, y, x, y)
+    var box = PixelBox()
+    pixels.withUnsafeBufferPointer { p in
+      for y in 0..<height {
+        for x in 0..<width {
+          let i = (y * width + x) * 4
+          let (r, g, b) = (p[i], p[i + 1], p[i + 2])
+          if max(r, g, b) - min(r, g, b) > 60 { box.add(x, y) }
+        }
       }
     }
-    return box.map {
-      CGRect(x: CGFloat($0.x0) / Self.scale, y: CGFloat($0.y0) / Self.scale,
-             width: CGFloat($0.x1 - $0.x0 + 1) / Self.scale, height: CGFloat($0.y1 - $0.y0 + 1) / Self.scale)
+    return box.points
+  }
+
+  /// A growing bounding box of pixel coordinates, converted to points at the end.
+  private struct PixelBox {
+    var x0 = Int.max, y0 = Int.max, x1 = Int.min, y1 = Int.min
+
+    mutating func add(_ x: Int, _ y: Int) {
+      x0 = min(x0, x); y0 = min(y0, y); x1 = max(x1, x); y1 = max(y1, y)
+    }
+
+    var points: CGRect? {
+      x0 > x1 ? nil : CGRect(x: CGFloat(x0) / Screen.scale, y: CGFloat(y0) / Screen.scale,
+                             width: CGFloat(x1 - x0 + 1) / Screen.scale, height: CGFloat(y1 - y0 + 1) / Screen.scale)
     }
   }
 
   static func isClose(_ a: UInt32, _ b: UInt32, tolerance: Int = 4) -> Bool {
-    distances(a, b).allSatisfy { $0 <= tolerance }
+    abs(Int(a >> 16 & 0xFF) - Int(b >> 16 & 0xFF)) <= tolerance && abs(Int(a >> 8 & 0xFF) - Int(b >> 8 & 0xFF)) <= tolerance
+      && abs(Int(a & 0xFF) - Int(b & 0xFF)) <= tolerance
   }
 
   static func distance(_ a: UInt32, _ b: UInt32) -> Int {
     abs(Int(a >> 16 & 0xFF) - Int(b >> 16 & 0xFF)) + abs(Int(a >> 8 & 0xFF) - Int(b >> 8 & 0xFF))
       + abs(Int(a & 0xFF) - Int(b & 0xFF))
-  }
-
-  private static func distances(_ a: UInt32, _ b: UInt32) -> [Int] {
-    [16, 8, 0].map { abs(Int(a >> $0 & 0xFF) - Int(b >> $0 & 0xFF)) }
   }
 
   static func hex(_ c: UInt32) -> String { String(format: "#%06X", c) }
