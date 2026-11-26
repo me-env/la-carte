@@ -231,7 +231,8 @@ struct ScreenColorTests {
       let g = try #require(screen.saturatedBounds(), "\(name): no G drawn")
       #expect(g.width <= 21 && g.height <= 21, "\(name): colour outside the 20 pt G: \(g)")
       if name != "disabled" {  // disabled fades the whole pill to 38 %, so its G isn't Google's colours
-        for (colour, hex) in [("blue", 0x4285F4), ("red", 0xEA4335), ("yellow", 0xFBBC04), ("green", 0x34A853)] {
+        // The 2025 gradient G in Google's iOS asset bundle (`GoogleG`): its solid stops, not the classic flat G's.
+        for (colour, hex) in [("blue", 0x3186FF), ("red", 0xFD4641), ("yellow", 0xFFD10F), ("green", 0x0EBC5F)] {
           #expect(screen.share(of: UInt32(hex), in: g, tolerance: 10) > 0.02, "\(name): G has no Google \(colour)")
         }
       }
