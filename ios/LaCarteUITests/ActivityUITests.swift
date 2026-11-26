@@ -289,7 +289,12 @@ final class ActivityUITests: XCTestCase {
     let ratingSessions = Set(study.filter { ($0["kind"] as? String) != "card_shown" }.compactMap { $0["session"] as? String })
     XCTAssertEqual(ratingSessions.count, 1, "#32: launch 1's reveal/rate events span several sessions")
     XCTAssertLessThanOrEqual(launch1Sessions.count, 2, "#32: launch 1's study events: \(launch1Sessions.count) sessions")
-    let shownFourth = found.filter { $0["kind"] as? String == "card_shown" && $0["card_id"] as? String == fourth }
+    // Launch 2 shows the 4th card again; its card_shown may ride the same launch flush (decision 6 loops until the
+    // buffer is empty), so count only launch 1's.
+    let shownFourth = found.filter {
+      $0["kind"] as? String == "card_shown" && $0["card_id"] as? String == fourth
+        && launch1Sessions.contains($0["session"] as? String ?? "")
+    }
     XCTAssertEqual(shownFourth.count, 1, "#32: launch 1's card_shown of the 4th card")
     let versions = Set(found.compactMap { $0["app_version"] as? String })
     let builds = Set(found.compactMap { $0["build"] as? String })
