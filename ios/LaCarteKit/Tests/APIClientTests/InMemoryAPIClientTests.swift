@@ -120,6 +120,21 @@ struct InMemoryAPIClientTests {
     #expect(try await client.dueCards(100).first?.id == ids[1])
   }
 
+  /// Like the API, the ladder's waiting reviews are the started cards Study serves now, not every started card.
+  @Test func reviewsToDoCountOnlyWhatStudyServes() async throws {
+    let lastWeek = now - 7 * 86_400
+    func started(_ front: String, due: Date) -> Card {
+      Card(
+        id: UUID(), front: front, back: "b", state: .review, due: due, lastReview: lastWeek,
+        createdAt: lastWeek, updatedAt: lastWeek
+      )
+    }
+    let client = APIClient.inMemory(cards: [started("due", due: now - 60), started("later", due: now + 3 * 86_400)], now: now)
+    let stats = try await client.stats()
+    #expect(try await client.dueCards(100).map(\.front) == ["due"])
+    #expect([stats.due, stats.reviewsDone, stats.reviewsTotal] == [1, 0, 1])
+  }
+
   @Test func updateNoteKeepsTheScheduleOfKeptDirections() async throws {
     let client = APIClient.inMemory(notes: .fixtures, now: now)
     let person = [Note].fixtures[0]

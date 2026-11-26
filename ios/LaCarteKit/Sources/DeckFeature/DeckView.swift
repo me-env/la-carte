@@ -184,6 +184,8 @@ public struct DeckView: View {
           }
           .font(.meta)
           .foregroundStyle(Theme.secondaryInk)
+          // Without its own container, a lone due Text (one-card note) hands its id to the row button.
+          .accessibilityElement(children: .contain)
           Text(note.title)
             .foregroundStyle(Theme.ink)
           Text(note.subtitle)

@@ -24,13 +24,15 @@ extension APIClient {
     let held = LockIsolated(held)
 
     /// When a card can be served: once due, and, unless (re)learning, until 6 h after a sibling's last review or that
-    /// sibling's due, whichever comes first (spec 014). Held siblings don't bury.
+    /// sibling's due, whichever comes first (spec 014). Only reviews from the last 6 h bury; held siblings don't.
     @Sendable func readyAt(_ card: Card, _ notes: [Note]) -> Date {
       guard !card.isLearning else { return card.due }
       let siblings =
         notes.first { $0.id == card.noteId }?.cards.filter { $0.id != card.id && !held.value.contains($0.id) } ?? []
-      return siblings.compactMap { sibling in sibling.lastReview.map { min($0 + siblingBury, sibling.due) } }
-        .reduce(card.due, max)
+      return siblings.compactMap { sibling in
+        sibling.lastReview.flatMap { $0 > now - siblingBury ? min($0 + siblingBury, sibling.due) : nil }
+      }
+      .reduce(card.due, max)
     }
 
     /// Every card not held with its ready time, in queue order: (re)learning first, then by due. `sorted` is
@@ -44,12 +46,21 @@ extension APIClient {
 
     /// The note with `next` filled as the API does: its first card in queue order that is ready, else the one
     /// ready earliest; `nil` when all its cards are held.
-    @Sendable func withNext(_ note: Note, _ notes: [Note]) -> Note {
-      let own = candidates(notes).filter { $0.card.noteId == note.id }
+    @Sendable func withNext(_ note: Note, _ candidates: [(card: Card, readyAt: Date)]) -> Note {
+      let own = candidates.filter { $0.card.noteId == note.id }
       let pick = own.first { $0.readyAt <= now } ?? own.min { $0.readyAt < $1.readyAt }
       var note = note
       note.next = pick.map { Note.Next(cardId: $0.card.id, readyAt: $0.readyAt) }
       return note
+    }
+
+    /// What Study serves now: ready cards, at most one per note (its first in queue order).
+    @Sendable func queue(_ notes: [Note]) -> [Card] {
+      var servedNotes = Set<Note.ID>()
+      return candidates(notes)
+        .filter { $0.readyAt <= now }
+        .map(\.card)
+        .filter { servedNotes.insert($0.noteId).inserted }
     }
 
     @Sendable func editCard<T: Sendable>(
@@ -65,13 +76,7 @@ extension APIClient {
 
     return APIClient(
       dueCards: { limit in
-        let notes = deck.value
-        var servedNotes = Set<Note.ID>()
-        let servable = candidates(notes)
-          .filter { $0.readyAt <= now }
-          .map(\.card)
-          .filter { servedNotes.insert($0.noteId).inserted }
-        return Array(servable.prefix(limit))
+        Array(queue(deck.value).prefix(limit))
       },
       updateCard: { id, front, back in
         try editCard(id) { note, index in
@@ -104,25 +109,26 @@ extension APIClient {
         let isToday = { (card: Card) in card.lastReview.map { DeckStats.calendar.isDate($0, inSameDayAs: now) } ?? false }
         let reviewed = cards.filter(isToday)
         let reviewedToday = reviewed.count
-        let dueCards = zip(studied, readyDates).filter { $1 <= now }.map(\.0)
+        let dueCards = queue(notes)
         let today = DeckStats.calendar.startOfDay(for: now)
-        /// Done = reviewed today; total = done + those of `ids` still waiting (not held, not reviewed today).
-        func step(_ ids: Set<Card.ID>) -> (done: Int, total: Int) {
+        /// Done = reviewed today; total = done + those of `waiting` in `ids`. At-risk cards wait until reviewed
+        /// (unless held); started reviews wait only while Study serves them, as on the API.
+        func step(_ ids: Set<Card.ID>, waiting: [Card]) -> (done: Int, total: Int) {
           let done = reviewed.filter { ids.contains($0.id) }.count
-          return (done, done + studied.filter { ids.contains($0.id) && !isToday($0) }.count)
+          return (done, done + waiting.filter { ids.contains($0.id) && !isToday($0) }.count)
         }
-        let (atRiskDone, atRiskTotal) = step(atRisk)
-        let (reviewsDone, reviewsTotal) = step(started)
+        let (atRiskDone, atRiskTotal) = step(atRisk, waiting: studied)
+        let (reviewsDone, reviewsTotal) = step(started, waiting: dueCards)
         return DeckStats(
           total: cards.count,
-          due: Set(dueCards.map(\.noteId)).count,
+          due: dueCards.count,
           new: cards.filter { $0.lastReview == nil }.count,
           reviewedToday: reviewedToday,
           nextDue: readyDates.filter { $0 > now }.min(),
           streak: reviewedToday > 0 ? 1 : 0,
           newToday: newToday + reviewedToday - reviewsDone,
           milestone: milestone,
-          dueNew: Set(dueCards.filter { $0.lastReview == nil }.map(\.noteId)).count,
+          dueNew: dueCards.filter { $0.lastReview == nil }.count,
           atRiskTotal: atRiskTotal,
           atRiskDone: atRiskDone,
           reviewsTotal: reviewsTotal,
@@ -134,7 +140,8 @@ extension APIClient {
       },
       notes: { query in
         let notes = deck.value
-        return notes.filter { $0.matches(query) }.map { withNext($0, notes) }
+        let queued = candidates(notes)
+        return notes.filter { $0.matches(query) }.map { withNext($0, queued) }
       },
       addNote: { draft in
         let directions =
@@ -150,7 +157,7 @@ extension APIClient {
         )
         return deck.withValue { notes in
           notes.insert(note, at: 0)
-          return withNext(note, notes)
+          return withNext(note, candidates(notes))
         }
       },
       // Ignores `draft.type`: a note's type is fixed at creation, as on the server.
@@ -164,7 +171,7 @@ extension APIClient {
               ?? Note.Card(id: UUID(), prompt: direction.prompt, answer: direction.answer, due: now)
           }
           notes[index].updatedAt = now
-          return withNext(notes[index], notes)
+          return withNext(notes[index], candidates(notes))
         }
       },
       deleteNote: { id in
