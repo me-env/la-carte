@@ -38,6 +38,10 @@ final class StubAPIServer: @unchecked Sendable {
   private var _handler: Handler
 
   var requests: [Request] { lock.withLock { _requests } }
+  /// `POST /cards/{id}/review` only: since spec 029 the app also POSTs `/activity`, so never count bare POSTs.
+  var reviewPosts: [Request] {
+    requests.filter { $0.method == "POST" && StubDeck.route($0.path).hasSuffix("/review") }
+  }
   var handler: Handler {
     get { lock.withLock { _handler } }
     set { lock.withLock { _handler = newValue } }
