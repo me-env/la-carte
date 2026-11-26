@@ -15,11 +15,8 @@ from sqlmodel import Session
 from la_carte_api import deck
 from la_carte_api.models import (
     ActivityEventRead,
-    AddCardsReply,
     AddNotesReply,
-    CardCreate,
     CardRead,
-    CardUpdate,
     DeckStats,
     Direction,
     FeedbackKind,
@@ -32,6 +29,8 @@ from la_carte_api.models import (
     Rating,
     ReportOutcome,
     ReportRead,
+    ReviewEntry,
+    StrugglingCard,
 )
 
 INSTRUCTIONS = """\
@@ -90,6 +89,12 @@ goes through the app's card reports, not here.
 
 Activity. `activity_log` lists what the user did in the app (dated); read it when handling feedback
 or reports. It holds no card text.
+
+History. `review_history` lists every rating (from the app or an agent's quiz), dated (UTC), with
+the card; it is never pruned. `struggling_cards` ranks the cards failed (`again`) most.
+For "what did I study yesterday", pass `since`/`until` as the user's local day with its UTC offset.
+For "why don't I see this card", read its note with `find_notes` (each card's `due`, `state`,
+`next`; an open report holds it), then `activity_log`.
 """
 
 HANDLE_REPORTS = """Work through my open la-carte reports.
@@ -268,46 +273,7 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         run(deck.delete_note, note_id)
         return f"Deleted note {note_id}"
 
-    # --- Cards ---------------------------------------------------------------------------------
-
-    @mcp.tool()
-    def add_cards(cards: list[CardCreate], allow_duplicates: bool = False) -> AddCardsReply:
-        """Prefer the note tools (`add_notes`, which makes both directions by default). Adds basic
-        notes, one card front -> back per item, due immediately.
-
-        Minimalist cards: front = a word or short question, back = the shortest answer (no
-        explanations). One fact per card. Check `list_cards` first; if a card exists, don't re-add
-        it: reuse it, `update_card` it, or tell the user.
-
-        Safety net: a front matching an existing basic note's front (case-insensitive, trimmed) or
-        an earlier card in this call is not added; the existing card is returned in `skipped`.
-        allow_duplicates=true adds it anyway: use only when the user explicitly asks.
-        New cards are due at once, after due reviews. Tell the user how many new cards wait (`new`).
-        Returns {added: [Card], skipped: [Card], new (never-reviewed cards in the deck now),
-        milestone (the app's new-card step size)}."""
-        add = partial(deck.add_cards, skip_duplicates=not allow_duplicates)
-        return run(with_new_count(AddCardsReply, add), cards)
-
-    @mcp.tool()
-    def list_cards(query: str | None = None, limit: int = 50) -> list[CardRead]:
-        """Prefer the note tools (`find_notes`). Lists cards, newest first; `query` filters on
-        their note's fields (substring, case-insensitive). Use it to check whether a card
-        already exists before adding."""
-        return run(deck.list_cards, query, limit)
-
-    @mcp.tool()
-    def update_card(card_id: UUID, front: str | None = None, back: str | None = None) -> CardRead:
-        """Prefer the note tools (`update_note`). Edits what this card shows: `front` sets its
-        prompt field, `back` its answer field, on the note, so siblings change too. Scheduling is
-        kept. Refused when that side shows several fields."""
-        return run(deck.update_card, card_id, CardUpdate(front=front, back=back))
-
-    @mcp.tool()
-    def delete_card(card_id: UUID) -> str:
-        """Prefer the note tools (`remove_direction`, `delete_note`). Deletes this card; if it was
-        its note's last card, the note goes too. Its review history is kept for stats."""
-        run(deck.delete_card, card_id)
-        return f"Deleted card {card_id}"
+    # --- Quiz ----------------------------------------------------------------------------------
 
     @mcp.tool()
     def due_cards(limit: int = 20) -> list[CardRead]:
@@ -444,8 +410,38 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         to 5 after) or by `card_id`. Filters: `since <= at < until` (ISO 8601, naive = UTC),
         `card_id`, `kind`, `session` (one app launch / foreground); `limit` 1-1000.
         Read-only; kept 90 days; events reach the server lazily, so the last minute may be
-        missing."""
+        missing. For ratings with card text, or older than 90 days, use `review_history`."""
         return run(deck.list_activity, since, until, card_id, kind, session, limit)
+
+    # --- History (spec 031) ---------------------------------------------------------------------
+
+    @mcp.tool()
+    def review_history(
+        since: datetime | None = None,
+        until: datetime | None = None,
+        card_id: UUID | None = None,
+        note_id: UUID | None = None,
+        rating: Rating | None = None,
+        limit: Annotated[int, Field(ge=1, le=deck.HISTORY_LIST_MAX)] = 100,
+    ) -> list[ReviewEntry]:
+        """Every rating the user gave, from the app or an agent's quiz, newest first, never
+        pruned. Each entry: `card_id`, `reviewed_at` (UTC), `rating` (again = forgot, hard, good,
+        easy), `confidence` (0-1 or null) and the current `card` (null once deleted). Filters:
+        `since <= reviewed_at < until` (ISO 8601, naive = UTC; for a local day pass its UTC
+        offset), `card_id`, `note_id` (its current cards), `rating`; `limit` 1-1000 (default
+        100). If you get `limit` entries, narrow the window. Read-only."""
+        return run(deck.review_history, since, until, card_id, note_id, rating, limit)
+
+    @mcp.tool()
+    def struggling_cards(
+        since: datetime | None = None,
+        limit: Annotated[int, Field(ge=1, le=deck.STRUGGLING_LIST_MAX)] = 20,
+    ) -> list[StrugglingCard]:
+        """Cards the user fails most: per existing card with at least one `again` since `since`
+        (all history if null), `{card, reviews, again, last_again_at}`, most `again` first, then
+        highest again/reviews. `limit` 1-100 (default 20). Read-only. To help: offer to rephrase
+        (`update_note`), split, or add a direction; change nothing without the user's OK."""
+        return run(deck.struggling_cards, since, limit)
 
     @mcp.prompt(title="Quiz me")
     def quiz_me(
