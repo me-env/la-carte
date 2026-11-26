@@ -25,6 +25,7 @@ set -- ${REST[@]+"${REST[@]}"}
 if [ "${1:-}" = --split ]; then  # --split [N] [--wait] <run> …: one run over several pool simulators (ios-ui-test-split.sh)
   exec "$(dirname "$0")/ios-ui-test-split.sh" "$@"
 fi
+source "$(dirname "$0")/_proc.sh"; stage "ios-ui-test: setup"  # stage lines + "still waiting at" warnings
 source "$(dirname "$0")/_ios-env.sh"
 source "$(dirname "$0")/_ui-retry.sh"
 RUN="${1:-$(date +%Y%m%d-%H%M%S)}"; shift || true
@@ -58,6 +59,7 @@ cd "$ROOT/ios"
 FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|preflight checks|\.swift:[0-9]+:[0-9]+: note:|TEST( EXECUTE)? (SUCCEEDED|FAILED)|^🔒"
 export NSUnbufferedIO=YES  # xcodebuild writes each line as it happens, even into a pipe
 set +e
+stage "ios-ui-test: build-for-testing (DerivedData lock, build slot)"
 # 1. Build under the app's DerivedData lock, copying the products out so a later build can't replace them.
 [ -n "$PREBUILT" ] || "$LOCK" "$APP_BUILD_LOCK" $BUILD_SLOT xcodebuild build-for-testing $BUILD_JOBS_FLAGS -project LaCarte.xcodeproj -scheme LaCarte \
   -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER"
@@ -78,6 +80,7 @@ PARALLEL=(-parallel-testing-enabled NO)
 # as failed, and the run goes on. Longest tests today: ≈ 90 s locally, ≈ 180 s on CI.
 TIMEOUTS=(-test-timeouts-enabled YES -default-test-execution-time-allowance 600)
 if [ "$STATUS" -eq 0 ]; then
+  stage "ios-ui-test: UI tests (pool simulator, xcodebuild test-without-building)"
   ui_test_with_retry "$RUN" "$RESULT" env TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" \
     TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \
     SIM_POOL=ui "$ROOT/scripts/_sim-pool.sh" /bin/sh -c 'exec xcodebuild test-without-building -destination "$POOL_DESTINATION" "$@"' \
@@ -92,6 +95,7 @@ INFRA="$(cat "$RESULT.infra" 2>/dev/null || true)"; rm -f "$RESULT.infra"  # scr
 if [ "$INFRA" = refused ]; then echo "TESTS: infra failure (simulator refused the runner)"; exit "$STATUS"; fi
 if [ ! -d "$RESULT" ]; then echo "TESTS: none run (exit $STATUS: build failed or lock timeout)"; exit "$STATUS"; fi
 
+stage "ios-ui-test: export screenshots + logs"
 xcrun xcresulttool export attachments --path "$RESULT" --output-path "$OUT" >/dev/null || warn "screenshot export"
 # Screenshots → <name>-<light|dark>.png; Xcode's screen recordings → recordings/<test>.mp4
 python3 -I - "$OUT" <<'PY' || warn "screenshot rename"

@@ -3,6 +3,7 @@
 # The UI run waits for the build/simulator locks itself (scripts/ios-ui-test.sh); the APIs are private to this run.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$(dirname "$0")/_proc.sh"; stage "e2e: setup"  # stage lines + "still waiting at" warnings
 RUN="${1:-e2e-$(date +%Y%m%d-%H%M%S)}"
 # Free ports picked by the OS, so several e2e runs (or a dev API) never clash. Override with E2E_PORT(S).
 free_port() { python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
@@ -54,6 +55,7 @@ done
 # Spec 021 reads /stats' ladder counts and opens the milestones popover (read-only; StudyMilestones runs before Study).
 # Spec 010 #16 edits greeting's back to "hello!" then PATCHes it back (net zero); StudyEdit runs before Study.
 # Spec 029 #32 studies 3 of the ACTIVITY API's 4 cards (its own deck, so order doesn't matter).
+stage "e2e: live UI tests (ios-ui-test.sh)"
 UI_WORKERS=1 "$ROOT/scripts/ios-ui-test.sh" "$RUN" \
   "-only-testing:LaCarteUITests/ActivityUITests/testActivity_eventsArriveAfterRelaunch_liveAPI" \
   "-only-testing:LaCarteUITests/DeckUITests/testDeck_addFromStudyThenDelete_liveAPI" \
