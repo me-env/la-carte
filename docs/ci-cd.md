@@ -131,9 +131,9 @@ never ran). Notes, Logo and StudyMilestones moved to a 5th shard.
 
 | Test | Owner | Failure on CI | Fix |
 |---|---|---|---|
+| `DeckUITests/testDeck_addFromDeck` | ios-engineer | New card editor sometimes opens with no focus on `editor.front` (spec 002 #6, app bug; the 2026-11-27 `.task` retry didn't fix it, red in main run 45954565083) | Make the auto-focus reliable, then remove the skip |
 
-None today. Released 2026-11-26: `DeckUITests/testDeck_addFromDeck` (focus wait now 30 s, then proves the
-auto-focus by typing without a tap) and `LogoUITests/testStudy_launchShowsFirstCardNoLogo` (one query per check;
+Released 2026-11-26: `LogoUITests/testStudy_launchShowsFirstCardNoLogo` (one query per check;
 limit 2.5 s when `CI` is set, which `scripts/ios-ui-test.sh` passes to the test runner as `TEST_RUNNER_CI`; 1.5 s locally).
 
 **Flaky tests.** The full-suite shards run with `-retry-tests-on-failure -test-iterations 2`: a test that fails

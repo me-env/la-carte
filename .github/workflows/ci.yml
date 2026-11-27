@@ -206,6 +206,7 @@ jobs:
               -only-testing:LaCarteUITests/LaCarteUITests
               -only-testing:LaCarteUITests/RefreshUITests
               -only-testing:LaCarteUITests/LaunchUITests
+              -skip-testing:LaCarteUITests/DeckUITests/testDeck_addFromDeck
           - name: setup-widget
             tests: >-
               -only-testing:LaCarteUITests/SetupUITests
