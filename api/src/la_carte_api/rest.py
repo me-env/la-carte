@@ -1,5 +1,6 @@
 """REST API consumed by the iOS app."""
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -9,6 +10,9 @@ from sqlmodel import Session
 from la_carte_api import deck
 from la_carte_api.db import sessions
 from la_carte_api.models import (
+    ActivityBatch,
+    ActivityEventRead,
+    ActivityIngest,
     CardCreate,
     CardRead,
     CardUpdate,
@@ -123,6 +127,31 @@ def stats(session: SessionDep, tz: str = "UTC"):
     except deck.UnknownTimeZone as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
     return deck.stats(session, tz=zone)
+
+
+# --- Activity (spec 029) ----------------------------------------------------------------------
+
+
+@router.post("/activity", response_model=ActivityIngest)
+def post_activity(session: SessionDep, body: ActivityBatch):
+    """The app's activity events; each is validated on its own (invalid ones are `rejected`)."""
+    try:
+        return deck.ingest_activity(session, body.events)
+    except deck.TooManyEvents as error:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, str(error)) from error
+
+
+@router.get("/activity", response_model=list[ActivityEventRead])
+def list_activity(
+    session: SessionDep,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    card_id: UUID | None = None,
+    kind: str | None = None,
+    session_id: Annotated[UUID | None, Query(alias="session")] = None,
+    limit: int = Query(100, ge=1, le=deck.ACTIVITY_LIST_MAX),
+):
+    return deck.list_activity(session, since, until, card_id, kind, session_id, limit)
 
 
 def _call(operation, *args):

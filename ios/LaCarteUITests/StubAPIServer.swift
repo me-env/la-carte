@@ -38,6 +38,10 @@ final class StubAPIServer: @unchecked Sendable {
   private var _handler: Handler
 
   var requests: [Request] { lock.withLock { _requests } }
+  /// `POST /cards/{id}/review` only: since spec 029 the app also POSTs `/activity`, so never count bare POSTs.
+  var reviewPosts: [Request] {
+    requests.filter { $0.method == "POST" && StubDeck.route($0.path).hasSuffix("/review") }
+  }
   var handler: Handler {
     get { lock.withLock { _handler } }
     set { lock.withLock { _handler = newValue } }
@@ -425,8 +429,12 @@ final class StubDeck: @unchecked Sendable {
       ["id": $0.id, "prompt": $0.prompt, "answer": $0.answer, "state": $0.state,
        "due": StubJSON.iso($0.due), "last_review": NSNull()]
     }
+    // Spec 028 `next`: the card Study serves first and when. Simplified server rule (no bury, no reports here):
+    // the earliest-due card, first on ties.
+    let first = n.cards.enumerated().min { ($0.element.due, $0.offset) < ($1.element.due, $1.offset) }?.element
+    let next: Any = first.map { ["card_id": $0.id, "ready_at": StubJSON.iso($0.due)] } ?? NSNull()
     let object: [String: Any] = [
-      "id": n.id, "type": n.type, "fields": n.fields, "cards": cards,
+      "id": n.id, "type": n.type, "fields": n.fields, "cards": cards, "next": next,
       "created_at": StubJSON.iso(n.createdAt), "updated_at": StubJSON.iso(n.createdAt),
     ]
     return String(decoding: try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self)

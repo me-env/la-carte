@@ -22,6 +22,34 @@ Data: the in-process stub deck in `ios/LaCarteUITests/MarketingUITests.swift` (d
 person "Nora Vale, runs the corner bakery", the stub's generated silhouette photo). The stub listens on
 127.0.0.1; no Settings screen is captured, so no URL or token is ever on screen.
 
+## README motion (animated WebP)
+
+GitHub plays committed animated WebP inline (not committed .mp4), so the README's motion is looping WebP in
+`marketing/readme/`, 2x of its display size, 30 fps, each under 1.5 MB:
+
+| File | What | Source |
+|---|---|---|
+| `clip-reveal.webp` | petrichor revealed, Got it, the person card revealed | `MarketingUITests/testMotion_1_reveal` recording |
+| `clip-tap.webp` | Forgot, then Got it, by tapping; the next card fades in | `testMotion_2_tap` |
+| `clip-drag.webp` | Forgot (drag left), Got it (drag right), the dial following | `testMotion_3_drag` |
+| `clip-finish.webp` | the last Got it, "All caught up" with the logo tilt | `testMotion_4_finish` |
+| `streak-{light,dark}.webp` | small + medium widget, streak day 1 → year 2, time label below | `ScreenColorTests/StreakGrowthRenders` (real `DeckWidgetTile`, 2x) |
+
+```bash
+LACARTE_AGENT=marketing UI_WORKERS=1 scripts/ios-ui-test.sh --record marketing-motion \
+  -only-testing:LaCarteUITests/MarketingUITests/testMotion_1_reveal -only-testing:LaCarteUITests/MarketingUITests/testMotion_2_tap \
+  -only-testing:LaCarteUITests/MarketingUITests/testMotion_3_drag -only-testing:LaCarteUITests/MarketingUITests/testMotion_4_finish
+uv run marketing/build-demo.py --clips      # ~2 min → marketing/readme/clip-*.webp
+LACARTE_AGENT=marketing LA_CARTE_RENDER_DIR=build/renders scripts/ios-test.sh -only-testing:ScreenColorTests/StreakGrowthRenders
+uv run marketing/build-demo.py --streak     # ~6 min → marketing/readme/streak-*.webp (LA_CARTE_STREAK_RENDERS overrides the input)
+```
+
+Clips are cut from Xcode's test recording (whole screen, light, status bar painted over) between the tests'
+`clip-<name>-start/-end` screenshots, matched frame by frame (the recording also shows launch and the Home Screen,
+which never make the cut); each loops with a 0.4 s fade back to its first frame, which is a still screen. The streak
+timeline (`STREAK` in the script) holds on Day 1, Day 7, Week 2, Month 1, Month 3, Year 1, Year 2, steps one day at a
+time with 0.25 s fades up to Day 7, then eases; the label counts days, weeks, months, years.
+
 ## Shots
 
 | # | s | Source frame | Caption |

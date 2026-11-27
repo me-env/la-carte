@@ -6,8 +6,10 @@
 # Other args go to xcodebuild, e.g. scripts/ios-test.sh --render -only-testing:DesignSystemTests/RenderTests
 # Real StudyView screens: scripts/ios-test.sh --render -only-testing:ScreenColorTests/StudyRenders (screen-study-*.png)
 # Each finished test prints as it finishes (also into a file), then a `TESTS: …` summary line.
-# Exit code = xcodebuild's (65 test failure, 75 lock timeout); the summary only warns if it fails.
+# Exit code = xcodebuild's (65 test failure, 70 no such simulator, 75 lock timeout, 124 stalled and killed); 0 only if
+# tests ran: a 0 with no result bundle, 0 tests or an unreadable summary becomes 66, with "Unable to find a device" 70.
 set -euo pipefail
+source "$(dirname "$0")/_proc.sh"; stage "ios-test: setup"  # stage lines + "still waiting at" warnings
 source "$(dirname "$0")/_ios-env.sh"
 ARGS=()
 for arg in "$@"; do
@@ -35,27 +37,36 @@ if [ -n "${FSEVENTS_SHIM_DIR:-}" ]; then
 else
   RUN='exec $BUILD_SLOT xcodebuild test $BUILD_JOBS_FLAGS -scheme LaCarteKit-Package -destination "$POOL_DESTINATION" -skipMacroValidation "$@"'
 fi
+stage "ios-test: build + unit tests (DerivedData lock, pool simulator, xcodebuild)"
 "$LOCK" "$KIT_BUILD_LOCK" "$ROOT/scripts/_sim-pool.sh" /bin/sh -c "$RUN" sh \
   -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} 2>&1 \
-  | grep --line-buffered -E "^(✔|✘|🔒|StudyRenders:)|Test [Cc]ase .*(passed|failed|skipped)|error:|\.swift:[0-9]+:[0-9]+: note:|TEST( EXECUTE)? (SUCCEEDED|FAILED)"
+  | grep --line-buffered -E "^(✔|✘|🔒|StudyRenders:)|Test [Cc]ase .*(passed|failed|skipped)|error:|\.swift:[0-9]+:[0-9]+: note:|TEST( EXECUTE)? (SUCCEEDED|FAILED)" \
+  | tee "$TMP/out.log"
 STATUS=${PIPESTATUS[0]}
 set -e
+stage "ios-test: summary (xcresulttool)"
+# A 0 must mean tests ran (a caller trusts it): never pass on a missing destination, bundle or test count.
+if grep -q "Unable to find a device matching the provided destination" "$TMP/out.log"; then
+  echo "❌ xcodebuild found no simulator for the destination" >&2; [ "$STATUS" -ne 0 ] || STATUS=70
+fi
 if [ ! -d "$RESULT" ]; then
-  echo "TESTS: none run (exit $STATUS: build failed or lock timeout)"
-else  # TESTS: 120 passed, 0 failed, 3 skipped (41.2 s), then one line per failed test.
-  python3 -I - "$(xcrun xcresulttool get test-results summary --path "$RESULT")" "$STATUS" 2>/dev/null <<'PY' \
-    || echo "⚠️  summary failed (exit code unchanged: $STATUS)" >&2
+  echo "TESTS: none run (exit $STATUS: build failed, lock timeout or no result bundle)"; [ "$STATUS" -ne 0 ] || STATUS=66
+else  # TESTS: 120 passed, 0 failed, 3 skipped (41.2 s), then one line per failed test. Exits 3 if no test ran.
+  S=0; python3 -I - "$(xcrun xcresulttool get test-results summary --path "$RESULT")" "$STATUS" 2>/dev/null <<'PY' || S=$?
 import json, sys
 s = json.loads(sys.argv[1])
 t = s["finishTime"] - s["startTime"]
 took = f"{t / 60:.1f} min" if t >= 120 else f"{t:.1f} s"
 if s["totalTestCount"] == 0:
     print(f"TESTS: none run (exit {sys.argv[2]}: build failed or no test matched)")
+    sys.exit(3)
 else:
     print(f"TESTS: {s['passedTests']} passed, {s['failedTests']} failed, {s['skippedTests']} skipped ({took})")
 for f in s.get("testFailures", []):
     print(f"  ✘ {f['testIdentifierString']}: {f['failureText'][:200]}")
 PY
+  if [ "$S" -ne 0 ] && [ "$S" -ne 3 ]; then echo "⚠️  summary failed: can't tell whether any test ran" >&2; fi
+  if [ "$S" -ne 0 ] && [ "$STATUS" -eq 0 ]; then STATUS=66; fi
 fi
 if [ -n "${LA_CARTE_RENDER_DIR:-}" ]; then echo "Renders: $LA_CARTE_RENDER_DIR"; fi
 exit "$STATUS"

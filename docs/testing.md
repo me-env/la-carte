@@ -48,8 +48,10 @@ Screen inks; the system's tint itself only shows on a device).
   Actions, plus a `::warning`), on a freshly taken pool slot (it may be the same simulator; `scripts/_ui-retry.sh`, also per `--split` shard and in
   `e2e.sh`). It prints `⚠️ INFRA: …` and adds `infra-retry: yes` to the TESTS line; refused again, the line is
   `TESTS: infra failure (simulator refused the runner)` (exit code still non-zero). A run where any test ran is never retried.
-- **Exit code** = xcodebuild's: 0 green, 65 build or test failure, 75 lock timeout. Screenshot export, renaming,
-  the summary and the contact sheet only print a ⚠️ warning when they fail. `e2e.sh` exits with `ios-ui-test.sh`'s code.
+- **Exit code** = xcodebuild's: 0 green, 65 build or test failure, 70 no simulator for the destination, 75 lock
+  timeout, 124 stalled run killed by the stall guard. **0 means tests ran:** a 0 with no result bundle, 0 tests in
+  it or an unreadable summary becomes 66, and an `Unable to find a device` line makes it 70. Screenshot export,
+  renaming and the contact sheet only print a ⚠️ warning when they fail. `e2e.sh` exits with `ios-ui-test.sh`'s code.
 - **Contact sheet:** when `uv` is on PATH, `ios-ui-test.sh` runs `scripts/contact-sheet.py` on the run's
   screenshots after the export (writes `contact-sheet*.png` into `qa/screenshots/<run>/`).
 

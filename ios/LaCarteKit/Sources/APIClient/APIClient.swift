@@ -16,6 +16,8 @@ public struct APIClient: Sendable {
   /// Sends every field of the draft's type (absent ones as `""`, which clears them) and the full set of directions.
   public var updateNote: @Sendable (_ id: Note.ID, _ draft: NoteDraft) async throws -> Note
   public var deleteNote: @Sendable (_ id: Note.ID) async throws -> Void
+  /// `POST /activity` (spec 029): returns on 2xx, throws `APIError` on any other status.
+  public var sendActivity: @Sendable (_ events: [ActivityEvent]) async throws -> Void
   /// False until a server URL and a token are both set: features show "Connect your deck" instead of loading.
   public var isConfigured: @Sendable () -> Bool = { false }
 }

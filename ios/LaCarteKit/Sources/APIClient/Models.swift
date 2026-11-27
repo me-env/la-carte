@@ -104,14 +104,28 @@ public struct Note: Codable, Equatable, Identifiable, Sendable {
   public var type: NoteType
   public var fields: [String: String]
   public var cards: [Card]
+  /// The card Study serves first and when (spec 028); `nil` when every card is held by a report.
+  public var next: Next?
   public var createdAt: Date
   public var updatedAt: Date
+
+  /// The server's pick of the note's next card in the study queue.
+  public struct Next: Codable, Equatable, Sendable {
+    public var cardId: UUID
+    public var readyAt: Date
+
+    public init(cardId: UUID, readyAt: Date) {
+      self.cardId = cardId
+      self.readyAt = readyAt
+    }
+  }
 
   public init(
     id: UUID,
     type: NoteType,
     fields: [String: String],
     cards: [Card],
+    next: Next? = nil,
     createdAt: Date,
     updatedAt: Date
   ) {
@@ -119,8 +133,29 @@ public struct Note: Codable, Equatable, Identifiable, Sendable {
     self.type = type
     self.fields = fields
     self.cards = cards
+    self.next = next
     self.createdAt = createdAt
     self.updatedAt = updatedAt
+  }
+
+  /// `next: null` means reported. A server older than spec 028 sends no `next` key: the earliest-due card stands in,
+  /// since a decoded `nil` would read as reported.
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let cards = try container.decode([Card].self, forKey: .cards)
+    let next =
+      container.contains(.next)
+      ? try container.decodeIfPresent(Next.self, forKey: .next)
+      : cards.min { $0.due < $1.due }.map { Next(cardId: $0.id, readyAt: $0.due) }
+    try self.init(
+      id: container.decode(UUID.self, forKey: .id),
+      type: container.decode(NoteType.self, forKey: .type),
+      fields: container.decode([String: String].self, forKey: .fields),
+      cards: cards,
+      next: next,
+      createdAt: container.decode(Date.self, forKey: .createdAt),
+      updatedAt: container.decode(Date.self, forKey: .updatedAt)
+    )
   }
 }
 

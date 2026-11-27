@@ -18,13 +18,16 @@
 # If the simulator refuses the test runner before any test ran ("preflight checks … Busy"), the test step runs once
 # more after UI_INFRA_RETRY_WAIT s (scripts/_ui-retry.sh): `infra-retry: yes` in the TESTS line, or
 # `TESTS: infra failure (simulator refused the runner)` if refused again.
-# Exit code = xcodebuild's (65 test failure, 75 lock timeout); export/summary/contact-sheet failures only warn.
+# Exit code = xcodebuild's (65 test failure, 70 no such simulator, 75 lock timeout, 124 stalled and killed); 0 only if
+# tests ran: a 0 with no result bundle, 0 tests or an unreadable summary becomes 66, with "Unable to find a device" 70.
+# Export/contact-sheet failures only warn.
 set -euo pipefail
 REST=(); for a in "$@"; do if [ "$a" = --record ]; then export UI_RECORD=1; else REST+=("$a"); fi; done
 set -- ${REST[@]+"${REST[@]}"}
 if [ "${1:-}" = --split ]; then  # --split [N] [--wait] <run> …: one run over several pool simulators (ios-ui-test-split.sh)
   exec "$(dirname "$0")/ios-ui-test-split.sh" "$@"
 fi
+source "$(dirname "$0")/_proc.sh"; stage "ios-ui-test: setup"  # stage lines + "still waiting at" warnings
 source "$(dirname "$0")/_ios-env.sh"
 source "$(dirname "$0")/_ui-retry.sh"
 RUN="${1:-$(date +%Y%m%d-%H%M%S)}"; shift || true
@@ -50,7 +53,8 @@ RESULT="$RESULTS_DIR/$RUN.xcresult"   # qa/.results, or $LA_CARTE_SCRATCH/qa-res
 PREBUILT="${UI_TEST_PRODUCTS:-}"
 OWN="$RESULTS_DIR/$RUN.xctestproducts"  # this run's own app + runner (or --record's copy of the prebuilt); removed on exit
 PRODUCTS="${PREBUILT:-$OWN}"
-trap 'rm -rf "$OWN"' EXIT; rm -rf "$OWN"
+LOG="$(mktemp)"   # the filtered xcodebuild output, checked for "Unable to find a device"
+trap 'rm -rf "$OWN" "$LOG"' EXIT; rm -rf "$OWN"
 rm -rf "$OUT" "$RESULT"; mkdir -p "$OUT" "$(dirname "$RESULT")"
 
 cd "$ROOT/ios"
@@ -58,9 +62,10 @@ cd "$ROOT/ios"
 FILTER="Test [Cc]ase .*(passed|failed|skipped)|error:|preflight checks|\.swift:[0-9]+:[0-9]+: note:|TEST( EXECUTE)? (SUCCEEDED|FAILED)|^🔒"
 export NSUnbufferedIO=YES  # xcodebuild writes each line as it happens, even into a pipe
 set +e
+stage "ios-ui-test: build-for-testing (DerivedData lock, build slot)"
 # 1. Build under the app's DerivedData lock, copying the products out so a later build can't replace them.
 [ -n "$PREBUILT" ] || "$LOCK" "$APP_BUILD_LOCK" $BUILD_SLOT xcodebuild build-for-testing $BUILD_JOBS_FLAGS -project LaCarte.xcodeproj -scheme LaCarte \
-  -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER"
+  -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER" | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
 # --record: keep every test's attachments, set in this run's products only (a prebuilt copy is cloned first).
 if [ "$STATUS" -eq 0 ] && [ -n "$UI_RECORD" ]; then
@@ -78,20 +83,29 @@ PARALLEL=(-parallel-testing-enabled NO)
 # as failed, and the run goes on. Longest tests today: ≈ 90 s locally, ≈ 180 s on CI.
 TIMEOUTS=(-test-timeouts-enabled YES -default-test-execution-time-allowance 600)
 if [ "$STATUS" -eq 0 ]; then
+  stage "ios-ui-test: UI tests (pool simulator, xcodebuild test-without-building)"
   ui_test_with_retry "$RUN" "$RESULT" env TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" \
     TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" TEST_RUNNER_CI="${CI:-}" \
     SIM_POOL=ui "$ROOT/scripts/_sim-pool.sh" /bin/sh -c 'exec xcodebuild test-without-building -destination "$POOL_DESTINATION" "$@"' \
     sh -testProductsPath "$PRODUCTS" "${PARALLEL[@]}" "${TIMEOUTS[@]}" \
     -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} \
-    | grep --line-buffered -E "$FILTER"
+    | grep --line-buffered -E "$FILTER" | tee -a "$LOG"
   STATUS=${PIPESTATUS[0]}
 fi
 set -e
 warn() { echo "⚠️  $1 failed (exit code unchanged: $STATUS)" >&2; }
 INFRA="$(cat "$RESULT.infra" 2>/dev/null || true)"; rm -f "$RESULT.infra"  # scripts/_ui-retry.sh: retried / refused
 if [ "$INFRA" = refused ]; then echo "TESTS: infra failure (simulator refused the runner)"; exit "$STATUS"; fi
-if [ ! -d "$RESULT" ]; then echo "TESTS: none run (exit $STATUS: build failed or lock timeout)"; exit "$STATUS"; fi
+# A 0 must mean tests ran (a caller trusts it): never pass on a missing destination, bundle or test count.
+if grep -q "Unable to find a device matching the provided destination" "$LOG"; then
+  echo "❌ xcodebuild found no simulator for the destination" >&2; [ "$STATUS" -ne 0 ] || STATUS=70
+fi
+if [ ! -d "$RESULT" ]; then
+  echo "TESTS: none run (exit $STATUS: build failed, lock timeout or no result bundle)"; [ "$STATUS" -ne 0 ] || STATUS=66
+  exit "$STATUS"
+fi
 
+stage "ios-ui-test: export screenshots + logs"
 xcrun xcresulttool export attachments --path "$RESULT" --output-path "$OUT" >/dev/null || warn "screenshot export"
 # Screenshots → <name>-<light|dark>.png; Xcode's screen recordings → recordings/<test>.mp4
 python3 -I - "$OUT" <<'PY' || warn "screenshot rename"
@@ -123,8 +137,8 @@ echo "📸 screenshots: $OUT  (xcresult: $RESULT)"
 ui_logs_summary "$OUT"
 ls -R "$OUT" || true
 ui_recordings_summary "$OUT"
-# TESTS: 69 passed, 0 failed, 6 skipped (49.3 min[, infra-retry: yes]), then one line per failed test.
-python3 -I - "$(xcrun xcresulttool get test-results summary --path "$RESULT")" "$STATUS" "$INFRA" 2>/dev/null <<'PY' || warn "summary"
+# TESTS: 69 passed, 0 failed, 6 skipped (49.3 min[, infra-retry: yes]), then one line per failed test. Exits 3 if none ran.
+S=0; python3 -I - "$(xcrun xcresulttool get test-results summary --path "$RESULT")" "$STATUS" "$INFRA" 2>/dev/null <<'PY' || S=$?
 import json, sys
 s = json.loads(sys.argv[1])
 t = s["finishTime"] - s["startTime"]
@@ -132,9 +146,12 @@ took = f"{t / 60:.1f} min" if t >= 120 else f"{t:.1f} s"
 took += ", infra-retry: yes" if sys.argv[3] == "retried" else ""
 if s["totalTestCount"] == 0:
     print(f"TESTS: none run (exit {sys.argv[2]}: build failed or no test matched)")
+    sys.exit(3)
 else:
     print(f"TESTS: {s['passedTests']} passed, {s['failedTests']} failed, {s['skippedTests']} skipped ({took})")
 for f in s.get("testFailures", []):
     print(f"  ✘ {f['testIdentifierString']}: {f['failureText'][:200]}")
 PY
+if [ "$S" -ne 0 ] && [ "$S" -ne 3 ]; then echo "⚠️  summary failed: can't tell whether any test ran" >&2; fi
+if [ "$S" -ne 0 ] && [ "$STATUS" -eq 0 ]; then STATUS=66; fi
 exit "$STATUS"

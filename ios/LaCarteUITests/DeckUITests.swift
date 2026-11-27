@@ -1,7 +1,7 @@
 import XCTest
 
 /// Spec 002: Deck list + add / edit card.
-/// Mock deck = `LA_CARTE_API=mock`: serendipity (…01), la carte (…02), ephemeral (…03); all due, state new.
+/// Mock deck = `LA_CARTE_API=mock`: serendipity (…01), la carte (…02), ephemeral (…03); all new: every row reads "New" (spec 028).
 final class DeckUITests: XCTestCase {
   static let ids = (1...3).map { "00000000-0000-0000-0000-00000000000\($0)" }
   static let fixtures: [(front: String, back: String)] = [
@@ -25,7 +25,7 @@ final class DeckUITests: XCTestCase {
     openDeck(app)
     waitForRows(app, Self.ids)
     for (i, id) in Self.ids.enumerated() {
-      assertRow(app, id, front: Self.fixtures[i].front, back: Self.fixtures[i].back, due: "Due now", state: "new")
+      assertRow(app, id, front: Self.fixtures[i].front, back: Self.fixtures[i].back, due: "New", state: nil)
     }
     assertDeckChrome(app)
     assertRowSpacing(app)
@@ -38,7 +38,7 @@ final class DeckUITests: XCTestCase {
     waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
   }
 
-  /// #1 against API-shaped data: rows keep the API order (newest first), "Due in 3 days", a non-new state,
+  /// #1 against API-shaped data: rows keep the API order (newest first), "In 3 days" / "New" (spec 028),
   /// long text on one line each; the live client asks for `limit=500`.
   @MainActor
   func testDeck_rowsFromAPI() throws {
@@ -57,8 +57,9 @@ final class DeckUITests: XCTestCase {
     openDeck(app)
     let newest = "aaaaaaaa-0000-0000-0000-000000000002", older = "aaaaaaaa-0000-0000-0000-000000000001"
     waitForRows(app, [newest, older])
-    assertRow(app, older, front: "gratitude", back: "thank you", due: "Due in 3 days", state: "review")
-    assertRow(app, newest, front: long, back: long + " (back)", due: "Due now", state: "new")
+    assertRow(app, older, front: "gratitude", back: "thank you", due: Self.inDaysLabel(now.addingTimeInterval(3 * 86_400 + 3_600)),
+              state: nil)
+    assertRow(app, newest, front: long, back: long + " (back)", due: "New", state: nil)
     // 1 line each: the long row is as tall as the short one.
     XCTAssertEqual(row(app, newest).frame.height, row(app, older).frame.height, accuracy: 1,
                    "long text row is taller than a short one: front/back not limited to 1 line")
@@ -221,7 +222,7 @@ final class DeckUITests: XCTestCase {
     waitUntil("new row at the top") { self.rowIDs(app).count == 4 }
     let top = rowIDs(app)[0]
     XCTAssertFalse(Self.ids.contains(top), "new card is not the top row: \(rowIDs(app))")
-    assertRow(app, top, front: "feline", back: "cat", due: "Due now", state: "new")
+    assertRow(app, top, front: "feline", back: "cat", due: "New", state: nil)
     XCTAssertEqual(Array(rowIDs(app).dropFirst()), Self.ids)
     snapshot("deck-after-add", appearance: .light)
   }
@@ -331,7 +332,7 @@ final class DeckUITests: XCTestCase {
     openDeck(app)
     waitUntil("3 rows in the live deck") { self.rowIDs(app).count == 3 }
     let felineID = rowIDs(app)[0]
-    assertRow(app, felineID, front: "feline", back: "cat", due: "Due now", state: "new")
+    assertRow(app, felineID, front: "feline", back: "cat", due: "New", state: nil)
     snapshot("deck-live", appearance: .light)
     XCTAssertTrue(try liveCards(url).contains { $0["front"] as? String == "feline" }, "feline not in the API")
 
@@ -706,29 +707,52 @@ final class DeckUITests: XCTestCase {
   }
 
   @MainActor
-  private func assertRow(_ app: XCUIApplication, _ id: String, front: String, back: String, due: String, state: String,
+  /// `state`: the right side of the meta line ("N directions"), `nil` = absent (one-card note, spec 028 #11).
+  private func assertRow(_ app: XCUIApplication, _ id: String, front: String, back: String, due: String, state: String?,
                          file: StaticString = #filePath, line: UInt = #line) {
     let row = row(app, id)
     XCTAssertTrue(row.waitFor(timeout: 5), "deck.row.\(id) missing", file: file, line: line)
     let dueEl = el(app, "deck.row.\(id.uppercased()).due"), stateEl = el(app, "deck.row.\(id.uppercased()).state")
     waitForLabel(dueEl, due, file: file, line: line)
-    waitForLabel(stateEl, state, file: file, line: line)
+    if let state {
+      waitForLabel(stateEl, state, file: file, line: line)
+    } else {
+      XCTAssertFalse(stateEl.exists, "deck.row.\(id).state shown on a one-card note: '\(stateEl.label)'",
+                     file: file, line: line)
+    }
     let frontEl = rowText(app, id, front), backEl = rowText(app, id, back)
     XCTAssertTrue(frontEl.exists, "deck.row.\(id) doesn't show front '\(front)'", file: file, line: line)
     XCTAssertTrue(backEl.exists, "deck.row.\(id) doesn't show back '\(back)'", file: file, line: line)
-    let r = row.frame, d = dueEl.frame, s = stateEl.frame, f = frontEl.frame, b = backEl.frame
+    let r = row.frame, d = dueEl.frame, f = frontEl.frame, b = backEl.frame
     // Meta line: due left, state right, same line, on top.
     XCTAssertLessThan(d.midX, r.midX, "due not on the left", file: file, line: line)
-    XCTAssertGreaterThan(s.midX, r.midX, "state not on the right", file: file, line: line)
-    XCTAssertEqual(d.midY, s.midY, accuracy: 1, "due/state not on one line", file: file, line: line)
+    var parts = [("due", d), ("front", f), ("back", b)]
+    if state != nil {
+      let s = stateEl.frame
+      XCTAssertGreaterThan(s.midX, r.midX, "state not on the right", file: file, line: line)
+      XCTAssertEqual(d.midY, s.midY, accuracy: 1, "due/state not on one line", file: file, line: line)
+      parts.append(("state", s))
+    }
     XCTAssertGreaterThanOrEqual(f.minY, d.maxY - 1, "front not under the meta line", file: file, line: line)
     XCTAssertGreaterThanOrEqual(b.minY, f.maxY - 1, "back not under the front", file: file, line: line)
     XCTAssertEqual(f.minX, d.minX, accuracy: 1, "front not left-aligned with the meta line", file: file, line: line)
     // 1 line each: front and back are as tall as each other (same .body style).
     XCTAssertEqual(f.height, b.height, accuracy: 1, "front/back heights differ (wrapping?)", file: file, line: line)
     XCTAssertLessThan(f.height, d.height * 2.2, "front taller than one line: \(f)", file: file, line: line)
-    for (name, t) in [("due", d), ("state", s), ("front", f), ("back", b)] {
+    for (name, t) in parts {
       XCTAssertTrue(r.insetBy(dx: -0.5, dy: -0.5).contains(t), "\(name) outside its row: \(t) in \(r)", file: file, line: line)
+    }
+  }
+
+  /// Spec 028 label of a future `readyAt` from the calendar-day distance (device calendar), for d in 0…13.
+  static func inDaysLabel(_ readyAt: Date, now: Date = Date()) -> String {
+    let calendar = Calendar.current
+    let d = calendar.dateComponents([.day], from: calendar.startOfDay(for: now),
+                                    to: calendar.startOfDay(for: readyAt)).day ?? -1
+    switch d {
+    case 0: return "Later today"
+    case 1: return "Tomorrow"
+    default: return "In \(d) days"
     }
   }
 
@@ -912,5 +936,245 @@ extension XCTestCase {
     el(app, "editor.close").tap()
     dialogButton(app, "editor.discard", "Discard", file: file, line: line).tap()
     waitForAbsence(editorBar(app), "editor still open after Discard", file: file, line: line)
+  }
+}
+
+// MARK: - Spec 028: card list labels match the study queue
+
+extension DeckUITests {
+  static let labelIDs = (31...38).map { "00000000-0000-0000-0000-0000000000\($0)" }
+
+  /// 028 #15 + #11: the `mock-labels` deck shows one row per label, every row on screen, no state text on these
+  /// one-card notes. Light pass, then (028 #2 seen from the app): Study serves exactly the "In queue" and "New" rows.
+  @MainActor
+  func testDeckLabels_everyLabel() {
+    continueAfterFailure = true  // QA: record every deviation, still take the later screenshots
+    for appearance in [XCUIDevice.Appearance.light, .dark] {
+      XCUIDevice.shared.appearance = appearance
+      let launchedAt = Date()
+      let app = launch(api: .mockLabels)
+      openDeck(app)
+      Thread.sleep(forTimeInterval: 1)
+      snapshot("deck-labels", appearance: appearance)
+      // Eight 104 pt rows don't fit one screen: the first six show, the last two after a scroll (deck-labels-bottom).
+      waitUntil("first label rows") { self.rowIDs(app).first == Self.labelIDs[0].uppercased() }
+      let labels = ["In queue", "New", Self.inDaysLabel(launchedAt.addingTimeInterval(1_800)), "Tomorrow", "In 3 days",
+                    "In 2 weeks", "In 4 months", "Reported"]
+      let fronts = ["in queue", "new", "later today", "tomorrow", "in 3 days", "in 2 weeks", "in 4 months", "reported"]
+      for (i, id) in Self.labelIDs.enumerated() {
+        let r = row(app, id), window = app.windows.firstMatch
+        for _ in 0..<4 where !(r.exists && r.isHittable) {
+          window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+            .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
+          Thread.sleep(forTimeInterval: 0.5)
+        }
+        assertRow(app, id, front: fronts[i], back: "a deck row label", due: labels[i], state: nil)
+      }
+      Thread.sleep(forTimeInterval: 0.5)
+      snapshot("deck-labels-bottom", appearance: appearance)
+      if appearance == .light {
+        swipeSheetDown(app, from: deckTitle(app))
+        waitForAbsence(deckTitle(app), "deck sheet still open after swiping down")
+        // Study serves the "In queue" review, then the "New" card, then nothing.
+        for front in ["in queue", "new"] {
+          rateGood(app, front: front)
+        }
+        XCTAssertTrue(poll(timeout: 10) { self.el(app, "study.message").label == "All caught up" },
+                      "Study served more than the In queue + New rows: front '\(el(app, "study.front").label)'")
+        snapshot("study-labels-caught-up", appearance: appearance)
+      }
+      app.terminate()
+    }
+  }
+
+  /// 028 #12: the mock deck reads "New" on every row; rating the first card Good in Study turns its row "Tomorrow"
+  /// (the mock pushes a review one day out), the others stay "New".
+  @MainActor
+  func testDeckLabels_afterRatingGood() {
+    continueAfterFailure = true  // QA: record every deviation, still take the later screenshots
+    for appearance in [XCUIDevice.Appearance.light, .dark] {
+      XCUIDevice.shared.appearance = appearance
+      let app = launch(api: .mock)
+      openDeck(app)
+      waitForRows(app, Self.ids)
+      for (i, id) in Self.ids.enumerated() {
+        assertRow(app, id, front: Self.fixtures[i].front, back: Self.fixtures[i].back, due: "New", state: nil)
+      }
+      swipeSheetDown(app, from: deckTitle(app))
+      waitForAbsence(deckTitle(app), "deck sheet still open after swiping down")
+      rateGood(app, front: Self.fixtures[0].front)
+      waitForLabel(el(app, "study.front"), Self.fixtures[1].front)
+      openDeck(app)
+      waitForRows(app, Self.ids)
+      let labels = ["Tomorrow", "New", "New"]
+      for (i, id) in Self.ids.enumerated() {
+        assertRow(app, id, front: Self.fixtures[i].front, back: Self.fixtures[i].back, due: labels[i], state: nil)
+      }
+      Thread.sleep(forTimeInterval: 0.5)
+      snapshot("deck-after-rating", appearance: appearance)
+      app.terminate()
+    }
+  }
+
+  /// 028 #13 + #11: `mock-notes`, rate cards Good until the first direction of "la carte" is rated; its sibling is
+  /// buried 6 h, so the row reads the bury's end ("Later today" / "Tomorrow"), never "In queue" or "New"; its right side
+  /// reads "2 directions", a one-card row has none.
+  @MainActor
+  func testDeckLabels_buriedSibling() throws {
+    continueAfterFailure = true  // QA: record every deviation, still take the later screenshots
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mockNotes)
+    let laCarte = "00000000-0000-0000-0000-000000000002", serendipity = "00000000-0000-0000-0000-000000000001"
+    var ratedAt: Date?
+    for _ in 0..<6 {
+      XCTAssertTrue(el(app, "study.reveal").waitFor(timeout: 10), "study.reveal missing")
+      let front = el(app, "study.front")
+      let isLaCarte = front.exists && front.label == "la carte"
+      rateGood(app, front: nil)
+      if isLaCarte { ratedAt = Date(); break }
+    }
+    let rated = try XCTUnwrap(ratedAt, "Study never served 'la carte' front → back within 6 cards")
+    openDeck(app)
+    let due = el(app, "deck.row.\(laCarte).due")
+    XCTAssertTrue(due.waitFor(timeout: 10), "la carte row missing")
+    waitForLabel(due, Self.inDaysLabel(rated.addingTimeInterval(6 * 3_600)))
+    XCTAssertFalse(["In queue", "New"].contains(due.label), "buried sibling reads '\(due.label)'")
+    waitForLabel(el(app, "deck.row.\(laCarte).state"), "2 directions")
+    XCTAssertTrue(row(app, serendipity).waitFor(timeout: 5), "serendipity row missing")
+    XCTAssertFalse(el(app, "deck.row.\(serendipity).state").exists, "one-card note shows deck.row.<id>.state")
+    Thread.sleep(forTimeInterval: 0.5)
+    snapshot("deck-sibling-buried", appearance: .light)
+  }
+
+  /// 028 #14: report the first card (a one-card note) from Study ("I don't want this card"); its row reads "Reported".
+  @MainActor
+  func testDeckLabels_reported() {
+    continueAfterFailure = true  // QA: record every deviation, still take the later screenshots
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .mock)
+    waitForLabel(el(app, "study.front"), Self.fixtures[0].front)
+    el(app, "study.reveal").tap()
+    waitForLabel(el(app, "study.back"), Self.fixtures[0].back)
+    Thread.sleep(forTimeInterval: 0.5)  // reveal animation settled
+    el(app, "study.card").coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.08)).doubleTap()
+    let drop = reportButton(app, "drop", "I don't want this card")
+    XCTAssertTrue(drop.waitFor(timeout: 5), "double tap on the revealed card opened no report menu")
+    Thread.sleep(forTimeInterval: 0.6)
+    reportButton(app, "drop", "I don't want this card").tap()
+    waitForLabel(el(app, "study.front"), Self.fixtures[1].front)
+    openDeck(app)
+    waitForRows(app, Self.ids)
+    assertRow(app, Self.ids[0], front: Self.fixtures[0].front, back: Self.fixtures[0].back, due: "Reported", state: nil)
+    assertRow(app, Self.ids[1], front: Self.fixtures[1].front, back: Self.fixtures[1].back, due: "New", state: nil)
+    Thread.sleep(forTimeInterval: 0.5)
+    snapshot("deck-reported", appearance: .light)
+  }
+
+  /// 028 live (scripts/e2e.sh, EMPTY API): three notes posted, "flagged" reported, "sibling"'s first direction rated
+  /// Good in the app. Study then serves "fresh" (not the buried sibling, not the reported card); the deck reads
+  /// "Reported", the bury's end (not "In queue"/"New") with "2 directions", and "New"; a row reads "In queue"/"New"
+  /// exactly when `GET /cards/due` holds its note. Notes deleted again (net zero for the empty-deck check).
+  @MainActor
+  func testDeckLabels_matchStudy_liveAPI() throws {
+    continueAfterFailure = true  // QA: record every deviation, still take the later screenshots
+    guard let url = ProcessInfo.processInfo.environment["LA_CARTE_EMPTY_API_URL"], !url.isEmpty else {
+      throw XCTSkip("LA_CARTE_EMPTY_API_URL not set — run scripts/e2e.sh")
+    }
+    func post(_ body: String) throws -> [String: Any] {
+      try XCTUnwrap(liveJSON(url + "/notes", method: "POST", body: body) as? [String: Any], "POST /notes \(body)")
+    }
+    let sibling = try post(#"{"type":"basic","fields":{"front":"sibling","back":"held"}}"#)
+    let fresh = try post(#"{"type":"basic","fields":{"front":"fresh","back":"new card"},"directions":[{"prompt":["front"]}]}"#)
+    let flagged = try post(#"{"type":"basic","fields":{"front":"flagged","back":"reported card"},"directions":[{"prompt":["front"]}]}"#)
+    let notes = [sibling, fresh, flagged]
+    let ids = notes.map { ($0["id"] as? String ?? "").uppercased() }
+    addTeardownBlock { for id in ids { _ = self.liveJSON(url + "/notes/\(id.lowercased())", method: "DELETE") } }
+    XCTAssertEqual((sibling["cards"] as? [Any])?.count, 2, "sibling note doesn't have 2 directions: \(sibling)")
+    let flaggedCard = try XCTUnwrap((flagged["cards"] as? [[String: Any]])?.first?["id"] as? String)
+    XCTAssertNotNil(liveJSON(url + "/cards/\(flaggedCard)/report", method: "POST", body: #"{"reason":"drop"}"#),
+                    "POST report")
+
+    XCUIDevice.shared.appearance = .light
+    let app = launch(api: .live(url))
+    waitForLabel(el(app, "study.front"), "sibling")
+    rateGood(app, front: "sibling")
+    let ratedAt = Date()
+    waitForLabel(el(app, "study.front"), "fresh")
+    snapshot("study-live-after-sibling", appearance: .light)
+
+    openDeck(app)
+    waitUntil("3 live rows") { Set(self.rowIDs(app)) == Set(ids) }
+    assertRow(app, ids[2], front: "flagged", back: "reported card", due: "Reported", state: nil)
+    assertRow(app, ids[1], front: "fresh", back: "new card", due: "New", state: nil)
+    let siblingDue = el(app, "deck.row.\(ids[0]).due")
+    XCTAssertTrue(siblingDue.waitFor(timeout: 5), "sibling row missing")
+    XCTAssertFalse(["In queue", "New"].contains(siblingDue.label), "held sibling reads '\(siblingDue.label)'")
+    // Reviewed card's new due (learning step) or the 6 h bury, whichever first: never before today.
+    XCTAssertTrue(["Later today", "Tomorrow"].contains(siblingDue.label), "sibling label '\(siblingDue.label)'")
+    waitForLabel(el(app, "deck.row.\(ids[0]).state"), "2 directions")
+    Thread.sleep(forTimeInterval: 0.5)
+    snapshot("deck-labels-live", appearance: .light)
+
+    // The list and Study agree: a row says "In queue"/"New" exactly when /cards/due holds its note.
+    let due = try XCTUnwrap(liveJSON(url + "/cards/due?limit=200") as? [[String: Any]], "GET /cards/due")
+    let dueNotes = Set(due.compactMap { ($0["note_id"] as? String)?.uppercased() })
+    for id in ids {
+      let label = el(app, "deck.row.\(id).due").label
+      XCTAssertEqual(["In queue", "New"].contains(label), dueNotes.contains(id),
+                     "row \(id) '\(label)' vs /cards/due notes \(dueNotes)")
+    }
+    let listed = try XCTUnwrap(liveJSON(url + "/notes?limit=500") as? [[String: Any]], "GET /notes")
+    let next = Dictionary(uniqueKeysWithValues: listed.map { (($0["id"] as? String ?? "").uppercased(), $0["next"]) })
+    XCTAssertTrue(next[ids[2]] is NSNull, "reported note next: \(String(describing: next[ids[2]]))")
+    let siblingNext = try XCTUnwrap(next[ids[0]] as? [String: Any], "sibling next")
+    let readyAt = try XCTUnwrap((siblingNext["ready_at"] as? String).flatMap(Self.parseISO), "sibling ready_at")
+    XCTAssertGreaterThan(readyAt, ratedAt, "sibling next.ready_at \(readyAt) not after the review")
+    XCTAssertLessThanOrEqual(readyAt, ratedAt.addingTimeInterval(6 * 3_600 + 60), "sibling held past 6 h")
+  }
+
+  /// Reveals the current card (`front` checked when given) and rates it Good.
+  @MainActor
+  private func rateGood(_ app: XCUIApplication, front: String?, file: StaticString = #filePath, line: UInt = #line) {
+    if let front { waitForLabel(el(app, "study.front"), front, file: file, line: line) }
+    let reveal = el(app, "study.reveal")
+    XCTAssertTrue(reveal.waitFor(timeout: 10), "study.reveal missing", file: file, line: line)
+    reveal.tap()
+    let good = el(app, "study.rate.good")
+    XCTAssertTrue(good.waitFor(timeout: 5), "study.rate.good missing", file: file, line: line)
+    XCTAssertTrue(poll(timeout: 3) { good.isEnabled }, "study.rate.good disabled", file: file, line: line)
+    good.tap()
+  }
+
+  /// A report-dialog button by id; its label when the system drops ids inside a dialog (as in ReportUITests).
+  @MainActor
+  private func reportButton(_ app: XCUIApplication, _ id: String, _ title: String) -> XCUIElement {
+    let byID = el(app, "study.report.\(id)")
+    return byID.exists ? byID : app.buttons.matching(NSPredicate(format: "label == %@", title)).firstMatch
+  }
+
+  static func parseISO(_ s: String) -> Date? {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+  }
+
+  private func liveJSON(_ url: String, method: String = "GET", body: String? = nil) -> Any? {
+    var request = URLRequest(url: URL(string: url)!)
+    request.httpMethod = method
+    if let token = ProcessInfo.processInfo.environment["LA_CARTE_API_TOKEN"] {
+      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+    if let body {
+      request.httpBody = Data(body.utf8)
+      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    }
+    var result: Data?
+    let done = DispatchSemaphore(value: 0)
+    URLSession.shared.dataTask(with: request) { data, _, _ in
+      result = data
+      done.signal()
+    }.resume()
+    _ = done.wait(timeout: .now() + 10)
+    return result.flatMap { try? JSONSerialization.jsonObject(with: $0) }
   }
 }

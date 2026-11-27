@@ -164,6 +164,137 @@ final class MarketingUITests: XCTestCase {
     }
   }
 
+  // MARK: - README motion clips (recorded with `--record`; `marketing/build-demo.py --clips` cuts them)
+  //
+  // Each clip starts and ends on a still screen, marked by `clip-<name>-start` / `clip-<name>-end` screenshots so
+  // the cut finds them in Xcode's recording (which also shows the launch and the Home Screen).
+
+  /// Tap to reveal a word card, then a person card.
+  @MainActor
+  func testMotion_1_reveal() throws {
+    let (server, app) = try motionDeck(["petrichor", "person", "halcyon"])
+    waitForLabel(el(app, "study.front"), "petrichor")
+    clipMark("reveal-start")
+    el(app, "study.reveal").tap()
+    waitForLabel(el(app, "study.back"), "the smell of rain on dry earth")
+    settle(1.6)
+    el(app, "study.rate.good").tap()
+    waitForLabel(el(app, "study.photo"), "Photo")
+    settle(1.8)
+    el(app, "study.reveal").tap()
+    XCTAssertTrue(app.staticTexts["Nora Vale"].waitFor(timeout: 5), "person answer missing")
+    settle(1.6)
+    clipMark("reveal-end")
+    app.terminate()
+    server.stop()
+  }
+
+  /// Forgot, then Got it, by tapping the buttons: the card leaves, the next one fades in.
+  @MainActor
+  func testMotion_2_tap() throws {
+    let (server, app) = try motionDeck(["luminous", "halcyon", "Au"])
+    waitForLabel(el(app, "study.front"), "luminous")
+    clipMark("tap-start")
+    el(app, "study.reveal").tap()
+    waitForLabel(el(app, "study.back"), "full of light")
+    settle(1.2)
+    el(app, "study.rate.again").tap()
+    waitForLabel(el(app, "study.front"), "halcyon")
+    settle(1.6)
+    el(app, "study.reveal").tap()
+    waitForLabel(el(app, "study.back"), "calm and peaceful")
+    settle(1.2)
+    el(app, "study.rate.good").tap()
+    waitForLabel(el(app, "study.front"), "Au")
+    settle(1.2)
+    clipMark("tap-end")
+    app.terminate()
+    server.stop()
+  }
+
+  /// Forgot (drag left), then Got it (drag right): the dial follows the finger, the card leaves on release.
+  @MainActor
+  func testMotion_3_drag() throws {
+    let (server, app) = try motionDeck(["mellifluous", "Capital of Australia?", "luminous"])
+    reveal(app, "mellifluous", "sweet-sounding")
+    clipMark("drag-start")
+    slowDrag(app, -0.5)
+    waitForLabel(el(app, "study.front"), "Capital of Australia?")
+    settle(1.6)
+    el(app, "study.reveal").tap()
+    waitForLabel(el(app, "study.back"), "Canberra")
+    settle(1.2)
+    slowDrag(app, 0.15)
+    waitForLabel(el(app, "study.front"), "luminous")
+    settle(1.2)
+    clipMark("drag-end")
+    app.terminate()
+    server.stop()
+  }
+
+  /// The last card of the day: Got it, then "All caught up" with the logo laying itself flat.
+  @MainActor
+  func testMotion_4_finish() throws {
+    let (server, app) = try motionDeck(["Au"])
+    waitForLabel(el(app, "study.front"), "Au")
+    clipMark("finish-start")
+    el(app, "study.reveal").tap()
+    waitForLabel(el(app, "study.back"), "gold")
+    settle(1.2)
+    el(app, "study.rate.good").tap()
+    XCTAssertTrue(el(app, "study.logo").waitFor(timeout: 10), "no study.logo on All caught up")
+    waitForLabel(el(app, "study.message"), "All caught up")
+    settle(3.0)
+    clipMark("finish-end")
+    app.terminate()
+    server.stop()
+  }
+
+  /// A light-mode app on a deck of just these due cards (fronts from `demoDeck`; "person" = Nora Vale).
+  @MainActor
+  private func motionDeck(_ fronts: [String]) throws -> (StubAPIServer, XCUIApplication) {
+    XCUIDevice.shared.appearance = .light
+    let server = StubAPIServer()
+    try server.start()
+    let backs = ["petrichor": "the smell of rain on dry earth", "halcyon": "calm and peaceful", "luminous": "full of light",
+                 "Au": "gold", "mellifluous": "sweet-sounding", "Capital of Australia?": "Canberra"]
+    var cards: [StubDeck.Card] = []
+    var notes: [StubDeck.Note] = []
+    for (i, front) in fronts.enumerated() {
+      let at = Self.base.addingTimeInterval(Double(i) * 60)
+      if front == "person" {
+        notes.append(.init(type: "person", fields: [
+          "photo": server.url + "/photos/nora.png", "name": "Nora Vale", "description": "runs the corner bakery"],
+          cards: [.init(prompt: ["photo"], answer: ["name", "description"], due: at)], createdAt: at))
+      } else {
+        cards.append(.init(id: UUID().uuidString.lowercased(), front: front, back: backs[front] ?? "", due: at, createdAt: at))
+      }
+    }
+    let deck = StubDeck(cards, notes: notes)
+    server.handler = deck.handle
+    let app = launch(api: .live(server.url))
+    return (server, app)
+  }
+
+  /// A still frame, then a full-screen screenshot the cut matches against the recording.
+  @MainActor
+  private func clipMark(_ name: String) {
+    settle(1.2)
+    let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+    attachment.name = "clip-\(name)"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+  }
+
+  /// Drags from the card's centre to `0.5 + f` of its width at a readable pace, holds so the dial shows, releases.
+  @MainActor
+  private func slowDrag(_ app: XCUIApplication, _ f: Double) {
+    let card = el(app, "study.card"), w = card.frame.width
+    let start = card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+    start.press(forDuration: 0.2, thenDragTo: start.withOffset(CGVector(dx: f * w, dy: 0)),
+                withVelocity: XCUIGestureVelocity(rawValue: 220), thenHoldForDuration: 1.0)
+  }
+
   // MARK: - Demo deck (marketing/demo-deck.json, in study order) + one made-up person
 
   /// Due cards in this order: petrichor, halcyon, the person, Capital of Australia?, Largest planet? (deliberately

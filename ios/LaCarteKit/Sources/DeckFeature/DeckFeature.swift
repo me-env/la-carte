@@ -1,4 +1,5 @@
 import APIClient
+import ActivityClient
 import ComposableArchitecture
 import Foundation
 import NoteEditorFeature
@@ -101,6 +102,7 @@ public struct DeckFeature {
     }
   }
 
+  @Dependency(\.activity) var activity
   @Dependency(\.apiClient) var apiClient
   @Dependency(\.continuousClock) var clock
 
@@ -198,6 +200,21 @@ public struct DeckFeature {
       }
     }
     .ifLet(\.$destination, action: \.destination)
+    Reduce { state, action in
+      guard let event = activityEvent(action, state) else { return .none }
+      return .run { [activity] _ in activity.log(event) }
+    }
+  }
+
+  /// Spec 029: what a deck action tells the activity log; never the search text.
+  private func activityEvent(_ action: Action, _ state: State) -> Activity? {
+    switch action {
+    case let .notesResponse(.success(notes)): .deckLoaded(count: notes.count, query: !state.query.isEmpty)
+    case let .notesResponse(.failure(error)): .failed(.notes, error)
+    case let .deleteResponse(.success(id)): .noteDeleted(noteID: id)
+    case let .deleteResponse(.failure(error)): .failed(.deleteNote, error)
+    default: nil
+    }
   }
 
   /// Loads the notes matching the search field; without a server URL and a token, makes no request (spec 008).
@@ -239,13 +256,28 @@ extension Note {
     fields["photo"].flatMap(URL.init(string:))
   }
 
-  /// The earliest `due` among its cards.
-  var due: Date {
-    cards.map(\.due).min() ?? createdAt
+  /// How many directions it's studied in; nothing for a one-card note.
+  var stateText: String? {
+    cards.count > 1 ? "\(cards.count) directions" : nil
   }
 
-  /// The card's state when there's one card, else how many directions it's studied in.
-  var stateText: String {
-    cards.count == 1 ? cards[0].state.rawValue : "\(cards.count) directions"
+  /// What Study does with the note, from the server's `next` (spec 028): in the queue now, or which calendar day it
+  /// comes back.
+  func queueLabel(now: Date, calendar: Calendar) -> String {
+    guard let next else { return "Reported" }
+    if next.readyAt <= now {
+      return cards.first { $0.id == next.cardId }?.state == .new ? "New" : "In queue"
+    }
+    let days =
+      calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: next.readyAt))
+      .day ?? 0
+    switch days {
+    case ...0: return "Later today"
+    case 1: return "Tomorrow"
+    case 2...13: return "In \(days) days"
+    case 14...59: return "In \(days / 7) weeks"
+    case 60...364: return "In \(days / 30) months"
+    default: return days < 730 ? "In 1 year" : "In \(days / 365) years"
+    }
   }
 }

@@ -91,9 +91,9 @@ card, so the server can index it), `data` (object, kind-specific, below).
 | `note_edited` | editor `saveResponse(.success)` for an existing note, and Study `editSaveResponse(.success)` | Study: the card | `{note_id, source: "editor"\|"inline"}` |
 | `note_deleted` | `DeckFeature.deleteResponse(.success)` | — | `{note_id}` |
 | `deck_loaded` | `DeckFeature.notesResponse(.success)` | — | `{count, query: true\|false}` (whether a search was active, never its text) |
-| `api_error` | any `.failure` of the responses above (Study queue / ladder / review / report / broken-photo report / inline edit, Deck notes / delete, editor save) | the card when there is one | `{request, status, error}`: `request` one of `queue`, `stats`, `review`, `report`, `update_card`, `notes`, `add_note`, `update_note`, `delete_note`; `status` = HTTP status or 0 without a response; `error` = `URLError` code name or the first 200 chars of the server's `detail` (server messages never contain values, architecture.md) |
+| `api_error` | any `.failure` of the responses above (Study queue / ladder / review / report / broken-photo report / inline edit, Deck notes / delete, editor save) | the card when there is one | `{request, status, error}`: `request` one of `queue`, `stats`, `review`, `report`, `update_card`, `notes`, `add_note`, `update_note`, `delete_note`; `status` = HTTP status or 0 without a response; `error` = `URLError` code name or the first 200 chars of the server's string `detail`, else empty (server messages never contain values, architecture.md; other bodies, like a 422's `input`, can) |
 
-Durations are whole milliseconds from `@Dependency(\.date)` (state keeps `shownAt` / `revealedAt`).
+Durations are whole milliseconds from `ActivityClient.now` (state keeps `shownAt` / `revealedAt`).
 
 ## Acceptance criteria
 | # | Criterion (observable) | Validated by |
@@ -150,6 +150,8 @@ Depends on `APIClient` (models, URL/token resolution), `Dependencies`. No Compos
 public struct ActivityClient: Sendable {
   /// Fire and forget: returns at once, never throws, never blocks on I/O.
   public var log: @Sendable (_ activity: Activity) -> Void = { _ in }
+  /// The time durations are measured with.
+  public var now: @Sendable () -> Date = { Date() }
 }
 
 public enum Activity: Equatable, Sendable {
@@ -189,8 +191,14 @@ public enum Activity: Equatable, Sendable {
 - Keep logging out of the core logic: each feature appends one trailing `Reduce` after its core reducer that maps
   `(action, state)` to `Activity?` and returns `.run { [activity] _ in activity.log(event) }` (or `.none`).
   `card_shown` fits `.onChange(of: { $0.phase == .studying ? $0.cards.first?.id : nil })`.
-- Study state gains `shownAt: Date?` and `revealedAt: Date?` (set by the trailing reducer, read for durations).
+- Study state gains an `ActivityTrail` (`shownAt`, `revealedAt`, what was already in flight), set by the trailing
+  reducer and read for durations. Its `==` always returns `true` on purpose: it is bookkeeping for the log, so
+  existing exhaustive `TestStore` tests don't have to assert it and logging never changes the state they compare.
   No new actions, no delegates, no parent changes. `AppFeature` unchanged.
+- Durations use `ActivityClient.now`, not `@Dependency(\.date)`: its `testValue` is fixed, so features that log
+  don't force every existing test to override `date`.
+- `session`: one per launch and one per later return to the foreground; the launch's own first `app_foreground`
+  keeps the launch session, so one launch is one session.
 - Package: new `ActivityClient` target + test target; the three features depend on it.
 
 ## API / MCP changes

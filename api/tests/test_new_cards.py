@@ -180,16 +180,12 @@ async def test_new_card_milestone_reads_sets_and_rejects_out_of_range(client):
 
 
 @pytest.mark.anyio
-async def test_add_notes_and_add_cards_reply_new_and_milestone(engine):
+async def test_add_notes_reply_new_and_milestone(engine):
     async with Client(build_mcp(engine)) as client:
         added = (await client.call_tool("add_notes", {"notes": BASIC})).structured_content
         assert len(added["added"]) == 60
         assert (added["new"], added["milestone"]) == (120, 15)  # spec 026: both directions
         assert "new_cards" not in added
-
-        cards = await client.call_tool("add_cards", {"cards": [{"front": "chat", "back": "cat"}]})
-        assert (cards.structured_content["new"], cards.structured_content["milestone"]) == (121, 15)
-        assert "new_cards" not in cards.structured_content
 
 
 @pytest.mark.anyio
@@ -204,5 +200,4 @@ async def test_no_text_says_reviews_are_a_daily_must(engine):
         for phrase in ("must review", "every day", "daily work", "daily target", "each day"):
             assert phrase not in lowered
     assert "New cards are due at once, after due reviews." in tools["add_notes"]
-    assert "New cards are due at once, after due reviews." in tools["add_cards"]
     assert "display only, nothing is held back" in tools["deck_stats"]

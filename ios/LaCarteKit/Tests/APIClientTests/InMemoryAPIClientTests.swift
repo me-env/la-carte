@@ -58,6 +58,31 @@ struct InMemoryAPIClientTests {
     await #expect(throws: APIError.self) { try await client.reportCard(UUID(), .wrong, nil) }
   }
 
+  @Test func noteNextIsTheCardStudyServesFirstOrReadyEarliest() async throws {
+    let client = APIClient.inMemory(notes: .fixtures, now: now)
+    let laCarte = [Note].fixtures[2]
+    func next(_ note: Note) async throws -> Note.Next? {
+      try await client.notes(nil).first { $0.id == note.id }?.next
+    }
+
+    #expect(try await next(laCarte) == Note.Next(cardId: laCarte.cards[0].id, readyAt: laCarte.cards[0].due))
+
+    // Good pushes the card a day out and buries its sibling 6 h, which is ready first.
+    _ = try await client.review(laCarte.cards[0].id, .good)
+    #expect(try await next(laCarte) == Note.Next(cardId: laCarte.cards[1].id, readyAt: now + siblingBury))
+
+    // Again: relearning in 10 min, which shortens the sibling's bury to the same time; the learning card goes first.
+    _ = try await client.review(laCarte.cards[0].id, .again)
+    #expect(try await next(laCarte) == Note.Next(cardId: laCarte.cards[0].id, readyAt: now + 600))
+    #expect(try await client.dueCards(100).allSatisfy { $0.noteId != laCarte.id })
+
+    // A held card is skipped; with every card held, there's no next.
+    try await client.reportCard(laCarte.cards[0].id, .drop, nil)
+    #expect(try await next(laCarte) == Note.Next(cardId: laCarte.cards[1].id, readyAt: laCarte.cards[1].due))
+    try await client.reportCard(laCarte.cards[1].id, .drop, nil)
+    #expect(try await next(laCarte) == nil)
+  }
+
   @Test func mockDeckServesTheSameCardsAsBeforeNotes() async throws {
     let client = APIClient.inMemory(cards: .fixtures, now: now)
     #expect(try await client.notes(nil).map(\.id) == [Card].fixtures.map(\.id))
@@ -93,6 +118,24 @@ struct InMemoryAPIClientTests {
     #expect(notes[2].cards[1].direction == Direction(prompt: ["back"], answer: ["front"]))
     #expect(notes[0].fields["photo"]?.hasPrefix("data:image/png;base64,") == true)
     #expect(try await client.dueCards(100).first?.id == ids[1])
+  }
+
+  /// Like the API, the ladder's waiting reviews are the started cards Study serves now, not every started card.
+  @Test func reviewsToDoCountOnlyWhatStudyServes() async throws {
+    let lastWeek = now - 7 * 86_400
+    func started(_ front: String, due: Date) -> Card {
+      Card(
+        id: UUID(), front: front, back: "b", state: .review, due: due, lastReview: lastWeek,
+        createdAt: lastWeek, updatedAt: lastWeek
+      )
+    }
+    let client = APIClient.inMemory(cards: [started("due", due: now - 60), started("later", due: now + 3 * 86_400)], now: now)
+    let stats = try await client.stats()
+    let served = try await client.dueCards(100).map(\.front)
+    #expect(served == ["due"])
+    #expect(stats.due == 1)
+    #expect(stats.reviewsDone == 0)
+    #expect(stats.reviewsTotal == 1)
   }
 
   @Test func updateNoteKeepsTheScheduleOfKeptDirections() async throws {

@@ -9,6 +9,7 @@ extension APIClient: DependencyKey {
   /// - `LA_CARTE_API=mock`      → in-memory deck seeded with `[Card].fixtures` (deterministic screenshots)
   /// - `LA_CARTE_API=mock-notes` → in-memory deck seeded with `[Note].fixtures` (several directions, a person)
   /// - `LA_CARTE_API=mock-lengths` → `[Card].lengthFixtures` (short, long and very long cards first, spec 017)
+  /// - `LA_CARTE_API=mock-labels` → `[Note].labelFixtures`, one row per deck label relative to launch (spec 028)
   /// - `LA_CARTE_STARTED`, `LA_CARTE_AT_RISK`, `LA_CARTE_MILESTONE`, `LA_CARTE_NEW_TODAY` → a mock's daily ladder
   ///   (spec 021, see `inMemory(notes:environment:now:)`)
   /// - `LA_CARTE_API_URL=…`     → base URL of the API, wins over the one entered in Settings (no default)
@@ -23,6 +24,11 @@ extension APIClient: DependencyKey {
     case "mock": return .inMemory(notes: [Card].fixtures.map(\.basicNote), environment: environment)
     case "mock-notes": return .inMemory(notes: .fixtures, environment: environment)
     case "mock-lengths": return .inMemory(notes: [Card].lengthFixtures.map(\.basicNote), environment: environment)
+    case "mock-labels":
+      let now = Date()
+      return .inMemory(
+        notes: .labelFixtures(now: now), environment: environment, now: now, held: [[Note].labelFixturesReported]
+      )
     default: break
     }
     return .live(
@@ -37,11 +43,12 @@ extension APIClient: DependencyKey {
 
   /// Launch env > URL stored by Settings > none: there is no built-in server (spec 008).
   /// Only http(s) URLs with a host count; anything else is treated as unset.
-  static func resolvedBaseURL(environment: [String: String], stored: String?) -> URL? {
+  public static func resolvedBaseURL(environment: [String: String], stored: String?) -> URL? {
     environment["LA_CARTE_API_URL"].flatMap(httpURL) ?? stored.flatMap(httpURL)
   }
 
-  private static func httpURL(_ string: String) -> URL? {
+  /// The trimmed string as a URL if it is http(s) with a host, else nil.
+  public static func httpURL(_ string: String) -> URL? {
     guard let url = URL(string: string.trimmingCharacters(in: .whitespacesAndNewlines)),
       url.scheme == "http" || url.scheme == "https",
       url.host() != nil
@@ -50,7 +57,7 @@ extension APIClient: DependencyKey {
   }
 
   /// Launch env > token stored by Settings > none. Empty values count as unset.
-  static func resolvedToken(environment: [String: String], stored: () -> String?) -> String? {
+  public static func resolvedToken(environment: [String: String], stored: () -> String?) -> String? {
     if let token = environment["LA_CARTE_API_TOKEN"], !token.isEmpty {
       return token
     }
@@ -97,6 +104,9 @@ extension APIClient: DependencyKey {
       },
       deleteNote: { id in
         _ = try await http.data("DELETE", "notes/\(id)")
+      },
+      sendActivity: { events in
+        _ = try await http.data("POST", "activity", body: ["events": events])
       },
       isConfigured: {
         baseURL() != nil && token() != nil

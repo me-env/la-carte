@@ -6,6 +6,8 @@ enum APIMode {
   case mockNotes
   /// `LA_CARTE_API=mock-lengths`: short, long-question, short-question-long-answer and very long cards first (spec 017).
   case mockLengths
+  /// `LA_CARTE_API=mock-labels`: one one-card note per deck row label, relative to launch (spec 028).
+  case mockLabels
   case live(String)
   /// No API env at all (neither `LA_CARTE_API` nor `LA_CARTE_API_URL`/`_TOKEN`): the app uses the URL and token
   /// stored by Settings (spec 003 #6, #9).
@@ -52,6 +54,8 @@ extension XCTestCase {
       app.launchEnvironment["LA_CARTE_API"] = "mock-notes"
     case .mockLengths:
       app.launchEnvironment["LA_CARTE_API"] = "mock-lengths"
+    case .mockLabels:
+      app.launchEnvironment["LA_CARTE_API"] = "mock-labels"
     case let .live(url):
       app.launchEnvironment["LA_CARTE_API_URL"] = url
       // Spec 008 #14: the app needs URL + token to be "set up"; unguarded stubs ignore the header.

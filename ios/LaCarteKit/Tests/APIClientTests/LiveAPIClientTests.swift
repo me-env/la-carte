@@ -91,6 +91,23 @@ struct LiveAPIClientTests {
     #expect(try body(requests.value[1]) == ["reason": "broken_photo", "comment": "https://example.org/p/42.jpg"])
   }
 
+  @Test func sendActivityPostsTheEventsAndThrowsOnANon2xxAnswer() async throws {
+    let event = ActivityEvent(
+      id: noteID, kind: "app_foreground", at: Date(timeIntervalSince1970: 0), timeZone: .gmt, session: noteID,
+      appVersion: "1.0", build: "1", os: "iOS 26.1", cardID: nil, data: [:]
+    )
+    let (client, requests) = capturing(response: #"{"stored":1,"duplicates":0,"rejected":0}"#)
+    try await client.sendActivity([event])
+
+    let request = try #require(requests.value.first)
+    #expect(request.httpMethod == "POST")
+    #expect(request.url?.path() == "/activity")
+    #expect((try body(request)["events"] as? [NSDictionary])?.first?["kind"] as? String == "app_foreground")
+
+    let (failing, _) = capturing(response: #"{"detail":"At most 500 events per request."}"#, statusCode: 413)
+    await #expect(throws: APIError.self) { try await failing.sendActivity([event]) }
+  }
+
   private func capturing(response json: String, statusCode: Int = 200) -> (APIClient, LockIsolated<[URLRequest]>) {
     let requests = LockIsolated<[URLRequest]>([])
     let client = APIClient.live(

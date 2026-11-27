@@ -10,17 +10,23 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from itertools import islice
 from random import Random
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import fsrs
 from fsrs.scheduler import FUZZ_RANGES
-from sqlmodel import Session, col, delete, func, select
+from pydantic import ValidationError
+from sqlalchemy.dialects.sqlite import insert
+from sqlmodel import Session, case, col, delete, func, select
 
 from la_carte_api.models import (
     ACTIVE_REPORT,
+    ActivityEvent,
+    ActivityEventIn,
+    ActivityEventRead,
+    ActivityIngest,
     AddCardsResult,
     AddNotesResult,
     Card,
@@ -36,6 +42,7 @@ from la_carte_api.models import (
     FeedbackStatus,
     Note,
     NoteCreate,
+    NoteNext,
     NoteRead,
     NoteType,
     NoteUpdate,
@@ -46,8 +53,10 @@ from la_carte_api.models import (
     ReportRead,
     ReportReason,
     ReportStatus,
+    ReviewEntry,
     ReviewLog,
     Settings,
+    StrugglingCard,
     utcnow,
 )
 
@@ -304,12 +313,29 @@ def _cards_of(session: Session, note: Note) -> list[Card]:
     return sorted(cards, key=lambda card: _card_order(card, note))
 
 
-def _note_reads(session: Session, notes: list[Note]) -> list[NoteRead]:
+def _next_cards(session: Session, now: datetime) -> dict[UUID, NoteNext]:
+    """Per note, the card Study serves first and when (spec 028), read from `_candidates`: the
+    first card in queue order that is ready now, else the one ready earliest (ties: queue order).
+    A note whose cards are all held by a report has no entry."""
+    nexts: dict[UUID, NoteNext] = {}
+    for card, _, ready in _candidates(session, now):
+        current = nexts.get(card.note_id)
+        if current is None or (current.ready_at > now and ready < current.ready_at):
+            nexts[card.note_id] = NoteNext(card_id=card.id, ready_at=ready)
+    return nexts
+
+
+def _note_reads(session: Session, notes: list[Note], now: datetime | None = None) -> list[NoteRead]:
     cards: dict[UUID, list[Card]] = {note.id: [] for note in notes}
     for card in session.exec(select(Card).where(col(Card.note_id).in_(list(cards)))):
         cards[card.note_id].append(card)
+    nexts = _next_cards(session, now or utcnow())
     return [
-        NoteRead.of(note, sorted(cards[note.id], key=lambda c, n=note: _card_order(c, n)))
+        NoteRead.of(
+            note,
+            sorted(cards[note.id], key=lambda c, n=note: _card_order(c, n)),
+            nexts.get(note.id),
+        )
         for note in notes
     ]
 
@@ -322,7 +348,11 @@ def _matches(note: Note, needle: str) -> bool:
 
 
 def list_notes(
-    session: Session, query: str | None = None, type: NoteType | None = None, limit: int = 100
+    session: Session,
+    query: str | None = None,
+    type: NoteType | None = None,
+    limit: int = 100,
+    now: datetime | None = None,
 ) -> list[NoteRead]:
     """Newest first, optionally filtered by `type` and by `query` (see `_matches`)."""
     statement = select(Note).order_by(col(Note.created_at).desc())
@@ -330,11 +360,11 @@ def list_notes(
         statement = statement.where(Note.type == type)
     needle = (query or "").strip().casefold()
     notes = (note for note in session.exec(statement) if _matches(note, needle))
-    return _note_reads(session, list(islice(notes, limit)))
+    return _note_reads(session, list(islice(notes, limit)), now)
 
 
-def get_note(session: Session, note_id: UUID) -> NoteRead:
-    return _note_reads(session, [_note(session, note_id)])[0]
+def get_note(session: Session, note_id: UUID, now: datetime | None = None) -> NoteRead:
+    return _note_reads(session, [_note(session, note_id)], now)[0]
 
 
 def list_cards(session: Session, query: str | None = None, limit: int = 100) -> list[CardRead]:
@@ -414,7 +444,9 @@ def add_notes(
     duplicate key (basic: front, person: name; trimmed, casefolded) match an existing note or an
     earlier one of the same call is not added; the matching note is reported in `skipped`."""
     added, skipped = _add_notes(session, notes, now, skip_duplicates)
-    return AddNotesResult(added=_note_reads(session, added), skipped=_note_reads(session, skipped))
+    return AddNotesResult(
+        added=_note_reads(session, added, now), skipped=_note_reads(session, skipped, now)
+    )
 
 
 def update_note(
@@ -440,7 +472,7 @@ def update_note(
             session.delete(card)
     session.add_all(_new_card(note, way, now) for way in ways if way not in cards)
     session.commit()
-    return get_note(session, note_id)
+    return get_note(session, note_id, now)
 
 
 def add_direction(
@@ -539,16 +571,16 @@ def delete_card(session: Session, card_id: UUID) -> None:
 # --- Studying ----------------------------------------------------------------------------------
 
 
-def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], datetime | None]:
-    """The servable queue and the next time a card not servable now becomes servable.
+def _candidates(session: Session, now: datetime) -> list[tuple[Card, Note, datetime]]:
+    """Every card not held, with the time it becomes servable, in queue order.
 
     A sibling's latest review at `t` buries a card until `min(t + SIBLING_BURY, sibling.due)`:
     never longer than until that sibling is due again (its own reviews don't bury it). The
     sibling's current `due` is the one set by that latest review. A (re)learning card is never
-    buried: a card the user failed comes back at its own due. Servable = due, not buried, at most
-    one card per note: the first in `order` (a (re)learning card, then the review most at risk of
-    being forgotten, then the oldest new card). The queue keeps that same order.
-    Held cards (an active report, spec 015) are left out entirely: they don't bury siblings."""
+    buried: a card the user failed comes back at its own due. Order: a (re)learning card, then
+    the review most at risk of being forgotten, then the oldest new card.
+    Held cards (an active report, spec 015) are left out entirely: they don't bury siblings.
+    `_queue` (Study) and `_next_cards` (`Note.next`, spec 028) both read this list."""
     held = set(
         session.exec(select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))).all()
     )
@@ -590,11 +622,18 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
             group, risk = 2, 0.0
         return group, risk, card.due, *_card_order(card, note), str(card.id)
 
+    return [(card, note, ready_at(card)) for card, note in sorted(rows, key=order)]
+
+
+def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], datetime | None]:
+    """The servable queue and the next time a card not servable now becomes servable.
+
+    Servable = ready (see `_candidates`), at most one card per note: its first in queue order.
+    The queue keeps that same order."""
     servable: list[tuple[Card, Note]] = []
     served_notes: set[UUID] = set()
     later: list[datetime] = []
-    for card, note in sorted(rows, key=order):
-        ready = ready_at(card)
+    for card, note, ready in _candidates(session, now):
         if ready > now:
             later.append(ready)
         elif card.note_id not in served_notes:
@@ -978,3 +1017,175 @@ def _streak(history: str, start: date) -> tuple[int, date | None]:
     run = history.removesuffix("p")
     streak = len(run) - len(run.rstrip("sf"))
     return streak, start + (len(run) - streak) * _DAY if streak else None
+
+
+# --- Activity (spec 029) ----------------------------------------------------------------------
+
+ACTIVITY_RETENTION = timedelta(days=90)
+ACTIVITY_BATCH_MAX = 500
+ACTIVITY_LIST_MAX = 1000
+
+
+class TooManyEvents(ValueError):
+    def __init__(self) -> None:
+        super().__init__(f"At most {ACTIVITY_BATCH_MAX} events per request.")
+
+
+def _valid_event(raw: object) -> ActivityEventIn | None:
+    try:
+        return ActivityEventIn.model_validate(raw)
+    except ValidationError:
+        return None
+
+
+def ingest_activity(
+    session: Session, events: list[Any], now: datetime | None = None
+) -> ActivityIngest:
+    """Stores the app's events, validating each on its own: invalid ones are skipped (`rejected`),
+    ids already stored are ignored (`duplicates`). More than `ACTIVITY_BATCH_MAX` → `TooManyEvents`,
+    nothing stored. Touches nothing else."""
+    if len(events) > ACTIVITY_BATCH_MAX:
+        raise TooManyEvents()
+    valid = [event for raw in events if (event := _valid_event(raw))]
+    unique: dict[UUID, ActivityEventIn] = {}
+    for event in valid:
+        unique.setdefault(event.id, event)  # first wins on a repeated id
+    stored = 0
+    if unique:
+        received_at = now or utcnow()
+        values = [
+            ActivityEvent(**event.model_dump(), received_at=received_at).model_dump()
+            for event in unique.values()
+        ]
+        statement = insert(ActivityEvent.__table__).values(values)
+        result = session.exec(statement.on_conflict_do_nothing(index_elements=["id"]))
+        stored = result.rowcount  # rows really inserted: right even under a concurrent retry
+        session.commit()
+    return ActivityIngest(
+        stored=stored, duplicates=len(valid) - stored, rejected=len(events) - len(valid)
+    )
+
+
+def _utc(moment: datetime) -> datetime:
+    """A naive query bound is read as UTC."""
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def list_activity(
+    session: Session,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    card_id: UUID | None = None,
+    kind: str | None = None,
+    session_id: UUID | None = None,
+    limit: int = 100,
+) -> list[ActivityEventRead]:
+    """Events newest first, `since <= at < until`, optionally of one card, kind or app session."""
+    statement = select(ActivityEvent)
+    if since is not None:
+        statement = statement.where(ActivityEvent.at >= _utc(since))
+    if until is not None:
+        statement = statement.where(ActivityEvent.at < _utc(until))
+    if card_id is not None:
+        statement = statement.where(ActivityEvent.card_id == card_id)
+    if kind is not None:
+        statement = statement.where(ActivityEvent.kind == kind)
+    if session_id is not None:
+        statement = statement.where(ActivityEvent.session == session_id)
+    statement = statement.order_by(
+        col(ActivityEvent.at).desc(), col(ActivityEvent.received_at).desc()
+    ).limit(limit)
+    return [ActivityEventRead.of(event) for event in session.exec(statement)]
+
+
+def prune_activity(session: Session, now: datetime | None = None) -> int:
+    """Deletes events whose `at` is older than `ACTIVITY_RETENTION`; returns how many."""
+    cutoff = (now or utcnow()) - ACTIVITY_RETENTION
+    result = session.exec(delete(ActivityEvent).where(col(ActivityEvent.at) < cutoff))
+    session.commit()
+    return result.rowcount
+
+
+# --- History (spec 031) ------------------------------------------------------------------------
+
+HISTORY_LIST_MAX = 1000
+STRUGGLING_LIST_MAX = 100
+
+
+def _card_reads(session: Session, card_ids: set[UUID]) -> dict[UUID, CardRead]:
+    """The cards that still exist among `card_ids`, as `CardRead`."""
+    rows = session.exec(
+        select(Card, Note)
+        .join(Note, col(Card.note_id) == col(Note.id))
+        .where(col(Card.id).in_(card_ids))
+    )
+    return {card.id: CardRead.of(card, note) for card, note in rows}
+
+
+def review_history(
+    session: Session,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    card_id: UUID | None = None,
+    note_id: UUID | None = None,
+    rating: Rating | None = None,
+    limit: int = 100,
+) -> list[ReviewEntry]:
+    """Ratings newest first, `since <= reviewed_at < until`, optionally of one card, of the
+    note's current cards, or of one rating. Each with the card as it is now (null once deleted)."""
+    statement = select(ReviewLog)
+    if since is not None:
+        statement = statement.where(ReviewLog.reviewed_at >= _utc(since))
+    if until is not None:
+        statement = statement.where(ReviewLog.reviewed_at < _utc(until))
+    if card_id is not None:
+        statement = statement.where(ReviewLog.card_id == card_id)
+    if note_id is not None:
+        note_cards = select(Card.id).where(Card.note_id == note_id)
+        statement = statement.where(col(ReviewLog.card_id).in_(note_cards))
+    if rating is not None:
+        statement = statement.where(ReviewLog.rating == rating)
+    statement = statement.order_by(
+        col(ReviewLog.reviewed_at).desc(), col(ReviewLog.id).desc()
+    ).limit(limit)
+    logs = session.exec(statement).all()
+    cards = _card_reads(session, {log.card_id for log in logs})
+    return [
+        ReviewEntry(
+            card_id=log.card_id,
+            reviewed_at=log.reviewed_at,
+            rating=log.rating,
+            confidence=log.confidence,
+            card=cards.get(log.card_id),
+        )
+        for log in logs
+    ]
+
+
+def struggling_cards(
+    session: Session, since: datetime | None = None, limit: int = 20
+) -> list[StrugglingCard]:
+    """Existing cards with at least one `again` since `since`: most `again` first, then the
+    highest again / reviews, then the latest `again`, then card id."""
+    failed = ReviewLog.rating == Rating.again
+    again = func.sum(case((failed, 1), else_=0))
+    reviews = func.count(col(ReviewLog.id))
+    last_again_at = func.max(case((failed, col(ReviewLog.reviewed_at))))
+    statement = (
+        select(Card, Note, reviews, again, last_again_at)
+        .select_from(ReviewLog)
+        .join(Card, col(Card.id) == col(ReviewLog.card_id))
+        .join(Note, col(Note.id) == col(Card.note_id))
+        .group_by(col(Card.id), col(Note.id))
+        .having(again > 0)
+        .order_by(again.desc(), (again * 1.0 / reviews).desc(), last_again_at.desc(), col(Card.id))
+        .limit(limit)
+    )
+    if since is not None:
+        statement = statement.where(ReviewLog.reviewed_at >= _utc(since))
+    return [
+        StrugglingCard(
+            card=CardRead.of(card, note), reviews=total, again=failures, last_again_at=last
+        )
+        for card, note, total, failures, last in session.exec(statement)
+    ]

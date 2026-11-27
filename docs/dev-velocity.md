@@ -198,14 +198,92 @@ only a reboot fixes it.
   project, so the shim hands it to Apple's xcodebuild, which then doesn't hang; plain `xcodebuild test` exits 69 with a
   message. `ios-test.sh` therefore runs build-for-testing + test-without-building while the shim is on (~500 MB
   products copy in a temp dir per run); `ios-ui-test.sh` always does.
-- Fail fast: `_lock.sh --slots` prints one line when fseventsd is in `U` (shim active, or "this build will likely stall").
+- Fail fast: `_lock.sh --slots` prints one line when fseventsd is in `U` (shim active, or "this build will likely stall"),
+  checked without a full-table `ps` ("Hung ps").
 - Prevention: `BUILD_JOBS_FLAGS` passes `SDK_STAT_CACHE_ENABLE=NO`, so our builds never run clang-stat-cache.
   Worktrees on older branches don't have it until they merge main.
 - Guard: `_lock.sh --slots` kills a build whose process tree used < `STALL_CPU` s (5) of CPU over `STALL_MIN` min
   (10; `0` = off), frees the slot and exits 124 with a message naming this section. A live build burns minutes of
-  CPU in that window; a hung xcodebuild ~0.1 s/min.
+  CPU in that window; a hung xcodebuild ~0.1 s/min. Off on CI (`CI` set): test processes run under the simulator's
+  launchd, outside the tree, so `xcodebuild test` (scripts/ios-test.sh) during a silent 14 min `ScreenColorTests`
+  looked hung and was killed (CI run 45811826958, docs/ci-cd.md). The same can happen locally on a slow test bundle.
 - Recovery by hand: kill the hung `clang-stat-cache` and its `xcodebuild` (lockf frees the slot), and delete the
   `*.sdkstatcache` it was waiting on (literal path; regenerable). Don't kill other projects' builds without asking.
+
+### Stuck file coordination (2026-11-26)
+
+Symptom: after the shim fixed FSEvents, `build-for-testing` hung again at 0% CPU from ~11:45 (stall guard, exit
+124). `sample`: main thread in `IDEWorkspace initWithFilePath` → `NSFileCoordinator coordinateReadingItemAtURL` →
+`_blockOnAccessClaim`. A 10-line test program doing one coordinated read of a scratch file also never returned, so
+filecoordinationd (root, not `U`, but no sudo for us to restart it) stopped answering for every process; the
+Xcode app is hung the same way (main thread waiting on an `NSProgress` file subscription). A reboot fixes it;
+so would `sudo killall filecoordinationd` (launchd restarts it), which needs the user.
+- Workaround: the shim dylib also makes `NSFileCoordinator`'s coordinate methods run their accessor at once and
+  `addFilePresenter:` a no-op. A command-line build has no presenters to coordinate with. Same on/off switch as the
+  FSEvents part (it's on while fseventsd is in `U`).
+- Apple's `xcodebuild test-without-building` of the UI tests (the shim hands tests to it) was not blocked: two
+  `StudyUITests` runs passed at 12:07 and 12:12 (5 passed, 2 skipped each, ~62 s).
+- `ios-test.sh`'s unit `test-without-building` (LaCarteKit package products) can still hang in SwiftPM's
+  `FSEventStream.start` (seen 11:25, 0% CPU for 35+ min, outside the build-slot stall guard). Now covered by the pool
+  stall guard and `unstick.sh` ("Stuck runs").
+
+### Stuck simulator audio (2026-11-26)
+
+Symptom: UI runs fail at launch with "Failed to prepare device 'iPhone 17 Pro' for impending launch. (Underlying
+Error: Bundle com.apple.CoreSimulator.SimAudioProcessorServices failed to create an audio route descriptor.
+Input/output error)". Only on device `iPhone 17 Pro` (42891DD3…, UI pool slot 1), never on `la-carte-ui-*`.
+Cause: the host has one `SimAudioProcessorService` per user (started with CoreSimulator, here since 2026-11-22). It
+was in state `U` with 34 threads blocked forever in `read()` of that one device's
+`data/var/run/com.apple.coresimulator.audio.plist` (`sample` + `lsof -p`): one stuck thread and one open handle per
+launch ever attempted there. Each launch on that device asks for its audio route, waits, and gets the I/O error.
+Other devices' reads return. Slot 1 is the first slot every run tries, so it failed whenever slot 1 was free:
+"more and more often" as fewer other runs held it. Not too many booted simulators (2 at the time), not
+CoreSimulatorService itself. Kernel-side reason unknown (same Mac, same weeks as the fseventsd `U` hang); a `U`
+process can't be killed, so only a reboot clears it.
+- Guard: `_sim-pool.sh` checks `sim_audio_stuck <udid>` (`_ios-env.sh`: `lsof` on the service, ~70 ms) before
+  using a slot. A stuck device is skipped with one line naming this section and the run takes the next free slot;
+  if every slot is stuck it exits 70 ("reboot"). A healthy read takes microseconds, so an open handle is a stuck one.
+- Don't erase, rename or delete the stuck device to work around it: that goes through CoreSimulatorService, which
+  could block on the same volume and stall every simulator. After the reboot it works again as is.
+- Worktrees get the guard once they merge main; older checkouts still fail when they land on slot 1.
+- `ios-ui-test-split.sh` counts a stuck slot as free, so it may start one shard more than there are usable slots;
+  that shard waits for the next slot to free up (correct, a little slower).
+
+### Hung ps (2026-11-26)
+
+Symptom: every repo test script hung for hours with an empty log; three runs sat 4-5 h at 0% CPU. Cause: a full-table
+`ps -axo …` (then in `_lock.sh --slots` and `_fsevents-shim.sh`, before every build, to check fseventsd) hung in state
+`U` itself, and nothing can kill or `alarm` a `U` process. `pgrep -x <name>`, `pgrep -P <pid>` and per-pid
+`ps -o … -p <pid>` kept working.
+- Rule for scripts: no full-table `ps`. Use the helpers in `scripts/_proc.sh` (bash 3.2): `bounded <secs> <cmd>` runs
+  a call in the background and abandons it after `<secs>` (exit 124) instead of waiting on it; `proc_tree`,
+  `tree_cpu` (`ps -S`: exited children count), `fseventsd_hung` (`pgrep -x` + per-pid `ps`), `stall_guard`.
+  `LA_CARTE_FSEVENTS_SHIM=0/1` still overrides the fseventsd check.
+- Stage lines: `ios-build.sh`, `ios-test.sh`, `ios-ui-test.sh` and `e2e.sh` print `▶ <time> <step>` on stderr at each
+  step, and `⏳ still waiting at: <step> (N min)` after 2 min at the same step (`STAGE_WARN_SECS`), then every 10 min.
+  A long but healthy test step also prints it; a hang now shows *where* in the log.
+
+### Stuck runs: pool stall guard + `scripts/unstick.sh` (2026-11-26)
+
+- Pool stall guard (local only): `_sim-pool.sh` runs the command (`test-without-building`, or ios-test.sh's build +
+  test) under `stall_guard`: if its whole process tree used < `POOL_STALL_CPU` s (1) of CPU for `POOL_STALL_MIN` min
+  (15; `0` = off), the tree is killed, the slot freed, exit 124. It counts xcodebuild's tree, not the simulator's
+  processes: a test bundle that keeps xcodebuild silent and idle for 15 min would be killed (none locally today; on
+  CI the guard is off). Set `POOL_STALL_MIN=0` for such a run.
+- Both guards (pool and build slots) run the command through `guarded` (`_proc.sh`): its output reaches the caller
+  through relays that are cut once the command is gone, so a leftover the kill can't reach (state `U`, or reparented)
+  no longer holds the caller's `| grep` open. Before (2026-11-26): a unit run killed at 15 min sat "still waiting"
+  until its leftover died at 72 min. A stalled pool run (124) also skips the device trim (no `simctl` on a suspect
+  device). The test scripts never exit 0 without proof that tests ran (`docs/testing.md`, exit codes).
+- `scripts/unstick.sh [--dry-run]`: the hourly watchdog (cron in the manager session runs
+  `cd <repo> && scripts/unstick.sh`). Finds la-carte runs (`xcodebuild`, `xctest`, `lockf`, our scripts, `*-Runner`,
+  only when args or cwd mention `la-carte`/`LaCarte`: other projects are never touched), samples each process tree
+  twice 60 s apart, and kills (TERM, KILL 5 s later) trees older than 15 min that gained < 1 s CPU. A lock waiter
+  (queued `lockf`, slot/pool poller) only counts as stuck when every holder of that lock is. Survivors are reported
+  "unkillable, needs reboot" and remembered in `/tmp/la-carte-locks/unstick.unkillable`, so later runs don't signal
+  them again. Also reports fseventsd / filecoordinationd / Xcode in `U` in both samples and SimAudioProcessorService
+  with a stuck audio-plist read, and prints `reboot needed: yes/no`. Output: 5 lines; ~70 s; gives up after 200 s;
+  always exits 0; no sudo, simctl or `~/Library`. Knobs for testing: `UNSTICK_WINDOW`, `UNSTICK_MIN_AGE`.
 
 ### Unit-test pool: before / after (2026-11-21)
 

@@ -1,5 +1,6 @@
 """MCP server: lets any agent read and edit the deck ("add these words to my deck")."""
 
+from datetime import datetime
 from functools import partial
 from typing import Annotated
 from uuid import UUID
@@ -13,11 +14,9 @@ from sqlmodel import Session
 
 from la_carte_api import deck
 from la_carte_api.models import (
-    AddCardsReply,
+    ActivityEventRead,
     AddNotesReply,
-    CardCreate,
     CardRead,
-    CardUpdate,
     DeckStats,
     Direction,
     FeedbackKind,
@@ -30,6 +29,8 @@ from la_carte_api.models import (
     Rating,
     ReportOutcome,
     ReportRead,
+    ReviewEntry,
+    StrugglingCard,
 )
 
 INSTRUCTIONS = """\
@@ -85,6 +86,15 @@ looping agent task every few hours) that runs the `handle_reports` prompt. If th
 Feedback. Bugs, confusing tools or errors, missing capabilities and friction go to the developer
 with `send_feedback` (when the user asks, or on your own when a tool gets in your way). Card content
 goes through the app's card reports, not here.
+
+Activity. `activity_log` lists what the user did in the app (dated); read it when handling feedback
+or reports. It holds no card text.
+
+History. `review_history` lists every rating (from the app or an agent's quiz), dated (UTC), with
+the card; it is never pruned. `struggling_cards` ranks the cards failed (`again`) most.
+For "what did I study yesterday", pass `since`/`until` as the user's local day with its UTC offset.
+For "why don't I see this card", read its note with `find_notes` (each card's `due`, `state`,
+`next`; an open report holds it), then `activity_log`.
 """
 
 HANDLE_REPORTS = """Work through my open la-carte reports.
@@ -227,7 +237,9 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
     ) -> list[NoteRead]:
         """List notes, newest first, each with its cards (directions and schedule). `query`
         filters on any field except photo (substring, case-insensitive); `type` on basic/person.
-        Use it to check whether a note already exists before adding. Read-only."""
+        Use it to check whether a note already exists before adding. Read-only.
+        Each note has `next` {card_id, ready_at}: the card study serves first for it, and when.
+        `next.ready_at` <= now = in the study queue now; `null` = reported (every card held)."""
         return run(deck.list_notes, query, type, limit)
 
     @mcp.tool()
@@ -261,46 +273,7 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         run(deck.delete_note, note_id)
         return f"Deleted note {note_id}"
 
-    # --- Cards ---------------------------------------------------------------------------------
-
-    @mcp.tool()
-    def add_cards(cards: list[CardCreate], allow_duplicates: bool = False) -> AddCardsReply:
-        """Prefer the note tools (`add_notes`, which makes both directions by default). Adds basic
-        notes, one card front -> back per item, due immediately.
-
-        Minimalist cards: front = a word or short question, back = the shortest answer (no
-        explanations). One fact per card. Check `list_cards` first; if a card exists, don't re-add
-        it: reuse it, `update_card` it, or tell the user.
-
-        Safety net: a front matching an existing basic note's front (case-insensitive, trimmed) or
-        an earlier card in this call is not added; the existing card is returned in `skipped`.
-        allow_duplicates=true adds it anyway: use only when the user explicitly asks.
-        New cards are due at once, after due reviews. Tell the user how many new cards wait (`new`).
-        Returns {added: [Card], skipped: [Card], new (never-reviewed cards in the deck now),
-        milestone (the app's new-card step size)}."""
-        add = partial(deck.add_cards, skip_duplicates=not allow_duplicates)
-        return run(with_new_count(AddCardsReply, add), cards)
-
-    @mcp.tool()
-    def list_cards(query: str | None = None, limit: int = 50) -> list[CardRead]:
-        """Prefer the note tools (`find_notes`). Lists cards, newest first; `query` filters on
-        their note's fields (substring, case-insensitive). Use it to check whether a card
-        already exists before adding."""
-        return run(deck.list_cards, query, limit)
-
-    @mcp.tool()
-    def update_card(card_id: UUID, front: str | None = None, back: str | None = None) -> CardRead:
-        """Prefer the note tools (`update_note`). Edits what this card shows: `front` sets its
-        prompt field, `back` its answer field, on the note, so siblings change too. Scheduling is
-        kept. Refused when that side shows several fields."""
-        return run(deck.update_card, card_id, CardUpdate(front=front, back=back))
-
-    @mcp.tool()
-    def delete_card(card_id: UUID) -> str:
-        """Prefer the note tools (`remove_direction`, `delete_note`). Deletes this card; if it was
-        its note's last card, the note goes too. Its review history is kept for stats."""
-        run(deck.delete_card, card_id)
-        return f"Deleted card {card_id}"
+    # --- Quiz ----------------------------------------------------------------------------------
 
     @mcp.tool()
     def due_cards(limit: int = 20) -> list[CardRead]:
@@ -373,7 +346,8 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         (wrong, drop, doubt, rephrase, other), optional `comment` and the current `card` (null
         once deleted). `active` (default) = open + waiting_user: those cards are held out of
         study. Also "all" or one status (open, waiting_user, resolved, dismissed). Read-only.
-        Handle each by its reason (see the server instructions), then `update_report`."""
+        Handle each by its reason (see the server instructions), then `update_report`.
+        `activity_log(card_id=…)` shows how the card was shown and rated."""
         return run(deck.list_reports, status)
 
     @mcp.tool()
@@ -407,7 +381,8 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
     @mcp.tool()
     def list_feedback(status: deck.FeedbackFilter = "open") -> list[FeedbackRead]:
         """Feedback agents sent to the developer, oldest first. `open` (default), `done` or
-        `all`. Read-only. For the developer triaging: handle each, then `close_feedback`."""
+        `all`. Read-only. For the developer triaging: handle each, then `close_feedback`.
+        To see what the user was doing, call `activity_log` around each item's `created_at`."""
         return run(deck.list_feedback, status)
 
     @mcp.tool()
@@ -415,6 +390,58 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         """Mark feedback as done once handled (fixed, won't fix, duplicate). `note` (optional)
         says what was done. Error on an unknown or already done id."""
         return run(deck.close_feedback, feedback_id, note)
+
+    # --- Activity (spec 029) --------------------------------------------------------------------
+
+    @mcp.tool()
+    def activity_log(
+        since: datetime | None = None,
+        until: datetime | None = None,
+        card_id: UUID | None = None,
+        kind: str | None = None,
+        session: UUID | None = None,
+        limit: Annotated[int, Field(ge=1, le=deck.ACTIVITY_LIST_MAX)] = 100,
+    ) -> list[ActivityEventRead]:
+        """What the user did in the app, newest first: cards shown, answers revealed, ratings
+        (with time to reveal and to rate), notes created / edited / deleted, reports, app
+        foreground / background, queue fetches (how many cards were served) and errors (failed
+        requests, broken photos). `at` is UTC, `local_at` the user's local time. Use it to
+        understand feedback or a report: query around its `created_at` (e.g. 15 minutes before
+        to 5 after) or by `card_id`. Filters: `since <= at < until` (ISO 8601, naive = UTC),
+        `card_id`, `kind`, `session` (one app launch / foreground); `limit` 1-1000.
+        Read-only; kept 90 days; events reach the server lazily, so the last minute may be
+        missing. For ratings with card text, or older than 90 days, use `review_history`."""
+        return run(deck.list_activity, since, until, card_id, kind, session, limit)
+
+    # --- History (spec 031) ---------------------------------------------------------------------
+
+    @mcp.tool()
+    def review_history(
+        since: datetime | None = None,
+        until: datetime | None = None,
+        card_id: UUID | None = None,
+        note_id: UUID | None = None,
+        rating: Rating | None = None,
+        limit: Annotated[int, Field(ge=1, le=deck.HISTORY_LIST_MAX)] = 100,
+    ) -> list[ReviewEntry]:
+        """Every rating the user gave, from the app or an agent's quiz, newest first, never
+        pruned. Each entry: `card_id`, `reviewed_at` (UTC), `rating` (again = forgot, hard, good,
+        easy), `confidence` (0-1 or null) and the current `card` (null once deleted). Filters:
+        `since <= reviewed_at < until` (ISO 8601, naive = UTC; for a local day pass its UTC
+        offset), `card_id`, `note_id` (its current cards), `rating`; `limit` 1-1000 (default
+        100). If you get `limit` entries, narrow the window. Read-only."""
+        return run(deck.review_history, since, until, card_id, note_id, rating, limit)
+
+    @mcp.tool()
+    def struggling_cards(
+        since: datetime | None = None,
+        limit: Annotated[int, Field(ge=1, le=deck.STRUGGLING_LIST_MAX)] = 20,
+    ) -> list[StrugglingCard]:
+        """Cards the user fails most: per existing card with at least one `again` since `since`
+        (all history if null), `{card, reviews, again, last_again_at}`, most `again` first, then
+        highest again/reviews. `limit` 1-100 (default 20). Read-only. To help: offer to rephrase
+        (`update_note`), split, or add a direction; change nothing without the user's OK."""
+        return run(deck.struggling_cards, since, limit)
 
     @mcp.prompt(title="Quiz me")
     def quiz_me(

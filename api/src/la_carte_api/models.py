@@ -1,9 +1,12 @@
+import json
 from datetime import UTC, date, datetime
 from enum import StrEnum
+from typing import Any
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import fsrs
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, field_validator, model_validator
 from pydantic import Field as PydanticField
 from sqlmodel import JSON, Column, Field, ForeignKey, SQLModel, Uuid
 
@@ -189,6 +192,23 @@ class Settings(SQLModel, table=True):
     new_cards_per_day: int = 15  # the new-card milestone size M (1-200; a stored 0 reads 15)
 
 
+class ActivityEvent(SQLModel, table=True):
+    """Something the user did in the app (spec 029), sent lazily by the app. `id` is the
+    client's UUID (ingest is idempotent on it); `card_id` has no foreign key."""
+
+    id: UUID = Field(primary_key=True)
+    kind: str = Field(index=True)
+    at: datetime = Field(sa_type=UTCDateTime, index=True)  # device clock, stored in UTC
+    tz: str
+    session: UUID
+    card_id: UUID | None = Field(default=None, sa_column=Column(Uuid, index=True))
+    app_version: str
+    build: str
+    os: str
+    data: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    received_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)  # server clock
+
+
 # --- Public schemas (REST + MCP) ---------------------------------------------------------------
 
 
@@ -292,16 +312,24 @@ class NoteCard(BaseModel):
     last_review: datetime | None
 
 
+class NoteNext(BaseModel):
+    """The card of a note Study serves first, and when (spec 028)."""
+
+    card_id: UUID
+    ready_at: datetime
+
+
 class NoteRead(BaseModel):
     id: UUID
     type: NoteType
     fields: dict[str, str]
     cards: list[NoteCard]
+    next: NoteNext | None
     created_at: datetime
     updated_at: datetime
 
     @classmethod
-    def of(cls, note: Note, cards: list[Card]) -> "NoteRead":
+    def of(cls, note: Note, cards: list[Card], next: NoteNext | None) -> "NoteRead":
         return cls(
             id=note.id,
             type=note.type,
@@ -317,6 +345,7 @@ class NoteRead(BaseModel):
                 )
                 for c in cards
             ],
+            next=next,
             created_at=note.created_at,
             updated_at=note.updated_at,
         )
@@ -351,6 +380,25 @@ class DeckStats(BaseModel):
     reviews_done: int  # = reviewed_today - new_today
 
 
+class ReviewEntry(BaseModel):
+    """MCP `review_history` (spec 031): one `ReviewLog` row with the card as it is now."""
+
+    card_id: UUID
+    reviewed_at: datetime  # UTC
+    rating: Rating
+    confidence: float | None
+    card: CardRead | None  # null once the card was deleted
+
+
+class StrugglingCard(BaseModel):
+    """MCP `struggling_cards` (spec 031): an existing card's `again` count in the window."""
+
+    card: CardRead
+    reviews: int  # all ratings of the card in the window
+    again: int
+    last_again_at: datetime  # UTC
+
+
 class MilestoneSetting(BaseModel):
     """MCP `new_card_milestone`: the size of the new-card steps the app shows (spec 021)."""
 
@@ -365,13 +413,6 @@ class AddCardsResult(BaseModel):
 class AddNotesResult(BaseModel):
     added: list[NoteRead]
     skipped: list[NoteRead]  # existing notes whose duplicate key matched
-
-
-class AddCardsReply(AddCardsResult):
-    """MCP only: never-reviewed cards after the insert, and the milestone size."""
-
-    new: int
-    milestone: int
 
 
 class AddNotesReply(AddNotesResult):
@@ -428,3 +469,72 @@ class FeedbackRead(BaseModel):
     resolution: str | None
     created_at: datetime
     closed_at: datetime | None
+
+
+ACTIVITY_DATA_MAX = 4096  # bytes of an event's serialized `data`
+
+
+class ActivityEventIn(BaseModel):
+    """One event as the app sends it (spec 029). Validated on its own: a bad one is skipped."""
+
+    id: UUID
+    kind: str = PydanticField(pattern=r"^[a-z][a-z_]{0,39}$")
+    at: AwareDatetime
+    tz: str = PydanticField(max_length=64)
+    session: UUID
+    app_version: str = PydanticField(max_length=32)
+    build: str = PydanticField(max_length=32)
+    os: str = PydanticField(max_length=32)
+    card_id: UUID | None = None
+    data: dict[str, Any] = PydanticField(default_factory=dict)
+
+    @field_validator("at")
+    @classmethod
+    def _to_utc(cls, value: datetime) -> datetime:
+        return value.astimezone(UTC)
+
+    @field_validator("tz")
+    @classmethod
+    def _known_zone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError, OSError) as error:
+            raise ValueError(f"unknown time zone {value!r}") from error
+        return value
+
+    @field_validator("data")
+    @classmethod
+    def _small_data(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if len(json.dumps(value, separators=(",", ":")).encode()) > ACTIVITY_DATA_MAX:
+            raise ValueError(f"data is at most {ACTIVITY_DATA_MAX} bytes")
+        return value
+
+
+class ActivityBatch(BaseModel):
+    events: list[Any]  # each element validated on its own (`ActivityEventIn`)
+
+
+class ActivityIngest(BaseModel):
+    stored: int
+    duplicates: int
+    rejected: int
+
+
+class ActivityEventRead(BaseModel):
+    id: UUID
+    kind: str
+    at: datetime  # UTC
+    local_at: datetime  # `at` in `tz`, with its offset
+    tz: str
+    session: UUID
+    card_id: UUID | None
+    app_version: str
+    build: str
+    os: str
+    data: dict[str, Any]
+    received_at: datetime
+
+    @classmethod
+    def of(cls, event: ActivityEvent) -> "ActivityEventRead":
+        local_at = event.at.astimezone(ZoneInfo(event.tz))
+        return cls(**event.model_dump(), local_at=local_at)
