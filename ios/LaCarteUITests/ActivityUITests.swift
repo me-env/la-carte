@@ -17,17 +17,22 @@ final class ActivityUITests: XCTestCase {
 
   // MARK: - #30 + #31: same screens, same timing
 
-  /// 6 rounds: 18 reveal and 12 rate → next samples per mode. 10 rounds cost 7-8 min per attempt on a 3-CPU CI VM
-  /// and still saw 50-120 ms of median noise there (run 45811826958): more rounds didn't buy a reliable fixed 50 ms
-  /// check, the noise-aware tolerance of `assertNotSlower` does.
-  private static let rounds = 6
+  /// 4 rounds = 12 study cycles per mode (spec: 10): 12 reveal and 8 rate → next samples per mode, 12 launches. Every
+  /// launch is a chance for a slow or hung simulator launch, and xcodebuild doesn't retry a test that runs past the
+  /// 10 min allowance: 6 rounds took 5-7 min on CI (runs 45895507868, 45902387218) and a launch that hung cost the
+  /// run (45909706465). More rounds didn't buy a reliable fixed 50 ms check either (10 rounds still saw 50-120 ms of
+  /// median noise, run 45811826958): the noise-aware tolerance of `assertNotSlower` does that.
+  /// Order: every mode leads a round and `off` (the baseline) leads only once, so the cold first launch and drift
+  /// don't flatter a logging mode.
+  private static let rounds: [[Mode]] = [[.off, .down, .hung], [.down, .hung, .off], [.hung, .off, .down],
+                                         [.hung, .down, .off]]
 
   private enum Mode: String, CaseIterable {
     case off, down, hung
   }
 
-  /// `rounds` rounds; each round launches the mock deck once per mode (order rotated per round, so warm-up and drift
-  /// don't favour one mode) and studies its 3 cards: 3 reveal and 2 rate → next samples per mode and round.
+  /// Each round launches the mock deck once per mode and studies its 3 cards: 3 reveal and 2 rate → next samples
+  /// per mode and round. Screenshots and element signatures come from round 0.
   @MainActor
   func testActivity_studyLooksAndTimesTheSame() throws {
     XCUIDevice.shared.appearance = .light
@@ -45,9 +50,8 @@ final class ActivityUITests: XCTestCase {
     var signatures: [Mode: [String: [String]]] = [:]
 
     let modes = Mode.allCases
-    for round in 0..<Self.rounds {
-      for k in 0..<modes.count {
-        let mode = modes[(k + round) % modes.count]
+    for (round, order) in Self.rounds.enumerated() {
+      for mode in order {
         let app = launch(api: .mock, environment: environment[mode]!)
         let first = round == 0
         for (index, card) in Self.cards.enumerated() {
