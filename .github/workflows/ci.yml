@@ -151,6 +151,9 @@ jobs:
             -only-testing:LaCarteUITests/SettingsUITests/testSettings_testConnectionMock \
             -only-testing:LaCarteUITests/SetupUITests/testSetup_connectFromStudy \
             -only-testing:LaCarteUITests/RefreshUITests/testStudy_foregroundReload
+      - name: Make file names uploadable (an attachment named with " fails the whole upload)
+        if: always()
+        run: ci/artifact-safe-names.sh qa/screenshots
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
@@ -263,6 +266,9 @@ jobs:
         run: >-
           ci/ui-test.sh scripts/ios-ui-test.sh ci-${{ matrix.shard.name }}
           -retry-tests-on-failure -test-iterations 2 ${{ matrix.shard.tests }}
+      - name: Make file names uploadable (an attachment named with " fails the whole upload)
+        if: always()
+        run: ci/artifact-safe-names.sh qa/screenshots
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
@@ -296,6 +302,9 @@ jobs:
         env:
           UI_TEST_PRODUCTS: ${{ runner.temp }}/LaCarte.xctestproducts
         run: ci/ui-test.sh scripts/e2e.sh ci-e2e
+      - name: Make file names uploadable (an attachment named with " fails the whole upload)
+        if: always()
+        run: ci/artifact-safe-names.sh qa/screenshots
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
