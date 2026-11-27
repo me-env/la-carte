@@ -2,10 +2,13 @@ import APIClient
 import ComposableArchitecture
 import DesignSystem
 import SwiftUI
+import UIKit
 
 public struct NoteEditorView: View {
   @Bindable var store: StoreOf<NoteEditorFeature>
   @FocusState private var focusedField: String?
+  /// Set once UIKit really starts editing a field: `focusedField` can read "front" while nothing is first responder.
+  @State private var didBeginEditing = false
   /// The preview URL that failed to load, if any; a new URL clears the footer until it fails too.
   @State private var failedPhotoURL: URL?
 
@@ -13,14 +16,24 @@ public struct NoteEditorView: View {
     self.store = store
   }
 
-  /// A focus request made while the sheet is still presenting is silently dropped (CI flake), so retry
-  /// until it takes, for at most 5 s; stops as soon as any field has focus.
-  private func focusFrontUntilItSticks() async {
+  /// A focus request made while the sheet is still presenting can be dropped by UIKit while `focusedField` already
+  /// reads "front" (spec 002 #6, CI flake), so re-request it (nil, then "front") until a field really begins editing,
+  /// for at most 10 s. Never overrides a field the user picked.
+  private func focusFrontUntilEditing() async {
     guard store.note == nil else { return }
-    for _ in 0..<50 {
-      guard focusedField == nil else { return }
-      focusedField = "front"
-      do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+    for attempt in 0..<40 {
+      do {
+        if attempt > 0 {
+          focusedField = nil
+          try await Task.sleep(for: .milliseconds(50))
+        }
+        guard !didBeginEditing, focusedField == nil else { return }
+        focusedField = "front"
+        try await Task.sleep(for: .milliseconds(200))
+      } catch {
+        return
+      }
+      guard !didBeginEditing, focusedField == nil || focusedField == "front" else { return }
     }
   }
 
@@ -43,7 +56,7 @@ public struct NoteEditorView: View {
         case .basic:
           Section {
             field("front", prompt: "Word or question")
-              .task { await focusFrontUntilItSticks() }
+              .task { await focusFrontUntilEditing() }
             field("back", prompt: "Answer")
           }
         case .person:
@@ -89,6 +102,12 @@ public struct NoteEditorView: View {
       }
     }
     .tint(Theme.ink)
+    .onReceive(NotificationCenter.default.publisher(for: UITextView.textDidBeginEditingNotification)) { _ in
+      didBeginEditing = true
+    }
+    .onReceive(NotificationCenter.default.publisher(for: UITextField.textDidBeginEditingNotification)) { _ in
+      didBeginEditing = true
+    }
     .interactiveDismissDisabled(store.hasChanges)
     .sensoryFeedback(.error, trigger: store.saveFailed) { _, new in new }
   }
