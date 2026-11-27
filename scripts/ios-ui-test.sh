@@ -85,7 +85,7 @@ TIMEOUTS=(-test-timeouts-enabled YES -default-test-execution-time-allowance 600)
 if [ "$STATUS" -eq 0 ]; then
   stage "ios-ui-test: UI tests (pool simulator, xcodebuild test-without-building)"
   ui_test_with_retry "$RUN" "$RESULT" env TEST_RUNNER_LA_CARTE_API_URL="${LA_CARTE_API_URL:-}" \
-    TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" \
+    TEST_RUNNER_LA_CARTE_API_TOKEN="${LA_CARTE_API_TOKEN:-}" TEST_RUNNER_CI="${CI:-}" \
     SIM_POOL=ui "$ROOT/scripts/_sim-pool.sh" /bin/sh -c 'exec xcodebuild test-without-building -destination "$POOL_DESTINATION" "$@"' \
     sh -testProductsPath "$PRODUCTS" "${PARALLEL[@]}" "${TIMEOUTS[@]}" \
     -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} \

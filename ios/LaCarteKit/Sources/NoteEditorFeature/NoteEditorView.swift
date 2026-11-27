@@ -13,6 +13,17 @@ public struct NoteEditorView: View {
     self.store = store
   }
 
+  /// A focus request made while the sheet is still presenting is silently dropped (CI flake), so retry
+  /// until it takes, for at most 5 s; stops as soon as any field has focus.
+  private func focusFrontUntilItSticks() async {
+    guard store.note == nil else { return }
+    for _ in 0..<50 {
+      guard focusedField == nil else { return }
+      focusedField = "front"
+      do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+    }
+  }
+
   public var body: some View {
     NavigationStack {
       Form {
@@ -32,8 +43,7 @@ public struct NoteEditorView: View {
         case .basic:
           Section {
             field("front", prompt: "Word or question")
-              // On the field, not the sheet: focus set before the Form has built this row is dropped (CI flake).
-              .onAppear { if store.note == nil { focusedField = "front" } }
+              .task { await focusFrontUntilItSticks() }
             field("back", prompt: "Answer")
           }
         case .person:

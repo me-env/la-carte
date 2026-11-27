@@ -131,8 +131,10 @@ never ran). Notes, Logo and StudyMilestones moved to a 5th shard.
 
 | Test | Owner | Failure on CI | Fix |
 |---|---|---|---|
-| `DeckUITests/testDeck_addFromDeck` | qa-validator | "timed out waiting for: editor.front focused on a new card" (3 of the last 5 full runs, e.g. 45698139090). Also in the PR smoke set | wait for focus with a longer, load-tolerant timeout (or assert the keyboard / field value after typing instead of `hasFocus`) |
-| `LogoUITests/testStudy_launchShowsFirstCardNoLogo` | qa-validator | first card 1.52–1.92 s after launch vs a 1.5 s limit (3 of 5 runs) | CI-aware limit (e.g. 2.5 s when `CI` is set) or measure from the first frame, not from `launch()` |
+
+None today. Released 2026-11-26: `DeckUITests/testDeck_addFromDeck` (focus wait now 30 s, then proves the
+auto-focus by typing without a tap) and `LogoUITests/testStudy_launchShowsFirstCardNoLogo` (one query per check;
+limit 2.5 s when `CI` is set, which `scripts/ios-ui-test.sh` passes to the test runner as `TEST_RUNNER_CI`; 1.5 s locally).
 
 **Flaky tests.** The full-suite shards run with `-retry-tests-on-failure -test-iterations 2`: a test that fails
 then passes keeps the shard green, and `ci/ui-test.sh` prints a `Flaky UI test (passed on retry)` warning on the
@@ -143,8 +145,8 @@ tests) fixes any test that shows up in those warnings; one that fails both attem
 a test that is red in 2 runs gets quarantined above.
 
 Seen once or twice (not quarantined): `StudyLengthsUITests/testStudyLengths_scrollBarOnRevealOnly` failed once in 5 runs on the
-same commit ("no scroll bar flash on revealing a long card"): `barPoints` only counts frames after the tap returns,
-which on a loaded runner can be after the 1.6 s capture window's flash. `ReportUITests/testAsk_copiesCardText`
+same commit ("no scroll bar flash on revealing a long card"); fixed 2026-11-26: `barPoints` counts frames from the
+start of a tap (not after it returns) over 2.5 s. `ReportUITests/testAsk_copiesCardText`
 failed twice on 2026-11-23/24 (empty pasteboard), passed since. `ReportUITests/testReport_menuOpensAndCancels` failed
 once (run 45706902438, "dialog still shown after Cancel"), passed in the 4 runs before. `RatingsUITests/testRatings_dragReviewFailureThenRetry` failed
 once (rerun of 45706902438, '"study.front" Any missing').
