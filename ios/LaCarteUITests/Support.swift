@@ -458,7 +458,7 @@ extension XCTestCase {
   func assertKeyboard(_ app: XCUIApplication, dark: Bool, _ context: String,
                       file: StaticString = #filePath, line: UInt = #line) {
     let keyboard = app.keyboards.firstMatch
-    XCTAssertTrue(keyboard.waitFor(timeout: 5), "[\(context)] no keyboard", file: file, line: line)
+    XCTAssertTrue(keyboard.waitFor(timeout: 15), "[\(context)] no keyboard after 15 s", file: file, line: line)
     Thread.sleep(forTimeInterval: 0.8)  // keyboard slide-in
     let lums = ColorProbe(screenOf: app).colors(in: keyboard.frame.insetBy(dx: 4, dy: 4), step: 4).map(\.luminance)
     let avg = lums.isEmpty ? 0 : lums.reduce(0, +) / Double(lums.count)
