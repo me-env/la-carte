@@ -63,7 +63,10 @@ Speed settings (measured 2026-11-22, run 45032373007):
   that ran no test at all (`TESTS: none run`): it waits 30 s and retries once. A failing test is retried once only in
   the full-suite shards (see *Flaky tests*); smoke, E2E and local runs never retry.
 
-Screenshots: each UI job uploads its own artifact (`screenshots-smoke`, `screenshots-<shard>`, `screenshots-e2e`).
+Screenshots: each UI job uploads its own artifact (`screenshots-smoke`, `screenshots-<shard>`, `screenshots-e2e`). Just
+before the upload, `ci/artifact-safe-names.sh qa/screenshots` replaces the characters `upload-artifact` rejects
+(`" : < > | * ?`, CR, LF) with `_`: one such name (an XCUITest attachment named
+`Debug description for "NotificationShortLookView" …`) failed the whole upload of a shard in run 45925206158.
 
 ## Path filters
 

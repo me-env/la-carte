@@ -56,6 +56,9 @@ jobs:
           UI_TEST_PRODUCTS: ${{ runner.temp }}/LaCarte.xctestproducts
           UI_RECORD: ${{ inputs.record && '1' || '' }}
         run: ci/ui-test.sh scripts/ios-ui-test.sh ci-selected $ONLY_TESTING
+      - name: Make file names uploadable (an attachment named with " fails the whole upload)
+        if: always()
+        run: ci/artifact-safe-names.sh qa/screenshots
       - name: Upload screenshots, recordings, logs
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
