@@ -195,6 +195,12 @@ Retry a failed deploy: *Actions → CI → Run workflow* on `main` (it runs ever
    gh secret   set LA_CARTE_LIVE_URL  --env api-prod --body 'https://<your API host>'   # secret: masked in logs
    ```
    Without these values the job prints a notice and skips (forks).
+4. **Before the accounts API (spec 030a, branch `accounts`) merges:** set `LA_CARTE_OWNER_EMAIL` in the
+   Dokploy compose service's *Environment* (the owner's Apple or Google email; see `docs/deploy.md`). With
+   `LA_CARTE_API_TOKEN` set and no owner email the API refuses to start, and on a deck with data migration 030
+   refuses to run, so the deploy job fails at step 5 and prod stays down until it is set. `/health` stays public
+   (no bearer), so `scripts/api-live-check.sh` and the deploy check need no token. CI's image check passes
+   `ci@example.com`.
 
 ## Rollback
 
