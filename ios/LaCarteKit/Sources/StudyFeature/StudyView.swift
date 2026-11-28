@@ -513,7 +513,6 @@ public struct StudyView: View {
   /// The answer depends only on its own lines, even under a leading question (spec 017 #15).
   private var answerAlignment: TextAlignment { Self.alignment(of: backMeasure) }
 
-  /// A side of 1-2 lines is centred, 3+ lines leading.
   static func alignment(of side: TextMeasure) -> TextAlignment {
     side.isMultiline ? .leading : .center
   }
@@ -543,7 +542,7 @@ public struct StudyView: View {
   }
 
   private var answerSnap: CGFloat {
-    guard Self.textLayout == .snappedBlocks, promptAlignment == .leading else { return 0 }
+    guard Self.textLayout == .snappedBlocks, promptAlignment == .leading, answerAlignment == .leading else { return 0 }
     return Self.snap(answer: backMeasure.width, toQuestion: frontMeasure.width, column: cardSize.width)
   }
 
