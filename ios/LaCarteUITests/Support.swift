@@ -113,6 +113,24 @@ extension XCTestCase {
     XCTAssertTrue(matched, "Expected label '\(expected)', got '\(element.label)'", file: file, line: line)
   }
 
+  /// Reveals the current card by tapping `study.card` and waits for `study.back == back` (no tap when it already
+  /// shows `back`, e.g. after a cancelled drag). A synthesized tap the runner lost (seen on CI: a tap during the
+  /// system dark-mode crossfade; `study.back` still missing 5 s later, `study.reveal` still shown) is tapped once
+  /// more and logged. Tests that check tap-to-reveal itself (testRatings_tapAndDoubleTapUnchanged, StudyUITests)
+  /// tap directly instead.
+  @MainActor
+  func revealCard(_ app: XCUIApplication, back: String, file: StaticString = #filePath, line: UInt = #line) {
+    let shownBack = el(app, "study.back")
+    if shownBack.exists, shownBack.label == back { return }
+    XCTAssertTrue(el(app, "study.reveal").waitFor(timeout: 10), "study.reveal missing before reveal", file: file, line: line)
+    el(app, "study.card").tap()
+    if !shownBack.waitFor(timeout: 5), el(app, "study.reveal").exists {
+      print("revealCard: tap lost (study.back missing 5 s after the tap, card still unrevealed); tapping once more")
+      el(app, "study.card").tap()
+    }
+    waitForLabel(shownBack, back, file: file, line: line)
+  }
+
   /// Spec 021 #23: `study.remaining` is a button labelled "Milestones" whose value is the counter text
   /// ("3 new", "1 at risk", "2 to review"). Waits until the value is `expected`.
   @MainActor

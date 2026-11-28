@@ -44,8 +44,7 @@ final class RatingsUITests: XCTestCase {
       for id in ["study.rate.again", "study.rate.good", "study.rate.hard", "study.rate.easy"] {
         XCTAssertFalse(el(app, id).exists, "\(id) exists before reveal (\(v.name))")
       }
-      el(app, "study.card").tap()
-      waitForLabel(el(app, "study.back"), Self.mockBack)
+      revealCard(app, back: Self.mockBack)
       assertTwoButtons(app, context: v.name)
       XCTAssertFalse(ring(app).exists, "study.swipeRing shown at rest (\(v.name))")
       shot("study-revealed", v.name)
@@ -150,8 +149,7 @@ final class RatingsUITests: XCTestCase {
       waitForCounter(app, "\(plan.count - i) to review")
       XCTAssertTrue(el(app, "study.reveal").exists, "card \(i) not unrevealed")
       XCTAssertFalse(ring(app).exists, "ring on next card \(i)")
-      el(app, "study.card").tap()
-      waitForLabel(el(app, "study.back"), "back \(i)")
+      revealCard(app, back: "back \(i)")
       switch step.action {
       case "forgot": el(app, "study.rate.again").tap()
       case "gotit": el(app, "study.rate.good").tap()
@@ -187,8 +185,7 @@ final class RatingsUITests: XCTestCase {
       }
       snapshot("study-unrevealed-after-drag", appearance: appearance)
       // #7: dead-zone release on the revealed card.
-      el(app, "study.card").tap()
-      waitForLabel(el(app, "study.back"), "chat")
+      revealCard(app, back: "chat")
       for f in [0.04, -0.04] {
         drag(app, f)
         Thread.sleep(forTimeInterval: 0.5)
@@ -212,8 +209,7 @@ final class RatingsUITests: XCTestCase {
     let (server, _) = try startReviewStub([.init(id: "BBBBBBBB-1111-1111-1111-111111111111", front: "dog", back: "chien")])
     let app = launch(api: .live(server.url))
     waitForLabel(el(app, "study.front"), "dog")
-    el(app, "study.card").tap()
-    waitForLabel(el(app, "study.back"), "chien")
+    revealCard(app, back: "chien")
     el(app, "study.back").doubleTap()
     XCTAssertTrue(el(app, "study.backField").waitFor(timeout: 3), "double-tap did not open study.backField")
     for f in [0.22, -0.22] {
@@ -236,8 +232,7 @@ final class RatingsUITests: XCTestCase {
     let (server, _) = try startReviewStub([.init(id: "CCCCCCCC-1111-1111-1111-111111111111", front: "long", back: back)])
     let app = launch(api: .live(server.url), arguments: Self.longCardArguments)
     waitForLabel(el(app, "study.front"), "long")
-    el(app, "study.card").tap()
-    waitForLabel(el(app, "study.back"), back)
+    revealCard(app, back: back)
     let before = el(app, "study.back").frame
     el(app, "study.card").swipeUp()
     Thread.sleep(forTimeInterval: 0.5)
@@ -300,8 +295,7 @@ final class RatingsUITests: XCTestCase {
     var results: [String] = []
     for step in plan {
       waitForLabel(el(app, "study.front"), "long \(i)")
-      if el(app, "study.reveal").exists { el(app, "study.card").tap() }
-      waitForLabel(el(app, "study.back"), back)
+      revealCard(app, back: back)
       XCTAssertGreaterThan(el(app, "study.back").frame.maxY, cardArea(app).frame.maxY - 40, "long card doesn't scroll")
       let before = el(app, "study.back").frame
       drag(app, dx: step.dx, dy: step.dy, hold: 0.4)
@@ -349,8 +343,7 @@ final class RatingsUITests: XCTestCase {
     let app = launch(api: .live(server.url))
     for (i, step) in plan.enumerated() {
       waitForLabel(el(app, "study.front"), "front \(i)")
-      el(app, "study.card").tap()
-      waitForLabel(el(app, "study.back"), "back \(i)")
+      revealCard(app, back: "back \(i)")
       let released = Date()
       drag(app, dx: step.dx, dy: step.dy)
       print(String(format: "019 reward: release %d (%@) at +%.2f s", i, step.rating, Date().timeIntervalSince(released)))
@@ -414,8 +407,7 @@ final class RatingsUITests: XCTestCase {
     var lines: [String] = [], delays: [String: [Double]] = [:], lastRelease = Date()
     for (i, step) in plan.enumerated() {
       waitForLabel(el(app, "study.front"), "front \(i)")
-      el(app, "study.card").tap()
-      waitForLabel(el(app, "study.back"), "back \(i)")
+      revealCard(app, back: "back \(i)")
       let sincePrevious = i == 0 ? 0 : Date().timeIntervalSince(lastRelease)  // previous release → this drag's start
       // Drags, then waits up to 3 s for the next card (the POST for the last step); returns the drag call's
       // duration and the delay from its end to the next card (nil: not seen).
@@ -485,8 +477,7 @@ final class RatingsUITests: XCTestCase {
     var posts = 0, i = 0
     for step in plan {
       waitForLabel(el(app, "study.front"), "front \(i)")
-      if el(app, "study.reveal").exists { el(app, "study.card").tap() }
-      waitForLabel(el(app, "study.back"), "back \(i)")
+      revealCard(app, back: "back \(i)")
       drag(app, dx: step.dx, dy: step.dy)
       if let rating = step.rating {
         posts += 1
@@ -524,10 +515,12 @@ final class RatingsUITests: XCTestCase {
     let (server, _) = try startReviewStub(cards)
     let app = launch(api: .live(server.url))
     for (i, step) in plan.enumerated() {
-      if step.dark { XCUIDevice.shared.appearance = .dark }
+      if step.dark, XCUIDevice.shared.appearance != .dark {
+        XCUIDevice.shared.appearance = .dark
+        Thread.sleep(forTimeInterval: 1)  // the system crossfade to dark (~0.7 s on CI) swallowed the reveal tap
+      }
       waitForLabel(el(app, "study.front"), "front \(i)")
-      if el(app, "study.reveal").exists { el(app, "study.card").tap() }
-      waitForLabel(el(app, "study.back"), "back \(i)")
+      revealCard(app, back: "back \(i)")
       Thread.sleep(forTimeInterval: 1)  // a still frame before each sweep
       let card = el(app, "study.card"), w = card.frame.width
       let start = card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -576,8 +569,7 @@ final class RatingsUITests: XCTestCase {
     try server.start()
     let app = launch(api: .live(server.url))
     waitForLabel(el(app, "study.front"), "owl")
-    el(app, "study.card").tap()
-    waitForLabel(el(app, "study.back"), "hibou")
+    revealCard(app, back: "hibou")
     drag(app, 0.13)
     waitForLabel(el(app, "study.message"), "Can't reach your deck", timeout: 20)
     XCTAssertFalse(ring(app).exists, "ring on the offline screen")
