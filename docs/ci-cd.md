@@ -10,7 +10,7 @@ Every run starts with `What changed` (`ci/changes.sh`, ≈ 10 s), which decides 
 
 ```
 pull_request ──┬─ API (ruff + pytest)          ubuntu   ~1 min
-               ├─ API (docker build + /health) ubuntu   ~1 min
+               ├─ API (docker compose + /me)   ubuntu   ~30 s
                ├─ iOS unit tests               macos-26
                └─ iOS UI smoke (light, 9 tests) macos-26: simulator boots in the background while the app
                                                 builds, then tests the build      → PR feedback ≈ slowest job
@@ -99,7 +99,7 @@ every test's recording (`recordings/`) and the runner output (`logs/`). No deplo
 
 | What | Gated by | Not gated by |
 |---|---|---|
-| API deploy | `API (ruff + pytest)`, `API (docker build)` and `iOS E2E (live API)` green on that exact commit, which is also the head of `main`; only when the API changed since the last green run | iOS unit tests and UI shards (the app ships separately, via `adhoc.yml`) |
+| API deploy | `API (ruff + pytest)`, `API (docker compose)` and `iOS E2E (live API)` green on that exact commit, which is also the head of `main`; only when the API changed since the last green run | iOS unit tests and UI shards (the app ships separately, via `adhoc.yml`) |
 | PR merge | every job of the PR run that its changes need (unit + API + smoke) | the full UI suite (it runs on `main` and nightly) |
 
 **Smoke set** (in `ci.yml`, job `ios-ui-smoke`): core study, deck, settings/setup and refresh flows in light
@@ -203,7 +203,9 @@ Retry a failed deploy: *Actions → CI → Run workflow* on `main` (it runs ever
    `ci@example.com`. Also set `LA_CARTE_DB_KEY` (spec 032a: with `LA_CARTE_PUBLIC_URL` set the API refuses to
    start without it) and, for Google sign-in, `LA_CARTE_GOOGLE_CLIENT_ID` + `_SECRET` (without them prod
    starts with Google sign-in off). The full list is in `docs/deploy.md`; a setting reaches the container
-   only if `docker-compose.yml` lists it. CI's image check uses `docker run`, not the compose file.
+   only if `docker-compose.yml` lists it. CI's image check boots the API through `docker-compose.yml` with
+   throwaway values (https public URL, random DB key, owner email, token) and calls `/health` and `/me`, so a
+   compose mistake fails CI, not the deploy. A setting it does not pass gets the compose file's default.
 
 ## Rollback
 
