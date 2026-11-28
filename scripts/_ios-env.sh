@@ -106,10 +106,23 @@ sim_to_image() {  # <udid>
   rm -f "$dev"; mkdir "$dev"
   sim_attach "$1" && cp "$src/device.plist" "$dev/" && xcrun simctl erase "$1" && rm -rf "$src"
 }
+sim_named() {  # <runtime id> <name>: UDIDs of the available devices with that name, sorted (one per line)
+  xcrun simctl list devices -j | python3 -I -c '
+import json, sys
+devices = json.load(sys.stdin)["devices"].get(sys.argv[1], [])
+print("\n".join(sorted(d["udid"] for d in devices if d["name"] == sys.argv[2] and d["isAvailable"])))' "$1" "$2"
+}
 # Create a simulator (prints its UDID), move it into its image on LA_CARTE_SIM_DEVICES (if set) and boot it once, so
 # its first-boot work happens now and not in a test run. Call it while holding the device's lock.
 sim_create() {  # <name> <device type> <runtime id>
   local udid
+  # The service doesn't list some mounted images yet (it started before they were mounted): the device may exist
+  # already, and creating it now makes a duplicate whose name stays ambiguous once they are listed (2026-11-28).
+  if [ -n "${LA_CARTE_SIM_DEVICES:-}" ] && [ -n "$(LA_CARTE_SIM_DEVICES="$LA_CARTE_SIM_DEVICES" \
+      SIM_DEVICES_DIR="$SIM_DEVICES_DIR" "$ROOT/scripts/_sim-service.sh" --missing)" ]; then
+    echo "❌ not creating $1: CoreSimulatorService doesn't list some mounted simulator images yet (it started before they were mounted), so $1 may exist already. See the warning above; docs/dev-velocity.md" >&2
+    return 1
+  fi
   udid="$(xcrun simctl create "$1" "$2" "$3")" || return 1
   if [ -n "${LA_CARTE_SIM_DEVICES:-}" ]; then sim_to_image "$udid" >&2 || return 1; fi
   sim_prewarm "$udid"
