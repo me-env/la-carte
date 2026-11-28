@@ -192,7 +192,8 @@ LA_CARTE_OWNER_EMAIL=dev@example.com LA_CARTE_API_TOKEN=$(openssl rand -hex 32) 
 docker build -t la-carte-api api/ && docker run --rm -p 8000:8000 -e LA_CARTE_OWNER_EMAIL=dev@example.com \
   -e LA_CARTE_API_TOKEN=dev -e LA_CARTE_DB_KEY=$(openssl rand -hex 32) la-carte-api   # no host port in compose: add one to test
 ```
-CI (`.github/workflows/ci.yml`, job *API (docker build)*) builds the same image and checks `/health`.
+CI (`.github/workflows/ci.yml`, job *API (docker compose)*) boots the API through `docker-compose.yml` with
+throwaway values and checks `/health` and an authenticated `/me`.
 
 Known local issue: on Apple M4 Macs with an older Docker Desktop, the arm64 container can crash
 right away with exit code 132 (SIGILL). The Linux VM advertises SME, and the `cryptography` wheel

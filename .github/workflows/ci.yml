@@ -65,23 +65,38 @@ jobs:
       - run: scripts/api-test.sh
 
   api-image:
-    name: API (docker build)
+    name: API (docker compose)
     needs: changes
     if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Boots the API through docker-compose.yml, the way Dokploy does, so a compose mistake (a missing or empty
+    # setting) fails here instead of on the deploy. Values are CI-only throwaways; the Dokploy UI sets the real ones.
+    env:
+      COMPOSE_PROJECT_NAME: la-carte-ci
+      LA_CARTE_PUBLIC_URL: https://ci.example.com
+      LA_CARTE_OWNER_EMAIL: ci@example.com
+      LA_CARTE_API_TOKEN: ci-token
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
-      - name: Build the production image (same as Dokploy)
-        run: docker build -t la-carte-api:ci api/
-      - name: Starts and answers /health
+      - name: Compose file is valid
         run: |
-          # spec 030a: a token without an owner email refuses to start; /health stays public (no bearer)
-          # spec 032a: production needs LA_CARTE_DB_KEY (a throwaway one here), the file is SQLCipher
-          docker run -d --name api -p 8000:8000 -e LA_CARTE_API_TOKEN=ci-token \
-            -e LA_CARTE_OWNER_EMAIL=ci@example.com -e LA_CARTE_PUBLIC_URL=https://ci.example.com \
-            -e LA_CARTE_DB_KEY="$(openssl rand -hex 32)" la-carte-api:ci
-          for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/health && exit 0; sleep 1; done
-          docker logs api; exit 1
+          key=$(openssl rand -hex 32)  # throwaway SQLCipher key (spec 032a), for this run only
+          echo "LA_CARTE_DB_KEY=$key" >> "$GITHUB_ENV"
+          LA_CARTE_DB_KEY=$key docker compose config --quiet
+      - name: Build the production image (same as Dokploy)
+        run: docker compose build
+      - name: Starts, answers /health and an authenticated /me
+        run: |
+          # The compose file only `expose`s 8000 (Traefik routes to it), so call the container on its network IP.
+          docker compose up -d
+          ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(docker compose ps -q api)")
+          ok=
+          for _ in $(seq 1 30); do curl -fsS "http://$ip:8000/health" && ok=1 && break; sleep 1; done
+          # spec 030a: the token is imported as the owner's personal access token
+          [[ -n "$ok" ]] && curl -fsS -H "Authorization: Bearer $LA_CARTE_API_TOKEN" "http://$ip:8000/me" \
+            | grep -q "\"$LA_CARTE_OWNER_EMAIL\"" && echo && echo "/me answers as the owner" && exit 0
+          docker compose logs api; exit 1
 
   deploy-api:
     name: Deploy API (Dokploy)
