@@ -1,14 +1,19 @@
 import json
 import logging
+import os
+import shutil
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import sqlcipher3.dbapi2 as sqlcipher
 from sqlalchemy import DateTime, MetaData, Table, TypeDecorator, event, inspect
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.schema import CreateIndex, CreateTable
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
+
+from la_carte_api.config import HEX_KEY
 
 log = logging.getLogger(__name__)
 
@@ -31,29 +36,58 @@ NEEDS_OWNER = (
 )
 
 
+WRONG_KEY = "LA_CARTE_DB_KEY doesn't open this database"
+NEEDS_KEY = "This database is encrypted: set LA_CARTE_DB_KEY"
+REKEYED = "rekeyed: set LA_CARTE_DB_KEY to the new value and remove LA_CARTE_DB_KEY_NEW"
+REKEY_FAILED = (
+    "LA_CARTE_DB_KEY_NEW doesn't open the database after rekeying: "
+    "keep LA_CARTE_DB_KEY and remove LA_CARTE_DB_KEY_NEW"
+)
+PLAINTEXT_HEADER = b"SQLite format 3\0"
+
+
 class MigrationRefused(RuntimeError):
     """The database can't be migrated with this configuration; nothing was changed."""
 
 
-def make_engine(database_url: str, owner_email: str | None = None) -> Engine:
+def make_engine(
+    database_url: str,
+    owner_email: str | None = None,
+    key: str | None = None,
+    new_key: str | None = None,
+) -> Engine:
     """The engine, after the startup migrations (see `open_database`)."""
-    engine, _ = open_database(database_url, owner_email)
+    engine, _ = open_database(database_url, owner_email, key, new_key)
     return engine
 
 
-def open_database(database_url: str, owner_email: str | None = None) -> tuple[Engine, bool]:
+def open_database(
+    database_url: str,
+    owner_email: str | None = None,
+    key: str | None = None,
+    new_key: str | None = None,
+) -> tuple[Engine, bool]:
     """The engine after the startup migrations, and whether this start created the `user` table
     (migration 030 ran, or the database is new). `owner_email` (`LA_CARTE_OWNER_EMAIL`) owns the
-    data of a pre-030 database (migration 030); without it such a database is refused."""
+    data of a pre-030 database (migration 030); without it such a database is refused.
+
+    `key` (`LA_CARTE_DB_KEY`, 64 hex) opens a database file through SQLCipher (spec 032a); a
+    plaintext file is encrypted first, and `new_key` rekeys it (see `_settle_key`). Without a key,
+    and for the in-memory database, it is plain SQLite."""
     if database_url == "sqlite://":  # in-memory, used by tests: share one connection
+        key = None
         engine = create_engine(
             database_url, connect_args={"check_same_thread": False}, poolclass=StaticPool
         )
     else:
-        engine = create_engine(database_url, connect_args={"check_same_thread": False})
+        key = _settle_key(make_url(database_url).database, key, new_key)
+        module = {"module": sqlcipher} if key else {}
+        engine = create_engine(database_url, connect_args={"check_same_thread": False}, **module)
 
-    @event.listens_for(engine, "connect")
-    def _enable_foreign_keys(connection, _record) -> None:
+    @event.listens_for(engine, "connect", insert=True)  # before SQLAlchemy's own (dialect init)
+    def _on_connect(connection, _record) -> None:
+        if key:
+            connection.execute(_key_pragma("key", key))  # first, before anything reads the file
         connection.execute("PRAGMA foreign_keys=ON")
 
     from la_carte_api import models  # noqa: F401  (registers the tables)
@@ -62,6 +96,121 @@ def open_database(database_url: str, owner_email: str | None = None) -> tuple[En
     _migrate(engine, owner_email)  # first, so a backup is an exact copy of the file as it was
     SQLModel.metadata.create_all(engine)  # new tables (every table on a fresh database)
     return engine, first_start
+
+
+def _settle_key(path: str, key: str | None, new_key: str | None) -> str | None:
+    """The key the engine opens `path` with, after encrypting a plaintext file with `key` and
+    rekeying it to `new_key` (spec 032a). Refuses (`MigrationRefused`, file untouched) an
+    encrypted file without a key, or that neither key opens."""
+    if not key:
+        if _size(path) and not _is_plaintext(path):
+            raise MigrationRefused(NEEDS_KEY)
+        return None
+    if _is_plaintext(path):
+        _encrypt(path, key)
+    if not _size(path):  # a new database: created with the newest key
+        if new_key:
+            log.warning(REKEYED)
+        return new_key or key
+    if _opens(path, key):
+        if not new_key:
+            return key
+        _rekey(path, key, new_key)
+        if not _opens(path, new_key):
+            raise MigrationRefused(REKEY_FAILED)
+    elif not (new_key and _opens(path, new_key)):  # new_key: a restart before the env swap
+        raise MigrationRefused(WRONG_KEY)
+    log.warning(REKEYED)
+    return new_key
+
+
+def _key_pragma(pragma: str, key: str) -> str:
+    """`PRAGMA key` / `PRAGMA rekey` with a raw 256-bit key (no passphrase derivation)."""
+    if not HEX_KEY.fullmatch(key):
+        raise ValueError("a database key is 64 hex characters")
+    return f"PRAGMA {pragma} = \"x'{key}'\""
+
+
+def _size(path: str) -> int:
+    return os.path.getsize(path) if os.path.exists(path) else 0
+
+
+def _is_plaintext(path: str) -> bool:
+    if not _size(path):
+        return False
+    with open(path, "rb") as file:
+        return file.read(len(PLAINTEXT_HEADER)) == PLAINTEXT_HEADER
+
+
+def _opens(path: str, key: str) -> bool:
+    """Whether `key` opens `path`. Only SQLCipher's wrong-key error ("file is not a database")
+    means no; any other error (locked, busy, I/O) is raised as it is."""
+    db = sqlcipher.connect(path)
+    try:
+        db.execute(_key_pragma("key", key))
+        db.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        return True
+    except sqlcipher.DatabaseError as error:
+        if "file is not a database" in str(error):
+            return False
+        raise
+    finally:
+        db.close()
+
+
+def _rekey(path: str, key: str, new_key: str) -> None:
+    db = sqlcipher.connect(path)
+    try:
+        db.execute(_key_pragma("key", key))
+        db.execute(_key_pragma("rekey", new_key))
+    finally:
+        db.close()
+
+
+def _encrypt(path: str, key: str) -> None:
+    """Encrypts the plaintext file `path` with `key` (spec 032a decision 3): exported to
+    `<db>.encrypting`, checked (same rows in every table), the original copied to
+    `<db>.pre-032-<timestamp>.bak`, then `.encrypting` atomically replaces it. A failure or a
+    crash at any step leaves the plaintext file in place (the next start tries again)."""
+    encrypting = f"{path}.encrypting"
+    for leftover in (encrypting, f"{encrypting}-journal", f"{encrypting}-wal"):
+        if os.path.exists(leftover):  # left by an interrupted attempt
+            os.remove(leftover)
+    plain = sqlcipher.connect(path)
+    try:
+        plain.execute("ATTACH DATABASE ? AS enc KEY ?", (encrypting, f"x'{key}'"))
+        plain.execute("SELECT sqlcipher_export('enc')").fetchall()
+        plain.execute("DETACH DATABASE enc")
+        expected = _row_counts(plain)
+    finally:
+        plain.close()
+    encrypted = sqlcipher.connect(encrypting)
+    try:
+        encrypted.execute(_key_pragma("key", key))
+        same = _row_counts(encrypted) == expected
+    finally:
+        encrypted.close()
+    if not same:
+        os.remove(encrypting)
+        raise RuntimeError("encrypting the database lost rows: the plaintext file is kept")
+    backup = f"{path}.pre-032-{_stamp()}.bak"
+    shutil.copy2(path, backup)
+    os.replace(encrypting, path)
+    log.warning(
+        "database encrypted; the plaintext copy %s stays until you delete it",
+        os.path.basename(backup),
+    )
+
+
+def _row_counts(db) -> dict[str, int]:
+    tables = db.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    return {name: db.execute(f'SELECT count(*) FROM "{name}"').fetchone()[0] for (name,) in tables}
+
+
+def _stamp() -> str:
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")  # unique across quick restarts
 
 
 def _migrate(engine: Engine, owner_email: str | None = None) -> None:
@@ -122,8 +271,8 @@ def _rebuild_if(db, engine: Engine, spec: str, needed, rebuild) -> None:
     if not needed():
         return
     if (path := engine.url.database) and path != ":memory:":
-        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")  # unique across quick restarts
-        db.execute("VACUUM INTO ?", (f"{path}.pre-{spec}-{stamp}.bak",))
+        # Through SQLCipher, the copy is encrypted with the same key (spec 032a decision 5).
+        db.execute("VACUUM INTO ?", (f"{path}.pre-{spec}-{_stamp()}.bak",))
     db.execute("PRAGMA foreign_keys=OFF")  # no-op inside a transaction: set before BEGIN
     db.execute("BEGIN IMMEDIATE")
     try:

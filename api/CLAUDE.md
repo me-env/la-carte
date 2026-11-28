@@ -11,6 +11,8 @@
 - OAuth (spec 030b): `oauth.py` is the MCP SDK's provider plus our routes (they shadow the SDK's `/authorize`,
   `/token`, `/revoke`, metadata); `identity.py` the providers. Every token is minted by `auth.mint`. Tests use the
   fake provider or an `httpx.MockTransport` for Google (`tests/test_oauth.py`); no test calls Google.
+- `DB_KEY` (spec 032a): SQLCipher key of the database file, required with a non-loopback `PUBLIC_URL`;
+  unset locally = plain SQLite (`tests/test_encryption.py`).
 - Accounts (spec 030a): every `deck` function takes `user_id` right after the session and filters on it; another
   user's id is "not found". Tests act as `conftest.USER`; `mcp_client(engine, user_id)` runs MCP tools as a user.
 - Local dev: `LA_CARTE_OWNER_EMAIL=dev@example.com LA_CARTE_API_TOKEN=dev-token scripts/api-dev.sh`, then

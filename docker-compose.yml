@@ -14,6 +14,11 @@ services:
       LA_CARTE_API_TOKEN: ${LA_CARTE_API_TOKEN:-}
       # The public https URL: OAuth issuer, MCP resource (<url>/mcp), serverInfo icon (/icon.png).
       LA_CARTE_PUBLIC_URL: ${LA_CARTE_PUBLIC_URL:-}
+      # Spec 032a: the SQLCipher key of the whole database file (64 hex, openssl rand -hex 32).
+      # Required with a public URL. Losing it loses every account: keep a copy offline.
+      LA_CARTE_DB_KEY: ${LA_CARTE_DB_KEY:-}
+      # Only to rotate the key: set the new one here, deploy, then move it to LA_CARTE_DB_KEY.
+      LA_CARTE_DB_KEY_NEW: ${LA_CARTE_DB_KEY_NEW:-}
     expose:
       - "8000"
     volumes:

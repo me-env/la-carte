@@ -11,16 +11,22 @@ docker-compose.yml (repo root)
     env      LA_CARTE_OWNER_EMAIL (required with data or a token) → the account that owns the deck (spec 030a)
              LA_CARTE_API_TOKEN (optional)  → imported at the first accounts start as the owner's PAT `legacy`
              LA_CARTE_PUBLIC_URL (optional) → https base URL: OAuth issuer, MCP resource <url>/mcp, icon
+             LA_CARTE_DB_KEY (required with a public URL) → SQLCipher key of the whole database file (spec 032a)
     auth     every request but /health and the icons: Authorization: Bearer <a user's token>
     volume   la-carte-data → /data/la-carte.db
 ```
 
 ## One-time setup in Dokploy
 
-1. **Generate the token** on your Mac and keep it in your password manager:
+1. **Generate the token and the database key** on your Mac (two separate runs) and keep both in your
+   password manager:
    ```bash
-   openssl rand -hex 32
+   openssl rand -hex 32     # the token
+   openssl rand -hex 32     # the database key (LA_CARTE_DB_KEY)
    ```
+   **The database key is the only way to read the deck.** Keep a copy **offline**, outside the server and
+   outside Dokploy (password manager, plus a printed or offline copy): if Dokploy, the server or its env are
+   lost, the volume and every backup are unreadable without it, for every account. Nobody can recover it.
 2. **Create the service.** In a project → *Create Service* → **Compose** (type *Docker Compose*, not *Stack*).
 3. **Provider** (General tab): GitHub (or Git with the SSH URL for a private repo), branch `main`,
    **Compose Path** `./docker-compose.yml`. The compose file sits at the repo root and builds `./api`, so
@@ -30,6 +36,7 @@ docker-compose.yml (repo root)
    ```
    LA_CARTE_OWNER_EMAIL=<the email of your Apple or Google account>
    LA_CARTE_API_TOKEN=<the token from step 1>
+   LA_CARTE_DB_KEY=<the database key from step 1>
    ```
    Dokploy writes them to a `.env` next to the compose file, and the compose file passes them to the
    container. At its first start the API creates the owner's account and stores the token (hashed) as the
@@ -42,6 +49,7 @@ docker-compose.yml (repo root)
    LA_CARTE_OWNER_EMAIL …") and is left untouched; with it, migration 030 backs the file up
    (`la-carte.db.pre-030-<timestamp>.bak`) and gives every row to the owner. Keep `LA_CARTE_API_TOKEN` for
    that first start, so the app, widget and agents keep working on the same token.
+   See "Database encryption" below for what `LA_CARTE_DB_KEY` does on the first start.
 5. **Domains** tab → *Add Domain*: service `api`, host e.g. `carte.example.com`, path `/`, **container
    port `8000`**, HTTPS on, certificate *Let's Encrypt*. Point the DNS A record of that host at the
    server first. Dokploy adds the Traefik labels itself, so the compose file has none. (Free `sslip.io`
@@ -71,9 +79,42 @@ don't delete the service's volumes when you remove or recreate the service.
 - The MCP endpoint has DNS-rebinding (Host header) protection off (`api/src/la_carte_api/app.py`). Access is
   controlled by the bearer token, so it accepts your public hostname as is.
 
+## Database encryption (spec 032a)
+
+The whole SQLite file (every table, index and journal, and the API's own `.bak` copies) is encrypted with
+SQLCipher (AES-256) under `LA_CARTE_DB_KEY`: 64 hex characters, `openssl rand -hex 32`. It lives only in
+Dokploy's env and in your offline copies, never in the repo.
+
+- **Required in production.** With `LA_CARTE_PUBLIC_URL` set to a non-loopback URL, the API refuses to start
+  without it, or with a value that isn't 64 hex ("Set LA_CARTE_DB_KEY: 64 hex characters, e.g. openssl rand
+  -hex 32"). Locally (no public URL, or a loopback one) and without the key, it runs on plain SQLite. The value
+  is never logged.
+- **Losing it loses every account.** No key, no deck: not for you, not for the users. Keep it in your password
+  manager **and** an offline copy before the first deploy with it.
+- **First start on an existing plaintext deck:** the API encrypts the file before any migration, checks that
+  every table kept its rows, and keeps the plaintext original as `la-carte.db.pre-032-<timestamp>.bak` (log:
+  "database encrypted; the plaintext copy … stays until you delete it"). Later starts do nothing. Once you have
+  checked the deployed deck, **delete the plaintext copies** (`*.pre-030-*.bak`, `*.pre-032-*.bak`) from the
+  volume: they are the only unencrypted data left (with volume backups taken before the deploy, which age out).
+- **Wrong key:** the API refuses to start ("LA_CARTE_DB_KEY doesn't open this database") and leaves the file
+  untouched. An encrypted file with no key set refuses too ("This database is encrypted: set LA_CARTE_DB_KEY").
+- **Rotate the key:** generate a new one, save it offline, set `LA_CARTE_DB_KEY_NEW=<new>` next to the current
+  `LA_CARTE_DB_KEY` and redeploy. The start rekeys the file and logs "rekeyed: set LA_CARTE_DB_KEY to the new
+  value and remove LA_CARTE_DB_KEY_NEW": do that, redeploy. A restart in between is fine (it opens with the new
+  key). Backups taken before the rotation still need the old key: keep it until they age out (30 days).
+- **Open the file for debugging** (`sqlite3` can't): with the `sqlcipher` CLI (`brew install sqlcipher`, or the
+  distro package) on a copy of the file:
+  ```
+  sqlcipher la-carte.db
+  sqlite> PRAGMA key = "x'<the 64 hex>'";
+  sqlite> .tables
+  ```
+  Avoid typing the key where your shell history keeps it.
+
 ## Backups
 
-The whole deck is one SQLite file: `/data/la-carte.db` in the `la-carte-data` volume.
+The whole deck is one SQLite file, encrypted (above): `/data/la-carte.db` in the `la-carte-data` volume. Every
+backup is encrypted the same way: it needs `LA_CARTE_DB_KEY` (the one current when it was taken) to restore.
 
 - **Automatic (recommended):** Dokploy → the compose service → *Volume Backups* → create one with
   service `api`, volume `la-carte-data`, a daily cron (`0 3 * * *`), and an S3 destination (set up first
@@ -83,7 +124,12 @@ The whole deck is one SQLite file: `/data/la-carte.db` in the `la-carte-data` vo
   ```bash
   docker ps --filter "label=com.docker.compose.service=api" --format '{{.Names}}'   # find the la-carte one
   C=<that container name>
-  docker exec "$C" python -c "import sqlite3; sqlite3.connect('/data/la-carte.db').backup(sqlite3.connect('/data/backup.db'))"
+  docker exec -i "$C" python - <<'EOF'    # an encrypted copy, same key
+  import os, sqlcipher3
+  db = sqlcipher3.connect("/data/la-carte.db")
+  db.execute("PRAGMA key = \"x'%s'\"" % os.environ["LA_CARTE_DB_KEY"])
+  db.execute("VACUUM INTO '/data/backup.db'")
+  EOF
   docker cp "$C":/data/backup.db ./la-carte-$(date +%F).db && docker exec "$C" rm /data/backup.db
   ```
   To restore, stop the service, copy the file back to `/data/la-carte.db` in the volume, then start it.
@@ -114,7 +160,7 @@ open by default (`LA_CARTE_SIGNUP=open`; `allowlist` + `LA_CARTE_ALLOWED_EMAILS`
 All optional unless noted; secrets only in Dokploy, never in the repo. The full list with notes is in spec 030
 ("Secrets and env"); what the user provides and where it comes from is in its "What the user provides".
 - Accounts: `LA_CARTE_OWNER_EMAIL` (required before 030a deploys on a deck with data), `LA_CARTE_PUBLIC_URL`
-  (required, https), `LA_CARTE_GOOGLE_CLIENT_ID`, `LA_CARTE_GOOGLE_CLIENT_SECRET`, `LA_CARTE_SIGNUP`,
+  (required, https), `LA_CARTE_DB_KEY` (required, spec 032a; `LA_CARTE_DB_KEY_NEW` only to rotate it), `LA_CARTE_GOOGLE_CLIENT_ID`, `LA_CARTE_GOOGLE_CLIENT_SECRET`, `LA_CARTE_SIGNUP`,
   `LA_CARTE_ALLOWED_EMAILS`.
 - Sign in with Apple (030e, 030g): `LA_CARTE_APPLE_TEAM_ID`, `LA_CARTE_APPLE_KEY_ID`,
   `LA_CARTE_APPLE_PRIVATE_KEY_B64` (`base64 -i AuthKey_<KEYID>.p8 | tr -d '\n'`), `LA_CARTE_APPLE_BUNDLE_ID`,
@@ -126,9 +172,10 @@ All optional unless noted; secrets only in Dokploy, never in the repo. The full 
 ## Run the production image locally
 
 ```bash
-LA_CARTE_OWNER_EMAIL=dev@example.com LA_CARTE_API_TOKEN=$(openssl rand -hex 32) docker compose up --build
+LA_CARTE_OWNER_EMAIL=dev@example.com LA_CARTE_API_TOKEN=$(openssl rand -hex 32) \
+  LA_CARTE_DB_KEY=$(openssl rand -hex 32) docker compose up --build   # a throwaway key: local data only
 docker build -t la-carte-api api/ && docker run --rm -p 8000:8000 -e LA_CARTE_OWNER_EMAIL=dev@example.com \
-  -e LA_CARTE_API_TOKEN=dev la-carte-api     # no host port in compose: add one to test
+  -e LA_CARTE_API_TOKEN=dev -e LA_CARTE_DB_KEY=$(openssl rand -hex 32) la-carte-api   # no host port in compose: add one to test
 ```
 CI (`.github/workflows/ci.yml`, job *API (docker build)*) builds the same image and checks `/health`.
 
