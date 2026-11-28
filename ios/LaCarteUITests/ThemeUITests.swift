@@ -227,7 +227,10 @@ final class ThemeUITests: XCTestCase {
     el(app, "study.card").tap()
     XCTAssertTrue(el(app, "study.rate.good").waitFor(timeout: 5), "ratings missing after reveal")
     Thread.sleep(forTimeInterval: 0.5)  // the back fades in over 0.25 s
-    assertTextColor(app, "study.back", p.secondaryInk, background: p.background)
+    // Spec 017 #17 (a): on reveal the question recedes to `recededInk` (forest #83938A, the same value as forest
+    // `secondaryInk`) and the answer is `ink`, on every card.
+    assertTextColor(app, "study.front", p.secondaryInk, background: p.background)
+    assertTextColor(app, "study.back", p.ink, background: p.background)
     snapshot("study-revealed-forest", appearance: .light)
 
     // Deck.
