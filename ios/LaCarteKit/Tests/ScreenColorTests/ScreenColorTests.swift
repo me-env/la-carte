@@ -65,16 +65,23 @@ struct ScreenColorTests {
   /// axis. A person card's text prompt recedes too, and a photo prompt's caption rows are the answer, so both `ink`.
   @Test(arguments: looks)
   func revealedWeightTransfer(_ look: Look) throws {
-    func screen(_ card: Card, revealed: Bool) throws -> Screen {
+    func screen(_ card: Card, revealed: Bool, reduceMotion: Bool = false) throws -> Screen {
       var state = StudyFeature.State()
       state.cards = [card]
       state.phase = .studying
       state.isRevealed = revealed
-      return try Screen(StudyView(store: Store(initialState: state) { EmptyReducer() }), look, name: "study-weight")
+      let view = StudyView(store: Store(initialState: state) { EmptyReducer() })
+        .environment(\._accessibilityReduceMotion, reduceMotion)
+      return try Screen(view, look, name: "study-weight")
     }
-    for (question, answer) in [("la mer", "the sea"), (CardLines.questions[3].1, "The Peace of Westphalia")] {
+    let longAnswer = CardLines.answers[2].1
+    for (question, answer) in [
+      ("la mer", "the sea"), (CardLines.questions[3].1, "The Peace of Westphalia"),
+      ("mitochondria", longAnswer), (CardLines.questions[4].1, longAnswer),
+    ] {
       let card = CardLines.card(question, answer)
-      let front = try screen(card, revealed: false), revealed = try screen(card, revealed: true)
+      // Under Reduce Motion the front's question already sits where the revealed one does (a 3+-line answer lifts it, #14).
+      let front = try screen(card, revealed: false, reduceMotion: true), revealed = try screen(card, revealed: true)
       let ink = try #require(front.inkBounds(in: front.band(0.14, 0.85)), "no question drawn")
       front.expectText(in: ink, front.palette.ink, "\(question): study.front before reveal")
       revealed.expectText(in: ink, revealed.palette.recededInk, "\(question): study.front after reveal")
@@ -134,10 +141,14 @@ struct ScreenColorTests {
       let ink = try #require(still.inkBounds(in: still.band(0.14, 0.85)), "no question drawn")
       // Its colour changes, not its shape (#17: on every card).
       #expect(revealed.changedPixels(from: still, in: ink) > 0, "question didn't recede on reveal (answer: \(answer))")
-      // Within half a point: the lighter colour leaves a glyph's faintest anti-aliased edge pixels under the ink threshold.
+      // The lighter colour leaves a glyph's faintest anti-aliased edge pixels under the ink threshold, so each edge may
+      // shrink inward by up to half a point; none may grow (the receded ink stays inside the original), so a real move
+      // can't hide in that tolerance. Rounded to whole pixels: `maxX` is `minX + width`, off by float noise.
       let receded = try #require(revealed.inkBounds(in: ink.insetBy(dx: -2, dy: -2)), "question gone on reveal")
-      #expect([receded.minX - ink.minX, receded.maxX - ink.maxX, receded.minY - ink.minY, receded.maxY - ink.maxY]
-                .allSatisfy { abs($0) <= 0.5 }, "question moved on reveal: \(receded) vs \(ink) (answer: \(answer))")
+      let shrinks = [receded.minX - ink.minX, ink.maxX - receded.maxX, receded.minY - ink.minY, ink.maxY - receded.maxY]
+        .map { ($0 * Screen.scale).rounded() / Screen.scale }
+      let staysInside = shrinks.allSatisfy { (0...0.5).contains($0) }
+      #expect(staysInside, "question moved on reveal: inward shrinks \(shrinks) (answer: \(answer))")
       if leadingQuestion {
         #expect(abs(ink.minX - 16) <= 1.5, "leading question off the column's edge: \(ink)")
       }
@@ -307,6 +318,7 @@ struct Look: CustomTestStringConvertible, Sendable {
 }
 
 /// Token values (spec 004 #4, docs/design-system.md), as 0xRRGGBB. Same values as `Palette` in the UI tests.
+/// `recededInk == secondaryInk` in dark and forest, so only light tells them apart.
 struct Palette: Sendable {
   let background: UInt32, surface: UInt32, ink: UInt32, secondaryInk: UInt32, recededInk: UInt32, accent: UInt32
   static let light = Palette(
@@ -484,6 +496,7 @@ struct Screen {
       } else if let done = line, (blankRows + 1) >= Int(Self.scale) {
         lines.append(done)
         line = nil
+        blankRows = 0
       } else {
         blankRows += 1
       }
