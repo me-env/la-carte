@@ -6,13 +6,6 @@ Depends on: 030a merged. Overview, principles, flow diagram, env and user action
 Design reference: none for the app. The consent and error pages are plain server HTML (system font, the
 la-carte icon from `/icon.svg`, one heading, one sentence, one button; light/dark via `prefers-color-scheme`).
 
-
-> **Amended by [032](032-encryption.md) (032b decisions 7–8):** for a user with an encryption key, the callback of an
-> agent client (not `la-carte-ios`) no longer redirects with a code: the request waits at `/oauth/wait` until the
-> user approves it in the app, which mints the code with a key slot; a user without a key gets "Open the la-carte app
-> and sign in once". `/token`, refresh rotation and `POST /me/tokens` (`deck`) carry the key slot; iOS-client tokens
-> come back locked and the app unlocks them. AC 4 holds as written for a keyless user; with a key it runs through the
-> approval (032 AC B9). AC 18's e2e adds `POST /me/key` before `POST /me/tokens` (032 AC B13).
 ## Goal
 Any MCP client (Claude Code, claude.ai connectors, ChatGPT, Cursor, VS Code) and the iOS app can sign the user in
 with Google against the API itself, and receive la-carte tokens scoped to that user's deck. Sign-up is open by
@@ -38,8 +31,10 @@ default; a server setting can switch it to a silent allowlist (030 "Sign-up mode
   `/.well-known/oauth-protected-resource/mcp`, `RequireAuthMiddleware`, `get_access_token()`. Mounted at `/`
   under FastAPI, these land at the root. Gaps we fill: its AS metadata omits `"none"` from
   `token_endpoint_auth_methods_supported` and the `iss` flag (we serve our own metadata route, registered in
-  FastAPI before the mount so it wins); the token handler doesn't check that `resource` / `client_id` of the stored
-  code or refresh token match the request (the provider checks); no CIMD.
+  FastAPI before the mount so it wins); the token handler checks the stored code's or refresh token's `client_id`
+  but not `resource` (we check it, decision 7); its `/revoke` requires a `client_secret` (we serve our own,
+  decision 7); no CIMD. *(Corrected in implementation 2026-11-28: this line first said `client_id` was unchecked
+  too.)*
 - Clients: claude.ai (DCR or CIMD; redirect `https://claude.ai/api/mcp/auth_callback`; needs the 401
   `resource_metadata`; PRM `resource` must equal the URL typed; 10 s timeouts), Claude Code (loopback callback on a
   random port; CIMD then DCR; `--header` still works for PATs), ChatGPT (CIMD/DCR; S256 required; wants `iss`),
@@ -104,8 +99,13 @@ default; a server setting can switch it to a silent allowlist (030 "Sign-up mode
    - One callback, `/oauth/callback`, for every provider: the pending request records which provider it went to
      (`authrequest.provider`), so a second provider adds a class, not a route.
 6. **Callback** `GET /oauth/callback?code&state` (or `error`):
-   - Unknown/expired `state`, or `lc_auth` cookie present and ≠ `state` → HTML error page "This sign-in expired.
-     Start again from your app." (400). No redirect (we can't trust where to send it).
+   - Unknown/expired `state` → HTML error page "This sign-in expired. Start again from your app." (400). No
+     redirect (we can't trust where to send it).
+   - **Agent clients** (any client but `la-carte-ios`): the `lc_auth` cookie is **required** and must equal `state`;
+     missing or different → the same 400 page (confused-deputy fix, decided in implementation 2026-11-28: else an
+     attacker could send a victim the provider URL of the attacker's own request). The **iOS client** skips consent,
+     so it never gets the cookie: its callback ignores `lc_auth` (a stale cookie from an abandoned agent sign-in in
+     the same browser must not break it).
    - Google `error` (user cancelled) or `IdentityError` → redirect to the client's `redirect_uri` with
      `error=access_denied` (+ `error_description=cancelled|unverified_email|sign_in_failed`), `state`, `iss`.
    - Account (principle 4 of 030): find `identity (provider, subject)` → its user (update `email`, `last_seen_at`).
@@ -132,11 +132,17 @@ default; a server setting can switch it to a silent allowlist (030 "Sign-up mode
      in the same family + a new access token. **Reuse** of an already-rotated refresh token revokes the whole family
      (its refresh and access tokens) → `invalid_grant`. Expired/revoked/unknown → `invalid_grant`. Requested scopes
      must be a subset.
-   - `/revoke`: revoking a refresh token revokes its family; an access token just itself; unknown → 200.
+   - `/revoke`: revoking a refresh token revokes its family; an access token just itself; unknown → 200. **We serve
+     `/revoke` ourselves**: mcp 2.3.0's handler requires a `client_secret` field, which public clients don't have.
+     A token of another client → 200, nothing done.
+   - **We shadow the SDK's `/authorize` and `/token`** (our routes, registered before the MCP mount) to add what the
+     SDK lacks: on `/authorize`, the `lc_auth` cookie (decision 3) and RFC 9207 `iss` on error redirects; on
+     `/token`, the `resource` check. The SDK still validates the rest (PKCE, `redirect_uri`, client auth).
 8. **`POST /me/tokens`** `{name (1–60 chars, trimmed), scope: "deck"|"stats" (default "deck"),
    expires_in_days?: 1–365}` → 201 `{id, name, scope, token, created_at, expires_at, last_used_at: null}`.
-   Allowed **only** with an access token whose `client_id` is `la-carte-ios` (a PAT, a refresh token or an agent's
-   access token → 403 `{"detail": "Create access tokens from the la-carte app"}`). Max 20 live PATs per user (422).
+   Allowed **only** with an access token whose `client_id` is `la-carte-ios` (a PAT or an agent's access token →
+   403 `{"detail": "Create access tokens from the la-carte app"}`; a refresh token is not a bearer credential at
+   all → 401, like any unknown token). Max 20 live PATs per user (422).
 9. **`/privacy`**: moved to [030h](030h-web-landing-privacy.md) (with the landing and support pages).
 10. **Config**: `LA_CARTE_GOOGLE_CLIENT_ID`, `LA_CARTE_GOOGLE_CLIENT_SECRET`, `LA_CARTE_SIGNUP` (`open` default |
     `allowlist`; any other value → refuse to start), `LA_CARTE_ALLOWED_EMAILS` (read only in `allowlist` mode; empty
@@ -147,6 +153,10 @@ default; a server setting can switch it to a silent allowlist (030 "Sign-up mode
 11. **MCP docs**: architecture's "Connect an agent" becomes `claude mcp add --transport http la-carte <PUBLIC>/mcp`
     (OAuth); `--header "Authorization: Bearer lc_pat_…"` documented as the PAT alternative. Server `instructions`
     unchanged.
+12. **Access log without query strings** (review fix on `accounts`, 2026-11-28): a filter on `uvicorn.access`
+    (`app.strip_query`) logs the path without its query, because queries carry OAuth codes and `state`
+    (`/oauth/callback`) and search terms (`/notes?query=`), which `/privacy` says aren't logged (pytest
+    `test_the_access_log_has_no_query_strings`).
 
 ## Acceptance criteria
 All with the fake provider or an injected `httpx` transport: no test calls Google.
@@ -166,8 +176,8 @@ All with the fake provider or an injected `httpx` transport: no test calls Googl
 | 11 | Owner claim: with a migrated owner row (030a), the first sign-in with the verified owner email attaches `(provider, sub)` and the tokens read the migrated deck; a later sign-in with the same email but another `sub` → `email_in_use`, no row; a later sign-in by `sub` with a changed email updates `user.email` | pytest |
 | 12 | Unverified email (fake `unverified…` / Google `email_verified: false`) → `access_denied`/`unverified_email`, no row | pytest |
 | 13 | `GoogleProvider` (injected transport returning a canned token response): sends `scope=openid email`, PKCE, `prompt=select_account`; rejects wrong `iss`, wrong `aud`, expired `exp`, wrong `nonce`; keeps nothing but `sub` + email (no Google token in any table); revokes the Google access token (030e AC 12) | pytest |
-| 14 | Unknown or expired `state` on the callback → 400 HTML page, no redirect | pytest |
-| 15 | `POST /me/tokens` with an `la-carte-ios` access token → 201 with `token` once (`lc_pat_…`), `expires_at` = now + N days when given; the PAT works on REST and `/mcp` (`deck`) or only `/stats` (`stats`); with a PAT, an agent client's access token or a refresh token → 403 | pytest |
+| 14 | Unknown or expired `state` on the callback → 400 HTML page, no redirect; an agent client's callback without the `lc_auth` cookie, or with another one → the same 400; an iOS callback with a stale `lc_auth` from another request succeeds | pytest |
+| 15 | `POST /me/tokens` with an `la-carte-ios` access token → 201 with `token` once (`lc_pat_…`), `expires_at` = now + N days when given; the PAT works on REST and `/mcp` (`deck`) or only `/stats` (`stats`); with a PAT or an agent client's access token → 403; with a refresh token → 401 | pytest |
 | 16 | `FakeProvider` with `LA_CARTE_PUBLIC_URL=https://example.com` → refuses to start; Google without client secret → refuses to start; no provider → `/authorize` ends in `temporarily_unavailable` while PATs keep working | pytest |
 | 17 | (moved to 030h) | — |
 | 18 | `scripts/e2e.sh` (qa-validator) runs its APIs with `LA_CARTE_IDENTITY_PROVIDER=fake`, signs in as `la-carte-ios` over HTTP (curl, PKCE), mints a PAT with `POST /me/tokens`, seeds with it, and the live UI tests pass | UI (live) |

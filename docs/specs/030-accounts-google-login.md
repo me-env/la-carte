@@ -40,8 +40,8 @@ iOS lane (one at a time):   030c ─► 030f ─► 030d          (on mock, in p
 release-engineer:           030f entitlement + default-URL build setting (any time)
 marketing ∥ design-lead:    030h copy + media ∥ 030h design note (now)
 ```
-App Store blockers: 030a, 030b, 030c, 030e, 030f, 030h, and 032a/032b/032c (encryption: api lane 030e → 032b →
-030g, 032a in its own worktree; iOS lane 030f → 032c → 030d). Not blockers: 030d, 030g.
+App Store blockers: 030a, 030b, 030c, 030e, 030f, 030h, and 032a (encryption at rest, built on `accounts`).
+Not blockers: 030d, 030g.
 Deploy: 030h can merge to main and deploy now (no migration). 030a onward stays on the accounts branch until the
 Dokploy env is set (see "What the user provides").
 
@@ -98,11 +98,10 @@ Dokploy env is set (see "What the user provides").
    an Apple outage never keeps the data), then deletes in one transaction the user's notes, cards, reviews,
    reports, feedback, activity events, settings, tokens, identities and the user row. Server backups age out within
    30 days (stated in `/privacy`). The app also deletes its local session, widget token and activity buffer.
-12. **Encryption, always on** ([032](032-encryption.md)). The whole database is encrypted with a server key
-   (SQLCipher, `LA_CARTE_DB_KEY`), and each user's content (note fields, photo URLs, report comments) with their own
-   data key, which the server can unwrap only inside a request carrying the user's account key (iCloud Keychain;
-   also their recovery key) or one of their tokens. Agents get a key slot when the user approves them in the app.
-   Feedback and activity stay readable to the owner (decision 10). Not end-to-end: the server decrypts in memory.
+12. **Encryption at rest, always on** ([032](032-encryption.md)). The whole database is encrypted with a server key
+   (SQLCipher, `LA_CARTE_DB_KEY`): a stolen file or backup is unreadable. The operator and the running server can
+   read the data, as they must to serve the app and agents. Not end-to-end. A per-user key was rejected (backlog
+   #72).
 
 ## The flow (Google, and Apple on the web for agents; Apple in the app is native, 030e/030f)
 ```
@@ -266,8 +265,8 @@ Data linked to the user, used for app functionality only, no tracking, no third-
 - User content → **Other user content** (notes, cards, reports, feedback).
 - Usage data → **Product interaction** (spec 029 activity log).
 - Diagnostics → **Other diagnostic data** (activity errors, app and OS version).
-Not collected: name, photo, contacts, location, payment, passwords (principles 1, 3). Encryption (032) changes no answer: content is
-still stored and processed on our server, so it is "collected"; we never claim end-to-end encryption. Person-card photos are
+Not collected: name, photo, contacts, location, payment, passwords (principles 1, 3). Encryption at rest (032) changes no answer: content
+is still stored and processed on our server, so it is "collected"; we never claim end-to-end encryption. Person-card photos are
 external URLs the user (or their agent) typed; la-carte hosts no images.
 
 ## Rollout (API first)
