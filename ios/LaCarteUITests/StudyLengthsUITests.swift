@@ -19,7 +19,7 @@ final class StudyLengthsUITests: XCTestCase {
 
   // MARK: - AC 5, 6, 7, 9
 
-  /// AC 5 short card centred; AC 6/15 long question + its 1-line answer centred (AC 15); AC 9 the
+  /// AC 5 short card centred; AC 16 long question leading at the column edge + its 1-line answer on that edge; AC 9 the
   /// long front doesn't move on reveal; AC 7 short question centred over a leading long answer.
   @MainActor
   func testStudyLengths_alignmentByLength() {
@@ -36,9 +36,9 @@ final class StudyLengthsUITests: XCTestCase {
     snapshot("study-lengths-short-back", appearance: .light)
     rateGood(app, next: Self.long.0)
 
-    // AC 6 + 9: Westphalia (3+ lines, layout D: a block as wide as its widest line, centred in the column).
+    // AC 16 (amends 6) + 9: Westphalia (3+ lines): leading in the full column, at its 16 pt edge (study.card minX).
     let lead = card.frame.minX
-    XCTAssertEqual(front.frame.midX, card.frame.midX, accuracy: 1, "long front block not centred: \(front.frame) in \(card.frame)")
+    XCTAssertEqual(front.frame.minX, lead, accuracy: 1, "long front not at the column edge: \(front.frame) in \(card.frame)")
     XCTAssertGreaterThan(front.frame.width, card.frame.width * 0.8, "long front doesn't span the card: \(front.frame)")
     let before = front.frame
     snapshot("study-lengths-long-front", appearance: .light)
@@ -46,9 +46,8 @@ final class StudyLengthsUITests: XCTestCase {
     XCTAssertEqual(front.frame.minX, before.minX, accuracy: 0.5, "AC 9: front moved on reveal \(before) → \(front.frame)")
     XCTAssertEqual(front.frame.minY, before.minY, accuracy: 0.5, "AC 9: front moved on reveal \(before) → \(front.frame)")
     XCTAssertEqual(front.frame.size, before.size, "AC 9: front resized on reveal \(before) → \(front.frame)")
-    // AC 15 (amends 6): the answer aligns on its own lines; a 1-line answer is centred even under a leading question.
-    XCTAssertEqual(back.frame.midX, card.frame.midX, accuracy: 1, "1-line answer not centred under the long question: \(back.frame) in \(card.frame)")
-    XCTAssertGreaterThan(back.frame.minX, front.frame.minX + 10, "1-line answer still at the long question's left edge: \(back.frame) vs \(front.frame)")
+    // AC 16 (amends 15): one axis per card; a 1-line answer under a leading question starts on its edge.
+    XCTAssertEqual(back.frame.minX, front.frame.minX, accuracy: 1, "1-line answer not on the long question's edge: \(back.frame) vs \(front.frame)")
     XCTAssertGreaterThanOrEqual(back.frame.minY, front.frame.maxY - 1, "back not below front")
     snapshot("study-lengths-long-back", appearance: .light)
     rateGood(app, next: Self.shortQ)
@@ -103,7 +102,7 @@ final class StudyLengthsUITests: XCTestCase {
       XCTAssertTrue(el(app, id).waitFor(timeout: 3), "\(id) missing on the very long card")
       assertSameFrame(el(app, id).frame, frame, id)
     }
-    XCTAssertEqual(front.frame.midX, card.frame.midX, accuracy: 1, "very long front block not centred")
+    XCTAssertEqual(front.frame.minX, card.frame.minX, accuracy: 1, "very long front not at the column edge (AC 16)")
     XCTAssertGreaterThan(front.frame.width, card.frame.width * 0.9, "very long front doesn't fill the column")
     snapshot("study-lengths-verylong-front", appearance: .light)
     reveal(app, nil)
@@ -174,6 +173,10 @@ final class StudyLengthsUITests: XCTestCase {
     Thread.sleep(forTimeInterval: 0.6)
     XCTAssertEqual(field.frame.minX, text.minX, accuracy: 1, "frontField leading edge \(field.frame) vs text \(text)")
     XCTAssertEqual(field.frame.width, text.width, accuracy: 1, "frontField width \(field.frame) vs the block \(text)")
+    // AC 16 (g): a leading question's field starts at the 16 pt edge and spans the column.
+    let column = el(app, "study.card").frame
+    XCTAssertEqual(field.frame.minX, column.minX, accuracy: 1, "frontField not at the column edge \(field.frame) in \(column)")
+    XCTAssertEqual(field.frame.width, column.width, accuracy: 1, "frontField doesn't span the column \(field.frame) in \(column)")
     // Not an AC 10 item: the 5-line field measures ~0.5 pt per line taller than the text (noted in the QA report).
     XCTAssertEqual(field.frame.height, text.height, accuracy: 4, "frontField height \(field.frame) vs text \(text)")
     // Starting the edit must not move the answer relative to the question (the keyboard lifts the whole centred
@@ -333,7 +336,7 @@ final class StudyLengthsUITests: XCTestCase {
     waitForLabel(front, "Second " + paragraph)
     Thread.sleep(forTimeInterval: 0.5)
     XCTAssertEqual(front.frame.minY, topBefore, accuracy: 0.5, "next card didn't open at the top: \(front.frame), first card top \(topBefore)")
-    XCTAssertEqual(front.frame.midX, card.frame.midX, accuracy: 1, "next long front block not centred")
+    XCTAssertEqual(front.frame.minX, card.frame.minX, accuracy: 1, "next long front not at the column edge (AC 16)")
     snapshot("study-lengths-overflow-next", appearance: .light)
   }
 
@@ -381,7 +384,12 @@ final class StudyLengthsUITests: XCTestCase {
       var q = front.frame
       if i == 1 { oneLineQuestionHeight = q.height }  // "Speed of light (km/s)?" is one line
       note("QA017D \(names[i]) card \(card.frame) front \(q) ratio \(q.width / card.frame.width)")
-      XCTAssertEqual(q.midX, card.frame.midX, accuracy: 1, "\(names[i]): question not centred \(q)")
+      // AC 16: a question of 3+ lines is leading at the column's edge; 1-2-line questions stay centred.
+      if names[i] == "wrappedWide-long" {
+        XCTAssertEqual(q.minX, card.frame.minX, accuracy: 1, "\(names[i]): leading question not at the column edge \(q)")
+      } else {
+        XCTAssertEqual(q.midX, card.frame.midX, accuracy: 1, "\(names[i]): question not centred \(q)")
+      }
       do {  // the fixture is what it claims: the widest drawn line fills ≥ 85 % of the column iff `wide`
         let shot = ColorProbe(at3x: XCUIScreen.main.screenshot().image.cgImage!)
         let fill = (inkMaxX(shot, q) - inkMinX(shot, q)) / card.frame.width
@@ -410,7 +418,11 @@ final class StudyLengthsUITests: XCTestCase {
       }
       q = qa  // the checks below are about the revealed layout
       XCTAssertGreaterThanOrEqual(a.minY, q.maxY - 1, "\(names[i]): answer not below the question")
-      if c.leadingBack {
+      if names[i] == "wrappedWide-long" {
+        // AC 16 (c): under a leading question the answer starts on its edge and may span the column.
+        XCTAssertEqual(a.minX, q.minX, accuracy: 1, "\(names[i]): answer not on the question's edge \(a) vs \(q)")
+        XCTAssertLessThanOrEqual(a.maxX, card.frame.maxX + 1, "\(names[i]): answer wider than the column \(a)")
+      } else if c.leadingBack {
         if c.wide {
           // Only a leading answer takes the wide question's column.
           XCTAssertGreaterThanOrEqual(a.minX, q.minX - 1, "\(names[i]): answer starts left of the question \(a) vs \(q)")

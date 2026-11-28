@@ -662,26 +662,6 @@ final class NotesUITests: XCTestCase {
     app.staticTexts.matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex.map(\.frame)
   }
 
-  /// Toggles Settings › Accessibility › Motion › Reduce Motion (a simulator setting: always set back off).
-  @MainActor
-  private func setReduceMotion(_ on: Bool) {
-    let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
-    settings.terminate()
-    settings.launch()
-    let accessibility = settings.staticTexts["Accessibility"].firstMatch
-    for _ in 0..<6 where !(accessibility.exists && accessibility.isHittable) { settings.swipeUp() }
-    accessibility.tap()
-    let motion = settings.staticTexts["Motion"].firstMatch
-    for _ in 0..<6 where !(motion.exists && motion.isHittable) { settings.swipeUp() }
-    motion.tap()
-    let toggle = settings.switches["Reduce Motion"].firstMatch
-    XCTAssertTrue(toggle.waitFor(timeout: 5), "Reduce Motion switch not found")
-    let isOn = { (toggle.value as? String) == "1" }
-    if isOn() != on { toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap() }
-    XCTAssertTrue(poll(timeout: 3) { isOn() == on }, "Reduce Motion not set to \(on)")
-    settings.terminate()
-  }
-
   // MARK: - Live API
 
   /// 014c #17: create a person with 2 directions in the app → `GET /notes` has it with 2 cards; delete it from the
