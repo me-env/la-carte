@@ -5,7 +5,12 @@
 - mcp SDK 2.x: `MCPServer` from `mcp.server.mcpserver` (no FastMCP). Tests use `mcp.Client(server)` in-process.
 - `scripts/api-test.sh` must be green (ruff check, ruff format --check, pytest).
 - Config via `LA_CARTE_*` env vars (`config.py`): `DATABASE_URL`, `OWNER_EMAIL`, `API_TOKEN` (imported once as the
-  owner's PAT), `PUBLIC_URL` (OAuth issuer, MCP resource, icon URL), `HOST`, `PORT`.
+  owner's PAT), `PUBLIC_URL` (OAuth issuer, MCP resource, icon URL), `HOST`, `PORT`, and for sign-in (spec 030b)
+  `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `SIGNUP` (`open`|`allowlist`), `ALLOWED_EMAILS`,
+  `IDENTITY_PROVIDER` (`fake` for tests/e2e), `FAKE_EMAIL`.
+- OAuth (spec 030b): `oauth.py` is the MCP SDK's provider plus our routes (they shadow the SDK's `/authorize`,
+  `/token`, `/revoke`, metadata); `identity.py` the providers. Every token is minted by `auth.mint`. Tests use the
+  fake provider or an `httpx.MockTransport` for Google (`tests/test_oauth.py`); no test calls Google.
 - Accounts (spec 030a): every `deck` function takes `user_id` right after the session and filters on it; another
   user's id is "not found". Tests act as `conftest.USER`; `mcp_client(engine, user_id)` runs MCP tools as a user.
 - Local dev: `LA_CARTE_OWNER_EMAIL=dev@example.com LA_CARTE_API_TOKEN=dev-token scripts/api-dev.sh`, then

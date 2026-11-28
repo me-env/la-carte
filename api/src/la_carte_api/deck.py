@@ -34,6 +34,7 @@ from la_carte_api.models import (
     AddCardsResult,
     AddNotesResult,
     ApiToken,
+    AuthCode,
     Card,
     CardCreate,
     CardRead,
@@ -1327,7 +1328,7 @@ def me(session: Session, user_id: UUID) -> MeRead:
 def delete_account(session: Session, user_id: UUID) -> None:
     """Deletes, in one transaction, every row the user owns (their review history included), their
     tokens and identities, and the user. Other users are untouched."""
-    for table in (*reversed(OWNED), ApiToken, Identity):
+    for table in (*reversed(OWNED), ApiToken, AuthCode, Identity):
         session.exec(delete(table).where(col(table.user_id) == user_id))
     session.exec(delete(User).where(col(User.id) == user_id))
     session.commit()

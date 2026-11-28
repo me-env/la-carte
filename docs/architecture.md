@@ -138,9 +138,10 @@ Principles (non-negotiable):
   shown once, revocable, optional expiry. The old `LA_CARTE_API_TOKEN` is imported once as the owner's PAT `legacy`.
 - Cross-user access answers "not found", never "forbidden"; a pytest matrix covers every REST route and MCP tool.
 
-Pieces: `auth.py` (mint/verify tokens, `CurrentUser` dependency, MCP token verification), `oauth.py` (the MCP SDK
-`OAuthAuthorizationServerProvider`: `/authorize`, `/token`, `/register` (DCR), `/revoke`, metadata), `identity.py`
-(providers). Tables `user`, `identity`, `apitoken`, `oauthclient`, `authrequest`, `authcode`; `user_id` on `note`,
+Pieces: `auth.py` (mint/verify tokens: every token is minted by `auth.mint`; `CurrentUser` dependency), `oauth.py`
+(the MCP SDK `OAuthAuthorizationServerProvider`, which also verifies `/mcp` bearer tokens; our `/authorize`,
+`/token`, `/revoke`, metadata, consent and callback routes shadow the SDK's; the SDK serves `/register` (DCR)),
+`identity.py` (Google and the fake provider for tests/e2e). Tables `user`, `identity`, `apitoken`, `oauthclient`, `authrequest`, `authcode`; `user_id` on `note`,
 `card`, `reviewlog`, `report`, `feedback`, `activityevent`; `settings` keyed by `user_id`. Flow: client →
 `/authorize` → (agents: `/oauth/consent`, Apple or Google) → provider → `/oauth/callback` → our code → client →
 `/token`; the iOS app's Apple path is `POST /oauth/apple` straight to tokens. Public paths: `/health`, icons, the

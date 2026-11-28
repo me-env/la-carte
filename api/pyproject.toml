@@ -11,6 +11,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.165.0",
     "fsrs>=6.3.3",
+    "httpx>=0.28.1",
     "mcp>=2.3.0",
     "pydantic-settings>=2.16.3",
     "sqlmodel>=0.0.50",
@@ -27,7 +28,6 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "pytest>=9.2.0",
     "ruff>=0.17.6",
 ]

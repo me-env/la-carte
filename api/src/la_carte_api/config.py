@@ -1,5 +1,10 @@
+from typing import Literal
+from urllib.parse import urlparse
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 
 class Settings(BaseSettings):
@@ -20,11 +25,31 @@ class Settings(BaseSettings):
     public_url: str | None = None
     host: str = "127.0.0.1"
     port: int = 8000
+    # Sign-in (spec 030b). Google "Web application" client; neither set and not `fake`: the
+    # server runs with personal access tokens only.
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    identity_provider: Literal["google", "fake"] = "google"  # `fake`: tests and e2e only
+    fake_email: str = "e2e@example.com"  # who the fake provider signs in
+    # `open`: any verified account gets a deck; `allowlist`: only `allowed_emails` + the owner.
+    signup: Literal["open", "allowlist"] = "open"
+    allowed_emails: str = ""  # comma-separated; read only in `allowlist` mode
 
     @field_validator("owner_email")
     @classmethod
     def _casefolded(cls, email: str | None) -> str | None:
         return (email or "").strip().casefold() or None
+
+    @property
+    def allowed(self) -> set[str]:
+        """Who may create an account in `allowlist` mode: the listed emails and the owner."""
+        listed = {email.strip().casefold() for email in self.allowed_emails.split(",")}
+        return {email for email in listed | {self.owner_email} if email}
+
+    @property
+    def is_loopback(self) -> bool:
+        """The server is reached on this machine only (tests, e2e, local dev)."""
+        return urlparse(self.base_url).hostname in LOOPBACK
 
     @property
     def base_url(self) -> str:

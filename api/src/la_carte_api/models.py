@@ -141,6 +141,52 @@ class ApiToken(SQLModel, table=True):
     revoked_at: datetime | None = Field(default=None, sa_type=UTCDateTime)
 
 
+class OAuthClient(SQLModel, table=True):
+    """A client registered with Dynamic Client Registration (spec 030b); `info` is the SDK's
+    `OAuthClientInformationFull` as JSON. The iOS app is built in, never stored."""
+
+    client_id: str = Field(primary_key=True)
+    info: str
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+
+
+class AuthRequest(SQLModel, table=True):
+    """A pending `/authorize` request while the user signs in with the identity provider (10
+    min). `id` is our `state` towards the provider; `client_state` is the client's own."""
+
+    id: str = Field(primary_key=True)
+    client_id: str
+    redirect_uri: str
+    redirect_uri_provided_explicitly: bool
+    code_challenge: str
+    scopes: str  # space-separated
+    resource: str
+    client_state: str | None = None
+    provider: str  # the identity provider the request went to ("google" | "fake")
+    nonce: str
+    provider_verifier: str  # our PKCE verifier towards the identity provider
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+
+
+class AuthCode(SQLModel, table=True):
+    """One of our authorization codes (`lc_ac_`, 5 min, single use); only its SHA-256 is
+    stored."""
+
+    hash: str = Field(primary_key=True)
+    user_id: UUID = Field(
+        sa_column=Column(
+            Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+        )
+    )
+    client_id: str
+    redirect_uri: str
+    redirect_uri_provided_explicitly: bool
+    code_challenge: str
+    scopes: str  # space-separated
+    resource: str
+    expires_at: datetime = Field(sa_type=UTCDateTime)
+
+
 class Note(SQLModel, table=True):
     """One thing the user knows: typed, named fields (spec 014). Its cards are directions over
     those fields. One deck per user, so no deck id."""
@@ -633,3 +679,22 @@ class PersonalToken(BaseModel):
     created_at: datetime
     expires_at: datetime | None
     last_used_at: datetime | None
+
+
+class PersonalTokenCreate(BaseModel):
+    """`POST /me/tokens` (spec 030b): only from the app (an `la-carte-ios` access token)."""
+
+    name: str = PydanticField(min_length=1, max_length=60)
+    scope: TokenScope = TokenScope.deck
+    expires_in_days: int | None = PydanticField(default=None, ge=1, le=365)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _trimmed(cls, name: Any) -> Any:
+        return name.strip() if isinstance(name, str) else name
+
+
+class PersonalTokenCreated(PersonalToken):
+    """A new personal access token: the only reply that ever holds `token`."""
+
+    token: str

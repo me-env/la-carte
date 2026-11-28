@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from la_carte_api import auth, deck
-from la_carte_api.auth import CurrentUser, SessionDep, StatsUser
+from la_carte_api.auth import AppUser, CurrentUser, SessionDep, StatsUser
 from la_carte_api.models import (
     ActivityBatch,
     ActivityEventRead,
@@ -22,6 +22,8 @@ from la_carte_api.models import (
     NoteType,
     NoteUpdate,
     PersonalToken,
+    PersonalTokenCreate,
+    PersonalTokenCreated,
     ReportCreate,
     ReportRead,
     ReviewCreate,
@@ -149,6 +151,16 @@ def delete_me(session: SessionDep, user: CurrentUser):
 @router.get("/me/tokens", response_model=list[PersonalToken])
 def list_tokens(session: SessionDep, user: CurrentUser):
     return auth.list_personal_tokens(session, user)
+
+
+@router.post("/me/tokens", response_model=PersonalTokenCreated, status_code=status.HTTP_201_CREATED)
+def create_token(session: SessionDep, user: AppUser, body: PersonalTokenCreate):
+    """A personal access token, shown once. Only from the app (an `la-carte-ios` access
+    token): a PAT or an agent's token gets 403."""
+    try:
+        return auth.create_personal_token(session, user, body)
+    except auth.TooManyTokens as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
 
 
 @router.delete("/me/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)

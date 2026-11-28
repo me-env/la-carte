@@ -8,7 +8,7 @@ from typing import Annotated
 from uuid import UUID
 
 from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.auth.settings import AuthSettings
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.mcpserver import MCPServer, UserMessage
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import Icon
@@ -17,7 +17,6 @@ from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
 from la_carte_api import deck
-from la_carte_api.auth import McpTokenVerifier
 from la_carte_api.config import Settings
 from la_carte_api.models import (
     ActivityEventRead,
@@ -38,6 +37,7 @@ from la_carte_api.models import (
     ReviewEntry,
     StrugglingCard,
 )
+from la_carte_api.oauth import SCOPE, LaCarteOAuth
 
 INSTRUCTIONS = """\
 la carte is the user's single flashcard deck (spaced repetition, FSRS).
@@ -186,21 +186,29 @@ def server_icons(public_url: str | None) -> list[Icon] | None:
     ]
 
 
-def build_mcp(engine: Engine, settings: Settings | None = None) -> MCPServer:
-    """Each user's deck as MCP tools, over bearer tokens checked by `auth.verify` (the `deck`
-    scope). With `settings.public_url`, serverInfo lists the icons the API serves there."""
+def build_mcp(
+    engine: Engine, settings: Settings | None = None, oauth: LaCarteOAuth | None = None
+) -> MCPServer:
+    """Each user's deck as MCP tools, over our bearer tokens (the `deck` scope), with la-carte
+    as the OAuth authorization server (`oauth`; without one, sign-in is off and tokens still
+    work). With `settings.public_url`, serverInfo lists the icons the API serves there."""
     settings = settings or Settings(_env_file=None)
+    oauth = oauth or LaCarteOAuth(engine, settings, identity=None)
     owner_email = settings.owner_email
     mcp = MCPServer(
         name="la-carte",
         instructions=INSTRUCTIONS,
         icons=server_icons(settings.public_url),
-        token_verifier=McpTokenVerifier(engine, resource=f"{settings.base_url}/mcp"),
+        auth_server_provider=oauth,
         auth=AuthSettings(
-            issuer_url=settings.base_url,
-            resource_server_url=f"{settings.base_url}/mcp",
-            required_scopes=["deck"],
-            validate_token_resource=False,  # our verifier only accepts our own tokens
+            issuer_url=oauth.base,
+            resource_server_url=oauth.resource,
+            required_scopes=[SCOPE],
+            client_registration_options=ClientRegistrationOptions(
+                enabled=True, valid_scopes=[SCOPE], default_scopes=[SCOPE]
+            ),
+            revocation_options=RevocationOptions(enabled=True),
+            validate_token_resource=False,  # `oauth` only accepts our own tokens
         ),
     )
 

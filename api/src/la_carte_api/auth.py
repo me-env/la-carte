@@ -14,14 +14,15 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
-from mcp.server.auth.provider import AccessToken
-from sqlalchemy.engine import Engine
+from sqlalchemy import update
 from sqlmodel import Session, col, or_, select
 
 from la_carte_api.db import sessions
 from la_carte_api.models import (
     ApiToken,
     PersonalToken,
+    PersonalTokenCreate,
+    PersonalTokenCreated,
     TokenKind,
     TokenScope,
     User,
@@ -33,6 +34,10 @@ log = logging.getLogger(__name__)
 PREFIX = {TokenKind.access: "lc_at_", TokenKind.refresh: "lc_rt_", TokenKind.pat: "lc_pat_"}
 LEGACY = "legacy"  # name of the owner's PAT imported from LA_CARTE_API_TOKEN
 TOUCH_EVERY = timedelta(hours=1)  # `last_used_at` / `last_seen_at` are written at most this often
+IOS_CLIENT = "la-carte-ios"  # the app's built-in OAuth client (spec 030b)
+ACCESS_TTL = timedelta(hours=1)
+REFRESH_IDLE = timedelta(days=90)  # a refresh token unused this long is dead
+MAX_PATS = 20  # live personal access tokens per user
 
 
 @dataclass(frozen=True)
@@ -74,10 +79,38 @@ def store(
 
 
 def mint(session: Session, user_id: UUID, kind: TokenKind, scope: TokenScope, **options) -> str:
-    """A new token for the user; the raw value is returned once and never stored."""
+    """A new token for the user; the raw value is returned once and never stored. Every token
+    is minted here (PATs, OAuth pairs), so a step that applies to all of them goes here."""
     raw = PREFIX[kind] + secrets.token_urlsafe(32)
     store(session, user_id, raw, kind, scope, **options)
     return raw
+
+
+def mint_pair(
+    session: Session,
+    user_id: UUID,
+    client_id: str,
+    family_id: UUID,
+    now: datetime | None = None,
+) -> tuple[str, str]:
+    """An OAuth access token (1 h) and refresh token (90 days idle) of one family (spec 030b)."""
+    now = now or utcnow()
+    common = {"client_id": client_id, "family_id": family_id, "now": now}
+    access = mint(session, user_id, TokenKind.access, TokenScope.deck,
+                  expires_at=now + ACCESS_TTL, **common)  # fmt: skip
+    refresh = mint(session, user_id, TokenKind.refresh, TokenScope.deck,
+                   expires_at=now + REFRESH_IDLE, **common)  # fmt: skip
+    return access, refresh
+
+
+def revoke_family(session: Session, family_id: UUID, now: datetime | None = None) -> None:
+    """Revokes every live token of a refresh family (its refresh and access tokens)."""
+    session.exec(
+        update(ApiToken)
+        .where(col(ApiToken.family_id) == family_id, col(ApiToken.revoked_at).is_(None))
+        .values(revoked_at=now or utcnow())
+    )
+    session.commit()
 
 
 def verify(session: Session, raw: str, now: datetime | None = None) -> Principal | None:
@@ -129,6 +162,26 @@ def list_personal_tokens(
         .order_by(col(ApiToken.created_at).desc())
     )
     return [PersonalToken(**token.model_dump()) for token in tokens]
+
+
+class TooManyTokens(ValueError):
+    def __init__(self) -> None:
+        super().__init__(f"At most {MAX_PATS} access tokens: revoke one first")
+
+
+def create_personal_token(
+    session: Session, user_id: UUID, body: PersonalTokenCreate, now: datetime | None = None
+) -> PersonalTokenCreated:
+    """A new PAT of the user; its value is in this reply only (spec 030b decision 8)."""
+    now = now or utcnow()
+    if len(list_personal_tokens(session, user_id, now)) >= MAX_PATS:
+        raise TooManyTokens()
+    days = body.expires_in_days
+    expires_at = now + timedelta(days=days) if days else None
+    raw = mint(session, user_id, TokenKind.pat, body.scope, name=body.name,
+               expires_at=expires_at, now=now)  # fmt: skip
+    token = session.exec(select(ApiToken).where(ApiToken.hash == token_hash(raw))).one()
+    return PersonalTokenCreated(**token.model_dump(), token=raw)
 
 
 def revoke_personal_token(
@@ -215,27 +268,11 @@ CurrentUser = Annotated[UUID, Depends(_deck_user)]  # every route but `GET /stat
 StatsUser = Annotated[UUID, Depends(_stats_user)]  # `GET /stats`: the widget's token too
 
 
-# --- MCP ---------------------------------------------------------------------------------------
+def _app_user(principal: PrincipalDep, _: CurrentUser) -> UUID:
+    """Only the signed-in app: an `la-carte-ios` access token (not a PAT, not an agent's)."""
+    if principal.kind != TokenKind.access or principal.client_id != IOS_CLIENT:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Create access tokens from the la-carte app")
+    return principal.user_id
 
 
-class McpTokenVerifier:
-    """The MCP SDK's `TokenVerifier` over `verify`: the token's user is the `subject`."""
-
-    def __init__(self, engine: Engine, resource: str) -> None:
-        self.engine = engine
-        self.resource = resource
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        with Session(self.engine) as session:
-            principal = verify(session, token)
-        if principal is None:
-            return None
-        expires_at = principal.expires_at
-        return AccessToken(
-            token=token,
-            client_id=principal.client_id or principal.kind.value,
-            scopes=[principal.scope.value],
-            expires_at=int(expires_at.timestamp()) if expires_at else None,
-            resource=self.resource,
-            subject=str(principal.user_id),
-        )
+AppUser = Annotated[UUID, Depends(_app_user)]  # `POST /me/tokens`

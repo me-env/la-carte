@@ -250,6 +250,8 @@ def _rest_cases(a: dict, b_card: str) -> dict:
         ("GET", "/activity"): ("/activity", None, none_of_a),
         ("GET", "/me"): ("/me", None, none_of_a),
         ("GET", "/me/tokens"): ("/me/tokens", None, none_of_a),
+        ("POST", "/me/tokens"): ("/me/tokens", {"name": "x"},  # a PAT can't mint (030b)
+                                 lambda r: r.status_code == 403 or pytest.fail(r.text)),
         ("DELETE", "/me/tokens/{token_id}"): (f"/me/tokens/{a['token_id']}", None, not_found),
         ("DELETE", "/me"): ("/me", None, lambda r: r.status_code == 204 or pytest.fail(r.text)),
     }  # fmt: skip
