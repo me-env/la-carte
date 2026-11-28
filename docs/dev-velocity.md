@@ -145,6 +145,10 @@ nothing. `_ios-env.sh` mounts any image that isn't (after a reboot or replug; ~0
 - **SSD not mounted:** every iOS script stops at once with exit **78** and "❌ The simulators live in … not mounted":
   nothing runs and nothing is recreated on the internal disk. Plug the SSD in and rerun. (Xcode by hand would show
   the devices missing or empty; don't recreate them, plug the SSD in.)
+- **Simulator service started before the images** (2026-11-28, after a reboot: `simctl` listed 1 device of 11, runs
+  failed with "no simulator for the destination"): `scripts/_sim-service.sh` (run by `_ios-env.sh`, ~0.2 s) restarts
+  CoreSimulatorService once when a mounted image isn't listed, only if no simulator is booted and no `xcodebuild` or
+  Simulator app runs (any project); otherwise it warns, and `_sim-pool.sh` refuses to create a duplicate (exit 72).
 - Measured, `LaunchUITests` (4 tests) and full `ios-test.sh`, under heavy load from other agents (load 200–600):
   internal disk, warm device: 53.0 s and 5.3 min (283 tests). SSD: 54.2 s and 5.2 min (289 tests); per test
   7.0–7.7 s vs 6.6–6.8 s. The very first UI run after the migration took 114.6 s (one-off: its device had only been
