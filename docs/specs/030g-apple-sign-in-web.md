@@ -7,6 +7,11 @@ Overview: [030](030-accounts-google-login.md).
 Design reference: none for the app. Server HTML as in 030b decision 4; Apple's button per the HIG "Sign in with
 Apple" (black/white, "Continue with Apple").
 
+
+> **Amended by [032](032-encryption.md):** the Apple web callback ends in the same approval step as Google's (032b
+> decision 8): for a user with a key, AC 3 and AC 5 go through `/oauth/wait` and an approval in the app before the
+> redirect with `code`. The wait page needs the `lc_auth` cookie, which the same-site navigation after Apple's
+> cross-site `form_post` carries.
 ## Goal
 A user whose account signs in with Apple can connect an agent (Claude, ChatGPT, Cursor) over OAuth too: the consent
 page offers "Continue with Apple" next to "Continue with Google". Without this part, Apple users connect agents with

@@ -6,6 +6,13 @@ Depends on: 030a merged. Overview, principles, flow diagram, env and user action
 Design reference: none for the app. The consent and error pages are plain server HTML (system font, the
 la-carte icon from `/icon.svg`, one heading, one sentence, one button; light/dark via `prefers-color-scheme`).
 
+
+> **Amended by [032](032-encryption.md) (032b decisions 7–8):** for a user with an encryption key, the callback of an
+> agent client (not `la-carte-ios`) no longer redirects with a code: the request waits at `/oauth/wait` until the
+> user approves it in the app, which mints the code with a key slot; a user without a key gets "Open the la-carte app
+> and sign in once". `/token`, refresh rotation and `POST /me/tokens` (`deck`) carry the key slot; iOS-client tokens
+> come back locked and the app unlocks them. AC 4 holds as written for a keyless user; with a key it runs through the
+> approval (032 AC B9). AC 18's e2e adds `POST /me/key` before `POST /me/tokens` (032 AC B13).
 ## Goal
 Any MCP client (Claude Code, claude.ai connectors, ChatGPT, Cursor, VS Code) and the iOS app can sign the user in
 with Google against the API itself, and receive la-carte tokens scoped to that user's deck. Sign-up is open by

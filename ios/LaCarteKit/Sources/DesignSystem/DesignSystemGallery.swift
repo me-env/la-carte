@@ -162,6 +162,7 @@ struct DesignSystemGalleryContent: View {
     swatch("surface", Theme.surface)
     swatch("ink", Theme.ink)
     swatch("secondary", Theme.secondaryInk)
+    swatch("receded", Theme.recededInk)
     swatch("hairline", Theme.hairline)
     swatch("accent", Theme.accent)
   }

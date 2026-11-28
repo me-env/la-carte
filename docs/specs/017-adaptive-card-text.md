@@ -28,15 +28,16 @@ Measure the length of a side: the characters of its shown text fields after trim
 | Answer | Font token | Style | Alignment |
 |---|---|---|---|
 | short **and** the question isn't long | `.cardAnswer` (new, the maximum) | `.title2` regular (22) | by lines |
+| short **and** the question is long (#16) | `.cardFaceSmall` | `.title2` medium (22) | the question's edge |
 | otherwise | `.body` (the minimum) | `.body` (17) | by lines |
 
 **Alignment by rendered lines (amended 2026-11-22, user feedback).** Sizes stay on character counts; alignment
 follows the lines the text actually wraps to at the current width and text size:
 - A side of **1 or 2 lines** is centred, line by line.
 - A side of **3 or more lines** is leading-aligned.
-- The question depends only on itself, and the answer depends only on itself: each side follows its own line
-  count (amended 2026-11-28 per user, see "Answer alignment" below; it used to force the answer leading under a
-  leading question).
+- The question depends only on itself. The answer follows the question's axis when the question is leading
+  (3+ lines): it is then leading on the question's edge, whatever its length; under a centred question it follows its
+  own line count (amended 2026-11-28 per user, twice: see "One axis per card + weight transfer", #16).
 
 How it's measured: in the card's column, a hidden copy of each side's **saved** text is laid out cut to two lines
 (`lineLimit(2)`), with the full text over it. If the full text is taller, the side has 3+ lines. The probe is
@@ -75,7 +76,8 @@ Rules and why:
 1. **The question depends only on itself.** Its size and alignment never depend on the answer. The answer
    is hidden before reveal, so a question that changed with it would hint at the answer.
 2. **The answer is always below the question.** It is never in a bigger tier, and the colour (`secondaryInk`)
-   and weight (regular, not medium) set it apart too. When the question is at its 22 pt minimum, the
+   and weight (regular, not medium) set it apart too. *(Under a leading question, #16: the answer takes `ink` and the question
+   recedes to `recededInk` on reveal.)* When the question is at its 22 pt minimum, the
    answer drops to 17, so the two never read as equal blocks.
 3. **Centre a few lines, align paragraphs to the leading edge.** Centred ragged paragraphs are hard to read.
    Apple centres only short display text and aligns body text to the leading edge (Notes, Translate,
@@ -198,6 +200,7 @@ and one long sample to `DesignSystemGalleryContent`.
 | 13 | In layouts A to D, for 1-, 2-, 3- and 5-line questions and single lines filling 74, 89, 92 and 98 % of the column, with 1-, 2- and 4-line answers, revealing doesn't change a pixel of the question, and the question's columns are the same whatever the answer. In D, under a wide question (widest line ≥ 85 %) a leading answer's ink stays within the question's (3 pt left, 6 pt right for the break space), under any other (the 1-line, the 68 % 2-line and the 74 % questions) it starts at the column's edge, wider than the question, and a centred one shares its centre (`ScreenColorTests.questionStaysPut`); a 1-line answer wider than a 2-line question stays on one line (`ScreenColorTests.centredAnswerIgnoresTheQuestionWidth`; amended 2026-11-22 per user). On device (layout D, iPhone 17 Pro): `study.front`'s frame is identical before and after reveal for wide (≥ 85 %) and narrow (under 85 %, one line or wrapped) questions with 1- and 3+-line answers, and the question's pixels don't move (`screen-sample.py compare`). | render + UI |
 | 14 | *Amends #9 and #13 (2026-11-25).* "Revealing doesn't change a pixel of the question" holds when `lift ≤ 40 pt` (1- and 2-line answers). When `lift > 40` (e.g. 4-line answers), the question is vertically centred in `study.card` before reveal (± 1 pt) and after reveal its pixels are identical to today's revealed render; its horizontal place and columns never change. Reduce Motion: no lift (as #13). | render + UI |
 | 15 | *Amends #6, #7 and #13 (2026-11-28, "Answer alignment").* Basic card, revealed, layout D, light **and** dark: the answer's alignment depends only on its own rendered lines. (a) A question of 3+ lines (leading) with a 1-line answer (mock-lengths "Which treaty, signed in 1648…" / "The Peace of Westphalia"): `study.back` is centred in `study.card` (midX within 1 pt) and does **not** start at the question's left edge. (b) The same question with a 2-line answer: `study.back` centred (midX within 1 pt), its two lines each centred. (c) The same question with a 3+-line answer: `study.back` leading, starting at `study.front`'s left edge (within 1 pt), within its width (+6 pt), as before. (d) A 1-line centred question with a 3+-line answer: `study.back` leading at the column's edge, as before. (e) The question's frame and pixels on reveal are unaffected (#13, #14). (f) Person cards unchanged (014d). Unit: `answerAlignment`'s rule is `.center` for a 1-2-line answer under a 3+-line question, `.leading` for 3+ lines under any question (`StudyTextLayoutTests`). | unit + render + UI |
+| 16 | *Amends #2, #6, #7, #10, #13 and #15 (2026-11-28, "One axis per card + weight transfer").* Layout D, light **and** dark (forest by token values). (a) **Leading question, 1-line answer** (Westphalia: "Which treaty, signed in 1648…" / "The Peace of Westphalia"; and Git): `study.front` starts at `study.card` minX + 16 pt (± 1), lines leading; revealed `study.back` starts at `study.front`'s minX (± 1), font `.cardFaceSmall` (`.title2` medium), colour `ink` (#1C1C1C / #F2F2F0). Before reveal `study.front` is `ink`; after reveal `recededInk` (#6F6F6D / #8A8A88), measured ≥ 4.5:1 on `background` (`screen-sample.py contrast`). (b) **Leading question, 2-line answer** ("Which English idiom…" / "To feel down, to have the blues…"): `study.back` leading at `study.front`'s minX (± 1), both lines starting there, `.body`, `ink`; question `recededInk` after reveal. (c) **Leading question, 3+-line answer** (the 017 long Q / Westphalia paragraph): as (b), and `study.back` may be wider than the question, never wider than the column. (d) **Centred question, unchanged**: "la mer" / "the sea" both centred (midX ± 1), question `ink` before and after reveal, answer `.cardAnswer` `secondaryInk`; "mitochondria" + 3+-line answer: question centred `ink`, answer leading at the column edge, `.body` `secondaryInk`; a 2-line centred question with a 1-2-line answer: answer centred. (e) **Motion**: on reveal of a leading-question card, `study.front`'s colour crossfades `ink` → `recededInk` over 0.25 s ease-in-out (`Theme.Motion.standard`; a frame at ~125 ms is between the two); with **Reduce Motion** the same crossfade runs and there is no lift (#14). A new card's question shows in `ink` from its first frame. (f) **Position**: revealing doesn't move the question: `study.front`'s frame is identical before and after, and its ink mask (`screen-sample.py bbox`/`bands`) is unchanged; only its colour changes (replaces #13's "not a pixel" for leading questions). (g) **Edit**: double-tapping a revealed leading question gives `study.frontField` starting at 16 pt, spanning the column, in `recededInk`. (h) **Person cards unchanged** (014d): alignment and colours as before. (i) Unit: `CardText.answerFont` — a 7-char answer with a 61-char prompt → `.cardFaceSmall`; a 25-char answer with that prompt → `.body`; a 24-char answer with a 60-char prompt → `.cardAnswer`. `answerAlignment(question:answer:)` → `.leading` for a 1-, 2- and 3+-line answer under a leading question; `.center` for 1-2 lines and `.leading` for 3+ under a centred one (`StudyTextLayoutTests`). | unit + render + UI |
 
 Mock data: add `LA_CARTE_API=mock-lengths` (`InMemoryAPIClient`, English sample cards). It is the existing
 deck with these four cards first, in this order:
@@ -214,7 +217,7 @@ The columns are short / medium / long / very long / short question + long answer
 - `docs/design/renders/017/sheet-back.png` (revealed)
 - `docs/design/renders/017/sheet-front.png` (before reveal)
 
-## Answer alignment (design note, per user 2026-11-28)
+## Answer alignment (design note, per user 2026-11-28; superseded for leading questions by #16)
 User, after a blind A/B of real `StudyView` renders (light + dark, five revealed basic cards): "I prefer A.png
 answered centered even if question was left". A was this rule; B was the rule above it (answer forced leading under a
 leading question).
@@ -241,6 +244,76 @@ column's edge.
 *Dropped:* the later 3-option balance experiment (branch `design-lead/answer-balance-exp`: separated spacing,
 shared edge, centred axis with an 85 % measure and a bigger answer font) is superseded by this decision and won't
 ship.
+
+## One axis per card + weight transfer (design note, per user 2026-11-28)
+User, after a round on one of their own cards (long question, one-word answer), picked **P2 "weight transfer"** and added: "I don't
+understand why for the one you named long question, two line answer, the answer is centered. I think we got to be
+coherent. And like if we go back to aligning left the answers, like we should also do it for the two lines answers."
+This **replaces** "Answer alignment" above (and #15 (a), (b)) for the leading-question case. Criterion: #16.
+
+**Rule** (basic and notes cards; person cards keep 014d):
+1. **One axis per card.** A question of 3+ rendered lines (leading, the existing `frontMeasure` probe) puts its answer
+   on the **same left edge**, leading, whatever the answer's length (1, 2 or 3+ lines). A question of 1-2 lines
+   (centred) keeps today's answer rule: 1-2 lines centred, 3+ leading.
+   `answerAlignment = promptAlignment == .leading ? .leading : (backMeasure.isMultiline ? .leading : .center)`.
+2. **One fixed edge for leading text.** A leading question is laid out in the full column (layout A's placement:
+   lines start at the 16 pt side padding, `Theme.Spacing.m`, ragged right), not as a block centred at its own width,
+   and its answer uses the same full column. Measured (real renders, iPhone 17 Pro, light): with the centred block,
+   the left edge of a leading question drifts 16-31 pt from card to card (the user's card 16.3, Git 21, Westphalia 28,
+   long Q/long A 31, "Photosynthesis…" 18.7); fixed, it is 16.3-17 on every card, the same edge as the top bar's
+   deck button. *User-visible effect:* a paragraph question moves up to ~15 pt left (only when its widest line is
+   short of the column) and stays there before and after reveal; its right margin is ragged instead of mirrored; a
+   long answer under it spans the column instead of the question's width, so it can take one line less. The 85 %
+   rule (layout D) now applies only under a **centred** (2-line, wide) question, unchanged.
+3. **Weight transfer, on every leading-question card.** Under a leading question the answer is drawn in `Theme.ink`;
+   on reveal the question crossfades from `ink` to `Theme.recededInk`. Under a centred question nothing changes:
+   question `ink`, answer `secondaryInk`, no colour change on reveal.
+   *Why every leading-question card, not only long Q / short A:* one trigger (the line probe that already picks the
+   axis) drives both effects, so there is no third condition on the answer's length. A paragraph question is the
+   content the user reads before reveal; after reveal the eye must land on the answer whatever its length (visual
+   weight comes from value as much as size: research note principle 1). Orbit / Quantum Country demotes the
+   question on every reveal, not only for short answers (principle 6). Limiting it to short answers would leave a long
+   grey answer under a long ink question, the inverted hierarchy the blind critic called out ("the thing just
+   revealed is the faintest text on screen"). *Why not centred questions:* a 1-2-line question is display text, a
+   headword; size (34/28 vs 22/17) already sets the hierarchy (Dictionary pattern), and greying a one-word question
+   reads as disabled. That's the user's rule ("centred: today's behaviour").
+4. **Font.** Sizes stay on character counts (rule 4). One change in `CardText.answerFont`: a short answer
+   (≤ 24 chars) under a **long** question (> 60 chars or a line break) is `.cardFaceSmall` (`.title2` medium, the
+   question's tier), was `.body`. A one-word answer in ink at 17 pt reads as a caption under a 22 pt paragraph
+   (P2 as picked). Rule 2 still holds: never a bigger tier than the question. Other answers unchanged (`.cardAnswer`
+   for a short answer under a question that isn't long, `.body` otherwise), so a 25-60-char question that wraps to
+   3+ lines gets the axis and the colours, with its short answer at `.cardAnswer`.
+5. **`recededInk`** (new DesignSystem token, `Theme.swift`): light `#6F6F6D`, dark `#8A8A88`, forest `#83938A`.
+   Measured on the renders with `screen-sample.py contrast`: light 4.8:1, dark 5.03:1 on `background` (forest
+   5.57:1 by the token values). AA for text in every theme; `secondaryInk` light (2.6:1) is not used for this.
+6. **Motion.** The question's colour change animates with `Theme.Motion.standard` (0.25 s ease-in-out), scoped to the
+   prompt's foreground style and driven by `store.isRevealed` (the `.animation(_:body:)` form, as the answer's
+   opacity). It runs alongside the reveal lift (#14) when there is one. **Reduce Motion: the crossfade stays** (a
+   colour fade moves nothing, like the answer's opacity fade); only the lift is dropped (#14). A new card's question
+   appears in `ink` with the card's fade-in, never fading from grey.
+7. **Edit (010).** The edit field keeps the side's colour (a revealed leading question edits in `recededInk`), and a
+   leading question's field spans the column, starting at 16 pt.
+
+**Renders** (real `StudyView`, iPhone 17 Pro, rows: today revealed / new before reveal / new revealed; columns Git,
+Westphalia, short Q/A, long Q + 2-line A, long Q / long A, short Q / long A), built from a local exploration patch
+(branch `design-lead/coherent-axis-exp`, not merged):
+`<scratch>/renders/design-lead-coherent/sheet-017-16-light.png` and `…-dark.png` (local, not committed).
+
+**Blind A/B** (fresh design-critic, 2026-11-28, unlabelled A/B sheets, six cards, light + dark): new 6/10 vs today
+4/10; new won ("constant left margin", "the revealed answer is what you read"). Key: A = new. Critic's other points,
+settled: it asked to transfer the weight on centred cards too (declined: the user's rule keeps them, see 3); it read
+long answers as ~13 pt (they are `.body` 17 pt, a sheet-scale misreading); question-to-answer spacing stays
+`Theme.Spacing.m` on every card.
+
+**ios-engineer** (`StudyView`, `CardText`):
+- `answerAlignment` as rule 1; put the rule in a pure static function and unit-test it (`StudyTextLayoutTests`).
+- Leading question: `prompt(card).placed(promptAlignment, asBlock: false)`; `answerWidth` is nil when
+  `promptAlignment == .leading`; `editWidth(.front)` nil for a leading question.
+- `prompt` colour `promptAlignment == .leading && store.isRevealed ? Theme.recededInk : Theme.ink`, animated as rule 6;
+  `answer` colour `promptAlignment == .leading ? Theme.ink : Theme.secondaryInk`. Notes cards: other prompt text
+  fields stay `.body` `secondaryInk`.
+- `CardText.answerFont` as rule 4; update its unit tests (#2) and `ScreenColorTests.questionStaysPut` (#13 now
+  compares the question's shape, not its colour, across reveal on leading-question cards).
 
 ## TCA shape / API
 No state, action or API change. The view changes are in `StudyView` (`prompt`, `answer`, `side`, `field`,
