@@ -297,7 +297,7 @@ This **replaces** "Answer alignment" above (and #15 (a), (b)) for the leading-qu
 **Renders** (real `StudyView`, iPhone 17 Pro, rows: today revealed / new before reveal / new revealed; columns Git,
 Westphalia, short Q/A, long Q + 2-line A, long Q / long A, short Q / long A), built from a local exploration patch
 (branch `design-lead/coherent-axis-exp`, not merged):
-`/Volumes/cyprienricque_ssd/la-carte/renders/design-lead-coherent/sheet-017-16-light.png` and `…-dark.png`.
+`<scratch>/renders/design-lead-coherent/sheet-017-16-light.png` and `…-dark.png` (local, not committed).
 
 **Blind A/B** (fresh design-critic, 2026-11-28, unlabelled A/B sheets, six cards, light + dark): new 6/10 vs today
 4/10; new won ("constant left margin", "the revealed answer is what you read"). Key: A = new. Critic's other points,
