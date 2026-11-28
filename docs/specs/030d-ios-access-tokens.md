@@ -6,6 +6,9 @@ Depends on: 030b (`POST /me/tokens`), 030a (`GET`/`DELETE /me/tokens`), 030c (si
 section). Overview: [030](030-accounts-google-login.md) principle 6.
 Design reference: docs/design/reference/04-list-dark.jpg (plain list rows), 03-detail-light.jpg (sheet with a form).
 
+
+> **Amended by [032](032-encryption.md):** no UI change. A `deck` PAT carries the user's key (032b decision 7), so it
+> must be created from an unlocked app session (always the case after sign-in); the widget's `stats` token carries none.
 ## Goal
 A signed-in user creates a personal access token (PAT) for a script, CI, or an MCP client that has no OAuth, copies
 it once, and can revoke it later. This is the only place PATs are minted: they are API tokens tied to an Apple or

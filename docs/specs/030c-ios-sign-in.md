@@ -10,6 +10,11 @@ Design reference: docs/design/reference/02-editor-light.jpg, 01-editor-dark.jpg 
 like 008's "Connect your deck"), 05-theme-forest.jpg; Google's "Sign in with Google" branding guidelines
 (developers.google.com/identity/branding-guidelines) for the button.
 
+
+> **Amended by [032](032-encryption.md) (032c):** after the token exchange `AuthClient` checks `GET /me.key` and sets
+> up or unlocks the user's key (recovery key screen or unlock screen in `SignInFeature`); `signIn` returns
+> `SignInOutcome`; a 403 `Locked` is handled like `.unauthorized` (decision 7); Delete Account also deletes the
+> Keychain item `account-key.<user id>`, Sign Out keeps it.
 ## Goal
 A new user opens the app, taps "Continue with Google", picks their account in a system browser sheet, and lands on
 their deck. They stay signed in (silent token refresh), can sign out, and can delete their account from Settings.

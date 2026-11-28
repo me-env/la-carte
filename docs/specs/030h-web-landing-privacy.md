@@ -9,6 +9,10 @@ Supersedes 030b decision 9 and AC 17 (`/privacy` moves here). Overview: [030](03
 Design reference: the README visuals (`marketing/readme/`), the app icon (`/icon.svg`), the brand kit
 (`docs/design/brand*`); Apple's App Store marketing guidelines for the badge.
 
+
+> **Amended by [032](032-encryption.md):** the privacy text gains "How your data is protected" and changes to "Who can
+> see it", "Server logs" and "Delete your account" (032 "Privacy wording"); AC 4 also checks "can't read" and "not
+> end-to-end encryption". The approval wait page (`/oauth/wait`) uses the consent page's server-HTML style.
 ## Goal
 The App Store needs a public privacy policy and a support URL (5.1.1(i), App Store Connect). la-carte also gets a
 one-page landing site: name, logo, a few screenshots, the demo videos, an App Store link, and links to privacy and
