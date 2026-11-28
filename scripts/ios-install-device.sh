@@ -48,7 +48,13 @@ BUNDLE_ID="$(unzip -p "$IPA" Payload/LaCarte.app/Info.plist | plutil -extract CF
 # devicectl waits forever on a device whose tunnel won't come up (seen 2026-11-23 over Wi-Fi: tunnel
 # stuck "connecting" until the user's CoreDeviceService was restarted). So every call is bounded, and the
 # device is probed first; if it doesn't answer, restart CoreDeviceService once (launchd relaunches it).
-probe() { xcrun devicectl device info details --device "$DEVICE" --timeout 45 >/dev/null 2>&1; }
+# `info details` also succeeds from cache for a disconnected device ("Device State: unavailable", seen
+# 2026-11-28; the install then fails with CoreDeviceError 4016), so check the state too.
+probe() {
+  local info
+  info="$(xcrun devicectl device info details --device "$DEVICE" --timeout 45 2>/dev/null)" || return 1
+  ! grep -q 'Device State: unavailable' <<<"$info"
+}
 if ! probe; then
   echo "==> $DEVICE doesn't answer; restarting CoreDeviceService and retrying" >&2
   pkill -u "$(id -u)" -x CoreDeviceService || true
