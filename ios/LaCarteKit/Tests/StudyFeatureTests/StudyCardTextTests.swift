@@ -93,10 +93,23 @@ struct StudyTextLayoutTests {
     let oneLine = StudyView.TextMeasure(width: 200, height: 26, twoLines: 26)
     let twoLines = StudyView.TextMeasure(width: 340, height: 52, twoLines: 52)
     let threeLines = StudyView.TextMeasure(width: 340, height: 78, twoLines: 52)
-    // The rule takes no question: under a 3+-line (leading) question, a 1-2-line answer stays centred (#15a, b).
     #expect(StudyView.alignment(of: oneLine) == .center)
     #expect(StudyView.alignment(of: twoLines) == .center)
-    #expect(StudyView.alignment(of: threeLines) == .leading)  // a 3+-line answer under any question (#15c, d)
+    #expect(StudyView.alignment(of: threeLines) == .leading)
+  }
+
+  @Test func oneAxisPerCard() {
+    let oneLine = StudyView.TextMeasure(width: 200, height: 26, twoLines: 26)
+    let twoLines = StudyView.TextMeasure(width: 340, height: 52, twoLines: 52)
+    let threeLines = StudyView.TextMeasure(width: 340, height: 78, twoLines: 52)
+    // Under a leading question, every answer shares its edge (#16).
+    #expect(StudyView.answerAlignment(question: .leading, answer: oneLine) == .leading)
+    #expect(StudyView.answerAlignment(question: .leading, answer: twoLines) == .leading)
+    #expect(StudyView.answerAlignment(question: .leading, answer: threeLines) == .leading)
+    // Under a centred one, the answer aligns on its own lines.
+    #expect(StudyView.answerAlignment(question: .center, answer: oneLine) == .center)
+    #expect(StudyView.answerAlignment(question: .center, answer: twoLines) == .center)
+    #expect(StudyView.answerAlignment(question: .center, answer: threeLines) == .leading)
   }
 
   @Test func layoutCSnapsNearlyEqualBlocksThatStillFit() {

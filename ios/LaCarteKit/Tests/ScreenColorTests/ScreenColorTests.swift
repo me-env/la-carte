@@ -68,6 +68,8 @@ struct ScreenColorTests {
   /// own lines only, so a 1-2 line answer is centred in the column even under a leading question.
   /// Amended by #14 (reveal lift): with a 4-line answer the question sits > 40 pt high, so it starts centred in the
   /// card and rises on reveal into the place it has under Reduce Motion (no lift), which is today's revealed place.
+  /// Amended by #16: a leading (3+-line) question starts at the column's 16 pt edge, keeps its shape on reveal while it
+  /// recedes to `recededInk`, and its answer, whatever its length, starts at the same edge.
   @Test(arguments: StudyView.TextLayout.allCases, CardLines.questions.map(\.1) + CardLines.singleLines.map(\.1))
   func questionStaysPut(_ layout: StudyView.TextLayout, _ question: String) throws {
     let defaultLayout = StudyView.textLayout
@@ -75,6 +77,7 @@ struct ScreenColorTests {
     defer { StudyView.textLayout = defaultLayout }
     var columns: [ClosedRange<CGFloat>] = []
     var cardCentre: CGFloat?
+    let leadingQuestion = CardLines.questions.contains { $0.0 >= 3 && $0.1 == question }
     for (answerLines, answer) in CardLines.answers {
       let card = CardLines.card(question, answer)
       func screen(revealed: Bool, reduceMotion: Bool = false) throws -> Screen {
@@ -89,7 +92,14 @@ struct ScreenColorTests {
       let front = try screen(revealed: false), revealed = try screen(revealed: true)
       let still = try screen(revealed: false, reduceMotion: true)
       let ink = try #require(still.inkBounds(in: still.band(0.14, 0.85)), "no question drawn")
-      #expect(revealed.changedPixels(from: still, in: ink) == 0, "question moved on reveal (answer: \(answer))")
+      if leadingQuestion {
+        // Its colour changes, not its shape.
+        #expect(revealed.changedPixels(from: still, in: ink) > 0, "question didn't recede on reveal (answer: \(answer))")
+        #expect(revealed.inkBounds(in: ink.insetBy(dx: -2, dy: -2)) == ink, "question moved on reveal (answer: \(answer))")
+        #expect(abs(ink.minX - 16) <= 1.5, "leading question off the column's edge: \(ink)")
+      } else {
+        #expect(revealed.changedPixels(from: still, in: ink) == 0, "question moved on reveal (answer: \(answer))")
+      }
       let lifted = try #require(front.inkBounds(in: front.band(0.14, 0.85)), "no question drawn")
       #expect(lifted.minX == ink.minX && lifted.maxX == ink.maxX, "lift moved the question sideways: \(lifted) vs \(ink)")
       if answerLines <= 2 {
@@ -111,7 +121,9 @@ struct ScreenColorTests {
       let below = CGRect(x: 0, y: ink.maxY + 1, width: revealed.size.width, height: bottom - ink.maxY - 1)
       let answerInk = try #require(revealed.inkBounds(in: below), "no answer drawn")
       let leading = answerLines >= 3
-      if leading, !CardLines.wide.contains(question) {
+      if leadingQuestion {
+        #expect(abs(answerInk.minX - ink.minX) <= 3, "answer off the question's edge: \(answerInk) vs \(ink) (answer: \(answer))")
+      } else if leading, !CardLines.wide.contains(question) {
         // Amended 2026-11-22 (user): a question under 85 % of the column, even wrapped, leaves the answer the column.
         #expect(answerInk.minX < 16 + 3 && answerInk.width > ink.width,  // at the column's 16 pt edge
                 "answer held to a narrow question: \(answerInk) vs \(ink) (answer: \(answer))")

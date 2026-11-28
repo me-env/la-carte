@@ -25,8 +25,13 @@ struct CardTextTests {
     #expect(CardText.answerFont(text(24), prompt: "la mer") == .cardAnswer)
     #expect(CardText.answerFont(text(24), prompt: text(60)) == .cardAnswer)
     #expect(CardText.answerFont(text(25), prompt: "la mer") == .body)
-    #expect(CardText.answerFont(text(7), prompt: text(61)) == .body)
     #expect(CardText.answerFont("one\ntwo", prompt: "la mer") == .body)
+  }
+
+  @Test func aShortAnswerUnderALongPromptTakesThePromptsTier() {
+    #expect(CardText.answerFont(text(7), prompt: text(61)) == .cardFaceSmall)
+    #expect(CardText.answerFont(text(24), prompt: "one\ntwo") == .cardFaceSmall)
+    #expect(CardText.answerFont(text(25), prompt: text(61)) == .body)
   }
 
   @Test func aLongPromptKeepsTheAnswerAtBody() {

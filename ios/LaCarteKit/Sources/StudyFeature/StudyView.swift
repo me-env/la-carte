@@ -261,7 +261,8 @@ public struct StudyView: View {
                 person(card)
               } else {
                 VStack(spacing: Theme.Spacing.m) {
-                  prompt(card).placed(promptAlignment, asBlock: Self.textLayout != .column)
+                  // A leading question starts at the column's edge, so every paragraph shares one left edge (#16).
+                  prompt(card).placed(promptAlignment, asBlock: false)
                     .onGeometryChange(for: CGFloat.self, of: \.size.height) { questionHeight = $0 }
                   answer(card)
                     .animation(Theme.Motion.standard) { $0.opacity(store.isRevealed ? 1 : 0) }
@@ -476,7 +477,7 @@ public struct StudyView: View {
     } else {
       Text(text)
         .font(font)
-        .foregroundStyle(color)
+        .animation(Theme.Motion.standard) { $0.foregroundStyle(color) }
         .id(field)
         .allowsHitTesting(store.editing == nil)
         .gesture(TapGesture(count: 2).onEnded { store.send(.textDoubleTapped(field)) }, isEnabled: canEdit)
@@ -498,20 +499,28 @@ public struct StudyView: View {
     }
   }
 
-  /// A basic card's sides: one text field each, editable in place (spec 010).
+  /// A basic card's sides: one text field each, editable in place (spec 010). Under a leading question the revealed
+  /// answer takes the ink and the question recedes (#16).
   private func prompt(_ card: Card) -> some View {
-    side(.front, text: card.text(.front), font: card.promptFont.font, color: Theme.ink)
+    let recedes = promptAlignment == .leading && store.isRevealed
+    return side(.front, text: card.text(.front), font: card.promptFont.font, color: recedes ? Theme.recededInk : Theme.ink)
   }
 
   private func answer(_ card: Card) -> some View {
-    side(.back, text: card.text(.back), font: card.answerFont.font, color: Theme.secondaryInk)
+    let color = promptAlignment == .leading ? Theme.ink : Theme.secondaryInk
+    return side(.back, text: card.text(.back), font: card.answerFont.font, color: color)
   }
 
   /// The question depends only on itself, so it never moves on reveal.
   private var promptAlignment: TextAlignment { Self.alignment(of: frontMeasure) }
 
-  /// The answer depends only on its own lines, even under a leading question (spec 017 #15).
-  private var answerAlignment: TextAlignment { Self.alignment(of: backMeasure) }
+  private var answerAlignment: TextAlignment { Self.answerAlignment(question: promptAlignment, answer: backMeasure) }
+
+  /// One axis per card (#16): a leading question's answer shares its edge whatever its length; under a centred
+  /// question the answer aligns on its own lines.
+  static func answerAlignment(question: TextAlignment, answer: TextMeasure) -> TextAlignment {
+    question == .leading ? .leading : alignment(of: answer)
+  }
 
   static func alignment(of side: TextMeasure) -> TextAlignment {
     side.isMultiline ? .leading : .center
@@ -525,9 +534,9 @@ public struct StudyView: View {
     }
   }
 
-  /// Layout D: the width the answer is laid out in, or nil for the column.
+  /// Layout D: the width the answer is laid out in, or nil for the column (always under a leading question, #16).
   private var answerWidth: CGFloat? {
-    guard Self.textLayout == .questionWidth else { return nil }
+    guard Self.textLayout == .questionWidth, promptAlignment == .center else { return nil }
     return Self.referenceWidth(question: frontMeasure, answer: answerAlignment)
   }
 
@@ -595,13 +604,13 @@ public struct StudyView: View {
 
   nonisolated private static let twoLines = "study.twoLines"
 
-  /// The width a side's edit field keeps (the shown block's): a leading block's in B, C and D, a leading D answer's
-  /// column; nil spans the column.
+  /// The width a side's edit field keeps (the shown block's): a leading answer block's in B and C, a leading D answer's
+  /// column; nil spans the column, as the question always does.
   private func editWidth(_ field: StudyFeature.State.Field) -> CGFloat? {
-    if field == .back, Self.textLayout == .questionWidth { return answerWidth }
-    let alignment = field == .front ? promptAlignment : answerAlignment
-    guard alignment == .leading, Self.textLayout != .column else { return nil }
-    return (field == .front ? frontMeasure : backMeasure).width
+    guard field == .back else { return nil }
+    if Self.textLayout == .questionWidth { return answerWidth }
+    guard answerAlignment == .leading, Self.textLayout != .column else { return nil }
+    return backMeasure.width
   }
 
   struct TextMeasure: Equatable {
