@@ -15,7 +15,14 @@ from test_migration import CARD, OLD_SCHEMA
 from la_carte_api import auth, db, deck
 from la_carte_api.app import create_app
 from la_carte_api.config import DB_KEY_HELP, Settings
-from la_carte_api.db import NEEDS_KEY, REKEYED, WRONG_KEY, MigrationRefused, make_engine
+from la_carte_api.db import (
+    NEEDS_KEY,
+    REKEY_FAILED,
+    REKEYED,
+    WRONG_KEY,
+    MigrationRefused,
+    make_engine,
+)
 from la_carte_api.models import (
     ApiToken,
     FeedbackKind,
@@ -163,8 +170,11 @@ def test_a_failed_encryption_keeps_the_plaintext_file(tmp_path, monkeypatch):  #
     assert sorted(p.name for p in tmp_path.iterdir()) == ["deck.db"]
 
     monkeypatch.undo()
-    _start(path, db_key=K1)  # the next start tries again, over the stale `.encrypting`
-    assert _opens_with(path, K1) and not (tmp_path / "deck.db.encrypting").exists()
+    for leftover in ("deck.db.encrypting-journal", "deck.db.encrypting-wal"):
+        (tmp_path / leftover).write_bytes(b"left by a crash")
+    _start(path, db_key=K1)  # the next start tries again, over the stale `.encrypting*`
+    assert _opens_with(path, K1)
+    assert not list(tmp_path.glob("deck.db.encrypting*"))
 
 
 def test_a_wrong_key_refuses_to_start_and_leaves_the_file(tmp_path):  # A3
@@ -186,6 +196,7 @@ def test_a_wrong_key_refuses_to_start_and_leaves_the_file(tmp_path):  # A3
         {"public_url": "https://example.com", "db_key": ""},  # Compose's unset variable
         {"public_url": "https://example.com", "db_key": "abc"},
         {"public_url": "https://example.com", "db_key": "zz" * 32},
+        {"public_url": "carte.example.com"},  # no scheme: no parseable host, still production
         {"db_key": K1[:-1]},  # malformed even off production
         {"db_key": K1, "db_key_new": "abc"},
     ],
@@ -227,6 +238,50 @@ def test_rekey_moves_the_file_to_the_new_key(tmp_path, caplog):  # A5
 
     with pytest.raises(RuntimeError, match="set LA_CARTE_DB_KEY to the current key"):
         _start(path, db_key_new=K2)
+
+
+def test_a_rekey_that_did_not_take_refuses_to_start(tmp_path, monkeypatch, caplog):  # A5
+    path = tmp_path / "deck.db"
+    _seed(path, K1)
+    monkeypatch.setattr(db, "_rekey", lambda *_: None)  # PRAGMA rekey silently did nothing
+    with pytest.raises(MigrationRefused, match=REKEY_FAILED):
+        _start(path, db_key=K1, db_key_new=K2)
+    assert REKEYED not in caplog.text
+    assert _opens_with(path, K1)
+
+
+def test_the_key_pragma_runs_first_on_the_first_connection(tmp_path, monkeypatch):  # A1
+    statements: list[list[str]] = []  # per connection, in order
+    connect = sqlcipher.connect
+
+    def traced(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        statements.append([])
+        connection.set_trace_callback(statements[-1].append)
+        return connection
+
+    monkeypatch.setattr(sqlcipher, "connect", traced)
+    make_engine(f"sqlite:///{tmp_path / 'deck.db'}", key=K1).dispose()
+    assert statements[0][0].startswith("PRAGMA key"), statements[0][:3]
+
+
+def test_only_a_wrong_key_reads_as_a_wrong_key(tmp_path, monkeypatch):  # A3
+    path = tmp_path / "deck.db"
+    _seed(path, K1)
+
+    class Locked:
+        def execute(self, sql):
+            if not sql.startswith("PRAGMA key"):
+                raise sqlcipher.OperationalError("database is locked")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(db.sqlcipher, "connect", lambda _path: Locked())
+    with pytest.raises(sqlcipher.OperationalError, match="database is locked"):
+        db._opens(str(path), K1)
+    monkeypatch.undo()
+    assert db._opens(str(path), K1) and not db._opens(str(path), K2)
 
 
 def test_a_plaintext_database_with_both_keys_ends_on_the_new_key(tmp_path):  # A2 + A5

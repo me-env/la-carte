@@ -42,9 +42,14 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
-        """`public_url` is set and not a loopback address."""
-        host = urlsplit(self.public_url or "").hostname
-        if not host or host == "localhost":
+        """`public_url` is set and not a loopback address (set without a parseable host, e.g. no
+        scheme, counts as production: the safe side)."""
+        if not self.public_url:
+            return False
+        host = urlsplit(self.public_url).hostname
+        if not host:
+            return True
+        if host == "localhost":
             return False
         try:
             return not ip_address(host).is_loopback

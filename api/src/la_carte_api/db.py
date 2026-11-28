@@ -39,6 +39,10 @@ NEEDS_OWNER = (
 WRONG_KEY = "LA_CARTE_DB_KEY doesn't open this database"
 NEEDS_KEY = "This database is encrypted: set LA_CARTE_DB_KEY"
 REKEYED = "rekeyed: set LA_CARTE_DB_KEY to the new value and remove LA_CARTE_DB_KEY_NEW"
+REKEY_FAILED = (
+    "LA_CARTE_DB_KEY_NEW doesn't open the database after rekeying: "
+    "keep LA_CARTE_DB_KEY and remove LA_CARTE_DB_KEY_NEW"
+)
 PLAINTEXT_HEADER = b"SQLite format 3\0"
 
 
@@ -80,7 +84,7 @@ def open_database(
         module = {"module": sqlcipher} if key else {}
         engine = create_engine(database_url, connect_args={"check_same_thread": False}, **module)
 
-    @event.listens_for(engine, "connect")
+    @event.listens_for(engine, "connect", insert=True)  # before SQLAlchemy's own (dialect init)
     def _on_connect(connection, _record) -> None:
         if key:
             connection.execute(_key_pragma("key", key))  # first, before anything reads the file
@@ -112,6 +116,8 @@ def _settle_key(path: str, key: str | None, new_key: str | None) -> str | None:
         if not new_key:
             return key
         _rekey(path, key, new_key)
+        if not _opens(path, new_key):
+            raise MigrationRefused(REKEY_FAILED)
     elif not (new_key and _opens(path, new_key)):  # new_key: a restart before the env swap
         raise MigrationRefused(WRONG_KEY)
     log.warning(REKEYED)
@@ -137,13 +143,17 @@ def _is_plaintext(path: str) -> bool:
 
 
 def _opens(path: str, key: str) -> bool:
+    """Whether `key` opens `path`. Only SQLCipher's wrong-key error ("file is not a database")
+    means no; any other error (locked, busy, I/O) is raised as it is."""
     db = sqlcipher.connect(path)
     try:
         db.execute(_key_pragma("key", key))
         db.execute("SELECT count(*) FROM sqlite_master").fetchone()
         return True
-    except sqlcipher.DatabaseError:
-        return False
+    except sqlcipher.DatabaseError as error:
+        if "file is not a database" in str(error):
+            return False
+        raise
     finally:
         db.close()
 
@@ -163,8 +173,9 @@ def _encrypt(path: str, key: str) -> None:
     `<db>.pre-032-<timestamp>.bak`, then `.encrypting` atomically replaces it. A failure or a
     crash at any step leaves the plaintext file in place (the next start tries again)."""
     encrypting = f"{path}.encrypting"
-    if os.path.exists(encrypting):  # left by an interrupted attempt
-        os.remove(encrypting)
+    for leftover in (encrypting, f"{encrypting}-journal", f"{encrypting}-wal"):
+        if os.path.exists(leftover):  # left by an interrupted attempt
+            os.remove(leftover)
     plain = sqlcipher.connect(path)
     try:
         plain.execute("ATTACH DATABASE ? AS enc KEY ?", (encrypting, f"x'{key}'"))
