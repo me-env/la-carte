@@ -11,19 +11,25 @@ PORT="${E2E_PORT:-$(free_port)}"
 EMPTY_PORT="${E2E_EMPTY_PORT:-$(free_port)}"
 TMP="$(mktemp -d)"
 export LA_CARTE_API_URL="http://127.0.0.1:$PORT" LA_CARTE_API_TOKEN="e2e-token"
+# Spec 030a: an API with LA_CARTE_API_TOKEN refuses to start without its owner's email, and every request needs the
+# token. All three APIs get both (the token becomes the owner's personal access token on each fresh deck).
+OWNER_EMAIL="e2e@example.com"
 
-(cd "$ROOT/api" && LA_CARTE_DATABASE_URL="sqlite:///$TMP/e2e.db" LA_CARTE_PORT="$PORT" \
+(cd "$ROOT/api" && LA_CARTE_DATABASE_URL="sqlite:///$TMP/e2e.db" LA_CARTE_OWNER_EMAIL="$OWNER_EMAIL" \
+  LA_CARTE_API_TOKEN="$LA_CARTE_API_TOKEN" LA_CARTE_PORT="$PORT" \
   exec uv run la-carte-api) >"$TMP/api.log" 2>&1 &
 API_PID=$!
 # Second, never-seeded API: the empty-deck state (`next_due: null`) against the real backend (spec 001 #6).
 export TEST_RUNNER_LA_CARTE_EMPTY_API_URL="http://127.0.0.1:$EMPTY_PORT"
-(cd "$ROOT/api" && LA_CARTE_DATABASE_URL="sqlite:///$TMP/e2e-empty.db" LA_CARTE_PORT="$EMPTY_PORT" \
+(cd "$ROOT/api" && LA_CARTE_DATABASE_URL="sqlite:///$TMP/e2e-empty.db" LA_CARTE_OWNER_EMAIL="$OWNER_EMAIL" \
+  LA_CARTE_API_TOKEN="$LA_CARTE_API_TOKEN" LA_CARTE_PORT="$EMPTY_PORT" \
   exec uv run la-carte-api) >"$TMP/api-empty.log" 2>&1 &
 EMPTY_PID=$!
 # Third API for spec 029 #32 (activity log): 4 cards of its own, so studying 3 leaves the other suites' decks alone.
 ACTIVITY_PORT="${E2E_ACTIVITY_PORT:-$(free_port)}"
 export TEST_RUNNER_LA_CARTE_ACTIVITY_API_URL="http://127.0.0.1:$ACTIVITY_PORT"
-(cd "$ROOT/api" && LA_CARTE_DATABASE_URL="sqlite:///$TMP/e2e-activity.db" LA_CARTE_PORT="$ACTIVITY_PORT" \
+(cd "$ROOT/api" && LA_CARTE_DATABASE_URL="sqlite:///$TMP/e2e-activity.db" LA_CARTE_OWNER_EMAIL="$OWNER_EMAIL" \
+  LA_CARTE_API_TOKEN="$LA_CARTE_API_TOKEN" LA_CARTE_PORT="$ACTIVITY_PORT" \
   exec uv run la-carte-api) >"$TMP/api-activity.log" 2>&1 &
 ACTIVITY_PID=$!
 # The trap keeps the exit code: e2e.sh exits with ios-ui-test.sh's (xcodebuild's).

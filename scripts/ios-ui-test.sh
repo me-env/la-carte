@@ -65,7 +65,7 @@ set +e
 stage "ios-ui-test: build-for-testing (DerivedData lock, build slot)"
 # 1. Build under the app's DerivedData lock, copying the products out so a later build can't replace them.
 [ -n "$PREBUILT" ] || "$LOCK" "$APP_BUILD_LOCK" $BUILD_SLOT xcodebuild build-for-testing $BUILD_JOBS_FLAGS -project LaCarte.xcodeproj -scheme LaCarte \
-  -destination "$DESTINATION" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER" | tee "$LOG"
+  -destination "generic/platform=iOS Simulator" -skipMacroValidation -testProductsPath "$PRODUCTS" -quiet 2>&1 | grep --line-buffered -E "$FILTER" | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
 # --record: keep every test's attachments, set in this run's products only (a prebuilt copy is cloned first).
 if [ "$STATUS" -eq 0 ] && [ -n "$UI_RECORD" ]; then
