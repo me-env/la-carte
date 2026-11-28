@@ -36,18 +36,16 @@ if [ "${1:-}" = --on-slot ]; then
     RUNTIME="$(xcrun simctl list runtimes | sed -n "s/^iOS ${OS//./\\.} .* - \(com\.apple\.[^ ]*\).*/\1/p" | head -1)"
   fi
   [ -n "$RUNTIME" ] || { echo "no iOS $OS simulator runtime installed" >&2; exit 72; }
-  UDID="$(xcrun simctl list devices -j | python3 -I -c '
-import json, sys
-devices = json.load(sys.stdin)["devices"].get(sys.argv[1], [])
-print(next((d["udid"] for d in devices if d["name"] == sys.argv[2] and d["isAvailable"]), ""))' "$RUNTIME" "$NAME")"
-  if [ -z "$UDID" ] && [ -n "${LA_CARTE_SIM_DEVICES:-}" ] && [ -n "$(LA_CARTE_SIM_DEVICES="$LA_CARTE_SIM_DEVICES" SIM_DEVICES_DIR="$SIM_DEVICES_DIR" \
-      "$ROOT/scripts/_sim-service.sh" --missing)" ]; then
-    echo "❌ not creating $NAME: CoreSimulatorService doesn't list some mounted simulator images yet (it started before they were mounted), so $NAME may exist already. See the warning above; docs/dev-velocity.md" >&2
-    exit 72
+  # Several devices with this name (e.g. a duplicate made while the service didn't list the images): take the same
+  # one every time (lowest UDID) and say so; the run targets it by UDID, so the name's ambiguity never matters.
+  UDIDS="$(sim_named "$RUNTIME" "$NAME")"
+  UDID="$(echo "$UDIDS" | head -1)"
+  if [ "$(echo "$UDIDS" | wc -w)" -gt 1 ]; then
+    echo "⚠️  $(echo "$UDIDS" | wc -w | tr -d ' ') simulators named $NAME ($(echo $UDIDS | tr ' ' ',')): using $UDID. Delete the extra one under its lock (docs/dev-velocity.md, \"Duplicate devices\")" >&2
   fi
   if [ -z "$UDID" ]; then
     echo "📱 creating simulator $NAME ($MODEL, $RUNTIME), about 2 GB once used" >&2
-    UDID="$(sim_create "$NAME" "$MODEL" "$RUNTIME")"
+    UDID="$(sim_create "$NAME" "$MODEL" "$RUNTIME")" || exit 72
   fi
   if sim_audio_stuck "$UDID"; then  # never usable until a reboot: let the caller try the next slot
     echo "🔒 skipping $NAME ($UDID): the simulator audio service is stuck on it, every launch there fails until a reboot (docs/dev-velocity.md, \"Stuck simulator audio\")" >&2
@@ -55,7 +53,7 @@ print(next((d["udid"] for d in devices if d["name"] == sys.argv[2] and d["isAvai
     exit 70
   fi
   sim_appearance_ready "$UDID"
-  if [ "$SLOT" -eq 1 ]; then export POOL_DESTINATION="$FIRST_DEST"; else export POOL_DESTINATION="platform=iOS Simulator,id=$UDID"; fi
+  export POOL_DESTINATION="platform=iOS Simulator,id=$UDID"   # by UDID, slot 1 too: a name can match two devices
   [ -z "${CI:-}" ] || exec "$@"
   # Stall guard (local only): the command's whole tree used < POOL_STALL_CPU s (1) of CPU for POOL_STALL_MIN min (15;
   # 0 = off) -> killed, exit 124. A test run that waits on a hung simulator/daemon sits at 0% CPU for hours otherwise

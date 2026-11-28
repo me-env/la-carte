@@ -40,7 +40,7 @@ fi
 stage "ios-test: build + unit tests (DerivedData lock, pool simulator, xcodebuild)"
 "$LOCK" "$KIT_BUILD_LOCK" "$ROOT/scripts/_sim-pool.sh" /bin/sh -c "$RUN" sh \
   -collect-test-diagnostics never -resultBundlePath "$RESULT" ${ARGS[@]+"${ARGS[@]}"} 2>&1 \
-  | grep --line-buffered -E "^(✔|✘|🔒|StudyRenders:)|Test [Cc]ase .*(passed|failed|skipped)|error:|\.swift:[0-9]+:[0-9]+: note:|TEST( EXECUTE)? (SUCCEEDED|FAILED)" \
+  | grep --line-buffered -E "^(✔|✘|🔒|⚠️|❌|📱|🧹|🌗|🔄|✅ CoreSim|StudyRenders:)|Test [Cc]ase .*(passed|failed|skipped)|error:|\.swift:[0-9]+:[0-9]+: note:|TEST( EXECUTE)? (SUCCEEDED|FAILED)" \
   | tee "$TMP/out.log"
 STATUS=${PIPESTATUS[0]}
 set -e
