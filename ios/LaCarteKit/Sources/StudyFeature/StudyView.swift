@@ -499,23 +499,18 @@ public struct StudyView: View {
     }
   }
 
-  /// A basic card's sides: one text field each, editable in place (spec 010). Under a leading question the revealed
-  /// answer takes the ink and the question recedes (#16).
+  /// A basic card's sides: one text field each, editable in place (spec 010). On reveal the question recedes and the
+  /// answer takes the ink, on every card (#17).
   private func prompt(_ card: Card) -> some View {
-    let recedes = promptAlignment == .leading && store.isRevealed
-    return side(.front, text: card.text(.front), font: card.promptFont.font, color: recedes ? Theme.recededInk : Theme.ink)
+    side(.front, text: card.text(.front), font: card.promptFont.font, color: store.isRevealed ? Theme.recededInk : Theme.ink)
   }
 
   private func answer(_ card: Card) -> some View {
-    side(.back, text: card.text(.back), font: answerFont(card).font, color: Self.answerColor(question: promptAlignment))
+    side(.back, text: card.text(.back), font: answerFont(card).font, color: Theme.ink)
   }
 
   private func answerFont(_ card: Card) -> CardFont {
     CardText.answerFont(card.answerText, questionLeads: promptAlignment == .leading)
-  }
-
-  static func answerColor(question: TextAlignment) -> ThemeColor {
-    question == .leading ? Theme.ink : Theme.secondaryInk
   }
 
   /// The question depends only on itself, so it never moves on reveal.
@@ -751,14 +746,16 @@ public struct StudyView: View {
   }
 
   /// One text row: a prompt's style before reveal, the composition's after it. The name morphs its font (one line).
+  /// After reveal the prompt row recedes and the recalled rows take the ink (#17).
   private func personText(_ name: String, of card: Card, revealed: Bool) -> some View {
-    let isQuestion = !revealed && card.prompt.contains(name)
+    let isPrompt = card.prompt.contains(name)
+    let isQuestion = !revealed && isPrompt
     let isName = name == Card.nameField
     let alignment: TextAlignment = isQuestion ? promptAlignment : .center
     let fills = !isQuestion || promptAlignment == .center || Self.textLayout == .column
     return Text(card.fields[name] ?? "")
       .font(isQuestion ? card.promptFont.font : isName ? .cardFaceSmall : .body)
-      .foregroundStyle(isQuestion || isName ? Theme.ink : Theme.secondaryInk)
+      .foregroundStyle(revealed && isPrompt ? Theme.recededInk : Theme.ink)
       .contentTransition(isName ? .interpolate : .identity)
       .multilineTextAlignment(alignment)
       .frame(maxWidth: fills ? .infinity : nil, alignment: Alignment(horizontal: alignment.horizontal, vertical: .center))

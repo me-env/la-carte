@@ -61,6 +61,53 @@ struct ScreenColorTests {
     screen.expectNoBlue()
   }
 
+  /// Spec 017 #17: on reveal every question recedes to `recededInk` and the answer is `ink`, whatever the question's
+  /// axis. A person card's text prompt recedes too, and a photo prompt's caption rows are the answer, so both `ink`.
+  @Test(arguments: looks)
+  func revealedWeightTransfer(_ look: Look) throws {
+    func screen(_ card: Card, revealed: Bool, reduceMotion: Bool = false) throws -> Screen {
+      var state = StudyFeature.State()
+      state.cards = [card]
+      state.phase = .studying
+      state.isRevealed = revealed
+      let view = StudyView(store: Store(initialState: state) { EmptyReducer() })
+        .environment(\._accessibilityReduceMotion, reduceMotion)
+      return try Screen(view, look, name: "study-weight")
+    }
+    let longAnswer = CardLines.answers[2].1
+    for (question, answer) in [
+      ("la mer", "the sea"), (CardLines.questions[3].1, "The Peace of Westphalia"),
+      ("mitochondria", longAnswer), (CardLines.questions[4].1, longAnswer),
+    ] {
+      let card = CardLines.card(question, answer)
+      // Under Reduce Motion the front's question already sits where the revealed one does (a 3+-line answer lifts it, #14).
+      let front = try screen(card, revealed: false, reduceMotion: true), revealed = try screen(card, revealed: true)
+      let ink = try #require(front.inkBounds(in: front.band(0.14, 0.85)), "no question drawn")
+      front.expectText(in: ink, front.palette.ink, "\(question): study.front before reveal")
+      revealed.expectText(in: ink, revealed.palette.recededInk, "\(question): study.front after reveal")
+      let below = CGRect(x: 0, y: ink.maxY + 1, width: revealed.size.width, height: revealed.band(0, 0.85).maxY - ink.maxY - 1)
+      revealed.expectText(in: below, revealed.palette.ink, "\(question): study.back")
+    }
+
+    let date = Date(timeIntervalSince1970: 1_767_225_600)
+    let (ink, receded) = (look.palette.ink, look.palette.recededInk)
+    for (prompt, answer, nameColor, descriptionColor) in [
+      ("name", ["photo", "description"], receded, ink),
+      ("description", ["photo", "name"], ink, receded),
+      ("photo", ["name", "description"], ink, ink),
+    ] {
+      let fields = ["photo": "https://invalid.example/p.jpg", "name": "Ada Example", "description": "runs the bakery"]
+      let card = Card(id: UUID(), type: .person, prompt: [prompt], answer: answer, fields: fields,
+                      front: "", back: "", due: date, createdAt: date, updatedAt: date)
+      let revealed = try screen(card, revealed: true)
+      // The caption rows (the name, then a one-line description) are the card's last two lines of ink.
+      let lines = revealed.inkLines(in: revealed.band(0.14, 0.85))
+      try #require(lines.count >= 2, "\(prompt) prompt: caption rows not found: \(lines)")
+      revealed.expectText(in: lines[lines.count - 2], nameColor, "\(prompt) prompt: name")
+      revealed.expectText(in: lines[lines.count - 1], descriptionColor, "\(prompt) prompt: description")
+    }
+  }
+
   /// Spec 017: the question depends only on itself, in every candidate layout. Revealing the answer doesn't change a
   /// pixel of it, and short, 2-line and 4-line answers leave it at the same horizontal place (the stack's vertical
   /// centring may differ). In layout D, a leading answer under a wide question (widest line ≥ 85 % of the column)
@@ -69,6 +116,7 @@ struct ScreenColorTests {
   /// card and rises on reveal into the place it has under Reduce Motion (no lift), which is today's revealed place.
   /// Amended by #16: a leading (3+-line) question starts at the column's 16 pt edge, keeps its shape on reveal while it
   /// recedes to `recededInk`, and its answer, whatever its length, starts at the same edge.
+  /// Amended by #17: every question, centred too, recedes on reveal without changing shape.
   @Test(arguments: StudyView.TextLayout.allCases, CardLines.questions.map(\.1) + CardLines.singleLines.map(\.1))
   func questionStaysPut(_ layout: StudyView.TextLayout, _ question: String) throws {
     let defaultLayout = StudyView.textLayout
@@ -91,13 +139,18 @@ struct ScreenColorTests {
       let front = try screen(revealed: false), revealed = try screen(revealed: true)
       let still = try screen(revealed: false, reduceMotion: true)
       let ink = try #require(still.inkBounds(in: still.band(0.14, 0.85)), "no question drawn")
+      // Its colour changes, not its shape (#17: on every card).
+      #expect(revealed.changedPixels(from: still, in: ink) > 0, "question didn't recede on reveal (answer: \(answer))")
+      // The lighter colour leaves a glyph's faintest anti-aliased edge pixels under the ink threshold, so each edge may
+      // shrink inward by up to half a point; none may grow (the receded ink stays inside the original), so a real move
+      // can't hide in that tolerance. Rounded to whole pixels: `maxX` is `minX + width`, off by float noise.
+      let receded = try #require(revealed.inkBounds(in: ink.insetBy(dx: -2, dy: -2)), "question gone on reveal")
+      let shrinks = [receded.minX - ink.minX, ink.maxX - receded.maxX, receded.minY - ink.minY, ink.maxY - receded.maxY]
+        .map { ($0 * Screen.scale).rounded() / Screen.scale }
+      let staysInside = shrinks.allSatisfy { (0...0.5).contains($0) }
+      #expect(staysInside, "question moved on reveal: inward shrinks \(shrinks) (answer: \(answer))")
       if leadingQuestion {
-        // Its colour changes, not its shape.
-        #expect(revealed.changedPixels(from: still, in: ink) > 0, "question didn't recede on reveal (answer: \(answer))")
-        #expect(revealed.inkBounds(in: ink.insetBy(dx: -2, dy: -2)) == ink, "question moved on reveal (answer: \(answer))")
         #expect(abs(ink.minX - 16) <= 1.5, "leading question off the column's edge: \(ink)")
-      } else {
-        #expect(revealed.changedPixels(from: still, in: ink) == 0, "question moved on reveal (answer: \(answer))")
       }
       let lifted = try #require(front.inkBounds(in: front.band(0.14, 0.85)), "no question drawn")
       #expect(lifted.minX == ink.minX && lifted.maxX == ink.maxX, "lift moved the question sideways: \(lifted) vs \(ink)")
@@ -265,14 +318,15 @@ struct Look: CustomTestStringConvertible, Sendable {
 }
 
 /// Token values (spec 004 #4, docs/design-system.md), as 0xRRGGBB. Same values as `Palette` in the UI tests.
+/// `recededInk == secondaryInk` in dark and forest, so only light tells them apart.
 struct Palette: Sendable {
-  let background: UInt32, surface: UInt32, ink: UInt32, secondaryInk: UInt32, accent: UInt32
+  let background: UInt32, surface: UInt32, ink: UInt32, secondaryInk: UInt32, recededInk: UInt32, accent: UInt32
   static let light = Palette(
-    background: 0xF9FAF5, surface: 0xFFFFFF, ink: 0x1C1C1C, secondaryInk: 0x9D9D9B, accent: 0xB8325A)
+    background: 0xF9FAF5, surface: 0xFFFFFF, ink: 0x1C1C1C, secondaryInk: 0x9D9D9B, recededInk: 0x6F6F6D, accent: 0xB8325A)
   static let dark = Palette(
-    background: 0x1A1A1A, surface: 0x252525, ink: 0xF2F2F0, secondaryInk: 0x8A8A88, accent: 0xED6E8C)
+    background: 0x1A1A1A, surface: 0x252525, ink: 0xF2F2F0, secondaryInk: 0x8A8A88, recededInk: 0x8A8A88, accent: 0xED6E8C)
   static let forest = Palette(
-    background: 0x0E1913, surface: 0x16241B, ink: 0xEEF2EC, secondaryInk: 0x83938A, accent: 0xED6E8C)
+    background: 0x0E1913, surface: 0x16241B, ink: 0xEEF2EC, secondaryInk: 0x83938A, recededInk: 0x83938A, accent: 0xED6E8C)
 }
 
 /// A view hosted in a window at iPhone 17 Pro size (402 × 874 pt) and drawn with `CALayer.render` at 3×, sampled in
@@ -428,6 +482,26 @@ struct Screen {
       }
     }
     return box.points
+  }
+
+  /// The lines of ink in `rect`, top to bottom: its ink bounds split where a full point of pixel rows has none.
+  func inkLines(in rect: CGRect) -> [CGRect] {
+    let (_, ys) = pixelRanges(rect)
+    var lines: [CGRect] = [], line: CGRect?, blankRows = 0
+    for y in ys {
+      let row = CGRect(x: rect.minX, y: CGFloat(y) / Self.scale, width: rect.width, height: 1 / Self.scale)
+      if let ink = inkBounds(in: row) {
+        line = line.map { $0.union(ink) } ?? ink
+        blankRows = 0
+      } else if let done = line, (blankRows + 1) >= Int(Self.scale) {
+        lines.append(done)
+        line = nil
+        blankRows = 0
+      } else {
+        blankRows += 1
+      }
+    }
+    return lines + (line.map { [$0] } ?? [])
   }
 
   /// How many pixels in `rect` differ (in RGB) between the two screens.

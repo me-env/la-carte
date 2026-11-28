@@ -108,14 +108,6 @@ struct StudyTextLayoutTests {
     #expect(StudyView.answerAlignment(question: .center, answer: threeLines) == .leading)
   }
 
-  /// #16: under a leading question the answer takes the ink (the question recedes); otherwise it stays secondary.
-  @Test func theAnswerTakesTheInkUnderALeadingQuestion() {
-    let environment = EnvironmentValues()
-    let ink = Theme.ink.resolve(in: environment)
-    #expect(StudyView.answerColor(question: .leading).resolve(in: environment) == ink)
-    #expect(StudyView.answerColor(question: .center).resolve(in: environment) == Theme.secondaryInk.resolve(in: environment))
-  }
-
   @Test func layoutCSnapsNearlyEqualBlocksThatStillFit() {
     #expect(StudyView.snap(answer: 300, toQuestion: 280, column: 370) == 10)
     #expect(StudyView.snap(answer: 280, toQuestion: 300, column: 370) == -10)
