@@ -104,6 +104,9 @@ class GoogleProvider:
             except (httpx.HTTPError, ValueError) as error:
                 log.warning("Google token exchange failed: %s", type(error).__name__)
                 raise IdentityError("sign_in_failed") from error
+            if not isinstance(tokens, dict):
+                log.warning("Google token exchange failed: not a JSON object")
+                raise IdentityError("sign_in_failed")
             try:
                 return self._identity(tokens.get("id_token"), nonce)
             finally:  # no Google grant outlives a sign-in, whatever the outcome

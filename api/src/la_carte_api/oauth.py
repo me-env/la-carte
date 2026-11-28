@@ -15,7 +15,7 @@ import html
 import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, parse_qs, urlparse
 from uuid import UUID, uuid4
 
 from mcp.server.auth.handlers.authorize import AuthorizationHandler
@@ -28,11 +28,13 @@ from mcp.server.auth.provider import (
     AuthorizeError,
     RefreshToken,
     RegistrationError,
+    TokenError,
     construct_redirect_uri,
 )
 from mcp.server.auth.routes import cors_middleware
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyUrl
+from sqlalchemy import update
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, col, delete, select
 from starlette.requests import Request
@@ -65,6 +67,7 @@ CODE_PREFIX = "lc_ac_"
 REQUEST_TTL = timedelta(minutes=10)
 CODE_TTL = timedelta(minutes=5)
 NO_STORE = {"Cache-Control": "no-store"}
+MAX_CLIENT_NAME, MAX_REDIRECT_URIS = 100, 10  # DCR limits: a registration is unauthenticated
 
 
 # --- Clients -----------------------------------------------------------------------------------
@@ -88,7 +91,7 @@ class LaCarteClient(OAuthClientInformationFull):
         return super().validate_redirect_uri(redirect_uri)
 
 
-def _without_port(uri: str):
+def _without_port(uri: str) -> ParseResult:
     url = urlparse(uri)
     return url._replace(netloc=url.hostname or "")
 
@@ -205,6 +208,14 @@ class LaCarteOAuth:
         return LaCarteClient.model_validate_json(row.info) if row else None
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
+        if len(client_info.client_name or "") > MAX_CLIENT_NAME:
+            raise RegistrationError(
+                "invalid_client_metadata", f"client_name is over {MAX_CLIENT_NAME} characters"
+            )
+        if len(client_info.redirect_uris or []) > MAX_REDIRECT_URIS:
+            raise RegistrationError(
+                "invalid_client_metadata", f"At most {MAX_REDIRECT_URIS} redirect_uris"
+            )
         for uri in client_info.redirect_uris or []:
             if not (str(uri).startswith("https://") or _loopback(str(uri))):
                 raise RegistrationError(
@@ -330,13 +341,20 @@ class LaCarteOAuth:
     async def exchange_refresh_token(
         self, client: OAuthClientInformationFull, refresh_token: Refresh, scopes: list[str]
     ) -> OAuthToken:
-        """Rotation: the presented refresh token is spent, a new pair joins its family."""
+        """Rotation: the presented refresh token is spent, a new pair joins its family.
+        Compare-and-set: if a concurrent request spent it first, that is reuse (family revoked)."""
+        now = self.clock()
         with Session(self.engine) as session:
-            row = session.get(ApiToken, refresh_token.token_id)
-            assert row is not None
-            row.revoked_at = self.clock()
-            session.add(row)
+            spent = session.exec(
+                update(ApiToken)
+                .where(col(ApiToken.id) == refresh_token.token_id)
+                .where(col(ApiToken.revoked_at).is_(None))
+                .values(revoked_at=now)
+            )
             session.commit()
+            if spent.rowcount == 0:
+                auth.revoke_family(session, refresh_token.family_id, now)
+                raise TokenError("invalid_grant", "refresh token already used")
         return self._pair(refresh_token.user_id, client, refresh_token.family_id, scopes)
 
     def _pair(
@@ -472,6 +490,8 @@ def routes(oauth: LaCarteOAuth) -> list[Route]:
     async def authorize(request: Request) -> Response:
         response = await authorize_handler(request)
         location = response.headers.get("location", "")
+        if "error" in parse_qs(urlparse(location).query):  # RFC 9207, which we advertise
+            response.headers["location"] = construct_redirect_uri(location, iss=oauth.base)
         if location.startswith(consent_prefix):  # an agent: bind this browser to its request
             response.set_cookie(
                 COOKIE, location.removeprefix(consent_prefix), max_age=600, path="/oauth",
@@ -534,8 +554,13 @@ def routes(oauth: LaCarteOAuth) -> list[Route]:
         cookie = request.cookies.get(COOKIE)
         with Session(oauth.engine) as session:
             pending = oauth.pending(session, state)
-            if pending is None or (cookie is not None and cookie != state):
-                return expired()  # we can't trust where to send it
+            if pending is None:
+                return expired()
+            # An agent's sign-in must come back to the browser that consented (else an attacker
+            # could send a victim the provider URL of their own request). The app skips consent;
+            # a stale cookie from an abandoned agent sign-in must not break it.
+            if pending.client_id != auth.IOS_CLIENT and cookie != state:
+                return expired()  # not this browser's request: we can't trust where to send it
 
             def back(**params: str) -> Response:
                 url = construct_redirect_uri(

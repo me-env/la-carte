@@ -42,6 +42,23 @@ def icon_route(file: Path, media_type: str) -> Callable[[], FileResponse]:
     return icon
 
 
+def strip_query(record: logging.LogRecord) -> bool:
+    """Access-log filter: drops the query string from the logged path. Queries carry OAuth codes
+    and states (`/oauth/callback`) and searches, which the privacy policy says aren't logged."""
+    args = record.args
+    if isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
+        record.args = (*args[:2], args[2].split("?", 1)[0], *args[3:])
+    return True
+
+
+def quiet_access_log() -> None:
+    """Installs `strip_query` on uvicorn's access log (once; `create_app` runs for every server,
+    including `scripts/api-dev.sh` and the Docker image)."""
+    access = logging.getLogger("uvicorn.access")
+    if strip_query not in access.filters:
+        access.addFilter(strip_query)
+
+
 def prune(engine: Engine) -> int:
     """Applies the activity retention (spec 029; the privacy policy promises 90 days)."""
     with Session(engine) as session:
@@ -78,6 +95,7 @@ def with_scope_challenge(app: ASGIApp) -> ASGIApp:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
+    quiet_access_log()
     if settings.api_token and not settings.owner_email:  # before touching the database
         raise RuntimeError("LA_CARTE_API_TOKEN is set: set LA_CARTE_OWNER_EMAIL too")
     identity = provider_from(settings)  # refuses a configuration that must not start

@@ -4,6 +4,7 @@ calls Google."""
 
 import base64
 import json
+import logging
 import secrets
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
@@ -12,6 +13,7 @@ import httpx
 import pytest
 from conftest import add_user, bearer, token_for
 from fastapi.testclient import TestClient
+from mcp.server.auth.provider import TokenError
 from pydantic import ValidationError
 from sqlalchemy import inspect, text
 from sqlmodel import Session, select
@@ -23,6 +25,7 @@ from la_carte_api.identity import GoogleProvider, IdentityError, pkce_challenge
 from la_carte_api.models import (
     ApiToken,
     AuthCode,
+    AuthRequest,
     Identity,
     NoteCreate,
     TokenKind,
@@ -179,6 +182,28 @@ def test_dynamic_client_registration():  # AC 3
             })  # fmt: skip
             assert response.status_code == 400, redirect
             assert response.json()["error"] == "invalid_redirect_uri"
+
+
+def test_registration_limits():  # security review
+    with _app() as client:
+        for metadata in (
+            {"client_name": "x" * 101, "redirect_uris": [AGENT_REDIRECT]},
+            {"redirect_uris": [f"https://a.example/{i}" for i in range(11)]},
+        ):
+            response = client.post("/register", json=metadata | {
+                "token_endpoint_auth_method": "none"})  # fmt: skip
+            assert response.status_code == 400
+            assert response.json()["error"] == "invalid_client_metadata"
+        assert _register(client, name="x" * 100)
+
+
+def test_authorize_errors_carry_the_issuer():  # RFC 9207, security review
+    with _app() as client:
+        response, _ = _authorize(client, _register(client), AGENT_REDIRECT, scope="admin")
+        assert response.headers["location"].startswith(AGENT_REDIRECT)
+        query = _query(response.headers["location"])
+        assert query["error"] == "invalid_scope" and query["iss"] == PUBLIC
+        assert query["state"] == "client-state"
 
 
 # --- AC 4-6: the browser flows ------------------------------------------------------------------
@@ -489,9 +514,37 @@ def test_an_unknown_or_expired_state_gets_a_page():  # AC 14
             assert page.headers["content-type"].startswith("text/html")
             assert "This sign-in expired. Start again from your app." in page.text
         _later(client, 0)
-        client.cookies.set("lc_auth", "another-request", path="/oauth")  # not this browser's
-        assert client.get("/oauth/callback", params={"code": "a@example.com", "state": state},
+        client.cookies.set("lc_auth", "another-request", path="/oauth")  # not this request's
+        agent, _ = _authorize(client, _register(client), AGENT_REDIRECT)
+        agent_state = _query(agent.headers["location"])["request"]
+        client.cookies.clear()
+        client.cookies.set("lc_auth", "another-request", path="/oauth")
+        assert client.get("/oauth/callback", params={"code": "a@example.com",
+                                                     "state": agent_state},
                           follow_redirects=False).status_code == 400  # fmt: skip
+        # The app skips consent: a stale cookie from an abandoned agent sign-in doesn't matter.
+        ios = client.get("/oauth/callback", params={"code": "a@example.com", "state": state},
+                         follow_redirects=False)  # fmt: skip
+        assert ios.headers["location"].startswith("lacarte://oauth?code=")
+
+
+def test_an_agent_callback_needs_the_consenting_browser():  # security review; amends decision 6
+    """Confused deputy: an attacker consents to their own request, then sends the provider URL
+    to a victim. The victim's browser has no `lc_auth` cookie for it: no code is minted."""
+    with _app() as client:
+        response, _ = _authorize(client, _register(client), AGENT_REDIRECT)
+        request_id = _query(response.headers["location"])["request"]
+        posted = client.post("/oauth/consent", data={"request": request_id},
+                             follow_redirects=False)  # fmt: skip
+        state = _query(client.get(_path(posted.headers["location"]),
+                                  follow_redirects=False).headers["location"])["state"]  # fmt: skip
+        client.cookies.clear()  # the victim's browser
+        victim = client.get("/oauth/callback", params={"code": "victim@example.com",
+                                                       "state": state},
+                            follow_redirects=False)  # fmt: skip
+        assert victim.status_code == 400 and "location" not in victim.headers
+        assert "This sign-in expired" in victim.text
+        assert _counts(client)["authcode"] == 0 and _counts(client)["user"] == 0
 
 
 def test_deleting_the_account_deletes_its_pending_codes():
@@ -724,3 +777,53 @@ def test_the_consent_cookie_is_secure_on_a_public_url():  # decision 3
                                  resource="https://carte.example.com/mcp")  # fmt: skip
         assert response.headers["location"].startswith("https://carte.example.com/oauth/consent")
         assert "Secure" in response.headers["set-cookie"]
+
+
+# --- Security review ----------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+async def test_concurrent_refreshes_count_as_reuse(anyio_backend):
+    """Two requests that both loaded the same live refresh token: only the first rotates it;
+    the second finds it spent (compare-and-set) and revokes the family."""
+    with _app() as client:
+        tokens = _tokens(client)
+        oauth = client.app.state.oauth
+        agent = await oauth.get_client(tokens["client_id"])
+        loaded = await oauth.load_refresh_token(agent, tokens["refresh_token"])
+        winner = await oauth.exchange_refresh_token(agent, loaded, ["deck"])
+        with pytest.raises(TokenError) as error:
+            await oauth.exchange_refresh_token(agent, loaded, ["deck"])
+        assert error.value.error == "invalid_grant"
+        assert _mcp(client, winner.access_token).status_code == 401  # the family is dead
+
+
+def test_a_non_object_google_reply_refuses_the_sign_in():
+    settings = {"identity_provider": "google", "google_client_id": GOOGLE_ID,
+                "google_client_secret": "secret"}  # fmt: skip
+    with _app(**settings) as client:
+        reply = httpx.MockTransport(lambda request: httpx.Response(200, json=["not", "an object"]))
+        client.app.state.oauth.identity.transport = reply
+        response, _ = _authorize(client, "la-carte-ios", "lacarte://oauth")
+        state = _query(response.headers["location"])["state"]
+        callback = client.get("/oauth/callback", params={"code": "g", "state": state},
+                              follow_redirects=False)  # fmt: skip
+        assert _refused(callback) == "sign_in_failed"
+        with Session(client.app.state.engine) as session:
+            assert session.exec(select(AuthRequest)).all() == []
+        assert _counts(client)["authcode"] == 0
+
+
+def test_the_access_log_has_no_query_strings(caplog):
+    with _app():  # installs the filter
+        pass
+    access = logging.getLogger("uvicorn.access")
+    with caplog.at_level(logging.INFO, logger="uvicorn.access"):
+        access.info('%s - "%s %s HTTP/%s" %d', "127.0.0.1:5000", "GET",
+                    "/oauth/callback?code=a%40example.com&state=s", "1.1", 302)  # fmt: skip
+        access.info('%s - "%s %s HTTP/%s" %d', "127.0.0.1:5000", "GET", "/notes", "1.1", 200)
+    assert [r.getMessage() for r in caplog.records] == [
+        '127.0.0.1:5000 - "GET /oauth/callback HTTP/1.1" 302',
+        '127.0.0.1:5000 - "GET /notes HTTP/1.1" 200',
+    ]
