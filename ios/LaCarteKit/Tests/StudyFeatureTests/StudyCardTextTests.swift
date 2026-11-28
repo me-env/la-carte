@@ -34,10 +34,6 @@ struct StudyCardTextTests {
   @Test func theAnswerIsAllItsTextFieldsJoinedByASpace() {
     let card = card(prompt: ["photo"], answer: ["photo", "name", "description"], fields: ["name": " Ada Example "])
     #expect(card.answerText == "Ada Example runs the bakery")
-    #expect(card.answerFont == .body)
-
-    let nameOnly = self.card(prompt: ["photo"], answer: ["photo", "name"])
-    #expect(nameOnly.answerFont == .cardAnswer)
   }
 
   /// Spec 014d: every direction reveals the same composition, photo, name, description; an empty field is left out.
@@ -110,6 +106,14 @@ struct StudyTextLayoutTests {
     #expect(StudyView.answerAlignment(question: .center, answer: oneLine) == .center)
     #expect(StudyView.answerAlignment(question: .center, answer: twoLines) == .center)
     #expect(StudyView.answerAlignment(question: .center, answer: threeLines) == .leading)
+  }
+
+  /// #16: under a leading question the answer takes the ink (the question recedes); otherwise it stays secondary.
+  @Test func theAnswerTakesTheInkUnderALeadingQuestion() {
+    let environment = EnvironmentValues()
+    let ink = Theme.ink.resolve(in: environment)
+    #expect(StudyView.answerColor(question: .leading).resolve(in: environment) == ink)
+    #expect(StudyView.answerColor(question: .center).resolve(in: environment) == Theme.secondaryInk.resolve(in: environment))
   }
 
   @Test func layoutCSnapsNearlyEqualBlocksThatStillFit() {

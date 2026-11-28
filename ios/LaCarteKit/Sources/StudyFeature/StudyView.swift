@@ -29,9 +29,9 @@ public struct StudyView: View {
   @State private var frontMeasure = TextMeasure()
   @State private var backMeasure = TextMeasure()
 
-  /// Spec 017's candidate layouts for text of 3+ lines, until the user picks one: the leading full-width column (A),
-  /// a leading block as wide as its widest line, centred (B), B with an answer of nearly the question's width
-  /// moved to the question's left edge (C), or B with the answer kept inside a wide question's width (D).
+  /// Spec 017's candidate layouts for a leading answer under a centred question, until the user picks one: the
+  /// full-width column (A), a block as wide as its widest line, centred (B), B moved to the question's left edge when
+  /// nearly as wide (C), or kept inside a wide question's width (D). A leading question always uses the column's edge.
   enum TextLayout: CaseIterable { case column, blocks, snappedBlocks, questionWidth }
   static var textLayout = TextLayout.questionWidth
 
@@ -283,7 +283,7 @@ public struct StudyView: View {
             .background(alignment: .top) {
               VStack {
                 probe(card.promptText, font: card.promptFont, into: $frontMeasure)
-                probe(card.answerText, font: card.answerFont, into: $backMeasure)
+                probe(card.answerText, font: answerFont(card), into: $backMeasure)
               }
             }
             // A person card centres itself, not through the scroll view's alignment (kept for basic cards): that one
@@ -507,8 +507,15 @@ public struct StudyView: View {
   }
 
   private func answer(_ card: Card) -> some View {
-    let color = promptAlignment == .leading ? Theme.ink : Theme.secondaryInk
-    return side(.back, text: card.text(.back), font: card.answerFont.font, color: color)
+    side(.back, text: card.text(.back), font: answerFont(card).font, color: Self.answerColor(question: promptAlignment))
+  }
+
+  private func answerFont(_ card: Card) -> CardFont {
+    CardText.answerFont(card.answerText, questionLeads: promptAlignment == .leading)
+  }
+
+  static func answerColor(question: TextAlignment) -> ThemeColor {
+    question == .leading ? Theme.ink : Theme.secondaryInk
   }
 
   /// The question depends only on itself, so it never moves on reveal.
@@ -1009,7 +1016,6 @@ extension Card {
   }
 
   var promptFont: CardFont { CardText.promptFont(promptText) }
-  var answerFont: CardFont { CardText.answerFont(answerText, prompt: promptText) }
 }
 
 extension TextAlignment {

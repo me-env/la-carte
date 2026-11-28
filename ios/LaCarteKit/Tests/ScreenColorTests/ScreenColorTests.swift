@@ -64,8 +64,7 @@ struct ScreenColorTests {
   /// Spec 017: the question depends only on itself, in every candidate layout. Revealing the answer doesn't change a
   /// pixel of it, and short, 2-line and 4-line answers leave it at the same horizontal place (the stack's vertical
   /// centring may differ). In layout D, a leading answer under a wide question (widest line ≥ 85 % of the column)
-  /// stays within its width, and under any other question starts at the column's edge. #15: the answer aligns on its
-  /// own lines only, so a 1-2 line answer is centred in the column even under a leading question.
+  /// stays within its width, and under any other question starts at the column's edge.
   /// Amended by #14 (reveal lift): with a 4-line answer the question sits > 40 pt high, so it starts centred in the
   /// card and rises on reveal into the place it has under Reduce Motion (no lift), which is today's revealed place.
   /// Amended by #16: a leading (3+-line) question starts at the column's 16 pt edge, keeps its shape on reveal while it
