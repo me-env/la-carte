@@ -8,6 +8,9 @@ public enum Theme {
   public static let surface = ThemeColor(light: 0xFFFFFF, dark: 0x252525, forest: 0x16241B)
   public static let ink = ThemeColor(light: 0x1C1C1C, dark: 0xF2F2F0, forest: 0xEEF2EC)
   public static let secondaryInk = ThemeColor(light: 0x9D9D9B, dark: 0x8A8A88, forest: 0x83938A)
+  /// Text that steps back once something else takes the ink, but must stay readable: a paragraph question after
+  /// its answer is revealed (spec 017 #16). AA for text on `background`: 4.8:1 light, 5.0:1 dark, 5.6:1 forest.
+  public static let recededInk = ThemeColor(light: 0x6F6F6D, dark: 0x8A8A88, forest: 0x83938A)
   public static let hairline = ThemeColor(
     light: .black.opacity(0.08), dark: .white.opacity(0.08), forest: .white.opacity(0.08)
   )

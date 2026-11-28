@@ -18,6 +18,7 @@ Reference: **Vyst** (App Store id 6760647645). Screenshots in `docs/design/refer
 | `Theme.surface` | `#FFFFFF` | `#252525` | `#16241B` | circle buttons, list rows |
 | `Theme.ink` | `#1C1C1C` | `#F2F2F0` | `#EEF2EC` | primary text, icons |
 | `Theme.secondaryInk` | `#9D9D9B` | `#8A8A88` | `#83938A` | metadata, hints |
+| `Theme.recededInk` | `#6F6F6D` | `#8A8A88` | `#83938A` | text that steps back but must stay readable: a paragraph question once its answer shows (spec 017 #16). AA on `background`: 4.8 / 5.0 / 5.6:1 |
 | `Theme.hairline` | black 8% | white 8% | white 8% | dark/forest button border |
 | `Theme.accent` | `#B8325A` | `#ED6E8C` | `#ED6E8C` | pink: the logo's line, then very small amounts only (rule below) |
 
@@ -50,8 +51,8 @@ error or empty states. Swipe-delete stays the **system red** (hue 3°, vs the pi
 |---|---|---|
 | `.cardFace` | `.largeTitle` medium (34 at default size) | the card question, ≤ 24 chars (spec 017) |
 | `.cardFaceMedium` | `.title` medium (28) | the card question, 25–60 chars |
-| `.cardFaceSmall` | `.title2` medium (22) | the card question, > 60 chars or a line break (minimum; leading-aligned) |
-| `.cardAnswer` | `.title2` (22) | a short answer (≤ 24 chars) under a question that isn't long; else `.body` |
+| `.cardFaceSmall` | `.title2` medium (22) | the card question, > 60 chars or a line break (minimum; leading-aligned); also a short answer (≤ 24 chars) under such a question (spec 017 #16) |
+| `.cardAnswer` | `.title2` (22) | a short answer (≤ 24 chars) under a question that isn't long; a longer answer is `.body` |
 | `.screenTitle` | `.title` bold (28) | list screen titles ("Cards") |
 | `.body` | `.body` (17) | list row text, card back |
 | `.meta` | `.footnote` (13) | dates, counts, status lines |
@@ -175,5 +176,5 @@ Study screen catalogue: `scripts/ios-test.sh --render -only-testing:ScreenColorT
 - Background is `Theme.background` edge to edge, light **and** dark.
 - Nothing competes with the centered text; no default iOS blue tint (button tint = ink). Pink appears only in the 5 accent places.
 - Buttons are the circle style, 44pt hit area, aligned to the same top margin.
-- Card text never truncates. Size and alignment follow its length (`CardText`, spec 017): a word or a short question is big and centred, a paragraph is smaller and leading-aligned, and the answer is always one tier below the question. Each side aligns on its own rendered lines: 1-2 lines centred, 3+ leading, so a short answer stays centred even under a leading question (user, 2026-11-28). Anything longer scrolls.
+- Card text never truncates. Size and alignment follow its length (`CardText`, spec 017): a word or a short question is big and centred, a paragraph is smaller and leading-aligned, and the answer is always one tier below the question. One axis per card (spec 017 #16, user 2026-11-28): a question of 3+ rendered lines is leading at the column's 16 pt edge and its answer, whatever its length, shares that edge; a question of 1-2 lines is centred and its answer centres at 1-2 lines, leads at 3+. Weight transfer: under a leading question, the answer is drawn in `ink` and on reveal the question crossfades to `recededInk` (`Motion.standard`, kept under Reduce Motion); under a centred question the answer stays `secondaryInk`. Anything longer scrolls.
 - Dynamic Type at XL doesn't break layout.
