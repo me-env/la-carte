@@ -18,7 +18,7 @@ Reference: **Vyst** (App Store id 6760647645). Screenshots in `docs/design/refer
 | `Theme.surface` | `#FFFFFF` | `#252525` | `#16241B` | circle buttons, list rows |
 | `Theme.ink` | `#1C1C1C` | `#F2F2F0` | `#EEF2EC` | primary text, icons |
 | `Theme.secondaryInk` | `#9D9D9B` | `#8A8A88` | `#83938A` | metadata, hints |
-| `Theme.recededInk` | `#6F6F6D` | `#8A8A88` | `#83938A` | text that steps back but must stay readable: a paragraph question once its answer shows (spec 017 #16). AA on `background`: 4.8 / 5.0 / 5.6:1 |
+| `Theme.recededInk` | `#6F6F6D` | `#8A8A88` | `#83938A` | text that steps back but must stay readable: every question once its answer shows (spec 017 #16, #17). AA on `background`: 4.8 / 5.0 / 5.6:1 |
 | `Theme.hairline` | black 8% | white 8% | white 8% | dark/forest button border |
 | `Theme.accent` | `#B8325A` | `#ED6E8C` | `#ED6E8C` | pink: the logo's line, then very small amounts only (rule below) |
 
@@ -161,7 +161,7 @@ kept), and only today's mark is `.widgetAccentable()`; frozen and today stay dis
 ## Screen patterns from the reference
 | Vyst | la-carte |
 |---|---|
-| Editor: single word centered, icons in corners (01, 02) | **Study**: card front centered; tap reveals back below in `secondaryInk`; "Show answer" then a quiet "Forgot / Got it" text row at the bottom (specs 001, 011); dragging the revealed card shows a 96-dot `RatingDial` around the finger whose order is the grade: the dots settle into 3 evenly spaced rings (29 / 32 / 35 dots), one size, toward Got it / Easy (up, right) and scatter with varied sizes toward Hard / Forgot (down, left); Easy links each ring's dots into three full chains with thin lines (grown in only past 60 % of the way from Got it, so Got it never shows a line), Forgot turns a fifth of the dots pink; the row echoes the grade (specs 011, 019) |
+| Editor: single word centered, icons in corners (01, 02) | **Study**: card front centered; tap reveals back below in `ink` as the question recedes to `recededInk`; "Show answer" then a quiet "Forgot / Got it" text row at the bottom (specs 001, 011); dragging the revealed card shows a 96-dot `RatingDial` around the finger whose order is the grade: the dots settle into 3 evenly spaced rings (29 / 32 / 35 dots), one size, toward Got it / Easy (up, right) and scatter with varied sizes toward Hard / Forgot (down, left); Easy links each ring's dots into three full chains with thin lines (grown in only past 60 % of the way from Got it, so Got it never shows a line), Forgot turns a fifth of the dots pink; the row echoes the grade (specs 011, 019) |
 | Notes list in dark (04) | **Deck**: list of cards, add + settings in the title row, search field below (spec 002) |
 | Detail sheet with title + word count + round actions (03) | **Card editor** and **Settings** sheets: title top-left, round `checkmark`/`xmark` top-right (specs 002, 003) |
 | Theme (05) | Settings → Appearance: System / Light / Dark / Forest (spec 004) |
@@ -176,5 +176,5 @@ Study screen catalogue: `scripts/ios-test.sh --render -only-testing:ScreenColorT
 - Background is `Theme.background` edge to edge, light **and** dark.
 - Nothing competes with the centered text; no default iOS blue tint (button tint = ink). Pink appears only in the 5 accent places.
 - Buttons are the circle style, 44pt hit area, aligned to the same top margin.
-- Card text never truncates. Size and alignment follow its length (`CardText`, spec 017): a word or a short question is big and centred, a paragraph is smaller and leading-aligned, and the answer is always one tier below the question. One axis per card (spec 017 #16, user 2026-11-28): a question of 3+ rendered lines is leading at the column's 16 pt edge and its answer, whatever its length, shares that edge; a question of 1-2 lines is centred and its answer centres at 1-2 lines, leads at 3+. Weight transfer: under a leading question, the answer is drawn in `ink` and on reveal the question crossfades to `recededInk` (`Motion.standard`, kept under Reduce Motion); under a centred question the answer stays `secondaryInk`. Anything longer scrolls.
+- Card text never truncates. Size and alignment follow its length (`CardText`, spec 017): a word or a short question is big and centred, a paragraph is smaller and leading-aligned, and the answer is always one tier below the question. One axis per card (spec 017 #16, user 2026-11-28): a question of 3+ rendered lines is leading at the column's 16 pt edge and its answer, whatever its length, shares that edge; a question of 1-2 lines is centred and its answer centres at 1-2 lines, leads at 3+. Weight transfer on every card (spec 017 #17): the answer is drawn in `ink` and on reveal the question (a person card's name or description prompt too, never the photo) crossfades to `recededInk` (`Motion.standard`, kept under Reduce Motion). Anything longer scrolls.
 - Dynamic Type at XL doesn't break layout.
