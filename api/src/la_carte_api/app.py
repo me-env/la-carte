@@ -1,21 +1,23 @@
-import secrets
+import asyncio
+import logging
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
+from sqlalchemy.engine import Engine
 from sqlmodel import Session
-from starlette.responses import FileResponse, JSONResponse
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.responses import FileResponse
 
-from la_carte_api import deck
+from la_carte_api import auth, deck
 from la_carte_api.build import source_hash
 from la_carte_api.config import Settings
 from la_carte_api.db import make_engine
 from la_carte_api.mcp_server import build_mcp
 from la_carte_api.rest import router
 
+log = logging.getLogger(__name__)
 STATIC = Path(__file__).parent / "static"
 # The la carte icon (rendered by docs/design/brand/render.py), for clients showing the site icon.
 ICONS = {
@@ -24,8 +26,9 @@ ICONS = {
     "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png"),
     "/icon.svg": ("icon.svg", "image/svg+xml"),
 }
-# Served without the bearer token: clients fetch them anonymously.
+# Served without a bearer token: clients fetch them anonymously. Every other REST route needs one.
 PUBLIC_PATHS = {"/health", *ICONS}
+PRUNE_EVERY = 24 * 60 * 60  # seconds: activity older than 90 days goes at start, then daily
 
 
 def icon_route(file: Path, media_type: str) -> Callable[[], FileResponse]:
@@ -36,12 +39,31 @@ def icon_route(file: Path, media_type: str) -> Callable[[], FileResponse]:
     return icon
 
 
+def prune(engine: Engine) -> int:
+    """Applies the activity retention (spec 029; the privacy policy promises 90 days)."""
+    with Session(engine) as session:
+        return deck.prune_activity(session)
+
+
+async def prune_daily(engine: Engine, every: float = PRUNE_EVERY) -> None:
+    """Prunes the activity log every `every` seconds while the server runs."""
+    while True:
+        await asyncio.sleep(every)
+        try:
+            await asyncio.to_thread(prune, engine)
+        except Exception:  # a failed run must not stop the next ones
+            log.exception("activity pruning failed")
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
-    engine = make_engine(settings.database_url)
+    if settings.api_token and not settings.owner_email:  # before touching the database
+        raise RuntimeError("LA_CARTE_API_TOKEN is set: set LA_CARTE_OWNER_EMAIL too")
+    engine = make_engine(settings.database_url, settings.owner_email)
     with Session(engine) as session:
-        deck.prune_activity(session)  # spec 029: once per start
-    mcp = build_mcp(engine, settings.public_url)
+        auth.import_owner(session, settings.owner_email, settings.api_token)
+    prune(engine)  # spec 029: at start, then daily (lifespan)
+    mcp = build_mcp(engine, settings)
     mcp_app = mcp.streamable_http_app(
         streamable_http_path="/mcp",
         stateless_http=True,
@@ -52,11 +74,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        async with mcp.session_manager.run():
-            yield
+        pruning = asyncio.create_task(prune_daily(engine))
+        try:
+            async with mcp.session_manager.run():
+                yield
+        finally:
+            pruning.cancel()
 
     app = FastAPI(title="la carte", lifespan=lifespan)
     app.state.engine = engine
+    app.state.settings = settings
     build = source_hash()
 
     @app.get("/health")
@@ -67,25 +94,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.add_api_route(path, icon_route(STATIC / name, media_type), include_in_schema=False)
 
     app.include_router(router)
-    app.mount("/", mcp_app)  # serves /mcp; mounted last so REST routes match first
-    if settings.api_token:
-        app.add_middleware(BearerTokenMiddleware, token=settings.api_token)
+    app.mount("/", mcp_app)  # serves /mcp (bearer-checked by the SDK); mounted last
     return app
-
-
-class BearerTokenMiddleware:
-    """Requires `Authorization: Bearer <token>` on every HTTP request except `PUBLIC_PATHS`."""
-
-    def __init__(self, app: ASGIApp, token: str) -> None:
-        self.app = app
-        self.expected = f"Bearer {token}".encode()
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and scope["path"] not in PUBLIC_PATHS:
-            sent = dict(scope["headers"]).get(b"authorization", b"")
-            if not secrets.compare_digest(sent, self.expected):
-                await JSONResponse({"detail": "Unauthorized"}, status_code=401)(
-                    scope, receive, send
-                )
-                return
-        await self.app(scope, receive, send)

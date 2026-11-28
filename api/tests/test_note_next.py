@@ -5,11 +5,10 @@ from uuid import UUID
 
 import fsrs
 import pytest
-from mcp import Client
+from conftest import USER, mcp_client
 from sqlmodel import Session
 
 from la_carte_api import deck
-from la_carte_api.mcp_server import build_mcp
 from la_carte_api.models import (
     Card,
     NoteCreate,
@@ -30,7 +29,7 @@ BOTH_WAYS = [{"prompt": ["front"]}, {"prompt": ["back"]}]
 def _note(session, front: str, directions=ONE_WAY, now=NOW - 30 * DAY) -> list[Card]:
     body = {"type": "basic", "fields": {"front": front, "back": front + " back"}}
     body["directions"] = directions
-    [note] = deck.add_notes(session, [NoteCreate.model_validate(body)], now=now).added
+    [note] = deck.add_notes(session, USER, [NoteCreate.model_validate(body)], now=now).added
     return [session.get(Card, c.id) for c in note.cards]
 
 
@@ -61,11 +60,13 @@ def _review(session, card: Card, *, days_ago: float, due_in: float, stability: f
 
 
 def _hold(session, card: Card):
-    return deck.report_card(session, card.id, ReportCreate(reason=ReportReason.wrong), now=NOW)[0]
+    return deck.report_card(
+        session, USER, card.id, ReportCreate(reason=ReportReason.wrong), now=NOW
+    )[0]
 
 
 def _nexts(session, now=NOW) -> dict:
-    return {note.id: note.next for note in deck.list_notes(session, limit=500, now=now)}
+    return {note.id: note.next for note in deck.list_notes(session, USER, limit=500, now=now)}
 
 
 def _mixed_deck(session) -> None:
@@ -81,11 +82,11 @@ def _mixed_deck(session) -> None:
     # A sibling reviewed 1 h ago buries the other one (due, new) until 5 h from now.
     reviewed, buried = _note(session, "buried", BOTH_WAYS)
     _review(session, reviewed, days_ago=40, due_in=-1, stability=50)
-    deck.review_card(session, reviewed.id, Rating.good, now=NOW - HOUR)
+    deck.review_card(session, USER, reviewed.id, Rating.good, now=NOW - HOUR)
     # A learning card is never buried: its sibling was just reviewed, it is still served.
     first, failed = _note(session, "learning sibling", BOTH_WAYS)
     _review(session, first, days_ago=40, due_in=-1, stability=50)
-    deck.review_card(session, first.id, Rating.good, now=NOW - HOUR)
+    deck.review_card(session, USER, first.id, Rating.good, now=NOW - HOUR)
     _set(session, failed, fsrs.State.Relearning, stability=1, last=NOW - DAY, due=NOW - HOUR)
     _hold(session, _note(session, "reported")[0])
     held, other = _note(session, "half reported", BOTH_WAYS)
@@ -113,7 +114,7 @@ def test_every_note_response_has_next(client):  # AC 1
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"])
 async def test_mcp_notes_have_next(engine, anyio_backend):  # AC 1
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         added = await client.call_tool(
             "add_notes",
             {
@@ -139,29 +140,29 @@ async def test_mcp_notes_have_next(engine, anyio_backend):  # AC 1
 
 def test_notes_ready_now_are_exactly_the_study_queue(session):  # AC 2, AC 3
     _mixed_deck(session)
-    queue = deck.due_cards(session, limit=10_000, now=NOW)
+    queue = deck.due_cards(session, USER, limit=10_000, now=NOW)
     ready = {
         note_id: n.card_id for note_id, n in _nexts(session).items() if n and n.ready_at <= NOW
     }
     assert ready == {card.note_id: card.id for card in queue}
     assert len(queue) == len(ready) == 6  # sanity: the deck mixes ready and not-ready notes
-    assert deck.stats(session, now=NOW).due == len(ready)
+    assert deck.stats(session, USER, now=NOW).due == len(ready)
 
 
 def test_a_new_note_is_ready_with_its_first_card(session):  # AC 4
     cards = _note(session, "fresh", BOTH_WAYS, now=NOW - HOUR)
-    [read] = deck.list_notes(session, now=NOW)
-    assert read.next.card_id == deck.due_cards(session, now=NOW)[0].id == cards[0].id
+    [read] = deck.list_notes(session, USER, now=NOW)
+    assert read.next.card_id == deck.due_cards(session, USER, now=NOW)[0].id == cards[0].id
     assert read.next.ready_at == cards[0].due <= NOW
 
 
 def test_reviewing_a_new_card_keeps_the_note_off_the_queue_until_its_step(session):  # AC 5
     reviewed, _ = _note(session, "pair", BOTH_WAYS)
     t = NOW
-    deck.review_card(session, reviewed.id, Rating.good, now=t)
+    deck.review_card(session, USER, reviewed.id, Rating.good, now=t)
     session.refresh(reviewed)
     for now in (t, t + timedelta(minutes=1)):
-        [read] = deck.list_notes(session, now=now)
+        [read] = deck.list_notes(session, USER, now=now)
         assert read.next.ready_at == min(t + deck.SIBLING_BURY, reviewed.due) > now
         assert read.next.card_id == reviewed.id  # (re)learning, ready no later than its sibling
 
@@ -170,13 +171,13 @@ def test_reviewing_a_review_card_buries_its_sibling_six_hours(session):  # AC 5
     reviewed, sibling = _note(session, "pair", BOTH_WAYS)
     _review(session, reviewed, days_ago=40, due_in=-1, stability=50)
     t = NOW
-    deck.review_card(session, reviewed.id, Rating.good, now=t)
+    deck.review_card(session, USER, reviewed.id, Rating.good, now=t)
     session.refresh(reviewed)
     assert reviewed.due > t + deck.SIBLING_BURY
     for now in (t, t + 5 * HOUR):
-        [read] = deck.list_notes(session, now=now)
+        [read] = deck.list_notes(session, USER, now=now)
         assert (read.next.card_id, read.next.ready_at) == (sibling.id, t + deck.SIBLING_BURY)
-    [read] = deck.list_notes(session, now=t + deck.SIBLING_BURY)
+    [read] = deck.list_notes(session, USER, now=t + deck.SIBLING_BURY)
     assert read.next.ready_at <= t + deck.SIBLING_BURY  # the bury has ended: in the queue
 
 
@@ -188,7 +189,7 @@ def test_reported_cards_have_no_next(session):  # AC 6
     nexts = _nexts(session)
     assert nexts[alone.note_id] is None
     assert nexts[held.note_id].card_id == other.id
-    deck.update_report(session, report.id, ReportOutcome.kept, "fine", now=NOW)
+    deck.update_report(session, USER, report.id, ReportOutcome.kept, "fine", now=NOW)
     assert _nexts(session)[alone.note_id].card_id == alone.id
 
 

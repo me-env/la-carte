@@ -10,11 +10,10 @@ from pathlib import Path
 
 import fsrs
 import pytest
-from mcp import Client
+from conftest import USER, mcp_client
 from sqlmodel import Session
 
 from la_carte_api import deck
-from la_carte_api.mcp_server import build_mcp
 from la_carte_api.models import (
     Card,
     CardCreate,
@@ -29,7 +28,9 @@ DAY = timedelta(days=1)
 
 
 def _add(session, *fronts: str, now=NOW - 30 * DAY) -> list[Card]:
-    added = deck.add_cards(session, [CardCreate(front=f, back=f) for f in fronts], now=now).added
+    added = deck.add_cards(
+        session, USER, [CardCreate(front=f, back=f) for f in fronts], now=now
+    ).added
     return [session.get(Card, c.id) for c in added]
 
 
@@ -66,7 +67,7 @@ def _review(session, card: Card, stability: float, days_ago: float, due_days_ago
 
 
 def _ids(session, now=NOW, limit=200) -> list:
-    return [c.id for c in deck.due_cards(session, limit=limit, now=now)]
+    return [c.id for c in deck.due_cards(session, USER, limit=limit, now=now)]
 
 
 def _r(session, card_id, now=NOW) -> float:
@@ -152,7 +153,9 @@ PERSON = {
 
 
 def _siblings(session) -> list[Card]:
-    [note] = deck.add_notes(session, [NoteCreate.model_validate(PERSON)], now=NOW - 30 * DAY).added
+    [note] = deck.add_notes(
+        session, USER, [NoteCreate.model_validate(PERSON)], now=NOW - 30 * DAY
+    ).added
     return [session.get(Card, c.id) for c in note.cards]
 
 
@@ -161,7 +164,7 @@ def test_within_a_note_the_same_order_picks_the_winner(session):  # AC 5
     _review(session, overdue, stability=100, days_ago=110, due_days_ago=10)
     _review(session, risky, stability=2, days_ago=4, due_days_ago=1)
     assert _ids(session) == [risky.id]  # lower retrievability, not the more overdue one
-    deck.delete_note(session, risky.note_id)
+    deck.delete_note(session, USER, risky.note_id)
 
     review, new, _ = _siblings(session)
     _review(session, review, stability=100, days_ago=110, due_days_ago=10)
@@ -184,14 +187,14 @@ def test_sibling_hold_and_stats_are_unchanged(session):  # AC 6
     _review(session, weakest, stability=0.2, days_ago=50, due_days_ago=49)
     [other] = _add(session, "other")
     _review(session, other, stability=20, days_ago=25, due_days_ago=1)
-    deck.review_card(session, reviewed.id, Rating.good, now=NOW - timedelta(hours=1))
+    deck.review_card(session, USER, reviewed.id, Rating.good, now=NOW - timedelta(hours=1))
     session.refresh(reviewed)
 
     # The hold ends 6 h after that review (its new due is later); the new sibling has the same hold.
     hold_end = NOW + timedelta(hours=5)
     assert reviewed.due > hold_end
     assert _ids(session) == [other.id]  # the weakest card in the deck is held
-    stats = deck.stats(session, now=NOW)
+    stats = deck.stats(session, USER, now=NOW)
     assert (stats.due, stats.next_due) == (1, hold_end)
 
     assert _ids(session, now=hold_end) == [weakest.id, other.id]
@@ -224,8 +227,8 @@ def test_report_held_cards_are_absent_and_do_not_change_the_order(session):  # A
     for card in cards:
         _review(session, card, rng.uniform(1, 50), rng.uniform(2, 100), due_days_ago=1)
     before = _ids(session)
-    deck.report_card(session, before[0], ReportCreate(reason=ReportReason.wrong), now=NOW)
-    deck.report_card(session, before[4], ReportCreate(reason=ReportReason.drop), now=NOW)
+    deck.report_card(session, USER, before[0], ReportCreate(reason=ReportReason.wrong), now=NOW)
+    deck.report_card(session, USER, before[4], ReportCreate(reason=ReportReason.drop), now=NOW)
     assert _ids(session) == [i for i in before if i not in (before[0], before[4])]
 
 
@@ -242,7 +245,7 @@ def test_3000_due_reviews_are_ordered_in_under_a_second(session):  # AC 11
     session.expunge_all()
 
     start = time.perf_counter()
-    served = deck.due_cards(session, limit=200, now=NOW)
+    served = deck.due_cards(session, USER, limit=200, now=NOW)
     elapsed = time.perf_counter() - start
     assert elapsed < 1
     assert len(served) == 200
@@ -263,7 +266,7 @@ async def test_rest_mcp_and_deck_agree(client, anyio_backend):  # AC 9 + AC 12 (
             session.add(card)
         session.commit()
         _add(session, "new", now=now - DAY)
-        expected = [str(c.id) for c in deck.due_cards(session, limit=200)]
+        expected = [str(c.id) for c in deck.due_cards(session, USER, limit=200)]
 
     rest = client.get("/cards/due", params={"limit": 200}).json()
     assert [c["id"] for c in rest] == expected
@@ -272,7 +275,7 @@ async def test_rest_mcp_and_deck_agree(client, anyio_backend):  # AC 9 + AC 12 (
         "note_id", "prompt", "state", "type", "updated_at",
     }  # fmt: skip
 
-    async with Client(build_mcp(engine)) as mcp:
+    async with mcp_client(engine) as mcp:
         result = await mcp.call_tool("due_cards", {"limit": 200})
         assert [c["id"] for c in result.structured_content["result"]] == expected
         [tool] = [t for t in (await mcp.list_tools()).tools if t.name == "due_cards"]

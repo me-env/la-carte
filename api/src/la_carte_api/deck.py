@@ -3,6 +3,9 @@
 A note is one thing the user knows (typed, named fields); a card is one direction over its fields
 (prompt fields -> answer fields) with its own FSRS state. Cards of a note are siblings (spec 014).
 Public functions return the read schemas (`NoteRead`, `CardRead`) shared by REST and MCP.
+
+Every user has their own deck (spec 030a): each function takes the caller's `user_id` right after
+the session and only ever reads or writes that user's rows. Another user's id is "not found".
 """
 
 from collections.abc import Iterable
@@ -29,6 +32,7 @@ from la_carte_api.models import (
     ActivityIngest,
     AddCardsResult,
     AddNotesResult,
+    ApiToken,
     Card,
     CardCreate,
     CardRead,
@@ -40,6 +44,8 @@ from la_carte_api.models import (
     FeedbackKind,
     FeedbackRead,
     FeedbackStatus,
+    Identity,
+    MeRead,
     Note,
     NoteCreate,
     NoteNext,
@@ -57,6 +63,7 @@ from la_carte_api.models import (
     ReviewLog,
     Settings,
     StrugglingCard,
+    User,
     utcnow,
 )
 
@@ -294,16 +301,16 @@ def _card_order(card: Card, note: Note) -> tuple:
     return card.created_at, [fields.index(f) for f in prompt], [fields.index(f) for f in answer]
 
 
-def _note(session: Session, note_id: UUID) -> Note:
+def _note(session: Session, user_id: UUID, note_id: UUID) -> Note:
     note = session.get(Note, note_id)
-    if note is None:
+    if note is None or note.user_id != user_id:
         raise NoteNotFound(note_id)
     return note
 
 
-def _card(session: Session, card_id: UUID) -> Card:
+def _card(session: Session, user_id: UUID, card_id: UUID) -> Card:
     card = session.get(Card, card_id)
-    if card is None:
+    if card is None or card.user_id != user_id:
         raise CardNotFound(card_id)
     return card
 
@@ -313,23 +320,25 @@ def _cards_of(session: Session, note: Note) -> list[Card]:
     return sorted(cards, key=lambda card: _card_order(card, note))
 
 
-def _next_cards(session: Session, now: datetime) -> dict[UUID, NoteNext]:
+def _next_cards(session: Session, user_id: UUID, now: datetime) -> dict[UUID, NoteNext]:
     """Per note, the card Study serves first and when (spec 028), read from `_candidates`: the
     first card in queue order that is ready now, else the one ready earliest (ties: queue order).
     A note whose cards are all held by a report has no entry."""
     nexts: dict[UUID, NoteNext] = {}
-    for card, _, ready in _candidates(session, now):
+    for card, _, ready in _candidates(session, user_id, now):
         current = nexts.get(card.note_id)
         if current is None or (current.ready_at > now and ready < current.ready_at):
             nexts[card.note_id] = NoteNext(card_id=card.id, ready_at=ready)
     return nexts
 
 
-def _note_reads(session: Session, notes: list[Note], now: datetime | None = None) -> list[NoteRead]:
+def _note_reads(
+    session: Session, user_id: UUID, notes: list[Note], now: datetime | None = None
+) -> list[NoteRead]:
     cards: dict[UUID, list[Card]] = {note.id: [] for note in notes}
     for card in session.exec(select(Card).where(col(Card.note_id).in_(list(cards)))):
         cards[card.note_id].append(card)
-    nexts = _next_cards(session, now or utcnow())
+    nexts = _next_cards(session, user_id, now or utcnow())
     return [
         NoteRead.of(
             note,
@@ -349,29 +358,35 @@ def _matches(note: Note, needle: str) -> bool:
 
 def list_notes(
     session: Session,
+    user_id: UUID,
     query: str | None = None,
     type: NoteType | None = None,
     limit: int = 100,
     now: datetime | None = None,
 ) -> list[NoteRead]:
     """Newest first, optionally filtered by `type` and by `query` (see `_matches`)."""
-    statement = select(Note).order_by(col(Note.created_at).desc())
+    statement = select(Note).where(Note.user_id == user_id).order_by(col(Note.created_at).desc())
     if type is not None:
         statement = statement.where(Note.type == type)
     needle = (query or "").strip().casefold()
     notes = (note for note in session.exec(statement) if _matches(note, needle))
-    return _note_reads(session, list(islice(notes, limit)), now)
+    return _note_reads(session, user_id, list(islice(notes, limit)), now)
 
 
-def get_note(session: Session, note_id: UUID, now: datetime | None = None) -> NoteRead:
-    return _note_reads(session, [_note(session, note_id)], now)[0]
+def get_note(
+    session: Session, user_id: UUID, note_id: UUID, now: datetime | None = None
+) -> NoteRead:
+    return _note_reads(session, user_id, [_note(session, user_id, note_id)], now)[0]
 
 
-def list_cards(session: Session, query: str | None = None, limit: int = 100) -> list[CardRead]:
+def list_cards(
+    session: Session, user_id: UUID, query: str | None = None, limit: int = 100
+) -> list[CardRead]:
     """Newest first: cards whose note matches `query` (same matching as `list_notes`)."""
     statement = (
         select(Card, Note)
         .join(Note, col(Card.note_id) == col(Note.id))
+        .where(Card.user_id == user_id)
         .order_by(col(Card.created_at).desc())
     )
     needle = (query or "").strip().casefold()
@@ -379,9 +394,9 @@ def list_cards(session: Session, query: str | None = None, limit: int = 100) -> 
     return [CardRead.of(card, note) for card, note in islice(rows, limit)]
 
 
-def get_card(session: Session, card_id: UUID) -> CardRead:
-    card = _card(session, card_id)
-    return CardRead.of(card, _note(session, card.note_id))
+def get_card(session: Session, user_id: UUID, card_id: UUID) -> CardRead:
+    card = _card(session, user_id, card_id)
+    return CardRead.of(card, _note(session, user_id, card.note_id))
 
 
 # --- Writing notes -----------------------------------------------------------------------------
@@ -390,7 +405,7 @@ def get_card(session: Session, card_id: UUID) -> CardRead:
 def _new_card(note: Note, way: Way, now: datetime) -> Card:
     prompt, answer = way
     return Card(
-        note_id=note.id, prompt=list(prompt), answer=list(answer),
+        user_id=note.user_id, note_id=note.id, prompt=list(prompt), answer=list(answer),
         created_at=now, updated_at=now, due=now,
     )  # fmt: skip
 
@@ -400,13 +415,18 @@ def _duplicate_key(note_type: NoteType, fields: dict[str, str]) -> tuple[NoteTyp
 
 
 def _add_notes(
-    session: Session, notes: list[NoteCreate], now: datetime | None, skip_duplicates: bool
+    session: Session,
+    user_id: UUID,
+    notes: list[NoteCreate],
+    now: datetime | None,
+    skip_duplicates: bool,
 ) -> tuple[list[Note], list[Note]]:
     """(added, skipped) notes; all or nothing: an invalid note raises before anything is saved."""
     now = now or utcnow()
     existing: dict[tuple[NoteType, str], Note] = {}  # duplicate key -> oldest note with it
-    if skip_duplicates:  # a single personal deck: matching in Python is fine
-        for note in session.exec(select(Note).order_by(col(Note.created_at))):
+    if skip_duplicates:  # one personal deck: matching in Python is fine
+        mine = select(Note).where(Note.user_id == user_id).order_by(col(Note.created_at))
+        for note in session.exec(mine):
             existing.setdefault(_duplicate_key(note.type, note.fields), note)
 
     added: list[Note] = []
@@ -423,7 +443,7 @@ def _add_notes(
         if skip_duplicates and key in existing:
             skipped.append(existing[key])
             continue
-        note = Note(type=new.type, fields=fields, created_at=now, updated_at=now)
+        note = Note(user_id=user_id, type=new.type, fields=fields, created_at=now, updated_at=now)
         cards += [_new_card(note, way, now) for way in ways]
         existing[key] = note
         added.append(note)
@@ -436,6 +456,7 @@ def _add_notes(
 
 def add_notes(
     session: Session,
+    user_id: UUID,
     notes: list[NoteCreate],
     now: datetime | None = None,
     skip_duplicates: bool = False,
@@ -443,20 +464,25 @@ def add_notes(
     """Adds notes with their cards, due immediately. With `skip_duplicates`, a note whose type and
     duplicate key (basic: front, person: name; trimmed, casefolded) match an existing note or an
     earlier one of the same call is not added; the matching note is reported in `skipped`."""
-    added, skipped = _add_notes(session, notes, now, skip_duplicates)
+    added, skipped = _add_notes(session, user_id, notes, now, skip_duplicates)
     return AddNotesResult(
-        added=_note_reads(session, added, now), skipped=_note_reads(session, skipped, now)
+        added=_note_reads(session, user_id, added, now),
+        skipped=_note_reads(session, user_id, skipped, now),
     )
 
 
 def update_note(
-    session: Session, note_id: UUID, changes: NoteUpdate, now: datetime | None = None
+    session: Session,
+    user_id: UUID,
+    note_id: UUID,
+    changes: NoteUpdate,
+    now: datetime | None = None,
 ) -> NoteRead:
     """`fields` merge key by key ("" clears). `directions` is the full desired set: kept ones keep
     their card (id, FSRS state), new ones become cards due now, missing ones are deleted (their
     review history stays)."""
     now = now or utcnow()
-    note = _note(session, note_id)
+    note = _note(session, user_id, note_id)
     cards = {_way_of(card): card for card in _cards_of(session, note)}
     fields = _clean_fields(note.type, {**note.fields, **(changes.fields or {})})
     if changes.directions is None:
@@ -472,36 +498,40 @@ def update_note(
             session.delete(card)
     session.add_all(_new_card(note, way, now) for way in ways if way not in cards)
     session.commit()
-    return get_note(session, note_id, now)
+    return get_note(session, user_id, note_id, now)
 
 
 def add_direction(
-    session: Session, note_id: UUID, direction: Direction, now: datetime | None = None
+    session: Session,
+    user_id: UUID,
+    note_id: UUID,
+    direction: Direction,
+    now: datetime | None = None,
 ) -> NoteRead:
     """A new card for the note, due now."""
-    note = _note(session, note_id)
+    note = _note(session, user_id, note_id)
     current = [_way_of(card) for card in _cards_of(session, note)]
     if (way := _way(note.type, direction, note.fields)) in current:
         raise InvalidNote(f"This note already has the direction {_show(way)}.")
     directions = [Direction(prompt=list(p), answer=list(a)) for p, a in [*current, way]]
-    return update_note(session, note_id, NoteUpdate(directions=directions), now)
+    return update_note(session, user_id, note_id, NoteUpdate(directions=directions), now)
 
 
-def remove_direction(session: Session, card_id: UUID) -> NoteRead:
+def remove_direction(session: Session, user_id: UUID, card_id: UUID) -> NoteRead:
     """Deletes one card of a note (its review history stays). Refuses the note's last card."""
-    card = _card(session, card_id)
-    note = _note(session, card.note_id)
+    card = _card(session, user_id, card_id)
+    note = _note(session, user_id, card.note_id)
     if len(_cards_of(session, note)) == 1:
         raise InvalidNote("This is the note's last card: delete the note instead (delete_note).")
     session.delete(card)
     session.commit()
-    return get_note(session, note.id)
+    return get_note(session, user_id, note.id)
 
 
-def delete_note(session: Session, note_id: UUID) -> None:
+def delete_note(session: Session, user_id: UUID, note_id: UUID) -> None:
     """Deletes the note and all its cards. Their ReviewLog rows stay (no foreign key), so past
     study days still count for stats."""
-    note = _note(session, note_id)
+    note = _note(session, user_id, note_id)
     session.exec(delete(Card).where(col(Card.note_id) == note.id))
     session.delete(note)
     session.commit()
@@ -512,6 +542,7 @@ def delete_note(session: Session, note_id: UUID) -> None:
 
 def add_cards(
     session: Session,
+    user_id: UUID,
     cards: list[CardCreate],
     now: datetime | None = None,
     skip_duplicates: bool = False,
@@ -527,7 +558,7 @@ def add_cards(
         )
         for c in cards
     ]
-    added, skipped = _add_notes(session, notes, now, skip_duplicates)
+    added, skipped = _add_notes(session, user_id, notes, now, skip_duplicates)
 
     def first_card(note: Note) -> CardRead:
         return CardRead.of(_cards_of(session, note)[0], note)
@@ -537,10 +568,10 @@ def add_cards(
     )
 
 
-def update_card(session: Session, card_id: UUID, changes: CardUpdate) -> CardRead:
+def update_card(session: Session, user_id: UUID, card_id: UUID, changes: CardUpdate) -> CardRead:
     """Edits what this card shows: `front` sets its prompt field, `back` its answer field, on the
     note (so siblings see it). A side showing several fields can't be edited this way."""
-    card = _card(session, card_id)
+    card = _card(session, user_id, card_id)
     fields: dict[str, str] = {}
     for side, value, names in (
         ("front", changes.front, card.prompt),
@@ -554,24 +585,26 @@ def update_card(session: Session, card_id: UUID, changes: CardUpdate) -> CardRea
                 f"instead (PATCH /notes/{card.note_id}, or the update_note tool)."
             )
         fields[names[0]] = value
-    update_note(session, card.note_id, NoteUpdate(fields=fields))
-    return get_card(session, card_id)
+    update_note(session, user_id, card.note_id, NoteUpdate(fields=fields))
+    return get_card(session, user_id, card_id)
 
 
-def delete_card(session: Session, card_id: UUID) -> None:
+def delete_card(session: Session, user_id: UUID, card_id: UUID) -> None:
     """Removes this direction; the note goes too if it was its last card. Review history stays."""
-    card = _card(session, card_id)
-    note = _note(session, card.note_id)
+    card = _card(session, user_id, card_id)
+    note = _note(session, user_id, card.note_id)
     if len(_cards_of(session, note)) == 1:
-        delete_note(session, note.id)
+        delete_note(session, user_id, note.id)
     else:
-        remove_direction(session, card_id)
+        remove_direction(session, user_id, card_id)
 
 
 # --- Studying ----------------------------------------------------------------------------------
 
 
-def _candidates(session: Session, now: datetime) -> list[tuple[Card, Note, datetime]]:
+def _candidates(
+    session: Session, user_id: UUID, now: datetime
+) -> list[tuple[Card, Note, datetime]]:
     """Every card not held, with the time it becomes servable, in queue order.
 
     A sibling's latest review at `t` buries a card until `min(t + SIBLING_BURY, sibling.due)`:
@@ -581,20 +614,20 @@ def _candidates(session: Session, now: datetime) -> list[tuple[Card, Note, datet
     the review most at risk of being forgotten, then the oldest new card.
     Held cards (an active report, spec 015) are left out entirely: they don't bury siblings.
     `_queue` (Study) and `_next_cards` (`Note.next`, spec 028) both read this list."""
-    held = set(
-        session.exec(select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))).all()
-    )
+    held = set(session.exec(_held_card_ids(user_id)).all())
     recent: dict[UUID, datetime] = dict(
         session.exec(
             select(ReviewLog.card_id, func.max(ReviewLog.reviewed_at))
-            .where(col(ReviewLog.reviewed_at) > now - SIBLING_BURY)
+            .where(ReviewLog.user_id == user_id, col(ReviewLog.reviewed_at) > now - SIBLING_BURY)
             .group_by(col(ReviewLog.card_id))
         ).all()
     )
     rows = [
         (card, note)
         for card, note in session.exec(
-            select(Card, Note).join(Note, col(Card.note_id) == col(Note.id))
+            select(Card, Note)
+            .join(Note, col(Card.note_id) == col(Note.id))
+            .where(Card.user_id == user_id)
         )
         if card.id not in held
     ]
@@ -625,7 +658,16 @@ def _candidates(session: Session, now: datetime) -> list[tuple[Card, Note, datet
     return [(card, note, ready_at(card)) for card, note in sorted(rows, key=order)]
 
 
-def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], datetime | None]:
+def _held_card_ids(user_id: UUID):
+    """The user's cards held by an active report (spec 015), as a subquery."""
+    return select(Report.card_id).where(
+        Report.user_id == user_id, col(Report.status).in_(ACTIVE_REPORT)
+    )
+
+
+def _queue(
+    session: Session, user_id: UUID, now: datetime
+) -> tuple[list[tuple[Card, Note]], datetime | None]:
     """The servable queue and the next time a card not servable now becomes servable.
 
     Servable = ready (see `_candidates`), at most one card per note: its first in queue order.
@@ -633,7 +675,7 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
     servable: list[tuple[Card, Note]] = []
     served_notes: set[UUID] = set()
     later: list[datetime] = []
-    for card, note, ready in _candidates(session, now):
+    for card, note, ready in _candidates(session, user_id, now):
         if ready > now:
             later.append(ready)
         elif card.note_id not in served_notes:
@@ -642,14 +684,17 @@ def _queue(session: Session, now: datetime) -> tuple[list[tuple[Card, Note]], da
     return servable, min(later, default=None)
 
 
-def due_cards(session: Session, limit: int = 20, now: datetime | None = None) -> list[CardRead]:
+def due_cards(
+    session: Session, user_id: UUID, limit: int = 20, now: datetime | None = None
+) -> list[CardRead]:
     """The servable queue (see `_queue`): what can be studied now."""
-    queue, _ = _queue(session, now or utcnow())
+    queue, _ = _queue(session, user_id, now or utcnow())
     return [CardRead.of(card, note) for card, note in queue[:limit]]
 
 
 def review_card(
     session: Session,
+    user_id: UUID,
     card_id: UUID,
     rating: Rating,
     now: datetime | None = None,
@@ -660,8 +705,9 @@ def review_card(
     A review interval of 3+ days moves to a lighter nearby day (`_balanced_due`, spec 023).
     Its siblings are then buried until its new due, at most `SIBLING_BURY` (see `_queue`)."""
     now = now or utcnow()
-    card = _card(session, card_id)
+    card = _card(session, user_id, card_id)
     log = ReviewLog(
+        user_id=user_id,
         card_id=card.id,
         rating=rating,
         reviewed_at=now,
@@ -671,11 +717,11 @@ def review_card(
     )
     scheduled, _ = _scheduler.review_card(card.to_fsrs(), rating.to_fsrs(), review_datetime=now)
     if scheduled.state == fsrs.State.Review:
-        scheduled.due = _balanced_due(session, card.id, scheduled.due, now, rng or _rng)
+        scheduled.due = _balanced_due(session, card, scheduled.due, now, rng or _rng)
     card.apply_fsrs(scheduled)
     session.add(log)
     session.commit()
-    return get_card(session, card_id)
+    return get_card(session, user_id, card_id)
 
 
 def _balance_window(interval: int) -> tuple[int, int]:
@@ -692,10 +738,14 @@ def _day_weight(count: int, day: int) -> float:
     return 1.0 if count == 0 else (1 / count) ** 2.15 * (1 / day) ** 3
 
 
-def _day_loads(session: Session, card_id: UUID, now: datetime, lo: int, hi: int) -> dict[int, int]:
-    """Other cards due on each day `k` in `lo..hi`, day `k` being `(now + (k-1) d, now + k d]`."""
+def _day_loads(
+    session: Session, user_id: UUID, card_id: UUID, now: datetime, lo: int, hi: int
+) -> dict[int, int]:
+    """The user's other cards due on each day `k` in `lo..hi`, day `k` being
+    `(now + (k-1) d, now + k d]`."""
     dues = session.exec(
         select(Card.due).where(
+            Card.user_id == user_id,
             col(Card.due) > now + (lo - 1) * _DAY,
             col(Card.due) <= now + hi * _DAY,
             col(Card.id) != card_id,
@@ -708,18 +758,20 @@ def _day_loads(session: Session, card_id: UUID, now: datetime, lo: int, hi: int)
 
 
 def _balanced_due(
-    session: Session, card_id: UUID, due: datetime, now: datetime, rng: Random
+    session: Session, card: Card, due: datetime, now: datetime, rng: Random
 ) -> datetime:
     """FSRS's `due` moved within `_balance_window`, weighted toward days with fewer cards due."""
     interval = (due - now).days
     if interval < 3:
         return due
-    loads = _day_loads(session, card_id, now, *_balance_window(interval))
+    loads = _day_loads(session, card.user_id, card.id, now, *_balance_window(interval))
     weights = [_day_weight(count, day) for day, count in loads.items()]
     return now + rng.choices(list(loads), weights)[0] * _DAY
 
 
-def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> DeckStats:
+def stats(
+    session: Session, user_id: UUID, now: datetime | None = None, tz: tzinfo = UTC
+) -> DeckStats:
     """Deck counts at `now`. `due` / `next_due` / `due_new` follow the servable queue (burying
     applied); `total` / `new` count cards; `reviewed_today`, `new_today`, the ladder counts
     (`at_risk_*`, `reviews_*`), `streak` and `history` use calendar days in `tz` (specs 007, 021,
@@ -728,9 +780,10 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
     today = now.astimezone(tz).date()
     start_of_day, end_of_day = _local_midnight(today, tz), _local_midnight(today + _DAY, tz)
 
-    first_today = _first_reviews_between(session, start_of_day, end_of_day)
+    first_today = _first_reviews_between(session, user_id, start_of_day, end_of_day)
     first_reviews = (
         select(func.min(ReviewLog.reviewed_at).label("first"))
+        .where(ReviewLog.user_id == user_id)
         .group_by(col(ReviewLog.card_id))
         .subquery()
     )
@@ -740,24 +793,26 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
         .where(first_reviews.c.first >= start_of_day, first_reviews.c.first < end_of_day)
     ).one()
     review_times = session.exec(
-        select(ReviewLog.reviewed_at).where(col(ReviewLog.reviewed_at) < end_of_day)
+        select(ReviewLog.reviewed_at).where(
+            ReviewLog.user_id == user_id, col(ReviewLog.reviewed_at) < end_of_day
+        )
     )
     history_start, history = _history({t.astimezone(tz).date() for t in review_times}, today)
     streak, streak_start = _streak(history, history_start)
-    queue, next_due = _queue(session, now)
-    at_risk_total, at_risk_done = _at_risk(session, first_today, start_of_day)
+    queue, next_due = _queue(session, user_id, now)
+    at_risk_total, at_risk_done = _at_risk(session, user_id, first_today, start_of_day)
     reviews_done = len(first_today) - new_today
     reviews_waiting = sum(
         c.last_review is not None and c.last_review < start_of_day for c, _ in queue
     )
     return DeckStats(
-        total=session.exec(select(func.count()).select_from(Card)).one(),
+        total=session.exec(select(func.count()).where(Card.user_id == user_id)).one(),
         due=len(queue),
-        new=new_card_count(session),
+        new=new_card_count(session, user_id),
         reviewed_today=len(first_today),
         next_due=next_due,
         new_today=new_today,
-        milestone=get_milestone(session),
+        milestone=get_milestone(session, user_id),
         streak=streak,
         streak_start=streak_start,
         history_start=history_start,
@@ -770,20 +825,24 @@ def stats(session: Session, now: datetime | None = None, tz: tzinfo = UTC) -> De
     )
 
 
-def new_card_count(session: Session) -> int:
+def new_card_count(session: Session, user_id: UUID) -> int:
     """Never-reviewed cards (report-held ones included)."""
     return session.exec(
-        select(func.count()).select_from(Card).where(col(Card.last_review).is_(None))
+        select(func.count()).where(Card.user_id == user_id, col(Card.last_review).is_(None))
     ).one()
 
 
 def _first_reviews_between(
-    session: Session, start: datetime, end: datetime
+    session: Session, user_id: UUID, start: datetime, end: datetime
 ) -> dict[UUID, ReviewLog]:
     """card id -> its first review in `[start, end)`, deleted cards included."""
     logs = session.exec(
         select(ReviewLog)
-        .where(col(ReviewLog.reviewed_at) >= start, col(ReviewLog.reviewed_at) < end)
+        .where(
+            ReviewLog.user_id == user_id,
+            col(ReviewLog.reviewed_at) >= start,
+            col(ReviewLog.reviewed_at) < end,
+        )
         .order_by(col(ReviewLog.reviewed_at), col(ReviewLog.id))
     )
     first: dict[UUID, ReviewLog] = {}
@@ -802,7 +861,7 @@ def _was_at_risk(stability: float | None, last_review: datetime | None, at: date
 
 
 def _at_risk(
-    session: Session, first_today: dict[UUID, ReviewLog], start_of_day: datetime
+    session: Session, user_id: UUID, first_today: dict[UUID, ReviewLog], start_of_day: datetime
 ) -> tuple[int, int]:
     """(at_risk_total, at_risk_done) of the day's snapshot (spec 021 decision 5.1): the cards at
     risk at `start_of_day`. A card reviewed today is judged by the state stored with its first
@@ -812,9 +871,12 @@ def _at_risk(
         _was_at_risk(log.stability_before, log.last_review_before, start_of_day)
         for log in first_today.values()
     )
-    held = select(Report.card_id).where(col(Report.status).in_(ACTIVE_REPORT))
     started = session.exec(
-        select(Card).where(col(Card.last_review).is_not(None), col(Card.id).not_in(held))
+        select(Card).where(
+            Card.user_id == user_id,
+            col(Card.last_review).is_not(None),
+            col(Card.id).not_in(_held_card_ids(user_id)),
+        )
     )
     waiting = sum(
         card.id not in first_today and _was_at_risk(card.stability, card.last_review, start_of_day)
@@ -827,19 +889,19 @@ def _at_risk(
 # --- New-card milestone (spec 021) ---------------------------------------------------------------
 
 
-def get_milestone(session: Session) -> int:
+def get_milestone(session: Session, user_id: UUID) -> int:
     """The size M of the new-card steps the app shows: the stored setting, 15 when missing or 0."""
-    settings = session.get(Settings, 1)
+    settings = session.get(Settings, user_id)
     return (settings and settings.new_cards_per_day) or DEFAULT_MILESTONE
 
 
-def set_milestone(session: Session, value: int) -> int:
+def set_milestone(session: Session, user_id: UUID, value: int) -> int:
     """Stores the new-card milestone size (1-200) for every client and returns it."""
     if not 1 <= value <= MAX_MILESTONE:
         raise InvalidSetting(f"new_card_milestone must be between 1 and {MAX_MILESTONE}.")
-    settings = session.get(Settings, 1) or Settings()
+    settings = session.get(Settings, user_id) or Settings(user_id=user_id)
     settings.new_cards_per_day = value
-    session.add(settings)  # inserts row 1 the first time
+    session.add(settings)  # inserts the user's row the first time
     session.commit()
     return value
 
@@ -849,19 +911,22 @@ def set_milestone(session: Session, value: int) -> int:
 
 def _report_read(session: Session, report: Report) -> ReportRead:
     card = session.get(Card, report.card_id)
-    return ReportRead.of(report, CardRead.of(card, _note(session, card.note_id)) if card else None)
+    if card is None or card.user_id != report.user_id:
+        return ReportRead.of(report, None)
+    return ReportRead.of(report, CardRead.of(card, _note(session, card.user_id, card.note_id)))
 
 
 def report_card(
-    session: Session, card_id: UUID, body: ReportCreate, now: datetime | None = None
+    session: Session, user_id: UUID, card_id: UUID, body: ReportCreate, now: datetime | None = None
 ) -> tuple[ReportRead, bool]:
     """Opens a report on the card, which holds it out of study until the report is closed.
     Returns `(report, created)`: a `broken_photo` report is not duplicated while one is active."""
     now = now or utcnow()
-    card = _card(session, card_id)
+    card = _card(session, user_id, card_id)
     if body.reason == ReportReason.broken_photo:
         active = session.exec(
             select(Report).where(
+                Report.user_id == user_id,
                 Report.card_id == card.id,
                 Report.reason == body.reason,
                 col(Report.status).in_(ACTIVE_REPORT),
@@ -870,8 +935,8 @@ def report_card(
         if active:
             return _report_read(session, active), False
     report = Report(
-        card_id=card.id, note_id=card.note_id, reason=body.reason, comment=body.comment,
-        created_at=now, updated_at=now,
+        user_id=user_id, card_id=card.id, note_id=card.note_id, reason=body.reason,
+        comment=body.comment, created_at=now, updated_at=now,
     )  # fmt: skip
     session.add(report)
     session.commit()
@@ -881,9 +946,11 @@ def report_card(
 ReportFilter = Literal["active", "all"] | ReportStatus
 
 
-def list_reports(session: Session, status: ReportFilter = "active") -> list[ReportRead]:
+def list_reports(
+    session: Session, user_id: UUID, status: ReportFilter = "active"
+) -> list[ReportRead]:
     """Oldest first. `active` = open + waiting_user."""
-    statement = select(Report).order_by(col(Report.created_at))
+    statement = select(Report).where(Report.user_id == user_id).order_by(col(Report.created_at))
     if status == "active":
         statement = statement.where(col(Report.status).in_(ACTIVE_REPORT))
     elif status != "all":
@@ -901,6 +968,7 @@ _OUTCOME_STATUS = {
 
 def update_report(
     session: Session,
+    user_id: UUID,
     report_id: UUID,
     outcome: ReportOutcome,
     note: str,
@@ -911,7 +979,7 @@ def update_report(
     never touched."""
     now = now or utcnow()
     report = session.get(Report, report_id)
-    if report is None:
+    if report is None or report.user_id != user_id:
         raise ReportNotFound(report_id)
     if report.status not in ACTIVE_REPORT:
         raise InvalidReport(f"Report {report_id} is already {report.status}.")
@@ -923,8 +991,9 @@ def update_report(
     if report.status != ReportStatus.waiting_user:
         report.resolved_at = now
     session.add(report)
-    if outcome == ReportOutcome.deleted and session.get(Card, report.card_id):
-        delete_card(session, report.card_id)  # commits the report too
+    card = session.get(Card, report.card_id)
+    if outcome == ReportOutcome.deleted and card and card.user_id == user_id:
+        delete_card(session, user_id, report.card_id)  # commits the report too
     session.commit()
     return _report_read(session, report)
 
@@ -935,15 +1004,21 @@ FEEDBACK_MAX = 2000
 FeedbackFilter = Literal["all"] | FeedbackStatus
 
 
+def _feedback_read(session: Session, feedback: Feedback) -> FeedbackRead:
+    sender = session.get(User, feedback.user_id)
+    return FeedbackRead(**feedback.model_dump(), user_email=sender.email if sender else "")
+
+
 def _save_feedback(session: Session, feedback: Feedback) -> FeedbackRead:
     session.add(feedback)
     session.commit()
     session.refresh(feedback)  # commit expires the row; model_dump doesn't reload it
-    return FeedbackRead(**feedback.model_dump())
+    return _feedback_read(session, feedback)
 
 
 def send_feedback(
     session: Session,
+    user_id: UUID,
     message: str,
     kind: FeedbackKind = FeedbackKind.other,
     now: datetime | None = None,
@@ -954,24 +1029,39 @@ def send_feedback(
         raise InvalidFeedback("`message` is required: what went wrong, or what's missing.")
     if len(message) > FEEDBACK_MAX:
         raise InvalidFeedback(f"`message` is at most {FEEDBACK_MAX} characters.")
-    feedback = Feedback(kind=kind, message=message, created_at=now or utcnow())
+    feedback = Feedback(user_id=user_id, kind=kind, message=message, created_at=now or utcnow())
     return _save_feedback(session, feedback)
 
 
-def list_feedback(session: Session, status: FeedbackFilter = "open") -> list[FeedbackRead]:
-    """Oldest first."""
+def list_feedback(
+    session: Session,
+    user_id: UUID,
+    status: FeedbackFilter = "open",
+    owner_email: str | None = None,
+) -> list[FeedbackRead]:
+    """Oldest first: the user's own feedback, or everyone's for the owner (spec 030a)."""
     statement = select(Feedback).order_by(col(Feedback.created_at))
+    if not is_owner(session, user_id, owner_email):
+        statement = statement.where(Feedback.user_id == user_id)
     if status != "all":
         statement = statement.where(Feedback.status == status)
-    return [FeedbackRead(**feedback.model_dump()) for feedback in session.exec(statement)]
+    return [_feedback_read(session, feedback) for feedback in session.exec(statement)]
 
 
 def close_feedback(
-    session: Session, feedback_id: UUID, note: str | None = None, now: datetime | None = None
+    session: Session,
+    user_id: UUID,
+    feedback_id: UUID,
+    note: str | None = None,
+    now: datetime | None = None,
+    owner_email: str | None = None,
 ) -> FeedbackRead:
-    """Marks open feedback as done; a blank `note` is stored as no resolution."""
+    """Marks open feedback as done; a blank `note` is stored as no resolution. The owner may
+    close anyone's (spec 030a)."""
     feedback = session.get(Feedback, feedback_id)
-    if feedback is None:
+    if feedback is None or (
+        feedback.user_id != user_id and not is_owner(session, user_id, owner_email)
+    ):
         raise FeedbackNotFound(feedback_id)
     if feedback.status == FeedbackStatus.done:
         raise InvalidFeedback(f"Feedback {feedback_id} is already done.")
@@ -1039,11 +1129,12 @@ def _valid_event(raw: object) -> ActivityEventIn | None:
 
 
 def ingest_activity(
-    session: Session, events: list[Any], now: datetime | None = None
+    session: Session, user_id: UUID, events: list[Any], now: datetime | None = None
 ) -> ActivityIngest:
     """Stores the app's events, validating each on its own: invalid ones are skipped (`rejected`),
-    ids already stored are ignored (`duplicates`). More than `ACTIVITY_BATCH_MAX` → `TooManyEvents`,
-    nothing stored. Touches nothing else."""
+    ids the user already stored are ignored (`duplicates`), ids another user stored are
+    `rejected`. More than `ACTIVITY_BATCH_MAX` → `TooManyEvents`, nothing stored. Touches nothing
+    else."""
     if len(events) > ACTIVITY_BATCH_MAX:
         raise TooManyEvents()
     valid = [event for raw in events if (event := _valid_event(raw))]
@@ -1051,18 +1142,32 @@ def ingest_activity(
     for event in valid:
         unique.setdefault(event.id, event)  # first wins on a repeated id
     stored = 0
+    foreign = set(
+        session.exec(
+            select(ActivityEvent.id).where(
+                col(ActivityEvent.id).in_(list(unique)), ActivityEvent.user_id != user_id
+            )
+        ).all()
+    )
+    taken = sum(event.id in foreign for event in valid)
     if unique:
         received_at = now or utcnow()
         values = [
-            ActivityEvent(**event.model_dump(), received_at=received_at).model_dump()
+            ActivityEvent(
+                **event.model_dump(), user_id=user_id, received_at=received_at
+            ).model_dump()
             for event in unique.values()
+            if event.id not in foreign
         ]
+    if unique and values:
         statement = insert(ActivityEvent.__table__).values(values)
         result = session.exec(statement.on_conflict_do_nothing(index_elements=["id"]))
         stored = result.rowcount  # rows really inserted: right even under a concurrent retry
         session.commit()
     return ActivityIngest(
-        stored=stored, duplicates=len(valid) - stored, rejected=len(events) - len(valid)
+        stored=stored,
+        duplicates=len(valid) - taken - stored,
+        rejected=len(events) - len(valid) + taken,
     )
 
 
@@ -1073,6 +1178,7 @@ def _utc(moment: datetime) -> datetime:
 
 def list_activity(
     session: Session,
+    user_id: UUID,
     since: datetime | None = None,
     until: datetime | None = None,
     card_id: UUID | None = None,
@@ -1081,7 +1187,7 @@ def list_activity(
     limit: int = 100,
 ) -> list[ActivityEventRead]:
     """Events newest first, `since <= at < until`, optionally of one card, kind or app session."""
-    statement = select(ActivityEvent)
+    statement = select(ActivityEvent).where(ActivityEvent.user_id == user_id)
     if since is not None:
         statement = statement.where(ActivityEvent.at >= _utc(since))
     if until is not None:
@@ -1112,18 +1218,19 @@ HISTORY_LIST_MAX = 1000
 STRUGGLING_LIST_MAX = 100
 
 
-def _card_reads(session: Session, card_ids: set[UUID]) -> dict[UUID, CardRead]:
-    """The cards that still exist among `card_ids`, as `CardRead`."""
+def _card_reads(session: Session, user_id: UUID, card_ids: set[UUID]) -> dict[UUID, CardRead]:
+    """The user's cards that still exist among `card_ids`, as `CardRead`."""
     rows = session.exec(
         select(Card, Note)
         .join(Note, col(Card.note_id) == col(Note.id))
-        .where(col(Card.id).in_(card_ids))
+        .where(Card.user_id == user_id, col(Card.id).in_(card_ids))
     )
     return {card.id: CardRead.of(card, note) for card, note in rows}
 
 
 def review_history(
     session: Session,
+    user_id: UUID,
     since: datetime | None = None,
     until: datetime | None = None,
     card_id: UUID | None = None,
@@ -1133,7 +1240,7 @@ def review_history(
 ) -> list[ReviewEntry]:
     """Ratings newest first, `since <= reviewed_at < until`, optionally of one card, of the
     note's current cards, or of one rating. Each with the card as it is now (null once deleted)."""
-    statement = select(ReviewLog)
+    statement = select(ReviewLog).where(ReviewLog.user_id == user_id)
     if since is not None:
         statement = statement.where(ReviewLog.reviewed_at >= _utc(since))
     if until is not None:
@@ -1141,7 +1248,7 @@ def review_history(
     if card_id is not None:
         statement = statement.where(ReviewLog.card_id == card_id)
     if note_id is not None:
-        note_cards = select(Card.id).where(Card.note_id == note_id)
+        note_cards = select(Card.id).where(Card.user_id == user_id, Card.note_id == note_id)
         statement = statement.where(col(ReviewLog.card_id).in_(note_cards))
     if rating is not None:
         statement = statement.where(ReviewLog.rating == rating)
@@ -1149,7 +1256,7 @@ def review_history(
         col(ReviewLog.reviewed_at).desc(), col(ReviewLog.id).desc()
     ).limit(limit)
     logs = session.exec(statement).all()
-    cards = _card_reads(session, {log.card_id for log in logs})
+    cards = _card_reads(session, user_id, {log.card_id for log in logs})
     return [
         ReviewEntry(
             card_id=log.card_id,
@@ -1163,7 +1270,7 @@ def review_history(
 
 
 def struggling_cards(
-    session: Session, since: datetime | None = None, limit: int = 20
+    session: Session, user_id: UUID, since: datetime | None = None, limit: int = 20
 ) -> list[StrugglingCard]:
     """Existing cards with at least one `again` since `since`: most `again` first, then the
     highest again / reviews, then the latest `again`, then card id."""
@@ -1176,6 +1283,7 @@ def struggling_cards(
         .select_from(ReviewLog)
         .join(Card, col(Card.id) == col(ReviewLog.card_id))
         .join(Note, col(Note.id) == col(Card.note_id))
+        .where(ReviewLog.user_id == user_id, Card.user_id == user_id)
         .group_by(col(Card.id), col(Note.id))
         .having(again > 0)
         .order_by(again.desc(), (again * 1.0 / reviews).desc(), last_again_at.desc(), col(Card.id))
@@ -1189,3 +1297,62 @@ def struggling_cards(
         )
         for card, note, total, failures, last in session.exec(statement)
     ]
+
+
+# --- Accounts (spec 030a) ----------------------------------------------------------------------
+
+# Every table whose rows belong to one user; `delete_account` empties them for that user.
+OWNED = (ActivityEvent, Feedback, Report, ReviewLog, Card, Note, Settings)
+
+
+class UserNotFound(NotFound):
+    def __init__(self) -> None:
+        super().__init__("user not found")
+
+
+def is_owner(session: Session, user_id: UUID, owner_email: str | None) -> bool:
+    """The user is the server's owner: their email is `LA_CARTE_OWNER_EMAIL` (unset: nobody)."""
+    user = session.get(User, user_id)
+    return bool(owner_email) and user is not None and user.email == owner_email
+
+
+def me(session: Session, user_id: UUID) -> MeRead:
+    user = session.get(User, user_id)
+    if user is None:
+        raise UserNotFound()
+    identity = session.exec(select(Identity).where(Identity.user_id == user_id)).first()
+    return MeRead(
+        id=user.id,
+        email=user.email,
+        provider=identity.provider if identity else None,
+        created_at=user.created_at,
+    )
+
+
+def delete_account(session: Session, user_id: UUID) -> None:
+    """Deletes, in one transaction, every row the user owns (their review history included), their
+    tokens and identities (cascade) and the user. Other users are untouched."""
+    for table in (*OWNED, ApiToken, Identity):
+        session.exec(delete(table).where(col(table.user_id) == user_id))
+    session.exec(delete(User).where(col(User.id) == user_id))
+    session.commit()
+
+
+def activity_user(
+    session: Session, user_id: UUID, email: str | None, owner_email: str | None
+) -> UUID:
+    """Whose activity `activity_log(user=…)` reads: the caller when `email` is unset or theirs;
+    for the owner only, a user who sent at least one feedback. Anything else: `UserNotFound`."""
+    caller = session.get(User, user_id)
+    email = (email or "").strip().casefold()
+    if not email or (caller and caller.email == email):
+        return user_id
+    if not is_owner(session, user_id, owner_email):
+        raise UserNotFound()
+    target = session.exec(select(User).where(User.email == email)).first()
+    if (
+        target is None
+        or not session.exec(select(Feedback.id).where(Feedback.user_id == target.id)).first()
+    ):
+        raise UserNotFound()
+    return target.id

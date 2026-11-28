@@ -2,12 +2,13 @@ import re
 from datetime import timedelta
 
 import pytest
+from conftest import USER, mcp_client
 from mcp import Client
 from mcp.shared.exceptions import MCPError
 from sqlmodel import Session, select
 
 from la_carte_api import deck
-from la_carte_api.mcp_server import build_mcp
+from la_carte_api.config import Settings
 from la_carte_api.models import NoteCreate, Rating, ReviewLog, utcnow
 
 pytestmark = pytest.mark.anyio
@@ -40,7 +41,7 @@ def anyio_backend():
 
 
 async def test_agent_can_add_and_review_cards(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         tools = {t.name for t in (await client.list_tools()).tools}
         assert tools == TOOLS
 
@@ -61,7 +62,7 @@ async def test_agent_can_add_and_review_cards(engine):
 
 
 async def test_unknown_card_is_a_tool_error(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         result = await client.call_tool(
             "remove_direction", {"card_id": "00000000-0000-0000-0000-000000000000"}
         )
@@ -75,7 +76,7 @@ async def test_unknown_card_is_a_tool_error(engine):
     ("delete_card", {"card_id": "CARD"}),
 ])  # fmt: skip
 async def test_removed_card_tools_are_unknown_and_change_nothing(engine, name, arguments):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         [card] = await add_one_way(client, ("chat", "cat"))
         before = (await client.call_tool("find_notes", {})).structured_content
         arguments = {k: card["id"] if v == "CARD" else v for k, v in arguments.items()}
@@ -91,7 +92,7 @@ async def test_removed_card_tools_are_unknown_and_change_nothing(engine, name, a
 
 async def test_no_text_names_a_removed_tool(engine):
     removed = re.compile(rf"\b({'|'.join(REMOVED_TOOLS)})\b")
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         texts = [client.instructions or ""]
         texts += [t.description or "" for t in (await client.list_tools()).tools]
         for name, arguments in (
@@ -103,7 +104,7 @@ async def test_no_text_names_a_removed_tool(engine):
 
 
 async def test_add_notes_skips_duplicates_unless_allowed(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         first = await client.call_tool("add_notes", {"notes": [one_way("chat", "cat")]})
         [chat] = first.structured_content["added"]
 
@@ -121,7 +122,7 @@ async def test_add_notes_skips_duplicates_unless_allowed(engine):
 
 
 async def test_instructions_explain_notes_cards_and_directions(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         instructions = client.instructions
         assert instructions is not None
         for expected in (
@@ -151,7 +152,7 @@ async def test_instructions_explain_notes_cards_and_directions(engine):
 
 
 async def test_lists_the_prompts(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         prompts = {p.name: p for p in (await client.list_prompts()).prompts}
         assert {name: p.title for name, p in prompts.items()} == {
             "quiz_me": "Quiz me",
@@ -167,7 +168,7 @@ async def test_lists_the_prompts(engine):
 
 
 async def test_quiz_me_prompt(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         [message] = (await client.get_prompt("quiz_me", {"limit": "5"})).messages
         assert message.role == "user"
         text = message.content.text
@@ -197,7 +198,7 @@ async def test_quiz_me_prompt(engine):
 
 async def test_make_cards_prompt(engine):
     source = "Le chat dort.\nLe chien {aboie}."
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         [message] = (await client.get_prompt("make_cards", {"text": source})).messages
         text = message.content.text
         assert message.role == "user"
@@ -228,14 +229,14 @@ async def test_make_cards_prompt(engine):
     ("make_cards", {"text": "x", "max_cards": "0"}),
 ])  # fmt: skip
 async def test_prompt_counts_must_be_at_least_one(engine, name, arguments):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         # The SDK reports prompt-argument validation as an internal error (-32603).
         with pytest.raises(MCPError):
             await client.get_prompt(name, arguments)
 
 
 async def test_mcp_review_counts_in_rest_stats(client):
-    async with Client(build_mcp(client.app.state.engine)) as mcp:
+    async with mcp_client(client.app.state.engine) as mcp:
         [card] = await add_one_way(mcp, ("chat", "cat"))
         await mcp.call_tool("review_card", {"card_id": card["id"], "rating": "good"})
 
@@ -244,7 +245,7 @@ async def test_mcp_review_counts_in_rest_stats(client):
 
 
 async def test_deck_stats_takes_a_time_zone(client):
-    async with Client(build_mcp(client.app.state.engine)) as mcp:
+    async with mcp_client(client.app.state.engine) as mcp:
         [card] = await add_one_way(mcp, ("chat", "cat"))
         await mcp.call_tool("review_card", {"card_id": card["id"], "rating": "good"})
 
@@ -267,12 +268,12 @@ async def test_deck_stats_takes_a_time_zone(client):
 async def test_deck_stats_streak_survives_delete_note(engine):
     with Session(engine) as session:
         basic = NoteCreate(type="basic", fields={"front": "chat", "back": "cat"})
-        [note] = deck.add_notes(session, [basic]).added
+        [note] = deck.add_notes(session, USER, [basic]).added
         card = note.cards[0]
-        deck.review_card(session, card.id, Rating.good, now=utcnow() - timedelta(days=1))
-        deck.review_card(session, card.id, Rating.good)
+        deck.review_card(session, USER, card.id, Rating.good, now=utcnow() - timedelta(days=1))
+        deck.review_card(session, USER, card.id, Rating.good)
 
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         assert (await client.call_tool("deck_stats", {})).structured_content["streak"] == 2
         deleted = await client.call_tool("delete_note", {"note_id": str(note.id)})
         assert not deleted.is_error
@@ -284,7 +285,7 @@ async def test_deck_stats_streak_survives_delete_note(engine):
 
 
 async def test_review_card_takes_an_optional_confidence(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         a, b = await add_one_way(client, ("a", "a"), ("b", "b"))
         measured = {"card_id": a["id"], "rating": "good", "confidence": 0.72}
         assert not (await client.call_tool("review_card", measured)).is_error
@@ -303,7 +304,7 @@ async def test_review_card_takes_an_optional_confidence(engine):
 
 
 async def test_add_people_prompt(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         asked = (await client.get_prompt("add_people", {"text": "Ada, CEO {x}"})).messages[0]
         text = asked.content.text
         for expected in ("<text>\nAda, CEO {x}\n</text>", "`description`", "ask me before"):
@@ -313,7 +314,7 @@ async def test_add_people_prompt(engine):
 
 
 async def test_handle_reports_prompt(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         assert "handle_reports" in client.instructions
         text = (await client.get_prompt("handle_reports")).messages[0].content.text
         for expected in ("`list_reports`", "`update_report`", "`waiting_user`", "wait"):
@@ -321,12 +322,14 @@ async def test_handle_reports_prompt(engine):
 
 
 async def test_server_info_lists_the_icon_at_the_public_url(engine):
-    async with Client(build_mcp(engine, "https://carte.example.com/")) as client:
+    async with mcp_client(
+        engine, settings=Settings(public_url="https://carte.example.com/", _env_file=None)
+    ) as client:
         icons = client.server_info.icons
         assert icons is not None
         assert [(i.src, i.mime_type) for i in icons] == [
             ("https://carte.example.com/icon.png", "image/png"),
             ("https://carte.example.com/icon.svg", "image/svg+xml"),
         ]
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         assert client.server_info.icons is None

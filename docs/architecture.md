@@ -19,7 +19,8 @@ scheduling logic.
 | `deck.py` | **All behavior.** Plain functions taking a `Session`, returning the read schemas. Testable without HTTP. |
 | `rest.py` | FastAPI routes, thin wrappers over `deck` (consumed by iOS) |
 | `mcp_server.py` | MCP tools, thin wrappers over `deck` (consumed by agents) |
-| `app.py` | Assembly: engine, routes, MCP mount at `/mcp`, bearer-token middleware |
+| `app.py` | Assembly: engine, owner + legacy-token import, routes, MCP mount at `/mcp`, daily activity pruning |
+| `auth.py` | Our bearer tokens (mint, `verify`, PAT list/revoke), the REST `CurrentUser` / `StatsUser` dependencies, the MCP token verifier (spec 030a) |
 | `config.py` | `LA_CARTE_*` env settings |
 
 Rules:
@@ -91,7 +92,7 @@ Rules:
     waiting; both 0 when the total is below `deck.AT_RISK_MIN` (10).
   - Reviews: `reviews_done = reviewed_today - new_today`; `reviews_total` = done + cards in the servable queue now
     whose `last_review` is before `start_of_day` (a card failed today or a learning step doesn't reopen it).
-- **`settings` table** (spec 021): one row, `id = 1`, `new_cards_per_day` = the new-card milestone size M (default
+- **`settings` table** (spec 021; keyed by `user_id` since 030a): one row per user, `new_cards_per_day` = the new-card milestone size M (default
   15, 1–200; a stored 0 reads 15). A missing row means the defaults; `deck.get_milestone` reads it,
   `deck.set_milestone` upserts it (`InvalidSetting` outside 1–200). Migration 021 creates the table on a pre-021
   database (backup `<db>.pre-021-<timestamp>.bak`).
@@ -103,7 +104,7 @@ Rules:
 - **`activityevent` table** (spec 029): what the user did in the app, `{id (client UUID), kind, at (UTC), tz,
   session, card_id, app_version, build, os, data (JSON), received_at}`, indexed on `at`, `card_id`, `kind`. Created by
   `create_all` like `feedback`. Ingest is idempotent on `id` and skips invalid events one by one. Events older than
-  `deck.ACTIVITY_RETENTION` (90 days, by `at`) are pruned once at startup. Never touches the deck.
+  `deck.ACTIVITY_RETENTION` (90 days, by `at`) are pruned at startup and then daily (`app.prune_daily`). Never touches the deck.
 - **Migration 014**: when `card` still has `front`, each card becomes a `basic` note **with the same id** and
   `fields = {front, back}`; `card` is rebuilt with `note_id = id`, `prompt ["front"]`, `answer ["back"]`. Card ids,
   FSRS state and review logs are untouched. Backup `<db>.pre-014-<timestamp>.bak`.
@@ -208,11 +209,13 @@ also `all` or one status). `update_report(report_id, outcome, note)` stores `not
 Feedback (spec 025, MCP only): `send_feedback(message, kind="other")` → `Feedback` (`kind`: bug | confusing |
 missing | friction | other; `message` trimmed, 1–2000 chars, else `ToolError`), `list_feedback(status="open")`
 (open | done | all, oldest first), `close_feedback(feedback_id, note=None)` → `done`, `note` stored as
-`resolution` (unknown or already done → `ToolError`). Feedback is about the app / tools / experience, never one card
+`resolution` (unknown or already done → `ToolError`). `Feedback` carries `user_email` (its sender); the owner
+(`LA_CARTE_OWNER_EMAIL`) lists and closes every user's, everyone else only their own (spec 030a). Feedback is about the app / tools / experience, never one card
 (that's a report), and stays in this server's database: nothing is sent anywhere.
 
-Activity (spec 029): `activity_log(since, until, card_id, kind, session, limit=100)` → `[ActivityEventRead]` newest
-first, the same as `GET /activity`. `list_feedback` / `list_reports` descriptions point to it for correlation.
+Activity (spec 029): `activity_log(since, until, card_id, kind, session, limit=100, user=None)` → `[ActivityEventRead]`
+newest first, the same as `GET /activity`. `user` (an email, owner only, spec 030a): the activity of a user who sent
+feedback; anyone else, or a user with no feedback → `ToolError` "user not found". `list_feedback` / `list_reports` descriptions point to it for correlation.
 
 History (spec 031, MCP only): `review_history(since, until, card_id, note_id, rating, limit=100)` → `[ReviewEntry]`
 = `{card_id, reviewed_at, rating, confidence, card: Card | null}` over `ReviewLog` (app and MCP ratings, never

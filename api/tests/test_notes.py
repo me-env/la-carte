@@ -4,11 +4,10 @@ from datetime import timedelta
 from uuid import UUID
 
 import pytest
-from mcp import Client
+from conftest import USER, mcp_client
 from sqlmodel import Session, select
 
 from la_carte_api import deck
-from la_carte_api.mcp_server import build_mcp
 from la_carte_api.models import (
     CardCreate,
     Direction,
@@ -136,7 +135,7 @@ def test_validation_rules_are_422_naming_the_field(client, body, expected):
 
 @pytest.mark.parametrize(("body", "expected"), INVALID.values(), ids=INVALID.keys())
 async def test_validation_rules_are_tool_errors(engine, body, expected):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         result = await client.call_tool("add_notes", {"notes": [body]})
         assert result.is_error
         for text in expected:
@@ -249,7 +248,7 @@ def test_get_notes_filters_by_query_and_type_and_ignores_photo(client):
 
 
 def _person(session, now):
-    [note] = deck.add_notes(session, [NoteCreate.model_validate(PERSON)], now=now).added
+    [note] = deck.add_notes(session, USER, [NoteCreate.model_validate(PERSON)], now=now).added
     return note
 
 
@@ -257,12 +256,14 @@ def test_due_queue_serves_one_card_per_note_and_buries_siblings_for_6_hours(sess
     now = utcnow()
     note = _person(session, now - timedelta(minutes=1))
     a, b = note.cards
-    assert [c.id for c in deck.due_cards(session, now=now)] == [a.id]  # oldest first, one per note
+    assert [c.id for c in deck.due_cards(session, USER, now=now)] == [
+        a.id
+    ]  # oldest first, one per note
 
-    assert deck.review_card(session, a.id, Rating.easy, now=now).due > now + timedelta(days=1)
+    assert deck.review_card(session, USER, a.id, Rating.easy, now=now).due > now + timedelta(days=1)
 
     def due_at(delta):
-        return [c.id for c in deck.due_cards(session, now=now + delta)]
+        return [c.id for c in deck.due_cards(session, USER, now=now + delta)]
 
     assert due_at(timedelta(hours=5, minutes=59)) == []
     assert due_at(timedelta(hours=6, minutes=1)) == [b.id]
@@ -271,15 +272,15 @@ def test_due_queue_serves_one_card_per_note_and_buries_siblings_for_6_hours(sess
 def test_a_card_rated_again_frees_its_sibling_and_wins_at_its_due(session):
     now = utcnow()
     a, b = _person(session, now - timedelta(minutes=1)).cards
-    again = deck.review_card(session, a.id, Rating.again, now=now).due
+    again = deck.review_card(session, USER, a.id, Rating.again, now=now).due
     assert now < again < now + deck.SIBLING_BURY
 
     def due_at(t):
-        return [c.id for c in deck.due_cards(session, now=t)]
+        return [c.id for c in deck.due_cards(session, USER, now=t)]
 
     assert due_at(again - timedelta(seconds=1)) == []  # B held until A is due again
     assert due_at(again) == [a.id]  # both due, one per note: the (re)learning card wins
-    deck.review_card(session, a.id, Rating.easy, now=again)
+    deck.review_card(session, USER, a.id, Rating.easy, now=again)
     assert due_at(again) == []  # B held again: siblings never back to back
     assert due_at(again + deck.SIBLING_BURY) == [b.id]
 
@@ -287,16 +288,20 @@ def test_a_card_rated_again_frees_its_sibling_and_wins_at_its_due(session):
 def test_a_failed_card_comes_back_at_its_due_even_after_a_sibling_was_answered(session):
     now = utcnow()
     a, b = _person(session, now - timedelta(minutes=1)).cards
-    step = deck.review_card(session, b.id, Rating.good, now=now).due
-    assert deck.review_card(session, b.id, Rating.good, now=step).state == "review"
+    step = deck.review_card(session, USER, b.id, Rating.good, now=now).due
+    assert deck.review_card(session, USER, b.id, Rating.good, now=step).state == "review"
 
     failed = step + timedelta(minutes=1)
-    again = deck.review_card(session, a.id, Rating.again, now=failed).due
-    answered = deck.review_card(session, b.id, Rating.good, now=failed + timedelta(seconds=30))
+    again = deck.review_card(session, USER, a.id, Rating.again, now=failed).due
+    answered = deck.review_card(
+        session, USER, b.id, Rating.good, now=failed + timedelta(seconds=30)
+    )
     assert answered.state == "review" and answered.due > again + deck.SIBLING_BURY
 
-    assert [c.id for c in deck.due_cards(session, now=again)] == [a.id]  # B's 6 h hold skips A
-    stats = deck.stats(session, now=again - timedelta(seconds=1))
+    assert [c.id for c in deck.due_cards(session, USER, now=again)] == [
+        a.id
+    ]  # B's 6 h hold skips A
+    stats = deck.stats(session, USER, now=again - timedelta(seconds=1))
     assert (stats.due, stats.next_due) == (0, again)
 
 
@@ -304,24 +309,24 @@ def _three_ways(session, now):
     ways = _directions(
         (["photo"], ["name", "description"]), (["description"], None), (["name"], None)
     )
-    [note] = deck.add_notes(session, [NoteCreate.model_validate(ways)], now=now).added
+    [note] = deck.add_notes(session, USER, [NoteCreate.model_validate(ways)], now=now).added
     return note.cards
 
 
 def test_a_hold_follows_the_reviewed_cards_latest_review_and_every_sibling_holds(session):
     now = utcnow()
     a, b, c = _three_ways(session, now - timedelta(minutes=1))
-    deck.review_card(session, a.id, Rating.again, now=now)
+    deck.review_card(session, USER, a.id, Rating.again, now=now)
     later = now + timedelta(minutes=1)
-    deck.review_card(session, a.id, Rating.easy, now=later)  # A's latest review: due in days
+    deck.review_card(session, USER, a.id, Rating.easy, now=later)  # A's latest review: due in days
 
     def due_at(t):
-        return [x.id for x in deck.due_cards(session, now=t)]
+        return [x.id for x in deck.due_cards(session, USER, now=t)]
 
     assert due_at(later + deck.SIBLING_BURY - timedelta(seconds=1)) == []
     assert due_at(later + deck.SIBLING_BURY) == [b.id]
 
-    relearn = deck.review_card(session, b.id, Rating.again, now=later).due
+    relearn = deck.review_card(session, USER, b.id, Rating.again, now=later).due
     assert relearn < later + deck.SIBLING_BURY
     assert due_at(relearn) == [b.id]  # B learning: never held; C still held by A (6 h)
     assert due_at(later + deck.SIBLING_BURY) == [b.id]  # C free too, but B (learning) wins
@@ -330,34 +335,38 @@ def test_a_hold_follows_the_reviewed_cards_latest_review_and_every_sibling_holds
 def test_a_card_rated_good_with_a_long_interval_holds_its_sibling_6_hours(session):
     now = utcnow()
     a, b = _person(session, now - timedelta(minutes=1)).cards
-    step = deck.review_card(session, a.id, Rating.good, now=now).due  # learning step
+    step = deck.review_card(session, USER, a.id, Rating.good, now=now).due  # learning step
     later = step + timedelta(minutes=1)
-    due = deck.review_card(session, a.id, Rating.good, now=later).due  # graduates: days
+    due = deck.review_card(session, USER, a.id, Rating.good, now=later).due  # graduates: days
     assert due > later + deck.SIBLING_BURY
 
-    assert deck.due_cards(session, now=later + deck.SIBLING_BURY - timedelta(seconds=1)) == []
-    assert [x.id for x in deck.due_cards(session, now=later + deck.SIBLING_BURY)] == [b.id]
+    assert deck.due_cards(session, USER, now=later + deck.SIBLING_BURY - timedelta(seconds=1)) == []
+    assert [x.id for x in deck.due_cards(session, USER, now=later + deck.SIBLING_BURY)] == [b.id]
 
 
 def test_burying_never_touches_other_notes(session):
     now = utcnow()
     a, _ = _person(session, now).cards
-    [chat] = deck.add_cards(session, [CardCreate(front="chat", back="cat")], now=now).added
-    deck.review_card(session, a.id, Rating.easy, now=now)
-    assert [c.id for c in deck.due_cards(session, now=now)] == [chat.id]
-    deck.review_card(session, chat.id, Rating.again, now=now)  # a one-card note: as before
-    relearn = deck.get_card(session, chat.id).due
-    assert [c.id for c in deck.due_cards(session, now=relearn)] == [chat.id]
+    [chat] = deck.add_cards(session, USER, [CardCreate(front="chat", back="cat")], now=now).added
+    deck.review_card(session, USER, a.id, Rating.easy, now=now)
+    assert [c.id for c in deck.due_cards(session, USER, now=now)] == [chat.id]
+    deck.review_card(session, USER, chat.id, Rating.again, now=now)  # a one-card note: as before
+    relearn = deck.get_card(session, USER, chat.id).due
+    assert [c.id for c in deck.due_cards(session, USER, now=relearn)] == [chat.id]
 
 
 def test_stats_due_matches_the_queue_and_next_due_is_the_end_of_burying(session):
     now = utcnow()
     a, _ = _person(session, now).cards
-    assert deck.stats(session, now=now).due == len(deck.due_cards(session, limit=500, now=now)) == 1
+    assert (
+        deck.stats(session, USER, now=now).due
+        == len(deck.due_cards(session, USER, limit=500, now=now))
+        == 1
+    )
 
-    deck.review_card(session, a.id, Rating.easy, now=now)  # A due in days; B buried
+    deck.review_card(session, USER, a.id, Rating.easy, now=now)  # A due in days; B buried
 
-    stats = deck.stats(session, now=now + timedelta(minutes=1))
+    stats = deck.stats(session, USER, now=now + timedelta(minutes=1))
     assert (stats.total, stats.due, stats.new) == (2, 0, 1)
     assert stats.next_due == now + deck.SIBLING_BURY
 
@@ -365,12 +374,12 @@ def test_stats_due_matches_the_queue_and_next_due_is_the_end_of_burying(session)
 def test_stats_next_due_is_the_failed_siblings_due_and_matches_the_queue(session):
     now = utcnow()
     a, b = _person(session, now - timedelta(minutes=1)).cards
-    again = deck.review_card(session, a.id, Rating.again, now=now).due
+    again = deck.review_card(session, USER, a.id, Rating.again, now=now).due
 
-    stats = deck.stats(session, now=now + timedelta(seconds=1))
+    stats = deck.stats(session, USER, now=now + timedelta(seconds=1))
     assert (stats.due, stats.next_due) == (0, again)  # B freed when A is due, not in 6 h
-    at_due = deck.stats(session, now=again)
-    assert at_due.due == len(deck.due_cards(session, limit=500, now=again)) == 1
+    at_due = deck.stats(session, USER, now=again)
+    assert at_due.due == len(deck.due_cards(session, USER, limit=500, now=again)) == 1
 
 
 # --- /cards compatibility -----------------------------------------------------------------------
@@ -439,7 +448,7 @@ def test_delete_cards_removes_a_direction_and_the_note_with_its_last_card(client
 
 
 async def test_add_notes_skips_duplicate_keys_unless_allowed(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         first = await client.call_tool("add_notes", {"notes": [CHAT, PERSON]})
         assert not first.is_error
         chat, ada = first.structured_content["added"]
@@ -471,7 +480,7 @@ async def test_add_notes_skips_duplicate_keys_unless_allowed(engine):
 
 
 async def test_add_notes_is_all_or_nothing_and_names_the_bad_note(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         result = await client.call_tool(
             "add_notes", {"notes": [CHAT, {**PERSON, "directions": []}]}
         )
@@ -481,7 +490,7 @@ async def test_add_notes_is_all_or_nothing_and_names_the_bad_note(engine):
 
 
 async def test_note_tools(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         [note] = (await client.call_tool("add_notes", {"notes": [PERSON]})).structured_content[
             "added"
         ]
@@ -521,8 +530,8 @@ async def test_note_tools(engine):
 
 async def test_due_cards_tool_serves_the_buried_queue(engine):
     with Session(engine) as session:
-        a, _ = deck.add_notes(session, [NoteCreate.model_validate(PERSON)]).added[0].cards
-    async with Client(build_mcp(engine)) as client:
+        a, _ = deck.add_notes(session, USER, [NoteCreate.model_validate(PERSON)]).added[0].cards
+    async with mcp_client(engine) as client:
         [due] = (await client.call_tool("due_cards", {})).structured_content["result"]
         assert due["id"] == str(a.id)
         await client.call_tool("review_card", {"card_id": str(a.id), "rating": "easy"})

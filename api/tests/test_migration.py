@@ -5,12 +5,15 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
-from sqlmodel import Session
+from conftest import USER
+from sqlmodel import Session, select
 
 from la_carte_api import db as migration
 from la_carte_api import deck
 from la_carte_api.db import make_engine
-from la_carte_api.models import Direction, NoteCreate, NoteType
+from la_carte_api.models import Direction, NoteCreate, NoteType, User
+
+OWNER_EMAIL = "owner@example.com"  # owns the data of a pre-030 database
 
 # The schema as created before spec 012 (`.schema` of a database made by the old models).
 OLD_SCHEMA = """
@@ -38,6 +41,12 @@ REVIEWS = [
     (3, CARD, "good", "2026-11-20 08:00:00.000000"),
     (7, CARD, "again", "2026-11-21 09:30:00.000000"),
 ]
+
+
+def _owner(engine) -> UUID:
+    """The user migration 030 created for `OWNER_EMAIL`."""
+    with Session(engine) as session:
+        return session.exec(select(User.id).where(User.email == OWNER_EMAIL)).one()
 
 
 def _old_db(path, reviews=REVIEWS) -> str:
@@ -77,11 +86,15 @@ def test_rebuilds_an_old_database_keeping_every_row(tmp_path):
     before = _snapshot(path)
     assert before["foreign_keys"]
 
-    make_engine(url).dispose()
+    make_engine(url, OWNER_EMAIL).dispose()
 
     after = _snapshot(path)
     assert after["foreign_keys"] == []
-    assert after["indexes"] == ["ix_reviewlog_card_id", "ix_reviewlog_reviewed_at"]
+    assert after["indexes"] == [
+        "ix_reviewlog_card_id",
+        "ix_reviewlog_reviewed_at",
+        "ix_reviewlog_user_id",
+    ]
     assert after["card_id_notnull"] == 1
     assert (after["reviews"], after["cards"]) == (before["reviews"], before["cards"])
     assert not any("reviewlog_new" in sql for sql in after["sql"])
@@ -90,11 +103,12 @@ def test_rebuilds_an_old_database_keeping_every_row(tmp_path):
 
 
 def test_migrated_database_keeps_history_after_delete(tmp_path):
-    engine = make_engine(_old_db(tmp_path / "deck.db"))
+    engine = make_engine(_old_db(tmp_path / "deck.db"), OWNER_EMAIL)
+    owner = _owner(engine)
     with Session(engine) as session:
-        [card] = deck.list_cards(session)
-        deck.delete_card(session, card.id)
-        assert deck.list_cards(session) == []
+        [card] = deck.list_cards(session, owner)
+        deck.delete_card(session, owner, card.id)
+        assert deck.list_cards(session, owner) == []
     engine.dispose()
     assert _snapshot(tmp_path / "deck.db")["reviews"] == REVIEWS
 
@@ -102,20 +116,24 @@ def test_migrated_database_keeps_history_after_delete(tmp_path):
 def test_is_idempotent(tmp_path):
     path = tmp_path / "deck.db"
     url = _old_db(path)
-    make_engine(url).dispose()
+    make_engine(url, OWNER_EMAIL).dispose()
     once = _snapshot(path)
 
-    make_engine(url).dispose()
+    make_engine(url, OWNER_EMAIL).dispose()
 
     assert _snapshot(path) == once
-    assert len(list(tmp_path.glob("*.bak"))) == 4  # pre-012, -014, -015, -021; second start: none
+    assert len(list(tmp_path.glob("*.bak"))) == 5  # pre-012/014/015/021/030; second start: none
 
 
 def test_fresh_database_has_no_foreign_key_and_skips_the_rebuild(tmp_path):
-    make_engine(f"sqlite:///{tmp_path / 'deck.db'}").dispose()
+    make_engine(f"sqlite:///{tmp_path / 'deck.db'}", OWNER_EMAIL).dispose()
     snapshot = _snapshot(tmp_path / "deck.db")
     assert snapshot["foreign_keys"] == []
-    assert snapshot["indexes"] == ["ix_reviewlog_card_id", "ix_reviewlog_reviewed_at"]
+    assert snapshot["indexes"] == [
+        "ix_reviewlog_card_id",
+        "ix_reviewlog_reviewed_at",
+        "ix_reviewlog_user_id",
+    ]
     assert list(tmp_path.glob("*.bak")) == []
 
 
@@ -124,7 +142,7 @@ def test_rebuild_skips_reviews_without_a_card_id(tmp_path, caplog):
     path = tmp_path / "deck.db"
     url = _old_db(path, [*REVIEWS, (9, None, "good", "2026-11-21 10:00:00.000000")])
 
-    make_engine(url).dispose()
+    make_engine(url, OWNER_EMAIL).dispose()
 
     snapshot = _snapshot(path)
     assert (snapshot["foreign_keys"], snapshot["reviews"]) == ([], REVIEWS)
@@ -145,7 +163,7 @@ def test_failed_rebuild_leaves_the_old_table_intact(tmp_path, monkeypatch):
 
     monkeypatch.setattr(migration, "_rebuild_reviewlog", fail_after_copy)
     with pytest.raises(RuntimeError, match="boom"):
-        make_engine(url)
+        make_engine(url, OWNER_EMAIL)
 
     assert _snapshot(path) == before
 
@@ -183,23 +201,23 @@ def test_adds_a_nullable_confidence_column_to_a_012_database(tmp_path):
     url = _db_012(path)
     before = _snapshot(path)
 
-    make_engine(url).dispose()
+    make_engine(url, OWNER_EMAIL).dispose()
 
     assert _confidence(path) == [("FLOAT", 0), [(None,), (None,)]]
     assert _snapshot(path)["reviews"] == before["reviews"] == REVIEWS
-    make_engine(url).dispose()  # idempotent
+    make_engine(url, OWNER_EMAIL).dispose()  # idempotent
     assert _confidence(path) == [("FLOAT", 0), [(None,), (None,)]]
 
 
 def test_a_pre_012_database_gets_both_steps(tmp_path):
     path = tmp_path / "deck.db"
-    make_engine(_old_db(path)).dispose()
+    make_engine(_old_db(path), OWNER_EMAIL).dispose()
     assert _snapshot(path)["foreign_keys"] == []
     assert _confidence(path) == [("FLOAT", 0), [(None,), (None,)]]
 
 
 def test_fresh_database_has_the_confidence_column(tmp_path):
-    make_engine(f"sqlite:///{tmp_path / 'deck.db'}").dispose()
+    make_engine(f"sqlite:///{tmp_path / 'deck.db'}", OWNER_EMAIL).dispose()
     assert _confidence(tmp_path / "deck.db") == [("FLOAT", 0), []]
 
 
@@ -246,7 +264,7 @@ def test_cards_become_basic_notes_keeping_ids_schedule_and_history(tmp_path, wit
     url = _main_db(path, with_confidence)
     before = _snapshot(path)
 
-    engine = make_engine(url)
+    engine = make_engine(url, OWNER_EMAIL)
 
     after, notes = _snapshot(path), _notes_snapshot(path)
     assert (after["cards"], after["reviews"]) == (before["cards"], before["reviews"])
@@ -259,19 +277,23 @@ def test_cards_become_basic_notes_keeping_ids_schedule_and_history(tmp_path, wit
     )
     assert "front" not in notes["card_columns"] and "back" not in notes["card_columns"]
     assert notes["card_fk"] == [("note", "note_id", "id", "CASCADE")]
-    assert notes["card_indexes"] == ["ix_card_due", "ix_card_note_id", "sqlite_autoindex_card_1"]
+    assert notes["card_indexes"] == [
+        "ix_card_due", "ix_card_note_id", "ix_card_user_id", "ix_card_user_id_due",
+        "sqlite_autoindex_card_1",
+    ]  # fmt: skip
     assert notes["confidence"] == [(3, None), (7, 0.5 if with_confidence else None)]
     [backup] = tmp_path.glob("deck.db.pre-014-*.bak")
     assert _snapshot(backup) == before  # untouched copy of the old file
     assert list(tmp_path.glob("*.pre-012-*.bak")) == []
 
-    with Session(engine) as session:  # the app reads it as before
-        cards = {c.front: c for c in deck.list_cards(session, query="")}
+    owner = _owner(engine)
+    with Session(engine) as session:  # the app reads it as before (as the owner, spec 030a)
+        cards = {c.front: c for c in deck.list_cards(session, owner, query="")}
         assert (cards["chat"].back, cards["chat"].note_id, cards["chat"].state) == (
             "cat", UUID(CARD), "review",
         )  # fmt: skip
-        assert deck.list_cards(session, query="été")[0].back == "summer"
-        stats = deck.stats(session, now=datetime(2026, 11, 21, 12, tzinfo=UTC))
+        assert deck.list_cards(session, owner, query="été")[0].back == "summer"
+        stats = deck.stats(session, owner, now=datetime(2026, 11, 21, 12, tzinfo=UTC))
         assert (stats.total, stats.reviewed_today, stats.streak) == (2, 1, 2)
     engine.dispose()
 
@@ -279,13 +301,13 @@ def test_cards_become_basic_notes_keeping_ids_schedule_and_history(tmp_path, wit
 def test_notes_migration_is_idempotent(tmp_path):
     path = tmp_path / "deck.db"
     url = _main_db(path)
-    make_engine(url).dispose()
+    make_engine(url, OWNER_EMAIL).dispose()
     once = (_snapshot(path), _notes_snapshot(path))
 
-    make_engine(url).dispose()
+    make_engine(url, OWNER_EMAIL).dispose()
 
     assert (_snapshot(path), _notes_snapshot(path)) == once
-    assert len(list(tmp_path.glob("*.bak"))) == 3  # pre-014, pre-015, pre-021; second start: none
+    assert len(list(tmp_path.glob("*.bak"))) == 4  # pre-014/015/021/030; second start: none
 
 
 def test_failed_notes_migration_leaves_the_old_tables_intact(tmp_path, monkeypatch):
@@ -302,13 +324,13 @@ def test_failed_notes_migration_leaves_the_old_tables_intact(tmp_path, monkeypat
 
     monkeypatch.setattr(migration, "_cards_to_notes", fail_mid_rebuild)
     with pytest.raises(RuntimeError, match="boom"):
-        make_engine(url)
+        make_engine(url, OWNER_EMAIL)
 
     assert _snapshot(path) == before
     assert sqlite3.connect(path).execute("SELECT name FROM sqlite_master").fetchall() == tables
 
     monkeypatch.undo()  # the next start migrates normally
-    make_engine(url).dispose()
+    make_engine(url, OWNER_EMAIL).dispose()
     assert len(_notes_snapshot(path)["notes"]) == 2
 
 
@@ -318,14 +340,14 @@ def test_failed_notes_migration_leaves_the_old_tables_intact(tmp_path, monkeypat
 def test_person_role_and_context_fold_into_description(tmp_path):
     path = tmp_path / "deck.db"
     url = f"sqlite:///{path}"
-    engine = make_engine(url)
+    engine = make_engine(url, OWNER_EMAIL)
     with Session(engine) as session:
         person = NoteCreate(
             type=NoteType.person,
             fields={"name": "Ada Example", "photo": "https://example.org/a.jpg"},
             directions=[Direction(prompt=["photo"]), Direction(prompt=["name"])],
         )
-        [note] = deck.add_notes(session, [person]).added
+        [note] = deck.add_notes(session, USER, [person]).added
     engine.dispose()
     photo, name = (card.id.hex for card in note.cards)
     old = sqlite3.connect(path)  # as written before the amendment: role, context, partial answers
@@ -339,10 +361,10 @@ def test_person_role_and_context_fold_into_description(tmp_path):
     old.commit()
     old.close()
 
-    engine = make_engine(url)
+    engine = make_engine(url, OWNER_EMAIL)
 
     with Session(engine) as session:
-        folded = deck.get_note(session, note.id)
+        folded = deck.get_note(session, USER, note.id)
     assert folded.fields == {
         "name": "Ada Example",
         "photo": "https://example.org/a.jpg",
@@ -354,5 +376,5 @@ def test_person_role_and_context_fold_into_description(tmp_path):
     ]
     assert len(list(tmp_path.glob("deck.db.pre-014a-*.bak"))) == 1
     engine.dispose()
-    make_engine(url).dispose()  # idempotent: no second backup
+    make_engine(url, OWNER_EMAIL).dispose()  # idempotent: no second backup
     assert len(list(tmp_path.glob("*.bak"))) == 1

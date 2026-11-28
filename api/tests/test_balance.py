@@ -10,12 +10,11 @@ from random import Random
 
 import fsrs
 import pytest
-from mcp import Client
+from conftest import USER, mcp_client
 from sqlalchemy import event
 from sqlmodel import Session
 
 from la_carte_api import deck
-from la_carte_api.mcp_server import build_mcp
 from la_carte_api.models import Card, CardCreate, Rating
 
 NOW = datetime(2026, 11, 22, 12, tzinfo=UTC)
@@ -30,7 +29,7 @@ def _reference(card: Card, rating: Rating = Rating.good, now: datetime = NOW) ->
 
 def _add(session, count: int, prefix: str = "c") -> list[Card]:
     fronts = [CardCreate(front=f"{prefix}{i}", back="x") for i in range(count)]
-    added = deck.add_cards(session, fronts, now=NOW - 400 * DAY).added
+    added = deck.add_cards(session, USER, fronts, now=NOW - 400 * DAY).added
     return [session.get(Card, c.id) for c in added]
 
 
@@ -71,7 +70,7 @@ def _load_days(session, cards: list[Card], days: dict[int, int]) -> None:
 
 def _day(session, card: Card, interval: int, seed: int) -> int:
     _review_card_with_interval(session, card, interval)
-    reviewed = deck.review_card(session, card.id, Rating.good, now=NOW, rng=Random(seed))
+    reviewed = deck.review_card(session, USER, card.id, Rating.good, now=NOW, rng=Random(seed))
     shift = reviewed.due - NOW
     assert shift % DAY == timedelta(0)
     return shift // DAY
@@ -82,13 +81,13 @@ def _day(session, card: Card, interval: int, seed: int) -> int:
 def test_learning_steps_are_never_moved(session, seed):
     [card] = _add(session, 1)
     reference = _reference(card)
-    reviewed = deck.review_card(session, card.id, Rating.good, now=NOW, rng=Random(seed))
+    reviewed = deck.review_card(session, USER, card.id, Rating.good, now=NOW, rng=Random(seed))
     assert reviewed.due == reference.due == NOW + timedelta(minutes=10)
 
     _review_card_with_interval(session, card, 20)
     reference = _reference(card, Rating.again)
     assert reference.state == fsrs.State.Relearning
-    reviewed = deck.review_card(session, card.id, Rating.again, now=NOW, rng=Random(seed))
+    reviewed = deck.review_card(session, USER, card.id, Rating.again, now=NOW, rng=Random(seed))
     assert reviewed.due == reference.due == NOW + timedelta(minutes=10)
 
 
@@ -164,7 +163,7 @@ def test_day_buckets(session):
     card.due, at_5.due, at_4.due = NOW + 5 * DAY, NOW + 5 * DAY, NOW + 4 * DAY
     after_5.due = NOW + 5 * DAY + timedelta(microseconds=1)
     session.commit()
-    assert deck._day_loads(session, card.id, NOW, 3, 7) == {3: 0, 4: 1, 5: 1, 6: 1, 7: 0}
+    assert deck._day_loads(session, USER, card.id, NOW, 3, 7) == {3: 0, 4: 1, 5: 1, 6: 1, 7: 0}
 
 
 # AC 9, through the pick: the one loaded day loses whichever card is loaded on it.
@@ -181,10 +180,10 @@ def test_a_loaded_day_is_avoided(session, delta):
 def test_the_reviewed_card_does_not_count_itself(session):
     [card] = _add(session, 1)
     _review_card_with_interval(session, card, 20)
-    assert deck._day_loads(session, card.id, NOW, 17, 23) == dict.fromkeys(range(17, 24), 0)
+    assert deck._day_loads(session, USER, card.id, NOW, 17, 23) == dict.fromkeys(range(17, 24), 0)
     card.due = NOW + 20 * DAY
     session.commit()
-    assert deck._day_loads(session, card.id, NOW, 17, 23) == dict.fromkeys(range(17, 24), 0)
+    assert deck._day_loads(session, USER, card.id, NOW, 17, 23) == dict.fromkeys(range(17, 24), 0)
 
 
 # AC 10
@@ -196,7 +195,7 @@ def test_no_drift(session):
         card.due = last_review + 23 * DAY  # the last interval (20 d) was shifted by +3 days
         session.commit()
         lo, hi = deck._balance_window((_reference(card).due - NOW).days)
-        due = deck.review_card(session, card.id, Rating.good, now=NOW, rng=Random(seed)).due
+        due = deck.review_card(session, USER, card.id, Rating.good, now=NOW, rng=Random(seed)).due
         assert lo <= (due - NOW) // DAY <= hi
     assert sorted(Card.__table__.columns.keys()) == [
         "answer",
@@ -211,6 +210,7 @@ def test_no_drift(session):
         "stability",
         "step",
         "updated_at",
+        "user_id",
     ]
 
 
@@ -227,7 +227,7 @@ def test_one_query_per_balanced_review(engine, session):
         statements.clear()
         event.listen(engine, "before_cursor_execute", record)
         try:
-            deck.review_card(session, card.id, Rating.good, now=NOW, rng=Random(0))
+            deck.review_card(session, USER, card.id, Rating.good, now=NOW, rng=Random(0))
         finally:
             event.remove(engine, "before_cursor_execute", record)
         return [s for s in statements if s.lstrip().upper().startswith("SELECT")]
@@ -247,7 +247,7 @@ def test_balancing_is_fast_on_a_big_deck(session):
     session.commit()
     _review_card_with_interval(session, card, 365)
     start = time.perf_counter()
-    reviewed = deck.review_card(session, card.id, Rating.good, now=NOW, rng=Random(0))
+    reviewed = deck.review_card(session, USER, card.id, Rating.good, now=NOW, rng=Random(0))
     assert time.perf_counter() - start < 0.2
     lo, hi = deck._balance_window(365)
     assert lo <= (reviewed.due - NOW) // DAY <= hi
@@ -279,8 +279,8 @@ def test_rest_review_is_balanced(client):
 @pytest.mark.parametrize("anyio_backend", ["asyncio"])
 async def test_mcp_review_is_balanced(engine, anyio_backend):
     with Session(engine) as session:
-        [card] = deck.add_cards(session, [CardCreate(front="chat", back="cat")]).added
-    async with Client(build_mcp(engine)) as client:
+        [card] = deck.add_cards(session, USER, [CardCreate(front="chat", back="cat")]).added
+    async with mcp_client(engine) as client:
         result = await client.call_tool("review_card", {"card_id": str(card.id), "rating": "easy"})
     reviewed = result.structured_content
     assert reviewed.keys() == card.model_dump().keys()

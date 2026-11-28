@@ -4,12 +4,12 @@ import sqlite3
 from datetime import timedelta
 
 import pytest
-from mcp import Client
+from conftest import USER, mcp_client
 from sqlmodel import Session, select
 
 from la_carte_api import deck
 from la_carte_api.db import make_engine
-from la_carte_api.mcp_server import INSTRUCTIONS, build_mcp
+from la_carte_api.mcp_server import INSTRUCTIONS
 from la_carte_api.models import (
     CardCreate,
     Direction,
@@ -22,6 +22,8 @@ from la_carte_api.models import (
     utcnow,
 )
 
+OWNER_EMAIL = "owner@example.com"  # owns the data of a pre-030 database
+
 
 def _two_way_note(session) -> tuple:
     note = NoteCreate(
@@ -29,16 +31,16 @@ def _two_way_note(session) -> tuple:
         fields={"front": "chat", "back": "cat"},
         directions=[Direction(prompt=["front"]), Direction(prompt=["back"])],
     )
-    [added] = deck.add_notes(session, [note], now=utcnow() - timedelta(days=1)).added
+    [added] = deck.add_notes(session, USER, [note], now=utcnow() - timedelta(days=1)).added
     return added.cards[0].id, added.cards[1].id
 
 
 def _report(session, card_id, reason="wrong"):
-    return deck.report_card(session, card_id, ReportCreate(reason=reason))[0]
+    return deck.report_card(session, USER, card_id, ReportCreate(reason=reason))[0]
 
 
 def _card(session, front="chat", back="cat"):
-    return deck.add_cards(session, [CardCreate(front=front, back=back)]).added[0]
+    return deck.add_cards(session, USER, [CardCreate(front=front, back=back)]).added[0]
 
 
 # --- REST (#1, #2, #3) -------------------------------------------------------------------------
@@ -113,11 +115,11 @@ def test_broken_photo_report_is_idempotent_while_active(client):
 def test_broken_photo_reopens_after_its_report_is_fixed(session):
     card = _card(session)
     first = _report(session, card.id, "broken_photo")
-    deck.update_report(session, first.id, ReportOutcome.waiting_user, "New URL?")
+    deck.update_report(session, USER, first.id, ReportOutcome.waiting_user, "New URL?")
     assert _report(session, card.id, "broken_photo").id == first.id
-    deck.update_report(session, first.id, ReportOutcome.fixed, "Photo replaced")
+    deck.update_report(session, USER, first.id, ReportOutcome.fixed, "Photo replaced")
 
-    second, created = deck.report_card(session, card.id, ReportCreate(reason="broken_photo"))
+    second, created = deck.report_card(session, USER, card.id, ReportCreate(reason="broken_photo"))
 
     assert created and second.id != first.id
 
@@ -125,8 +127,8 @@ def test_broken_photo_reopens_after_its_report_is_fixed(session):
 def test_held_card_does_not_hide_a_due_sibling(session):
     front, back = _two_way_note(session)
     _report(session, front)
-    assert [c.id for c in deck.due_cards(session)] == [back]
-    assert deck.stats(session).due == 1
+    assert [c.id for c in deck.due_cards(session, USER)] == [back]
+    assert deck.stats(session, USER).due == 1
 
 
 # --- deck: outcomes (#4 - #9) ------------------------------------------------------------------
@@ -135,66 +137,72 @@ def test_held_card_does_not_hide_a_due_sibling(session):
 def test_list_reports_filters_and_orders_oldest_first(session):
     front, back = _two_way_note(session)
     first, second = _report(session, front), _report(session, back, "drop")
-    deck.update_report(session, second.id, ReportOutcome.waiting_user, "Drop both directions?")
+    deck.update_report(
+        session, USER, second.id, ReportOutcome.waiting_user, "Drop both directions?"
+    )
     closed = _report(session, _card(session, "chien", "dog").id, "doubt")
-    deck.update_report(session, closed.id, ReportOutcome.kept, "It is right")
+    deck.update_report(session, USER, closed.id, ReportOutcome.kept, "It is right")
 
-    assert [r.id for r in deck.list_reports(session)] == [first.id, second.id]
-    assert [r.id for r in deck.list_reports(session, "all")] == [first.id, second.id, closed.id]
-    assert [r.id for r in deck.list_reports(session, "dismissed")] == [closed.id]
+    assert [r.id for r in deck.list_reports(session, USER)] == [first.id, second.id]
+    assert [r.id for r in deck.list_reports(session, USER, "all")] == [
+        first.id,
+        second.id,
+        closed.id,
+    ]
+    assert [r.id for r in deck.list_reports(session, USER, "dismissed")] == [closed.id]
 
-    deck.delete_note(session, first.note_id)
-    assert [r.card for r in deck.list_reports(session)] == [None, None]
+    deck.delete_note(session, USER, first.note_id)
+    assert [r.card for r in deck.list_reports(session, USER)] == [None, None]
 
 
 def test_waiting_user_keeps_the_card_held(session):
     front, _ = _two_way_note(session)
     report = _report(session, front, "rephrase")
 
-    updated = deck.update_report(session, report.id, ReportOutcome.waiting_user, " How? ")
+    updated = deck.update_report(session, USER, report.id, ReportOutcome.waiting_user, " How? ")
 
     assert (updated.status, updated.resolution, updated.resolved_at) == (
         "waiting_user", "How?", None,
     )  # fmt: skip
-    assert front not in [c.id for c in deck.due_cards(session)]
+    assert front not in [c.id for c in deck.due_cards(session, USER)]
 
 
 @pytest.mark.parametrize(("outcome", "status"), [("fixed", "resolved"), ("kept", "dismissed")])
 def test_fixed_and_kept_bring_the_card_back_unchanged(session, outcome, status):
     card = _card(session)
-    deck.review_card(session, card.id, Rating.again, now=utcnow() - timedelta(days=2))
-    before = deck.get_card(session, card.id)
+    deck.review_card(session, USER, card.id, Rating.again, now=utcnow() - timedelta(days=2))
+    before = deck.get_card(session, USER, card.id)
     report = _report(session, card.id)
 
-    closed = deck.update_report(session, report.id, ReportOutcome(outcome), "Done")
+    closed = deck.update_report(session, USER, report.id, ReportOutcome(outcome), "Done")
 
     assert (closed.status, closed.resolved_at is not None) == (status, True)
-    assert deck.get_card(session, card.id) == before
-    assert [c.id for c in deck.due_cards(session)] == [card.id]
+    assert deck.get_card(session, USER, card.id) == before
+    assert [c.id for c in deck.due_cards(session, USER)] == [card.id]
 
 
 def test_deleted_removes_that_card_only_and_keeps_history(session):
     front, back = _two_way_note(session)
-    deck.review_card(session, front, Rating.good)
+    deck.review_card(session, USER, front, Rating.good)
     report = _report(session, front, "drop")
 
-    closed = deck.update_report(session, report.id, ReportOutcome.deleted, "Dropped")
+    closed = deck.update_report(session, USER, report.id, ReportOutcome.deleted, "Dropped")
 
     assert (closed.status, closed.card) == ("resolved", None)
-    assert [c.id for c in deck.get_note(session, report.note_id).cards] == [back]
+    assert [c.id for c in deck.get_note(session, USER, report.note_id).cards] == [back]
     assert session.exec(select(ReviewLog).where(ReviewLog.card_id == front)).all()
 
     last = _report(session, back, "drop")
-    deck.update_report(session, last.id, ReportOutcome.deleted, "Dropped")
+    deck.update_report(session, USER, last.id, ReportOutcome.deleted, "Dropped")
     with pytest.raises(deck.NoteNotFound):
-        deck.get_note(session, report.note_id)
+        deck.get_note(session, USER, report.note_id)
 
 
 def test_deleted_on_a_gone_card_just_closes_the_report(session):
     card = _card(session)
     report = _report(session, card.id, "drop")
-    deck.delete_card(session, card.id)
-    closed = deck.update_report(session, report.id, ReportOutcome.deleted, "Gone")
+    deck.delete_card(session, USER, card.id)
+    closed = deck.update_report(session, USER, report.id, ReportOutcome.deleted, "Gone")
     assert closed.status == "resolved"
 
 
@@ -202,21 +210,21 @@ def test_update_report_errors(session):
     card = _card(session)
     report = _report(session, card.id)
     with pytest.raises(deck.ReportNotFound):
-        deck.update_report(session, card.id, ReportOutcome.kept, "x")
+        deck.update_report(session, USER, card.id, ReportOutcome.kept, "x")
     with pytest.raises(deck.InvalidReport):
-        deck.update_report(session, report.id, ReportOutcome.kept, "  ")
-    deck.update_report(session, report.id, ReportOutcome.kept, "Fine")
+        deck.update_report(session, USER, report.id, ReportOutcome.kept, "  ")
+    deck.update_report(session, USER, report.id, ReportOutcome.kept, "Fine")
     with pytest.raises(deck.InvalidReport):
-        deck.update_report(session, report.id, ReportOutcome.fixed, "Again")
+        deck.update_report(session, USER, report.id, ReportOutcome.fixed, "Again")
 
 
 def test_card_stays_held_until_every_active_report_is_closed(session):
     card = _card(session)
     one, two = _report(session, card.id), _report(session, card.id, "doubt")
-    deck.update_report(session, one.id, ReportOutcome.fixed, "Fixed")
-    assert deck.due_cards(session) == []
-    deck.update_report(session, two.id, ReportOutcome.kept, "Right")
-    assert [c.id for c in deck.due_cards(session)] == [card.id]
+    deck.update_report(session, USER, one.id, ReportOutcome.fixed, "Fixed")
+    assert deck.due_cards(session, USER) == []
+    deck.update_report(session, USER, two.id, ReportOutcome.kept, "Right")
+    assert [c.id for c in deck.due_cards(session, USER)] == [card.id]
 
 
 # --- MCP (#3, #8, #10) -------------------------------------------------------------------------
@@ -232,7 +240,7 @@ async def test_agent_works_through_reports(engine):
     with Session(engine) as session:
         card = _card(session, back="kat")
         report = _report(session, card.id)
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         assert (await client.call_tool("due_cards", {})).structured_content["result"] == []
         [listed] = (await client.call_tool("list_reports", {})).structured_content["result"]
         assert (listed["id"], listed["card"]["back"]) == (str(report.id), "kat")
@@ -267,7 +275,7 @@ def test_instructions_describe_reports():
 def test_report_table_is_added_to_an_existing_database_with_a_backup(tmp_path):
     path = tmp_path / "deck.db"
     url = f"sqlite:///{path}"
-    engine = make_engine(url)
+    engine = make_engine(url, OWNER_EMAIL)
     with Session(engine) as session:
         _card(session)
     engine.dispose()
@@ -275,12 +283,12 @@ def test_report_table_is_added_to_an_existing_database_with_a_backup(tmp_path):
     db.execute("DROP TABLE report")  # as a 014 database
     db.close()
 
-    engine = make_engine(url)
+    engine = make_engine(url, OWNER_EMAIL)
 
     with Session(engine) as session:
-        [card] = deck.list_cards(session)
+        [card] = deck.list_cards(session, USER)
         assert _report(session, card.id).status == "open"
     engine.dispose()
     assert len(list(tmp_path.glob("deck.db.pre-015-*.bak"))) == 1
-    make_engine(url).dispose()  # idempotent: no second backup
+    make_engine(url, OWNER_EMAIL).dispose()  # idempotent: no second backup
     assert len(list(tmp_path.glob("*.bak"))) == 1

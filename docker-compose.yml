@@ -7,8 +7,12 @@ services:
     build: ./api
     restart: unless-stopped
     environment:
-      LA_CARTE_API_TOKEN: ${LA_CARTE_API_TOKEN:?Set LA_CARTE_API_TOKEN (openssl rand -hex 32)}
-      # Optional: the public https URL, so MCP serverInfo can list the icon (/icon.png).
+      # The owner's account email (spec 030a): required before the accounts version starts on a
+      # deck with data, and with LA_CARTE_API_TOKEN.
+      LA_CARTE_OWNER_EMAIL: ${LA_CARTE_OWNER_EMAIL:-}
+      # Optional: imported once as the owner's personal access token `legacy`, then ignored.
+      LA_CARTE_API_TOKEN: ${LA_CARTE_API_TOKEN:-}
+      # The public https URL: OAuth issuer, MCP resource (<url>/mcp), serverInfo icon (/icon.png).
       LA_CARTE_PUBLIC_URL: ${LA_CARTE_PUBLIC_URL:-}
     expose:
       - "8000"

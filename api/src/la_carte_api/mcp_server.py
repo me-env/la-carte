@@ -1,10 +1,14 @@
-"""MCP server: lets any agent read and edit the deck ("add these words to my deck")."""
+"""MCP server: lets any agent read and edit the user's deck ("add these words to my deck").
+
+Every call runs as the user of the bearer token (spec 030a): `get_access_token().subject`."""
 
 from datetime import datetime
 from functools import partial
 from typing import Annotated
 from uuid import UUID
 
+from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer, UserMessage
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import Icon
@@ -13,6 +17,8 @@ from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
 from la_carte_api import deck
+from la_carte_api.auth import McpTokenVerifier
+from la_carte_api.config import Settings
 from la_carte_api.models import (
     ActivityEventRead,
     AddNotesReply,
@@ -180,14 +186,35 @@ def server_icons(public_url: str | None) -> list[Icon] | None:
     ]
 
 
-def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
-    """The deck as MCP tools. With `public_url`, serverInfo lists the icons the API serves there."""
-    mcp = MCPServer(name="la-carte", instructions=INSTRUCTIONS, icons=server_icons(public_url))
+def build_mcp(engine: Engine, settings: Settings | None = None) -> MCPServer:
+    """Each user's deck as MCP tools, over bearer tokens checked by `auth.verify` (the `deck`
+    scope). With `settings.public_url`, serverInfo lists the icons the API serves there."""
+    settings = settings or Settings(_env_file=None)
+    owner_email = settings.owner_email
+    mcp = MCPServer(
+        name="la-carte",
+        instructions=INSTRUCTIONS,
+        icons=server_icons(settings.public_url),
+        token_verifier=McpTokenVerifier(engine, resource=f"{settings.base_url}/mcp"),
+        auth=AuthSettings(
+            issuer_url=settings.base_url,
+            resource_server_url=f"{settings.base_url}/mcp",
+            required_scopes=["deck"],
+            validate_token_resource=False,  # our verifier only accepts our own tokens
+        ),
+    )
+
+    def caller() -> UUID:
+        """The user of the request's bearer token (no token: refused)."""
+        token = get_access_token()
+        if token is None or token.subject is None:
+            raise ToolError("Unauthorized")
+        return UUID(token.subject)
 
     def run(operation, *args):
         with Session(engine) as session:
             try:
-                return operation(session, *args)
+                return operation(session, caller(), *args)
             except (
                 deck.NotFound, deck.InvalidNote, deck.InvalidReport, deck.InvalidSetting,
                 deck.InvalidFeedback,
@@ -197,9 +224,10 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
     def with_new_count(reply, operation):
         """`operation`'s result plus the never-reviewed card count after it and the milestone."""
 
-        def run_it(session: Session, *args):
-            result = operation(session, *args)
-            new, milestone = deck.new_card_count(session), deck.get_milestone(session)
+        def run_it(session: Session, user_id: UUID, *args):
+            result = operation(session, user_id, *args)
+            new = deck.new_card_count(session, user_id)
+            milestone = deck.get_milestone(session, user_id)
             return reply(**dict(result), new=new, milestone=milestone)
 
         return run_it
@@ -382,14 +410,16 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
     def list_feedback(status: deck.FeedbackFilter = "open") -> list[FeedbackRead]:
         """Feedback agents sent to the developer, oldest first. `open` (default), `done` or
         `all`. Read-only. For the developer triaging: handle each, then `close_feedback`.
-        To see what the user was doing, call `activity_log` around each item's `created_at`."""
-        return run(deck.list_feedback, status)
+        To see what the user was doing, call `activity_log` around each item's `created_at`.
+        You see the feedback this user sent; the server's owner sees every user's, each with
+        its sender's `user_email` (pass it as `activity_log`'s `user`)."""
+        return run(partial(deck.list_feedback, owner_email=owner_email), status)
 
     @mcp.tool()
     def close_feedback(feedback_id: UUID, note: str | None = None) -> FeedbackRead:
         """Mark feedback as done once handled (fixed, won't fix, duplicate). `note` (optional)
         says what was done. Error on an unknown or already done id."""
-        return run(deck.close_feedback, feedback_id, note)
+        return run(partial(deck.close_feedback, owner_email=owner_email), feedback_id, note)
 
     # --- Activity (spec 029) --------------------------------------------------------------------
 
@@ -401,6 +431,7 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         kind: str | None = None,
         session: UUID | None = None,
         limit: Annotated[int, Field(ge=1, le=deck.ACTIVITY_LIST_MAX)] = 100,
+        user: str | None = None,
     ) -> list[ActivityEventRead]:
         """What the user did in the app, newest first: cards shown, answers revealed, ratings
         (with time to reveal and to rate), notes created / edited / deleted, reports, app
@@ -410,8 +441,15 @@ def build_mcp(engine: Engine, public_url: str | None = None) -> MCPServer:
         to 5 after) or by `card_id`. Filters: `since <= at < until` (ISO 8601, naive = UTC),
         `card_id`, `kind`, `session` (one app launch / foreground); `limit` 1-1000.
         Read-only; kept 90 days; events reach the server lazily, so the last minute may be
-        missing. For ratings with card text, or older than 90 days, use `review_history`."""
-        return run(deck.list_activity, since, until, card_id, kind, session, limit)
+        missing. For ratings with card text, or older than 90 days, use `review_history`.
+        `user` (an email): owner only: a user who sent feedback; leave it out for this user's own
+        activity."""
+
+        def read(db: Session, user_id: UUID) -> list[ActivityEventRead]:
+            whose = deck.activity_user(db, user_id, user, owner_email)
+            return deck.list_activity(db, whose, since, until, card_id, kind, session, limit)
+
+        return run(read)
 
     # --- History (spec 031) ---------------------------------------------------------------------
 

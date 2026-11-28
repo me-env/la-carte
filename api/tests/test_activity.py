@@ -5,15 +5,15 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from conftest import USER, mcp_client
 from fastapi.testclient import TestClient
-from mcp import Client
 from sqlmodel import Session, select
 
 from la_carte_api import deck
 from la_carte_api.app import create_app
 from la_carte_api.config import Settings
 from la_carte_api.db import make_engine
-from la_carte_api.mcp_server import INSTRUCTIONS, build_mcp
+from la_carte_api.mcp_server import INSTRUCTIONS
 from la_carte_api.models import ActivityEvent, CardCreate, ReportCreate
 
 SESSION = str(uuid4())
@@ -86,12 +86,12 @@ def test_a_repeated_id_within_one_batch_is_stored_once(client):
 
 def test_counts_come_from_the_rows_really_inserted(session):  # 2
     stored, new = _event(), _event()
-    deck.ingest_activity(session, [stored])  # e.g. a concurrent retry got there first
+    deck.ingest_activity(session, USER, [stored])  # e.g. a concurrent retry got there first
 
-    result = deck.ingest_activity(session, [stored, new, new, _event(kind="Bad")])
+    result = deck.ingest_activity(session, USER, [stored, new, new, _event(kind="Bad")])
 
     assert result.model_dump() == {"stored": 1, "duplicates": 2, "rejected": 1}
-    assert len(deck.list_activity(session)) == 2
+    assert len(deck.list_activity(session, USER)) == 2
 
 
 @pytest.mark.parametrize(
@@ -136,7 +136,12 @@ def test_events_must_be_a_list(client):
 
 
 def test_activity_needs_the_bearer_token():  # 5
-    settings = Settings(database_url="sqlite://", api_token="secret", _env_file=None)
+    settings = Settings(
+        database_url="sqlite://",
+        api_token="secret",
+        owner_email="owner@example.com",
+        _env_file=None,
+    )
     with TestClient(create_app(settings)) as client:
         assert _post(client, [_event()]).status_code == 401
         assert client.get("/activity").status_code == 401
@@ -148,15 +153,17 @@ def test_activity_needs_the_bearer_token():  # 5
 def test_posting_activity_changes_nothing_in_the_deck(client):  # 10
     with Session(client.app.state.engine) as session:
         cards = deck.add_cards(
-            session, [CardCreate(front="chat", back="cat"), CardCreate(front="chien", back="dog")]
+            session,
+            USER,
+            [CardCreate(front="chat", back="cat"), CardCreate(front="chien", back="dog")],
         ).added
         client.post(f"/cards/{cards[1].id}/review", json={"rating": "good"})
-        deck.report_card(session, cards[0].id, ReportCreate(reason="wrong"))
+        deck.report_card(session, USER, cards[0].id, ReportCreate(reason="wrong"))
 
     def snapshot() -> list:
         with Session(client.app.state.engine) as session:
-            reports = [r.model_dump() for r in deck.list_reports(session, "all")]
-            reviews = deck.stats(session).model_dump()
+            reports = [r.model_dump() for r in deck.list_reports(session, USER, "all")]
+            reviews = deck.stats(session, USER).model_dump()
         paths = ("/cards", "/notes", "/cards/due", "/stats")
         return [client.get(path).json() for path in paths] + [reports, reviews]
 
@@ -230,7 +237,7 @@ def test_each_event_has_local_at_in_its_own_zone(client, stored):  # 7
 
 @pytest.mark.anyio
 async def test_mcp_activity_log_returns_the_same_list(client, stored):  # 6
-    async with Client(build_mcp(client.app.state.engine)) as mcp:
+    async with mcp_client(client.app.state.engine) as mcp:
         result = await mcp.call_tool("activity_log", {"card_id": stored["b"]["card_id"]})
         everything = await mcp.call_tool("activity_log", {})
         too_many = await mcp.call_tool("activity_log", {"limit": 1001})
@@ -251,8 +258,8 @@ def test_startup_prunes_events_older_than_90_days(tmp_path):  # 8
     old = _event(at=(now - timedelta(days=91)).isoformat())
     recent = _event(at=(now - timedelta(days=89)).isoformat())
     with Session(engine) as session:
-        [card] = deck.add_cards(session, [CardCreate(front="chat", back="cat")]).added
-        deck.ingest_activity(session, [old, recent])
+        [card] = deck.add_cards(session, USER, [CardCreate(front="chat", back="cat")]).added
+        deck.ingest_activity(session, USER, [old, recent])
     engine.dispose()
 
     create_app(Settings(database_url=url, _env_file=None)).state.engine.dispose()
@@ -270,10 +277,10 @@ def test_prune_activity_uses_the_retention_cutoff(session):  # 8
         _event(at=(now - deck.ACTIVITY_RETENTION - timedelta(seconds=1)).isoformat()),
         _event(at=(now - deck.ACTIVITY_RETENTION).isoformat()),
     ]
-    deck.ingest_activity(session, events)
+    deck.ingest_activity(session, USER, events)
 
     assert deck.prune_activity(session, now=now) == 1
-    assert _ids([e.model_dump(mode="json") for e in deck.list_activity(session)]) == [
+    assert _ids([e.model_dump(mode="json") for e in deck.list_activity(session, USER)]) == [
         events[1]["id"]
     ]
 
@@ -282,7 +289,7 @@ def test_startup_adds_the_table_to_a_pre_029_database(tmp_path):  # 9
     path = tmp_path / "deck.db"
     engine = make_engine(f"sqlite:///{path}")
     with Session(engine) as session:
-        deck.add_cards(session, [CardCreate(front="chat", back="cat")])
+        deck.add_cards(session, USER, [CardCreate(front="chat", back="cat")])
     engine.dispose()
     db = sqlite3.connect(path)
     with db:
@@ -314,7 +321,7 @@ async def test_feedback_and_reports_point_to_activity_log(engine):  # 11
         "Activity. `activity_log` lists what the user did in the app (dated); read it when "
         "handling feedback or reports. It holds no card text."
     ) in " ".join(INSTRUCTIONS.split())
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         tools = {tool.name: tool for tool in (await client.list_tools()).tools}
     assert "`activity_log` around each item's `created_at`" in tools["list_feedback"].description
     assert "`activity_log(card_id=…)`" in tools["list_reports"].description

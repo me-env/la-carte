@@ -4,11 +4,11 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from mcp import Client
+from conftest import USER, mcp_client
 from sqlmodel import Session, func, select
 
 from la_carte_api import deck
-from la_carte_api.mcp_server import INSTRUCTIONS, build_mcp
+from la_carte_api.mcp_server import INSTRUCTIONS
 from la_carte_api.models import (
     ActivityEvent,
     Card,
@@ -33,7 +33,7 @@ def anyio_backend():
 def _note(session: Session, front: str, both: bool = False) -> NoteRead:
     fields = {"front": front, "back": f"{front} answer"}
     note = NoteCreate(type="basic", fields=fields, directions=None if both else ONE_WAY)
-    [added] = deck.add_notes(session, [note]).added
+    [added] = deck.add_notes(session, USER, [note]).added
     return added
 
 
@@ -42,18 +42,18 @@ def _card(session: Session, front: str) -> UUID:
 
 
 def _review(session: Session, card_id: UUID, rating: str, hours: float) -> None:
-    deck.review_card(session, card_id, Rating(rating), now=T0 + timedelta(hours=hours))
+    deck.review_card(session, USER, card_id, Rating(rating), now=T0 + timedelta(hours=hours))
 
 
 async def _call(engine, tool: str, **arguments) -> list[dict]:
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         result = await client.call_tool(tool, arguments)
     assert not result.is_error, result.content
     return result.structured_content["result"]
 
 
 async def _fails(engine, tool: str, **arguments) -> bool:
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         return (await client.call_tool(tool, arguments)).is_error
 
 
@@ -65,7 +65,7 @@ async def test_history_lists_app_and_agent_ratings_newest_first_with_the_card(cl
     with Session(engine) as session:
         note = _note(session, "chat")
     card_id = str(note.cards[0].id)
-    async with Client(build_mcp(engine)) as mcp:
+    async with mcp_client(engine) as mcp:
         await mcp.call_tool("review_card", {"card_id": card_id, "rating": "good"})
         assert client.post(f"/cards/{card_id}/review", json={"rating": "again"}).is_success
         rated = {"card_id": card_id, "rating": "easy", "confidence": 0.8}
@@ -116,9 +116,9 @@ async def test_history_window_since_inclusive_until_exclusive(engine):
     at = datetime(2026, 11, 24, 23, tzinfo=UTC)  # = 2026-11-25T00:00:00+01:00
     with Session(engine) as session:
         card_id = _card(session, "chat")
-        deck.review_card(session, card_id, Rating.good, now=at - timedelta(hours=1))
-        deck.review_card(session, card_id, Rating.good, now=at)
-        deck.review_card(session, card_id, Rating.good, now=at + timedelta(hours=1))
+        deck.review_card(session, USER, card_id, Rating.good, now=at - timedelta(hours=1))
+        deck.review_card(session, USER, card_id, Rating.good, now=at)
+        deck.review_card(session, USER, card_id, Rating.good, now=at + timedelta(hours=1))
 
     def hours(entries: list[dict]) -> list[int]:
         return [datetime.fromisoformat(e["reviewed_at"]).hour for e in entries]
@@ -141,7 +141,7 @@ async def test_history_keeps_a_removed_cards_entries_with_card_null(engine):
         removed, kept = (card.id for card in both.cards)
         _review(session, removed, "again", 1)
         _review(session, kept, "good", 2)
-        deck.remove_direction(session, removed)
+        deck.remove_direction(session, USER, removed)
 
     entries = await _call(engine, "review_history")
     assert [(e["card_id"], e["card"] is None) for e in entries] == [
@@ -178,7 +178,7 @@ async def test_history_is_never_pruned(engine):
     long_ago = datetime.now(UTC) - timedelta(days=200)
     with Session(engine) as session:
         card_id = _card(session, "chat")
-        deck.review_card(session, card_id, Rating.good, now=long_ago)
+        deck.review_card(session, USER, card_id, Rating.good, now=long_ago)
         deck.prune_activity(session)
 
     [entry] = await _call(engine, "review_history")
@@ -202,7 +202,7 @@ def _seed_struggles(session: Session) -> dict[str, UUID]:
     for hour in (4, 5):
         _review(session, cards["W"], "good", hour)
     _review(session, cards["D"], "again", 8)
-    deck.delete_note(session, deck.get_card(session, cards["D"]).note_id)
+    deck.delete_note(session, USER, deck.get_card(session, USER, cards["D"]).note_id)
     return cards
 
 
@@ -241,7 +241,7 @@ def test_struggling_cards_ties_break_on_ratio_then_latest_fail(session):
     _review(session, b, "again", 3)
     _review(session, b, "good", 4)
     _review(session, c, "again", 0)
-    ranked = deck.struggling_cards(session)
+    ranked = deck.struggling_cards(session, USER)
     # C: 1/1; B and A: 1/2, B failed later
     assert [r.card.front for r in ranked] == ["C", "B", "A"]
 
@@ -258,7 +258,7 @@ async def test_history_tools_are_read_only(engine):
             cards = sorted(c.model_dump_json() for c in session.exec(select(Card)))
             logs = session.exec(select(func.count()).select_from(ReviewLog)).one()
             events = session.exec(select(func.count()).select_from(ActivityEvent)).one()
-            return cards, logs, events, deck.stats(session, now=T0 + timedelta(days=1))
+            return cards, logs, events, deck.stats(session, USER, now=T0 + timedelta(days=1))
 
     before = snapshot()
     await _call(engine, "review_history")
@@ -269,7 +269,7 @@ async def test_history_tools_are_read_only(engine):
 async def test_instructions_and_activity_log_point_to_history(engine):
     assert "`review_history`" in INSTRUCTIONS
     assert "`struggling_cards`" in INSTRUCTIONS
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         tools = {t.name: t.description for t in (await client.list_tools()).tools}
     assert "`review_history`" in tools["activity_log"]
     assert "never pruned" in " ".join(tools["review_history"].split())

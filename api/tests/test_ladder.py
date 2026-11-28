@@ -7,6 +7,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import fsrs
+from conftest import USER
 from sqlmodel import Session, select
 
 from la_carte_api import deck
@@ -38,6 +39,7 @@ def _started(
     (due a day after it by default)."""
     added = deck.add_cards(
         session,
+        USER,
         [CardCreate(front=f"{prefix}{i}", back="x") for i in range(count)],
         now=last_review - DAY,
     ).added
@@ -47,7 +49,9 @@ def _started(
         card.stability, card.difficulty = stability, 5.0
         card.last_review, card.due = last_review, due or last_review + DAY
         session.add(card)
-        session.add(ReviewLog(card_id=card.id, rating=Rating.good, reviewed_at=last_review))
+        session.add(
+            ReviewLog(user_id=USER, card_id=card.id, rating=Rating.good, reviewed_at=last_review)
+        )
     session.commit()
     return [read.id for read in added]
 
@@ -59,12 +63,12 @@ def _at_risk(session: Session, count: int, prefix="r") -> list[UUID]:
 
 def _new(session: Session, count: int) -> list[UUID]:
     cards = [CardCreate(front=f"n{i}", back="x") for i in range(count)]
-    return [c.id for c in deck.add_cards(session, cards, now=MIDNIGHT - DAY).added]
+    return [c.id for c in deck.add_cards(session, USER, cards, now=MIDNIGHT - DAY).added]
 
 
 def _stats(session: Session, now: datetime) -> DeckStats:
     """`/stats` in Paris, with the spec's invariants checked on every call (AC 10)."""
-    stats = deck.stats(session, now=now, tz=PARIS)
+    stats = deck.stats(session, USER, now=now, tz=PARIS)
     assert 0 <= stats.at_risk_done <= stats.at_risk_total
     assert stats.at_risk_total == 0 or stats.at_risk_total >= deck.AT_RISK_MIN
     assert 0 <= stats.reviews_done <= stats.reviews_total
@@ -93,13 +97,13 @@ def _log(session: Session, card_id: UUID) -> ReviewLog:
 
 def test_review_log_stores_the_state_before_the_review(session):
     [new] = _new(session, 1)
-    deck.review_card(session, new, Rating.good, now=at(9))
+    deck.review_card(session, USER, new, Rating.good, now=at(9))
     log = _log(session, new)
     assert (log.stability_before, log.last_review_before) == (None, None)
 
     before = session.get(Card, new)
     stability, last_review = before.stability, before.last_review
-    deck.review_card(session, new, Rating.good, now=at(10))
+    deck.review_card(session, USER, new, Rating.good, now=at(10))
     log = _log(session, new)
     assert (log.stability_before, log.last_review_before) == (stability, last_review)
     assert session.get(Card, new).last_review == at(10)
@@ -122,8 +126,8 @@ def test_migration_adds_the_memory_columns_once(tmp_path):
     engine = make_engine(url)
     with Session(engine) as session:
         [card] = _new(session, 1)
-        deck.review_card(session, card, Rating.good, now=at(9))
-        deck.review_card(session, card, Rating.good, now=at(10))
+        deck.review_card(session, USER, card, Rating.good, now=at(9))
+        deck.review_card(session, USER, card, Rating.good, now=at(10))
     engine.dispose()
     db = sqlite3.connect(path)
     for column in ("stability_before", "last_review_before"):
@@ -151,10 +155,10 @@ def test_at_risk_is_a_snapshot_of_the_start_of_the_day(session):  # AC 6
     assert _at_risk_counts(session, at(8)) == (12, 0)
 
     for i, card in enumerate(risky[:5]):
-        deck.review_card(session, card, Rating.again if i == 0 else Rating.good, now=at(10))
+        deck.review_card(session, USER, card, Rating.again if i == 0 else Rating.good, now=at(10))
     assert _at_risk_counts(session, at(10, 5)) == (12, 5)
 
-    deck.review_card(session, safe[0], Rating.good, now=at(11))
+    deck.review_card(session, USER, safe[0], Rating.good, now=at(11))
     assert _at_risk_counts(session, at(11, 5)) == (12, 5)
     card = session.get(Card, crossing)
     assert deck._was_at_risk(card.stability, card.last_review, at(15))  # at risk from 15:00...
@@ -165,7 +169,7 @@ def test_at_risk_needs_at_least_ten_cards(session):  # AC 7
     nine = _at_risk(session, 9)
     assert _at_risk_counts(session, at(8)) == (0, 0)
     for card in nine:
-        deck.review_card(session, card, Rating.good, now=at(9))
+        deck.review_card(session, USER, card, Rating.good, now=at(9))
     assert _at_risk_counts(session, at(10)) == (0, 0)
 
     _at_risk(session, 1, prefix="tenth")
@@ -179,19 +183,19 @@ def test_ten_at_risk_cards_make_the_step(session):  # AC 7
 
 def test_held_and_deleted_cards_leave_at_risk_unless_reviewed_today(session):  # AC 8
     held, deleted, reviewed, *_ = _at_risk(session, 12)
-    deck.report_card(session, held, ReportCreate(reason=ReportReason.wrong), now=at(8))
-    deck.delete_card(session, deleted)
+    deck.report_card(session, USER, held, ReportCreate(reason=ReportReason.wrong), now=at(8))
+    deck.delete_card(session, USER, deleted)
     assert _at_risk_counts(session, at(9)) == (10, 0)
 
-    deck.review_card(session, reviewed, Rating.good, now=at(9))
-    deck.delete_card(session, reviewed)
+    deck.review_card(session, USER, reviewed, Rating.good, now=at(9))
+    deck.delete_card(session, USER, reviewed)
     assert _at_risk_counts(session, at(10)) == (10, 1)
 
 
 def test_reviews_before_the_columns_existed_are_never_at_risk(session):
     cards = _at_risk(session, 10)
     for card in cards:
-        deck.review_card(session, card, Rating.good, now=at(9))
+        deck.review_card(session, USER, card, Rating.good, now=at(9))
     for log in session.exec(select(ReviewLog)):
         log.stability_before = log.last_review_before = None  # a pre-deploy row
         session.add(log)
@@ -208,21 +212,21 @@ def test_reviews_count_cards_started_before_today(session):
     new, _ = _new(session, 2)
     assert _reviews_counts(session, at(8)) == (3, 0)
 
-    deck.review_card(session, a, Rating.good, now=at(9))
-    deck.review_card(session, new, Rating.good, now=at(9))
+    deck.review_card(session, USER, a, Rating.good, now=at(9))
+    deck.review_card(session, USER, new, Rating.good, now=at(9))
     assert _reviews_counts(session, at(9, 1)) == (3, 1)
 
-    queue = [card.id for card in deck.due_cards(session, limit=50, now=at(9, 30))]
+    queue = [card.id for card in deck.due_cards(session, USER, limit=50, now=at(9, 30))]
     assert new in queue  # its learning step: served, doesn't reopen the step
     assert _reviews_counts(session, at(9, 30)) == (3, 1)
 
-    deck.review_card(session, a, Rating.again, now=at(9, 40))
-    assert a in [card.id for card in deck.due_cards(session, limit=50, now=at(10, 0))]
+    deck.review_card(session, USER, a, Rating.again, now=at(9, 40))
+    assert a in [card.id for card in deck.due_cards(session, USER, limit=50, now=at(10, 0))]
     assert _reviews_counts(session, at(10)) == (3, 1)
 
     assert _reviews_counts(session, at(14, 59)) == (3, 1)
     assert _reviews_counts(session, at(15)) == (4, 1)  # `late` fell due
-    deck.review_card(session, b, Rating.good, now=at(15, 5))
+    deck.review_card(session, USER, b, Rating.good, now=at(15, 5))
     assert _reviews_counts(session, at(15, 10)) == (4, 2)
 
 
@@ -234,9 +238,9 @@ def test_reviews_done_is_reviewed_today_minus_new_today_on_a_mixed_day(session):
     started = _started(session, 3, 10.0, MIDNIGHT - 5 * DAY, prefix="started")
     new = _new(session, 4)
     for i, card in enumerate([*risky[:6], *started[:2], *new[:3]]):
-        deck.review_card(session, card, [Rating.again, Rating.good][i % 2], now=at(9, i))
-    deck.delete_card(session, new[0])
-    deck.review_card(session, risky[1], Rating.good, now=at(11))
+        deck.review_card(session, USER, card, [Rating.again, Rating.good][i % 2], now=at(9, i))
+    deck.delete_card(session, USER, new[0])
+    deck.review_card(session, USER, risky[1], Rating.good, now=at(11))
 
     stats = _stats(session, at(12))
     assert (stats.at_risk_total, stats.at_risk_done) == (11, 6)

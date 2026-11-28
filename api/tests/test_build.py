@@ -9,7 +9,14 @@ from la_carte_api.config import Settings
 
 
 def test_health_reports_the_source_build():
-    app = create_app(Settings(database_url="sqlite://", api_token="secret", _env_file=None))
+    app = create_app(
+        Settings(
+            database_url="sqlite://",
+            api_token="secret",
+            owner_email="owner@example.com",
+            _env_file=None,
+        )
+    )
     with TestClient(app) as client:
         body = client.get("/health").json()
     assert body == {"status": "ok", "build": source_hash()}

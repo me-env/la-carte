@@ -2,8 +2,9 @@ import json
 import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from uuid import uuid4
 
-from sqlalchemy import DateTime, MetaData, TypeDecorator, event
+from sqlalchemy import DateTime, MetaData, Table, TypeDecorator, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.schema import CreateIndex, CreateTable
 from sqlmodel import Session, SQLModel, create_engine
@@ -25,7 +26,20 @@ class UTCDateTime(TypeDecorator[datetime]):
         return value.replace(tzinfo=UTC) if value else None
 
 
-def make_engine(database_url: str) -> Engine:
+# Spec 030a: tables whose rows belong to one user (`user_id`). `settings` is keyed by it.
+OWNED_TABLES = ("note", "card", "reviewlog", "report", "feedback", "activityevent", "settings")
+NEEDS_OWNER = (
+    "This deck has data: set LA_CARTE_OWNER_EMAIL to the Google or Apple email of its owner"
+)
+
+
+class MigrationRefused(RuntimeError):
+    """The database can't be migrated with this configuration; nothing was changed."""
+
+
+def make_engine(database_url: str, owner_email: str | None = None) -> Engine:
+    """The engine, after the startup migrations. `owner_email` (`LA_CARTE_OWNER_EMAIL`) owns the
+    data of a pre-030 database (migration 030); without it such a database is refused."""
     if database_url == "sqlite://":  # in-memory, used by tests: share one connection
         engine = create_engine(
             database_url, connect_args={"check_same_thread": False}, poolclass=StaticPool
@@ -39,12 +53,12 @@ def make_engine(database_url: str) -> Engine:
 
     from la_carte_api import models  # noqa: F401  (registers the tables)
 
-    _migrate(engine)  # first, so a backup is an exact copy of the file as it was
+    _migrate(engine, owner_email)  # first, so a backup is an exact copy of the file as it was
     SQLModel.metadata.create_all(engine)  # new tables (every table on a fresh database)
     return engine
 
 
-def _migrate(engine: Engine) -> None:
+def _migrate(engine: Engine, owner_email: str | None = None) -> None:
     """Schema changes on existing tables, in spec order, before `create_all`. Idempotent: each
     step checks the schema with PRAGMA first (a missing table = a fresh database: skipped).
 
@@ -57,6 +71,10 @@ def _migrate(engine: Engine) -> None:
     - Spec 015: the `report` table is created (with a backup, like the rebuilds).
     - Spec 021: the `settings` table is created, without a row (a missing row = the defaults);
       `reviewlog.stability_before` / `last_review_before` (nullable) are added; old rows read NULL.
+    - Spec 030a: every owned table gets `user_id`; existing rows go to a new `user` row for
+      `owner_email` (refused, untouched, when there is data and no owner); `settings` is rebuilt
+      keyed by `user_id`. Rebuilds before it that copy rows (012, 014) build their tables
+      without `user_id` (`_pre_030`); 015 and 021 create empty current tables.
     """
     raw = engine.raw_connection()
     db = raw.driver_connection  # sqlite3: explicit BEGIN/COMMIT, so DDL is transactional too
@@ -78,6 +96,12 @@ def _migrate(engine: Engine) -> None:
         _rebuild_if(
             db, engine, "021", lambda: bool(_columns(db, "card")) and not _columns(db, "settings"),
             _create_settings,
+        )  # fmt: skip
+        if _needs_owners(db) and not owner_email and _has_owned_rows(db):
+            raise MigrationRefused(NEEDS_OWNER)  # before the backup: nothing changes
+        _rebuild_if(
+            db, engine, "030", lambda: _needs_owners(db),
+            lambda db, dialect: _add_owners(db, dialect, owner_email),
         )  # fmt: skip
     finally:
         db.execute("PRAGMA foreign_keys=ON")
@@ -127,7 +151,7 @@ def _rebuild_reviewlog(db, dialect) -> None:
     and stay in the backup."""
     from la_carte_api.models import ReviewLog
 
-    table = ReviewLog.__table__
+    table = _pre_030(ReviewLog.__table__, MetaData())
     new = table.to_metadata(MetaData(), name=f"{table.name}_new")
     old_columns = _columns(db, table.name)  # a pre-013 table has no `confidence`
     columns = ", ".join(c.name for c in table.columns if c.name in old_columns)
@@ -152,8 +176,8 @@ def _cards_to_notes(db, dialect) -> None:
     from la_carte_api.models import Card, Note
 
     metadata = MetaData()  # holds `note` too, so card_new's foreign key compiles
-    note = Note.__table__.to_metadata(metadata)
-    card = Card.__table__
+    note = _pre_030(Note.__table__, metadata)
+    card = _pre_030(Card.__table__, MetaData())
     new = card.to_metadata(metadata, name=f"{card.name}_new")
     db.execute(str(CreateTable(note).compile(dialect=dialect)))
     db.execute(
@@ -218,7 +242,7 @@ def _fold_person_roles(db, dialect) -> None:
 def _create_reports(db, dialect) -> None:
     from la_carte_api.models import Report
 
-    table = Report.__table__
+    table = Report.__table__  # empty: migration 030 rebuilds it later if needed
     db.execute(str(CreateTable(table).compile(dialect=dialect)))
     for index in table.indexes:
         db.execute(str(CreateIndex(index).compile(dialect=dialect)))
@@ -228,6 +252,75 @@ def _create_settings(db, dialect) -> None:
     from la_carte_api.models import Settings
 
     db.execute(str(CreateTable(Settings.__table__).compile(dialect=dialect)))
+
+
+def _pre_030(table: Table, metadata: MetaData) -> Table:
+    """`table` as it was before spec 030 (no `user_id`), for the migration steps before it."""
+    columns = [column._copy() for column in table.columns if column.name != "user_id"]
+    return Table(table.name, metadata, *columns)
+
+
+def _needs_owners(db) -> bool:
+    return bool(_columns(db, "note")) and "user_id" not in _columns(db, "note")
+
+
+def _has_owned_rows(db) -> bool:
+    return any(
+        _columns(db, table) and db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+        for table in OWNED_TABLES
+    )
+
+
+def _add_owners(db, dialect, owner_email: str | None) -> None:
+    """Spec 030a: every owned table rebuilt from its model with `user_id` = the owner, a new
+    `user` row (only when there is data). Ids and every other column are copied as they are."""
+    from la_carte_api import models
+
+    db.execute(str(CreateTable(models.User.__table__, if_not_exists=True).compile(dialect=dialect)))
+    owner = None
+    if _has_owned_rows(db):
+        owner = uuid4().hex  # how `Uuid` is stored in SQLite
+        stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
+        db.execute(
+            'INSERT INTO "user" (id, email, created_at) VALUES (?, ?, ?)',
+            (owner, owner_email, stamp),
+        )
+    metadata = MetaData()  # holds `note`, so card_new's foreign key compiles
+    models.Note.__table__.to_metadata(metadata)
+    for model in (
+        models.Note, models.Card, models.ReviewLog, models.Report, models.Feedback,
+        models.ActivityEvent,
+    ):  # fmt: skip
+        table = model.__table__
+        if not (old_columns := _columns(db, table.name)):
+            continue  # created later by create_all
+        new = table.to_metadata(metadata, name=f"{table.name}_new")
+        kept = ", ".join(c.name for c in table.columns if c.name in old_columns - {"user_id"})
+        db.execute(str(CreateTable(new).compile(dialect=dialect)))
+        db.execute(
+            f"INSERT INTO {new.name} (user_id, {kept}) SELECT ?, {kept} FROM {table.name}",
+            (owner,),
+        )
+        _replace(db, dialect, table, new.name)
+    rows = []
+    if _columns(db, "settings"):
+        rows = db.execute("SELECT new_cards_per_day FROM settings LIMIT 1").fetchall()
+        db.execute("DROP TABLE settings")
+    db.execute(str(CreateTable(models.Settings.__table__).compile(dialect=dialect)))
+    if rows and owner:
+        db.execute(
+            "INSERT INTO settings (user_id, new_cards_per_day) VALUES (?, ?)", (owner, rows[0][0])
+        )
+    if db.execute("PRAGMA foreign_key_check").fetchall():  # never expected: abort, roll back
+        raise RuntimeError("migration 030 left a card without its note")
+
+
+def _replace(db, dialect, table: Table, new_name: str) -> None:
+    """Drops `table`, renames `new_name` to it and creates the model's indexes."""
+    db.execute(f"DROP TABLE {table.name}")
+    db.execute(f"ALTER TABLE {new_name} RENAME TO {table.name}")
+    for index in table.indexes:
+        db.execute(str(CreateIndex(index).compile(dialect=dialect)))
 
 
 def sessions(engine: Engine) -> Iterator[Session]:

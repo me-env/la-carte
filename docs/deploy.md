@@ -8,8 +8,10 @@ see `release.md`) and any MCP agent talk to the same deck.
 docker-compose.yml (repo root)
   service "api"  build ./api  (api/Dockerfile: uv, Python 3.13 slim, non-root)
     listens 0.0.0.0:8000, not published on the host, Traefik reaches it on the Docker network
-    env      LA_CARTE_API_TOKEN (required)  → Authorization: Bearer … on everything except /health and the icons
-             LA_CARTE_PUBLIC_URL (optional) → https base URL; MCP serverInfo then lists <url>/icon.png
+    env      LA_CARTE_OWNER_EMAIL (required with data or a token) → the account that owns the deck (spec 030a)
+             LA_CARTE_API_TOKEN (optional)  → imported once as the owner's personal access token `legacy`
+             LA_CARTE_PUBLIC_URL (optional) → https base URL: OAuth issuer, MCP resource <url>/mcp, icon
+    auth     every request but /health and the icons: Authorization: Bearer <a user's token>
     volume   la-carte-data → /data/la-carte.db
 ```
 
@@ -26,10 +28,17 @@ docker-compose.yml (repo root)
    pass on that commit (`ci-cd.md`).
 4. **Environment** tab: add
    ```
+   LA_CARTE_OWNER_EMAIL=<the email of your Apple or Google account>
    LA_CARTE_API_TOKEN=<the token from step 1>
    ```
-   Dokploy writes it to a `.env` next to the compose file, and the compose file passes it to the container.
-   Deploys fail on purpose if it is missing.
+   Dokploy writes them to a `.env` next to the compose file, and the compose file passes them to the
+   container. At its first start the API creates the owner's account and stores the token (hashed) as the
+   owner's personal access token `legacy`; after that the token variable is ignored and can be removed.
+   **Order for an existing deck (spec 030a):** set `LA_CARTE_OWNER_EMAIL` *before* deploying the accounts
+   version. A database with data refuses to start without it (log: "This deck has data: set
+   LA_CARTE_OWNER_EMAIL …") and is left untouched; with it, migration 030 backs the file up
+   (`la-carte.db.pre-030-<timestamp>.bak`) and gives every row to the owner. Keep `LA_CARTE_API_TOKEN` for
+   that first start, so the app, widget and agents keep working on the same token.
 5. **Domains** tab → *Add Domain*: service `api`, host e.g. `carte.example.com`, path `/`, **container
    port `8000`**, HTTPS on, certificate *Let's Encrypt*. Point the DNS A record of that host at the
    server first. Dokploy adds the Traefik labels itself, so the compose file has none. (Free `sslip.io`
@@ -114,8 +123,9 @@ All optional unless noted; secrets only in Dokploy, never in the repo. The full 
 ## Run the production image locally
 
 ```bash
-LA_CARTE_API_TOKEN=$(openssl rand -hex 32) docker compose up --build    # no host port: add one to test
-docker build -t la-carte-api api/ && docker run --rm -p 8000:8000 -e LA_CARTE_API_TOKEN=dev la-carte-api
+LA_CARTE_OWNER_EMAIL=dev@example.com LA_CARTE_API_TOKEN=$(openssl rand -hex 32) docker compose up --build
+docker build -t la-carte-api api/ && docker run --rm -p 8000:8000 -e LA_CARTE_OWNER_EMAIL=dev@example.com \
+  -e LA_CARTE_API_TOKEN=dev la-carte-api     # no host port in compose: add one to test
 ```
 CI (`.github/workflows/ci.yml`, job *API (docker build)*) builds the same image and checks `/health`.
 

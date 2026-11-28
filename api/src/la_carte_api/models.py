@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import fsrs
 from pydantic import AwareDatetime, BaseModel, field_validator, model_validator
 from pydantic import Field as PydanticField
-from sqlmodel import JSON, Column, Field, ForeignKey, SQLModel, Uuid
+from sqlmodel import JSON, Column, Field, ForeignKey, Index, SQLModel, Uuid
 
 from la_carte_api.db import UTCDateTime
 
@@ -78,14 +78,75 @@ class FeedbackStatus(StrEnum):
     done = "done"
 
 
+class TokenKind(StrEnum):
+    access = "access"
+    refresh = "refresh"
+    pat = "pat"
+
+
+class TokenScope(StrEnum):
+    deck = "deck"  # everything the user owns, REST and MCP
+    stats = "stats"  # `GET /stats` only (the widget)
+
+
+def owner_column() -> Any:
+    """`user_id` of an owned row (spec 030a): indexed, required, no foreign key (`DELETE /me`
+    deletes owned rows explicitly, like the review history that has no foreign key either)."""
+    return Field(sa_column=Column("user_id", Uuid, nullable=False, index=True))
+
+
 # --- Tables -----------------------------------------------------------------------------------
+
+
+class User(SQLModel, table=True):
+    """An account (spec 030a): one deck. No name, no picture, never a password."""
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    email: str = Field(unique=True)  # casefolded, verified by the identity provider
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    last_seen_at: datetime | None = Field(default=None, sa_type=UTCDateTime)
+
+
+class Identity(SQLModel, table=True):
+    """The provider account (Apple or Google `sub`) a user signs in with (spec 030b/e)."""
+
+    provider: str = Field(primary_key=True)
+    subject: str = Field(primary_key=True)
+    user_id: UUID = Field(
+        sa_column=Column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    )
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    provider_token: str | None = None  # Apple's refresh token only, to revoke on deletion
+    provider_client_id: str | None = None
+
+
+class ApiToken(SQLModel, table=True):
+    """One of our opaque tokens (access, refresh or personal); only its SHA-256 is stored."""
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(
+        sa_column=Column(
+            Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+        )
+    )
+    kind: TokenKind
+    hash: str = Field(unique=True)
+    scope: TokenScope = TokenScope.deck
+    name: str | None = None  # personal access tokens
+    client_id: str | None = None
+    family_id: UUID | None = None  # refresh rotation (spec 030b)
+    expires_at: datetime | None = Field(default=None, sa_type=UTCDateTime)
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    last_used_at: datetime | None = Field(default=None, sa_type=UTCDateTime)
+    revoked_at: datetime | None = Field(default=None, sa_type=UTCDateTime)
 
 
 class Note(SQLModel, table=True):
     """One thing the user knows: typed, named fields (spec 014). Its cards are directions over
-    those fields. There is a single deck, so no deck id."""
+    those fields. One deck per user, so no deck id."""
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = owner_column()
     type: NoteType
     fields: dict[str, str] = Field(sa_column=Column(JSON, nullable=False))
     created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
@@ -94,9 +155,12 @@ class Note(SQLModel, table=True):
 
 class Card(SQLModel, table=True):
     """One direction over a note's fields (`prompt` fields -> `answer` fields, both in the type's
-    field order) plus its own FSRS scheduling state."""
+    field order) plus its own FSRS scheduling state. `user_id` is always its note's."""
+
+    __table_args__ = (Index("ix_card_user_id_due", "user_id", "due"),)
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = owner_column()
     note_id: UUID = Field(
         sa_column=Column(
             Uuid, ForeignKey("note.id", ondelete="CASCADE"), nullable=False, index=True
@@ -147,6 +211,7 @@ class ReviewLog(SQLModel, table=True):
     reviewed_today) survives deleting the card (spec 012)."""
 
     id: int | None = Field(default=None, primary_key=True)
+    user_id: UUID = owner_column()
     card_id: UUID = Field(sa_column=Column(Uuid, nullable=False, index=True))
     rating: Rating
     reviewed_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime, index=True)
@@ -161,6 +226,7 @@ class Report(SQLModel, table=True):
     is held out of study. `card_id` / `note_id` have no foreign key: a report outlives its card."""
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = owner_column()
     card_id: UUID = Field(sa_column=Column(Uuid, nullable=False, index=True))
     note_id: UUID = Field(sa_column=Column(Uuid, nullable=False))
     reason: ReportReason
@@ -177,6 +243,7 @@ class Feedback(SQLModel, table=True):
     deck; closed once with an optional `resolution`."""
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = owner_column()
     kind: FeedbackKind = FeedbackKind.other
     message: str
     status: FeedbackStatus = FeedbackStatus.open
@@ -186,9 +253,9 @@ class Feedback(SQLModel, table=True):
 
 
 class Settings(SQLModel, table=True):
-    """Deck-wide settings (spec 021): a single row, id 1. A missing row means the defaults."""
+    """A user's deck settings (spec 021, keyed by user since 030a). No row = the defaults."""
 
-    id: int = Field(default=1, primary_key=True)
+    user_id: UUID = Field(primary_key=True)
     new_cards_per_day: int = 15  # the new-card milestone size M (1-200; a stored 0 reads 15)
 
 
@@ -197,6 +264,7 @@ class ActivityEvent(SQLModel, table=True):
     client's UUID (ingest is idempotent on it); `card_id` has no foreign key."""
 
     id: UUID = Field(primary_key=True)
+    user_id: UUID = owner_column()
     kind: str = Field(index=True)
     at: datetime = Field(sa_type=UTCDateTime, index=True)  # device clock, stored in UTC
     tz: str
@@ -463,6 +531,7 @@ class ReportRead(BaseModel):
 
 class FeedbackRead(BaseModel):
     id: UUID
+    user_email: str  # who sent it (spec 030a: only the owner sees other users' feedback)
     kind: FeedbackKind
     message: str
     status: FeedbackStatus
@@ -538,3 +607,24 @@ class ActivityEventRead(BaseModel):
     def of(cls, event: ActivityEvent) -> "ActivityEventRead":
         local_at = event.at.astimezone(ZoneInfo(event.tz))
         return cls(**event.model_dump(), local_at=local_at)
+
+
+# --- Accounts (spec 030a) ----------------------------------------------------------------------
+
+
+class MeRead(BaseModel):
+    id: UUID
+    email: str
+    provider: str | None  # "apple" | "google"; null for the migrated owner before sign-in
+    created_at: datetime
+
+
+class PersonalToken(BaseModel):
+    """A personal access token as listed: never the token itself, nor its hash."""
+
+    id: UUID
+    name: str | None
+    scope: TokenScope
+    created_at: datetime
+    expires_at: datetime | None
+    last_used_at: datetime | None

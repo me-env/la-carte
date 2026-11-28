@@ -3,11 +3,11 @@
 from datetime import UTC, datetime
 
 import pytest
-from mcp import Client
+from conftest import USER, mcp_client
 from sqlmodel import Session
 
 from la_carte_api import deck
-from la_carte_api.mcp_server import INSTRUCTIONS, build_mcp
+from la_carte_api.mcp_server import INSTRUCTIONS
 from la_carte_api.models import Direction, NoteCreate, NoteType, NoteUpdate
 
 pytestmark = pytest.mark.anyio
@@ -27,13 +27,13 @@ def _ways(note: dict) -> list[tuple[list[str], list[str]]]:
 
 
 async def _tools(engine) -> dict[str, str]:
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         return {t.name: t.description for t in (await client.list_tools()).tools}
 
 
 async def test_ac1_mcp_add_notes_basic_without_directions_makes_both_cards(engine):
     before = datetime.now(UTC)
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         reply = (await client.call_tool("add_notes", {"notes": [CHAT]})).structured_content
     [note] = reply["added"]
     assert _ways(note) == BOTH
@@ -51,7 +51,7 @@ def test_ac2_rest_post_notes_basic_without_directions_makes_both_cards(client):
 
 async def test_ac3_explicit_single_direction_makes_one_card(engine):
     one = {**CHAT, "directions": [{"prompt": ["front"], "answer": ["back"]}]}
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         [note] = (await client.call_tool("add_notes", {"notes": [one]})).structured_content["added"]
         notes = (await client.call_tool("find_notes", {})).structured_content["result"]
     assert _ways(note) == [(["front"], ["back"])]
@@ -59,7 +59,7 @@ async def test_ac3_explicit_single_direction_makes_one_card(engine):
 
 
 async def test_ac4_person_without_directions_still_fails_mcp(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         result = await client.call_tool("add_notes", {"notes": [PERSON]})
         assert result.is_error
         assert "photo -> name + description" in result.content[0].text
@@ -83,7 +83,7 @@ def test_ac5_rest_post_cards_makes_one_card(client):
 
 
 async def test_ac6_add_notes_new_counts_both_cards(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         reply = (await client.call_tool("add_notes", {"notes": [CHAT]})).structured_content
     assert reply["new"] == 2
 
@@ -94,8 +94,8 @@ def test_ac7_update_note_fields_does_not_backfill_reverse_card(session: Session)
         fields={"front": "chat", "back": "cat"},
         directions=[Direction(prompt=["front"], answer=["back"])],
     )
-    [note] = deck.add_notes(session, [one_way]).added
-    updated = deck.update_note(session, note.id, NoteUpdate(fields={"back": "a cat"}))
+    [note] = deck.add_notes(session, USER, [one_way]).added
+    updated = deck.update_note(session, USER, note.id, NoteUpdate(fields={"back": "a cat"}))
     assert [(c.prompt, c.answer) for c in updated.cards] == [(["front"], ["back"])]
 
 
@@ -108,7 +108,7 @@ def test_ac8_instructions_state_the_both_directions_default():
 
 
 async def test_ac9_make_cards_prompt_and_add_notes_description(engine):
-    async with Client(build_mcp(engine)) as client:
+    async with mcp_client(engine) as client:
         [message] = (await client.get_prompt("make_cards", {"text": "x"})).messages
     assert "never add every direction by default" not in message.content.text
     assert "Capital of France" in message.content.text

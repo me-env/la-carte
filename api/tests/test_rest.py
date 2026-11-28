@@ -50,7 +50,14 @@ def test_rejects_empty_card(client):
 
 
 def test_bearer_token_is_required_when_configured():
-    app = create_app(Settings(database_url="sqlite://", api_token="secret", _env_file=None))
+    app = create_app(
+        Settings(
+            database_url="sqlite://",
+            api_token="secret",
+            owner_email="owner@example.com",
+            _env_file=None,
+        )
+    )
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
         assert client.get("/cards").status_code == 401
@@ -129,7 +136,14 @@ def test_review_rejects_a_confidence_outside_0_1(client):
     ],
 )
 def test_icons_are_served_without_the_token(path, media_type):
-    app = create_app(Settings(database_url="sqlite://", api_token="secret", _env_file=None))
+    app = create_app(
+        Settings(
+            database_url="sqlite://",
+            api_token="secret",
+            owner_email="owner@example.com",
+            _env_file=None,
+        )
+    )
     with TestClient(app) as client:
         response = client.get(path)
         assert response.status_code == 200
