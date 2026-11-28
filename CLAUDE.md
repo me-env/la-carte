@@ -58,7 +58,7 @@ account or installing on the iPhone. No CodeGraph in this repo: don't offer to i
 | `secrets-guard` | Read-only check that no credentials or private data reach the public repo (tree + history) | Edits files; prints secret values |
 | `marketing` | Demo deck content, demo videos (app + widget, agent-adds-cards via MCP), README visuals (`docs/marketing/`, `marketing/`) | Touches app/API code; shows real URLs, tokens or personal data |
 
-`scripts/` owners: dev-velocity `_ios-env.sh` `_lock.sh` `_proc.sh` `unstick.sh` `ios-build.sh` `ios-test.sh` · qa-validator `ios-ui-test.sh` `ios-ui-test-split.sh`
+`scripts/` owners: dev-velocity `_ios-env.sh` `_lock.sh` `_proc.sh` `_sim-service.sh` `unstick.sh` `ios-build.sh` `ios-test.sh` · qa-validator `ios-ui-test.sh` `ios-ui-test-split.sh`
 `e2e.sh` (lock/scratch mechanics agreed with dev-velocity) · api-engineer `api-*.sh` · release-engineer `ios-adhoc.sh`
 `ios-install-device.sh` · tooling-lead `design-review.py` `brandkit.py` (render methods agreed with design-lead) ·
 design-lead `fetch-design-refs.sh`.
