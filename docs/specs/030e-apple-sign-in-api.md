@@ -7,9 +7,6 @@ merged on the accounts branch. Overview, principles and env: [030](030-accounts-
 [030f](030f-apple-sign-in-ios.md); agents signing in with Apple on the web is [030g](030g-apple-sign-in-web.md).
 Design reference: none (no screen).
 
-
-> **Amended by [032](032-encryption.md):** `POST /oauth/apple` returns *locked* tokens like the iOS code flow; the app
-> then calls `POST /me/key` or `POST /me/unlock` (032b decisions 5–7).
 ## Goal
 The iOS app signs a user in with Apple (guideline 4.8) and gets la-carte tokens, exactly like the Google path ends.
 When an account with an Apple identity is deleted, the server revokes the user's Sign in with Apple authorization

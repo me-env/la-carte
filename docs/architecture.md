@@ -147,16 +147,10 @@ site (`/`, `/privacy`, `/support`, `/site/*`), `/.well-known/*`, `/authorize`, `
 `/oauth/*`. Detail: specs 030, 030a, 030b, 030e, 030g.
 
 ### Encryption (spec 032)
-Two layers, always on. **Base**: the SQLite file is SQLCipher-encrypted with `LA_CARTE_DB_KEY` (required in
-production). **Per user**: content (`note.fields`, `report.comment`/`resolution`) is sealed with the user's data key
-(DEK, AES-256-GCM, `vault.py`), stored only wrapped under the user's account key (`user.dek_wrap`) and under each
-`deck` token (`apitoken.dek_wrap`, `authcode.dek_wrap`; KEK = HKDF of the raw token). A request's `Principal` carries
-the DEK; content functions in `deck` take it explicitly. Rules: plaintext content only in memory during a request;
-never log keys, wraps, sealed blobs or query strings; a column that holds user-written text is sealed unless the spec
-says why not (feedback and activity stay readable to the owner); no server job may need content outside a user's
-request (that would be a user decision). Tokens from a sign-in are locked until the app sends the account key
-(`POST /me/key`, `POST /me/unlock`); agents get a slot when the user approves them in the app (`/oauth/wait`,
-`/me/agent-requests`). The pending approval's raw code lives in process memory: the API runs as one process.
+Encryption at rest, always on: the SQLite file is SQLCipher-encrypted with `LA_CARTE_DB_KEY` (64 hex, required in
+production; `PRAGMA key` first on every connection; a plaintext file is encrypted once at startup). A stolen file or
+backup is unreadable; the server and its operator can read the data (not end-to-end). Never log the key. A per-user
+key was rejected (2026-11-28, backlog #72): remote MCP agents need the server to hold it.
 
 ### Web pages (spec 030h)
 The API serves a small static site from `api/src/la_carte_api/site/` (no JavaScript, no external resources, no
@@ -329,9 +323,7 @@ refresh token → signed out → `SignInFeature`). The widget uses its own `stat
 in the App Group access group, and never refreshes. Credential order: launch env > `session` > legacy `api-token`;
 URL order: launch env > Info.plist `LaCarteDefaultAPIURL` (build setting `LA_CARTE_DEFAULT_API_URL`, set by CI; app
 and widget). The stored `apiURL` is no longer read, and the app has no server URL setting: self-hosters build from
-source with their own URL (spec 030 "Self-hosting"). Encryption (spec 032c): the user's account key (= recovery key) is Keychain
-account `account-key.<user id>`, `kSecAttrSynchronizable` (iCloud Keychain), app only; Sign Out keeps it, Delete
-Account removes it. The app does no cryptography itself.
+source with their own URL (spec 030 "Self-hosting").
 
 Theme (spec 004): `@Shared(.appStorage(AppTheme.storageKey))` (`"theme"`), `system|light|dark|forest`; launch argument `-theme forest`
 overrides it for screenshots.

@@ -8,9 +8,6 @@ Depends on: 030c (sign-in screen, `AuthClient`, session storage) merged or on th
 Design reference: the 030c design note (Apple's button **above** Google's, same width and height);
 Apple HIG "Sign in with Apple" buttons (developer.apple.com/design/human-interface-guidelines/sign-in-with-apple).
 
-
-> **Amended by [032](032-encryption.md):** after `POST /oauth/apple` the app runs the same key step as the Google path
-> (032c decision 1).
 ## Goal
 The sign-in screen offers "Continue with Apple" as an equal option next to "Continue with Google" (guideline 4.8).
 One Face ID confirmation, no browser sheet, then the user's deck. Settings says which provider the account uses.

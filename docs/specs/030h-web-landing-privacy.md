@@ -9,10 +9,6 @@ Supersedes 030b decision 9 and AC 17 (`/privacy` moves here). Overview: [030](03
 Design reference: the README visuals (`marketing/readme/`), the app icon (`/icon.svg`), the brand kit
 (`docs/design/brand*`); Apple's App Store marketing guidelines for the badge.
 
-
-> **Amended by [032](032-encryption.md):** the privacy text gains "How your data is protected" and changes to "Who can
-> see it", "Server logs" and "Delete your account" (032 "Privacy wording"); AC 4 also checks "can't read" and "not
-> end-to-end encryption". The approval wait page (`/oauth/wait`) uses the consent page's server-HTML style.
 ## Goal
 The App Store needs a public privacy policy and a support URL (5.1.1(i), App Store Connect). la-carte also gets a
 one-page landing site: name, logo, a few screenshots, the demo videos, an App Store link, and links to privacy and
@@ -92,8 +88,15 @@ own Dokploy domain/router rule and build for three HTML pages.
 > **Why**: to run the app (your deck, scheduling, the widget, the AI agents you connect) and to answer support
 > requests. The legal basis is providing the service you asked for.
 >
-> **Who can see it**: only you, through the app and the agents you connect. The developer can read the feedback
-> you send and your related activity in the app, to improve la-carte. We never sell or share your data. Google and
+> **How your data is protected**: our database and its backups are encrypted at rest with a server key, so someone
+> who steals the database file or a backup can't read anything in it, not even your email. This is not end-to-end
+> encryption. The server decrypts your data to run the app and the AI agents you connect, so the server, and so the
+> developer who runs it, can technically read your deck. (Spec 032; marketing's copy adds a short threat table.)
+>
+> **Who can see it**: you, through the app and the agents you connect. The developer can read the feedback you
+> send and your related app activity, which never contains card text, to improve la-carte. The developer can
+> technically read your deck too (see "How your data is protected") but doesn't look at it unless you ask or it's
+> needed to keep the service running. We never sell or share your data. Google and
 > Apple are used only to sign you in. Your data is stored on the server that hosts la-carte. When you connect an
 > AI agent, what it reads from your deck is handled under that agent provider's own policy.
 >
@@ -101,7 +104,8 @@ own Dokploy domain/router rule and build for three HTML pages.
 > so deleted data leaves the backups within 30 days.
 >
 > **Delete your account**: in the app, Settings → Delete Account. It deletes your account, deck, review history,
-> reports, feedback and activity right away, and revokes Sign in with Apple. Or email {{support_email}}.
+> reports, feedback and activity right away, and revokes Sign in with Apple. Copies left in our encrypted backups
+> are gone within 30 days. Or email {{support_email}}.
 >
 > **Your rights**: you can ask for a copy of your data, its correction or its deletion at {{support_email}}, and
 > complain to your data protection authority.
@@ -116,7 +120,7 @@ own Dokploy domain/router rule and build for three HTML pages.
 | 1 | `GET /`, `/privacy`, `/support` return 200 HTML without a token; `/site/site.css` and every file in `site/media/` return 200 with the right content type; `/mcp`, REST and the icons behave as before | pytest |
 | 2 | No page or CSS loads an external resource: every `src` and stylesheet `href` is relative; links are relative, `mailto:` or `{{app_store_url}}`; no `<script>`; no `Set-Cookie` | pytest |
 | 3 | With `LA_CARTE_SUPPORT_EMAIL=help@example.com`, `LA_CARTE_APP_STORE_URL=https://apps.apple.com/app/id0` and `LA_CARTE_OPERATOR_NAME=Example`, the pages show them (HTML-escaped: a value with `<` is escaped); with all unset, no page contains `{{`, `<!-- if`, an empty `mailto:` or a badge, and `/` shows "Coming soon to the App Store" | pytest |
-| 4 | `/privacy` contains "openid email", "Hide My Email", "90 days", "Delete Account", "The developer can read the feedback you send", "no tracking" and a "Last updated" date | pytest |
+| 4 | `/privacy` contains "openid email", "Hide My Email", "90 days", "Delete Account", "The developer can read the feedback you send", "no tracking", "encrypted at rest", "not end-to-end encryption" and a "Last updated" date (the 032 phrases as in marketing's draft on `web-030h`, 69cc2e8) | pytest |
 | 5 | The committed `site/` text files contain no `http://` or `https://` URL and no email address: hosts and emails come only from the placeholders (a pytest scan) | pytest |
 | 6 | `site/` is ≤ 4 MB; each video ≤ 1.5 MB; every `<img>` has `alt`, every `<video>` an `aria-label` and a `poster` | pytest |
 | 7 | Every collected data type in `ios/LaCarte/PrivacyInfo.xcprivacy` has a matching line in `/privacy` (Email Address, User ID, Product Interaction, Other Diagnostic Data, Other User Content) | QA (read) |

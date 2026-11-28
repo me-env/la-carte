@@ -10,11 +10,6 @@ Design reference: docs/design/reference/02-editor-light.jpg, 01-editor-dark.jpg 
 like 008's "Connect your deck"), 05-theme-forest.jpg; Google's "Sign in with Google" branding guidelines
 (developers.google.com/identity/branding-guidelines) for the button.
 
-
-> **Amended by [032](032-encryption.md) (032c):** after the token exchange `AuthClient` checks `GET /me.key` and sets
-> up or unlocks the user's key (recovery key screen or unlock screen in `SignInFeature`); `signIn` returns
-> `SignInOutcome`; a 403 `Locked` is handled like `.unauthorized` (decision 7); Delete Account also deletes the
-> Keychain item `account-key.<user id>`, Sign Out keeps it.
 ## Goal
 A new user opens the app, taps "Continue with Google", picks their account in a system browser sheet, and lands on
 their deck. They stay signed in (silent token refresh), can sign out, and can delete their account from Settings.
@@ -62,7 +57,10 @@ No Google SDK, no password, no token to type.
 7. **Signed out** = no credential. Study's existing `.notSetUp` check and every `.unauthorized` (after refresh)
    in Study and Deck send `delegate(.signInRequired)`; `AppFeature` presents `SignInFeature` full screen
    (`.fullScreenCover`, not dismissible). Settings' URL + token entry (spec 008) is removed: the token field goes
-   away (PATs are for scripts, 030d) and there is no server URL anywhere in the app.
+   away (PATs are for scripts, 030d) and there is no server URL anywhere in the app. Behind the cover (or while it
+   slides in), signed-out Study and Deck show one centred line, "Sign in to get your deck.", with **no Settings
+   button** (008's "Connect your deck" + "Open Settings" is gone: Settings can't sign you in). Decided in
+   implementation, 2026-11-28.
 8. **Sign-in screen** (design-lead finalises): centered `LaCarteLogo`, "la-carte", "Sign in to get your deck.",
    one button "Continue with Google" with Google's "G" mark per their branding guidelines (glass/prominent per
    design-system, design-lead decides), a `ProgressView` in the button while signing in, one caption line for the
@@ -190,7 +188,8 @@ streak". "Can't reach your deck" stays for a network failure with a token.
   `.signIn(SignInFeature.State(message: …))`; `signIn(.delegate(.signedIn))` → `destination = nil` +
   `study(.deckChanged)`.
 - **`StudyFeature` / `DeckFeature`**: add `delegate(.signInRequired)`, sent where they set `.notSetUp` /
-  `.unauthorized` today. No other change.
+  `.unauthorized` today; their signed-out state shows "Sign in to get your deck." with no Settings button
+  (decision 7).
 - **`SettingsFeature`**: State drops `token`, `apiURL` and the connection test status; adds `email: String?`, `@Presents alert`. Actions add
   `signOutButtonTapped`, `deleteAccountButtonTapped`, `alert(.presented(.confirmDelete))`, `meResponse`,
   `deleteResponse`, `delegate(.signedOut)`; drops `urlChanged`, `tokenChanged`, the test-connection actions.

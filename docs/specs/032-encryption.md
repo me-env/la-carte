@@ -1,187 +1,69 @@
-# 032 — Encryption: a server key for the whole database, each user's own key for their deck
+# 032 — Encryption at rest: SQLCipher with a server key
 
-Status: ready (three parts: 032a, 032b API; 032c iOS. App Store blockers, all three)
-Owners: api-engineer (032a → 032b) ∥ ios-engineer (032c, on mock) → code-reviewer → qa-validator; marketing (privacy
-wording, with 030h); the manager asks the user for the decisions below and for the server key
-Depends on: the `accounts` branch (030a done there, 93158e4). 032a only needs 030a. 032b needs 030b and 030e (it
-changes token minting, the callback and `/oauth/apple`'s result). 032c needs 030c and 030f.
-Design reference: docs/design/reference/02-editor-light.jpg, 01-editor-dark.jpg (one centered message and one
-action, like the sign-in screen of 030c); the 030d "token created" screen (a value shown once in monospace, with
-Copy); Apple's own recovery-key screens (Settings → Apple Account → Sign-In & Security → Recovery Key) for tone.
+Status: ready (032a only; built on the `accounts` branch: d06f796, review fixes 278fb88. App Store blocker)
+Owners: api-engineer → code-reviewer → qa-validator; marketing (privacy wording, with 030h); the manager asks the
+user for the server key
+Depends on: 030a (on `accounts`).
+Design reference: none (no screen).
 
 ## Goal
-People may keep confidential work notes in la-carte. **What they write can't be read from the database, its
-backups or a copy of the server's disk, not even by the operator**: it's readable only in the app and through the
-agents the user connected, while they use them. Encryption is always on (user decision 2026-11-28: no toggle unless
-a feature needs plaintext; none does, see "Features affected").
+The whole database is encrypted on disk: **a stolen database file, a backup or a copy of the volume is unreadable**
+without the server key. Always on (user decision 2026-11-28: no toggle).
 
-This is **not** end-to-end encryption: the server decrypts in memory to serve a request, so MCP, search and
-duplicate checks keep working on the server.
+This is **encryption at rest**, not end-to-end encryption. The server holds the key and decrypts in memory, so the
+operator and the running server can read the data, as they must to serve the app and the agents (MCP, search,
+duplicate checks, scheduling all run on the server).
 
-## The design in two layers
-| Layer | Key | Covers | Where the key lives |
-|---|---|---|---|
-| **Base** (032a) | One server key, `LA_CARTE_DB_KEY` | The **whole SQLite file** (every table, index, journal) through SQLCipher | Dokploy env only |
-| **Per user** (032b) | Each user's data key (DEK), random, AES-256-GCM | **Content**: note fields (text and photo URLs), report comments and resolutions | Stored only *wrapped*: under the user's **account key** (held by their iPhone in iCloud Keychain; the recovery key is this key) and under **each of their tokens** (app session, agents, PATs). The server unwraps it only inside a request that carries one of them |
-
-### What each layer protects against (this table feeds `/privacy`)
-| Threat | Base layer | Per-user layer (content) |
-|---|---|---|
-| A stolen database file or backup (no server env) | **Protected**: nothing is readable, not even emails or dates | **Protected** |
-| A copy of the server at rest: database + the server key (disk + env, a Dokploy compromise) | Not protected: metadata is readable (emails, due dates and review dates, ratings, activity, feedback, agent names) | **Protected**: content needs a user's account key or one of their live tokens, which the server never stores |
-| The operator (has the server key and the database) | Not protected: same metadata as above | **Protected** at rest. The operator reads feedback by design (030 decision 10) |
-| A compromised **running** server (attacker code in the process, or a modified server) | Not protected | **Not protected**: it sees the content of every user who makes a request, and the keys and tokens those requests carry |
-| A leaked token of a user | — | That token reads that user's content until it is revoked or expires |
-
-### Why these choices
-- **SQLCipher for the base layer**, not field-level encryption with a server key: one setting covers every table,
-  index, temporary file and backup copy, with no code per column and nothing to forget when a column is added. It is
-  the standard encrypted SQLite (AES-256), the Python binding `sqlcipher3` ships wheels for Python 3.13 on macOS
-  arm64 and Linux x86_64/aarch64 (checked on PyPI 2026-11-28; it bundles SQLCipher), and SQLAlchemy drives it as a
-  `sqlite3`-compatible module. Cost: one native dependency, and `sqlite3` on the command line can't open the file
-  (use `sqlcipher` with the key).
-- **Every token is a key slot** for the per-user layer: our tokens are already 256-bit random secrets that the
-  database stores only as SHA-256 (030 principle 5), so a key derived from the raw token (HKDF, a different
-  function from the hash) can wrap the DEK, and the database alone can't unwrap it. No passphrase, so no Argon2 or
-  scrypt: every secret here is random, at least 160 bits.
-- **The account key is the recovery key.** One secret, generated by the server at key setup, returned once, kept by
-  the app in iCloud Keychain (syncs to the user's new iPhone) and shown once to the user to write down. Two secrets
-  (device key + separate recovery key) would add a slot, a screen and a state for no gain the user can see.
-- **The app does no cryptography.** It stores and sends an opaque key, like a token. No CryptoKit, nothing new for
-  export compliance (`ITSAppUsesNonExemptEncryption` stays `NO`: the encryption runs on the server).
-
-## Crypto (exact; no custom constructions, Python `cryptography` only)
-- **Algorithms**: AES-256-GCM (`cryptography.hazmat.primitives.ciphers.aead.AESGCM`), 96-bit random nonces from
-  `os.urandom`; HKDF-SHA256 (`cryptography.hazmat.primitives.kdf.hkdf.HKDF`). `cryptography` becomes an explicit
-  runtime dependency (today it comes through `mcp`). New module `api/src/la_carte_api/vault.py` holds all of it,
-  ≈ 60 lines: `new_dek()`, `seal(key, plaintext, aad) -> bytes`, `open_(key, blob, aad) -> bytes`,
-  `token_kek(raw_token)`, `account_kek(account_key, user_id)`, `wrap(kek, dek, aad)`, `unwrap(kek, blob, aad)`,
-  `new_account_key()`, `parse_account_key(text)`.
-- **Sealed blob format** (content and wraps): `0x01 ‖ nonce (12 bytes) ‖ ciphertext ‖ tag (16 bytes)`. `0x01` =
-  AES-256-GCM, format 1; any other first byte → error (room for a future format, never guessed).
-- **DEK**: 32 random bytes per user, created at key setup. Never stored unwrapped, never logged, never cached across
-  requests (no module-level or per-user cache; it lives in the request's `Principal` and is dropped with it).
-- **Account key**: 20 random bytes (160 bits), shown as Crockford base32, 32 characters in 8 groups of 4
-  (`7QK2-…-M4XD`). `parse_account_key` uppercases, drops spaces and dashes, maps `O→0`, `I`/`L→1`, and requires
-  exactly 32 base32 characters. No checksum: a typo fails the unwrap ("That key doesn't match").
-- **Key-encryption keys (KEKs)**, 32 bytes each:
-  - account: `HKDF(ikm = account key bytes, salt = user_id.bytes, info = b"la-carte/v1/kek/account")`;
-  - token: `HKDF(ikm = raw token as ASCII bytes, salt = b"", info = b"la-carte/v1/kek/token")` for `lc_at_`,
-    `lc_rt_`, `lc_pat_` and our authorization codes `lc_ac_`.
-- **Associated data (AAD)** binds every ciphertext to its place, so a blob copied to another row, user or slot fails:
-  - a wrap: `b"la-carte/v1/dek|" + user_id.bytes + b"|" + slot`, slot = `b"account"`, `b"token|" + apitoken.id.bytes`
-    or `b"code|" + authcode.hash (ASCII)`;
-  - content: `b"la-carte/v1/content|" + table + b"|" + row id.bytes + b"|" + user_id.bytes` (`table` = `note` or
-    `report`).
-- **Server key**: `LA_CARTE_DB_KEY` = 64 hex characters (`openssl rand -hex 32`), applied as SQLCipher's raw key
-  (`PRAGMA key = "x'<hex>'"`, no PBKDF2 since it is already random), SQLCipher 4 defaults otherwise.
-- **Nonce budget**: random 96-bit nonces stay far below 2^32 messages per key for any deck.
-
-## What is encrypted (per-user layer) and what stays readable to the server (base layer only)
-| Data | Per-user key | Why |
-|---|---|---|
-| `note.fields` (every field: front, back, name, description, **photo URL**) | **yes** | The content |
-| `report.comment`, `report.resolution` | **yes** | The user's words about a card (and broken photo URLs); an agent's note may quote the card |
-| `note.type`, `card.prompt` / `card.answer` (field **names** like `["front"]`), ids, timestamps | no | Structure, no content; needed to validate and order cards before decrypting |
-| Scheduling: `card.due`, FSRS state, stability, difficulty, `last_review`; `settings` | no | The queue, load balancing (023), stats and the widget run in SQL |
-| `reviewlog` (card id, rating, date, confidence, stability before) | no | Streak, history grid, `review_history` dates, `struggling_cards` counts. Holds no text |
-| `activityevent` (029) | no | Holds no card text by design (029); the owner reads a feedback sender's activity (030 decision 10); pruning runs without a user |
-| `feedback.message`, `feedback.resolution` | no | **Deliberately sent to the developer**, who reads it over MCP (030 decision 10). `/privacy` and `send_feedback`'s docstring say it is readable by the developer |
-| `report.reason` / `status` | no | Hold-back of reported cards in the queue (015) |
-| `user.email`, `identity`, `apitoken` (hashes), `oauthclient`, `authrequest`, `authcode` | no | Sign-in lookups, the email-collision rule, the owner check |
-
-Plaintext of content exists only in the server's memory while a request is served, and on the user's devices.
-
-## Key lifecycle
-1. **Sign-up / key setup.** Sign-in (Google, Apple) gives the app *locked* tokens (no slot yet). The app calls
-   `GET /me`; `key: "none"` → `POST /me/key`: the server creates the DEK and the account key, wraps the DEK under the
-   account key (`user.dek_wrap`), **encrypts any plaintext content the user already has** (the migrated owner
-   deck), revokes the caller's token family and returns a new, unlocked token pair plus `account_key` (once). The
-   app saves the key to iCloud Keychain and shows it once as the recovery key.
-2. **Every later sign-in, a new iPhone.** Tokens from a sign-in are locked; `GET /me` says `key: "locked"`. The app
-   finds `account-key.<user id>` in the Keychain (synced by iCloud Keychain to the new iPhone) and calls
-   `POST /me/unlock {account_key}` → a new unlocked pair. Without the item, the app asks for the recovery key and
-   sends the typed value to the same endpoint.
-3. **Tokens carry the key.** Minting any `deck` token in a request that holds the DEK wraps the DEK under the new
-   token (`apitoken.dek_wrap`): refresh rotation (unwrap from the refresh token, wrap for the new pair), PATs
-   (`POST /me/tokens` from the unlocked app), agents (approved in the app, below). `stats` tokens (the widget) get
-   no slot: `GET /stats` reads no content. Revoking or expiring a token makes its slot useless (the row is checked
-   first; the slot dies with the row on deletion).
-4. **Everything lost** (no iCloud Keychain item, no recovery key): the deck can't be decrypted by anyone. The app's
-   unlock screen says so and offers only Delete Account (030c's flow) and Sign Out; after deleting, signing in again
-   gives a new, empty deck. The user is told **before** this can happen, on the recovery key screen at setup.
-5. **Account deletion** (`DELETE /me`, also allowed with a locked token): unchanged from 030a, plus the app deletes
-   `account-key.<user id>` from the Keychain (which removes it from iCloud Keychain everywhere). Old backups keep
-   ciphertext only, under a DEK whose wraps are gone with the rows (they age out within 30 days).
-6. **Rotation.** Server key: start once with `LA_CARTE_DB_KEY_NEW` set (032a decision 4). Per-user keys: a "new
-   recovery key" (new account key + new DEK, everything re-encrypted, other tokens revoked) is backlog #73: the
-   versioned formats and AAD above already allow it without a migration.
-
-## Agents: connecting needs one tap in the app
-The consent page runs in a browser that has no user key. Chosen flow, the simplest secure one: **after the user
-signs in with Google or Apple on the consent flow, the request waits for approval in the la-carte app.**
-```
-agent → /authorize → consent page → Google/Apple → /oauth/callback (user known)
-   user has no key  → error page "Open the la-carte app and sign in once, then connect again." (no code minted)
-   user has a key   → authrequest.status = waiting, user_id set → 303 /oauth/wait?request=<id>
-browser /oauth/wait: "Open la-carte on your iPhone to approve <client>." meta refresh every 2 s
-app (foreground)  GET /me/agent-requests → alert "Connect “Claude”?" → Connect
-                  POST /me/agent-requests/{id}/approve  (unlocked app token: the DEK is in memory)
-                     → mint our code lc_ac_, authcode.dek_wrap = wrap(DEK) under that code
-                     → keep the raw code in process memory only, keyed by the request id (≤ 5 min)
-browser /oauth/wait (next refresh) → pops the raw code → 302 redirect_uri?code&state&iss
-agent → /token → unwrap the DEK with the code → wrap it under the new access + refresh tokens
-```
-Why: the browser never needs a key, nothing that opens a DEK is ever in the database alone (the code wrap is useless
-without the raw code, which lives only in memory and in the agent's hands), and it reuses the consent page, the
-callback, codes and `/token`. Costs, accepted: the iPhone must be at hand (no app, no agent; decision D2); the API
-runs as one process (it does: SQLite, one `uvicorn` worker) and a restart while waiting loses the approval (the page
-says "This sign-in expired. Start again from your agent."). Rejected: a code typed from the app into the browser
-(needs ≥ 128 bits to be safe at rest, too long to type), a QR code (the browser is usually on a computer, the
-camera on the phone; same entropy problem), storing the raw code in the database (the operator could unwrap).
-PATs (030d) need no flow: they are minted by the unlocked app.
-
-## Features affected (complete list)
-| Feature | Effect |
+## What it protects against (this table feeds `/privacy`)
+| Threat | Protected? |
 |---|---|
-| `find_notes` / `GET /notes?query` / `GET /cards?query` search | Works: the user's notes are decrypted in memory per request and matched as today (`_matches` already runs in Python over every note). Search terms never reach logs (032b AC 11) |
-| Duplicate check in `add_notes` (front / name key) | Works: same, in memory |
-| Queue, `due_cards`, `review_card`, load balancing, hold-back of siblings and reports | Unchanged (no content) except card bodies decrypted for the reply |
-| `GET /stats` and the widget | Unchanged; the widget's `stats` token carries no key |
-| Streak, history, `review_history`, `struggling_cards` | Dates and counts unchanged; card text decrypted for the reply (needs an unlocked token) |
-| Reports (015) and `handle_reports` | Work for the user's app and agents; the comment is encrypted |
-| Owner reads feedback + a sender's activity (030 decision 10) | **Unchanged**: feedback and activity are not under the user's key. The owner sees no card text of another user, so a feedback about "this card" shows card ids only |
-| Activity pruning (90 days), `authrequest` pruning | Unchanged (no content) |
-| Migration of the owner's existing deck | Plaintext until the owner's first key setup in the new app, then encrypted in that request (032b decision 6). Old backups and the `.pre-*` files stay plaintext until removed (user action U3) |
-| The owner's legacy PAT (`LA_CARTE_API_TOKEN` imported by 030a), Claude Code `--header` with it | Works until the owner's key setup; then **locked** (it carries no slot): REST answers 403 `Locked`, `/mcp` answers 401 so the client re-runs OAuth. The user reconnects Claude Code with OAuth (or a new PAT from the app) |
-| Agent connection (030b consent, 030g Apple web) | One more step: approve in the app. An account with no key can't connect an agent |
-| Operator debugging (`sqlite3` on the server, reading a user's cards for a bug) | `sqlcipher` + the server key opens metadata only; content needs the user |
-| `scripts/e2e.sh` seeding | Adds `POST /me/key` after the fake sign-in, then mints the PAT with the unlocked token (032b AC 13) |
-| Ask AI (016), the app's caches, widget | Device-side: unchanged |
-| **Needs plaintext on the server outside a user's request** | **None today.** Future features that would: background jobs on card text (push reminders that show the card, email digests, server-side enrichment, embeddings for semantic search), shared decks, the owner reading a user's cards for support. Each would be a decision for the user (e.g. a per-feature opt-in), not a reason for a global toggle now |
+| A stolen database file, backup or volume copy, without the server's env | **Yes**: nothing is readable, not even emails or dates |
+| A copy of the database **and** the server key (disk + env, e.g. a Dokploy compromise) | No: everything is readable |
+| The operator (holds the key and the database) | No: can read every user's data. Policy, not cryptography, keeps them out (030h "Who can see it") |
+| A compromised running server | No |
+| A leaked token of a user | No: that token reads that user's deck until it is revoked or expires |
+
+## Why SQLCipher
+One setting covers every table, index, journal, temporary file and backup copy, with no code per column and nothing
+to forget when a column is added. It is the standard encrypted SQLite (AES-256); the Python binding `sqlcipher3`
+ships wheels for Python 3.13 on macOS arm64 and Linux x86_64/aarch64 (checked on PyPI 2026-11-28; it bundles
+SQLCipher), and SQLAlchemy drives it as a `sqlite3`-compatible module. Cost: one native dependency, and `sqlite3` on
+the command line can't open the file (use `sqlcipher` with the key).
+
+## Rejected: a per-user key (user, 2026-11-28)
+An earlier version of this spec (032b API, 032c iOS) added a per-user data key, wrapped under an account key kept
+in iCloud Keychain and under each token, with agents approved in the app. Rejected: every agent over a remote MCP
+needs the server to hold the user's key during its requests (the key that "is supposed to stay on the device" still
+reaches the server), and phone AI apps can only use remote MCP. It added screens, states and a recovery-key risk
+without keeping the key off the server. Backlog #72 records it.
 
 ---
 
 ## 032a — Base layer: SQLCipher (API)
-Owner: api-engineer. Files: `db.py`, `config.py`, `pyproject.toml`, `docker-compose.yml`, `docs/deploy.md`. Small; can
-run in its own worktree on top of `accounts` in parallel with 030b (only `db.py`'s engine setup overlaps).
+Owner: api-engineer. Files: `db.py`, `config.py`, `pyproject.toml`, `docker-compose.yml`, `docs/deploy.md`. Built and
+merged into `accounts` (2d619a8); ships with the accounts deploy.
 
 ### Decisions
 1. **Dependency** `sqlcipher3` (≥ 0.6.5, bundles SQLCipher). The engine uses it as the DB-API module
    (`create_engine("sqlite://…", module=sqlcipher3.dbapi2)` or `creator=`), with a `connect` event that runs
-   `PRAGMA key` first on every connection. In-memory `sqlite://` (unit tests) keeps plain `sqlite3`.
+   `PRAGMA key` first on every connection (registered with `insert=True`, so it runs before any other listener).
+   In-memory `sqlite://` (unit tests) keeps plain `sqlite3`.
 2. **`LA_CARTE_DB_KEY`** (64 hex). Required when `LA_CARTE_PUBLIC_URL` is set and not loopback (production): missing
    or malformed → refuse to start ("Set LA_CARTE_DB_KEY: 64 hex characters, e.g. openssl rand -hex 32"). Unset on a
-   local or loopback server → plain SQLite as today (dev, e2e). The value is never logged.
+   local or loopback server → plain SQLite as today (dev, e2e). A `LA_CARTE_PUBLIC_URL` without a parseable host
+   (e.g. no scheme) counts as production, the safe side. The value is never logged.
 3. **Encrypting an existing file** (startup, before every schema migration): if the key is set and the file is
    plaintext (it starts with `SQLite format 3\0`): `ATTACH '<db>.encrypting' AS enc KEY "x'<hex>'"`, `SELECT
    sqlcipher_export('enc')`, `DETACH`, reopen `.encrypting` with the key and compare row counts per table, then rename
    the original to `<db>.pre-032-<timestamp>.bak` and `.encrypting` to `<db>`. Log: "database encrypted; the
-   plaintext copy <name> stays until you delete it". A wrong key on an encrypted file → refuse to start ("LA_CARTE_DB_KEY
-   doesn't open this database"), file untouched.
+   plaintext copy <name> stays until you delete it". Leftover `<db>.encrypting*` files (a crash mid-export) are
+   removed before a new attempt. A wrong key on an encrypted file → refuse to start ("LA_CARTE_DB_KEY doesn't open
+   this database"), file untouched; only SQLCipher's "file is not a database" error reads as a wrong key, any other
+   error is raised as is.
 4. **Rekey**: with `LA_CARTE_DB_KEY_NEW` set, startup opens with `LA_CARTE_DB_KEY`, runs `PRAGMA rekey`, logs "rekeyed:
    set LA_CARTE_DB_KEY to the new value and remove LA_CARTE_DB_KEY_NEW". If `LA_CARTE_DB_KEY` no longer opens the file
    but `LA_CARTE_DB_KEY_NEW` does (a restart before the env was swapped), it opens with the new key and logs the same.
+   If after `PRAGMA rekey` the new key doesn't open the file, refuse to start (never run on a half-rekeyed file).
 5. Later migration backups (`_rebuild_if`'s `.bak` copies) are file copies of the encrypted file: encrypted.
 6. `docs/deploy.md`: the variable, how to generate it, **keep a copy in a password manager (losing it loses every
    account)**, how to open the file for debugging (`sqlcipher <db>` then `PRAGMA key = "x'…'";`), rekey.
@@ -198,258 +80,22 @@ run in its own worktree on top of `accounts` in parallel with 030b (only `db.py`
 | A7 | **Raw file scan**: seed users (emails `alice-marker@example.com`, …), notes, a report, feedback `feedback-marker`, activity; close the engine; the bytes of the db file and every `-wal`/`-journal`/`.bak` next to it (except `.pre-032-*`) contain none of the seeded strings, emails or token prefixes | pytest |
 | A8 | The Docker image builds and `/health` answers with the key set (CI's image build) | CI |
 
----
+## Privacy wording and App Store answers
+- `/privacy` (030h) gains "How your data is protected": encrypted at rest with a server key, a stolen file or backup
+  is unreadable, the server and so the developer who runs it can technically read the data, not end-to-end, and the
+  threat table above in plain words. The copy is marketing's draft on `web-030h` (69cc2e8,
+  `docs/marketing/web-landing.md`); 030h AC 4 checks "encrypted at rest" and "not end-to-end encryption". Never
+  claim that the operator can't read the deck.
+- App Privacy: unchanged categories (content is stored and processed on our server, so it is "collected").
+  Export compliance: the app adds no encryption of its own, `ITSAppUsesNonExemptEncryption` stays `NO`.
 
-## 032b — Per-user layer and agent approval (API + MCP)
-Owner: api-engineer. Files: `vault.py` (new), `models.py`, `db.py` (migration 032), `auth.py`, `oauth.py`,
-`identity.py` callers, `deck.py`, `rest.py`, `mcp_server.py`, `site/` (wait page), tests. After 030b and 030e on the
-`accounts` branch; before 030g (which then inherits the approval step).
-
-### Decisions
-1. **Columns.** `user.dek_wrap BLOB NULL` (null = no key yet); `apitoken.dek_wrap BLOB NULL`; `authcode.dek_wrap BLOB
-   NULL`; `authrequest.user_id UUID NULL`, `authrequest.status` (`pending` | `waiting` | `approved` | `denied`).
-   Content: `note.fields` becomes nullable and `note.sealed BLOB NULL` is added; `report.sealed BLOB NULL` is added
-   (`comment`, `resolution` stay as nullable plaintext columns). `sealed` holds the JSON of the row's content
-   (`note`: the fields dict; `report`: `{"comment", "resolution"}`). **Invariant: a user with a key has every content
-   row sealed and the plaintext columns null; a user without one has none sealed** (checked by a test helper used in
-   every 032b test). Migration 032 (`_rebuild_if`, condition: `note` has no `sealed`) adds the columns; tables new in
-   030a/030b get them through the models (not deployed yet).
-2. **`Principal`** (030a) gains `dek: bytes | None` and `locked: bool` (`user.dek_wrap` set and no DEK). `verify`
-   unwraps the token's slot when it has one (token KEK + AAD); a slot that doesn't open is treated as an unknown token
-   (401). Content code gets the key explicitly: content functions in `deck` take `dek: bytes | None` next to
-   `user_id`, and read/write through two helpers, `_fields(note, dek)` / `_set_fields(note, dek, fields)` (and the
-   same pair for reports). `dek is None` is allowed only while the user has no key (plaintext mode); otherwise the
-   route refused already (decision 3).
-3. **Locked tokens.** For a user with a key, a locked token may only call: `GET /me`, `DELETE /me`, `POST /me/key`
-   (→ 409), `POST /me/unlock`, `GET /me/tokens`, `DELETE /me/tokens/{id}`, `GET /me/agent-requests`, `POST /revoke`. Everything else on REST →
-   403 `{"detail": "Locked"}`; `/mcp` → 401 with the usual `WWW-Authenticate` (the client re-runs OAuth). `stats`
-   tokens: `GET /stats` as before. A user without a key: every `deck` token works as in 030a (the transition of the
-   owner's deck).
-4. **`GET /me`** gains `key: "none" | "locked" | "unlocked"` (relative to the calling token).
-5. **`POST /me/key`** (no body; only an `la-carte-ios` access token, else 403 `{"detail": "Use the la-carte app"}`;
-   409 `{"detail": "Key already set up"}` if `user.dek_wrap` is set). In one transaction: new DEK and account key,
-   `user.dek_wrap`, seal every plaintext `note` and `report` row of the user and null the plaintext, revoke the
-   caller's token family, mint a new access + refresh pair for `la-carte-ios` with slots. 200 →
-   `{access_token, token_type, expires_in, refresh_token, scope, account_key}` (the `/token` body plus the key,
-   formatted in groups). PATs and agent tokens that existed before (only possible for the migrated owner) stay but
-   are now locked.
-6. **`POST /me/unlock`** (JSON `{account_key}`; only an `la-carte-ios` access token): `parse_account_key`, unwrap
-   `user.dek_wrap`; failure → 400 `{"detail": "That key doesn't match"}`; user without a key → 409 `{"detail": "No
-   key yet"}`. Success: revoke the caller's family, mint a new unlocked pair → 200 with the `/token` body.
-7. **Minting with slots** (`auth.mint` gains `dek: bytes | None`): `/token` with an authorization code wraps the
-   code's DEK (if `authcode.dek_wrap`) into both new tokens; `refresh_token` rotation carries the refresh token's DEK
-   into the new pair; `POST /me/tokens` with `scope = deck` wraps the caller's DEK (caller must be unlocked or the
-   user keyless, else 403 `Locked`); `scope = stats` gets no slot. `/oauth/apple` (030e) and the iOS code flow
-   return locked tokens (the app unlocks next).
-8. **Agent approval** (changes 030b decisions 3, 6 and 030g decision 4):
-   - Callback, after account resolution, for any client other than `la-carte-ios`: user without a key → HTML 403
-     page "Open the la-carte app and sign in once, then connect your agent again." (no code, request deleted);
-     else set `authrequest.user_id`, `status = waiting`, 303 → `/oauth/wait?request=<id>`.
-   - `GET /oauth/wait?request=<id>` (public path; requires the `lc_auth` cookie equal to `request`, which a
-     same-site navigation carries even after Apple's cross-site `form_post`): `waiting` → 200 HTML, the 030b page
-     style, "Open la-carte on your iPhone to approve **<client_name>**." + "This page continues by itself.",
-     `<meta http-equiv="refresh" content="2">`, no script; `approved` and the raw code in memory → pop it, delete
-     the request, clear `lc_auth`, 302 `redirect_uri?code&state&iss`; `denied` → 302 with
-     `error=access_denied&error_description=denied`; expired, unknown, or approved but the code is gone (restart) →
-     400 page "This sign-in expired. Start again from your agent."
-   - `GET /me/agent-requests` (only `la-carte-ios` tokens, locked allowed) → `[{id, client_name, redirect_host,
-     created_at}]`: the user's `waiting` requests younger than 10 minutes, oldest first.
-   - `POST /me/agent-requests/{id}/approve` (only an **unlocked** `la-carte-ios` access token; another user's or
-     unknown id → 404; not `waiting` → 409): mint `lc_ac_` as 030b decision 6 (same fields, 5 min), with `dek_wrap`
-     under the code (AAD slot `code|<hash>`); keep the raw code in a module-level dict `{request_id: (code,
-     expires_at)}` (entries older than 5 minutes dropped on every access); `status = approved` → 204.
-   - `POST /me/agent-requests/{id}/deny` → `status = denied` → 204.
-9. **Logs**: no account key, DEK, wrap or sealed blob is ever logged; the uvicorn access log drops query strings
-   (search terms) through a logging filter on `uvicorn.access`.
-10. **MCP**: tool shapes unchanged. `send_feedback`'s docstring adds "The developer reads feedback as written: don't
-    paste card content." INSTRUCTIONS' Feedback paragraph adds the same sentence.
-
-### Acceptance criteria
-| # | Criterion (observable) | Validated by |
-|---|---|---|
-| B1 | **Operator dump**: users A and B each set up a key and add basic and person notes with unique marker strings (fronts, backs, names, descriptions, photo URLs) and a report with a marker comment and resolution; `iterdump()` of the database opened **with the server key** (or plain in tests) contains none of the markers, while it does contain B's feedback marker (readable by design) and A's email | pytest |
-| B2 | Round trip: after B1, A's unlocked token reads every marker back unchanged over REST and MCP (`find_notes`, `due_cards`, `list_reports`, `review_history`); B's token can't reach A's notes (030a matrix still passes) | pytest |
-| B3 | `vault`: a blob or wrap moved to another row, another user or another slot (AAD changed) fails to open; a blob with first byte ≠ `0x01` fails; two seals of the same text differ; `parse_account_key` accepts lower case, spaces, dashes, `O`/`I`/`L` and rejects 31 or 33 characters | pytest |
-| B4 | Key setup: an `la-carte-ios` token of a keyless user → `POST /me/key` 200 with `account_key` (32 base32 chars in 8 groups) and new tokens; the old access and refresh tokens → 401; `GET /me` with the new token says `unlocked`; a second call → 409; with a PAT or an agent token → 403 | pytest |
-| B5 | Owner migration: a migrated owner deck in plaintext (030a) is fully readable with the legacy PAT; after `POST /me/key` every `note`/`report` row is sealed with plaintext columns null (invariant helper), the same reads return the same data with the new token, and the legacy PAT gets 403 `Locked` on `GET /notes` and 401 on `/mcp` | pytest |
-| B6 | Unlock: a fresh sign-in's tokens are locked (`GET /me` → `locked`; `GET /notes` → 403 `Locked`; `GET /stats` with the widget's `stats` token → 200); `POST /me/unlock` with the right key (any case, with or without dashes) → new tokens that read the deck; a wrong key → 400 and the caller stays locked | pytest |
-| B7 | Refresh rotation keeps the key: an unlocked pair refreshed three times still reads the deck; a locked pair refreshed stays locked | pytest |
-| B8 | A PAT created by an unlocked app token reads the deck over REST and `/mcp`; a `stats` PAT has `dek_wrap` null | pytest |
-| B9 | Agent flow (fake provider): consent → callback → 303 `/oauth/wait` (page has the client name and a meta refresh, no `<script>`) → `GET /me/agent-requests` lists it → approve → the next `/oauth/wait` 302s to the redirect URI with `code`, `state`, `iss` → `/token` → the access token lists tools and reads the deck's markers | pytest |
-| B10 | Approval edge cases: deny → the wait page 302s with `access_denied`/`denied`; approve with a locked app token → 403; approve another user's request → 404; approve twice → 409; `/oauth/wait` without or with another `lc_auth` → 400; clearing the in-memory dict (simulated restart) after approval → the wait page shows "This sign-in expired"; a keyless user on the agent flow gets the "Open the la-carte app" page and no `authcode` row | pytest |
-| B11 | No account key, DEK or marker string appears in any log record of the full test run (caplog), and an access-log line for `GET /notes?query=<marker>` holds `/notes` without the query | pytest |
-| B12 | Deletion: `DELETE /me` with a locked token → 204 and every row of the user is gone, `user.dek_wrap` included | pytest |
-| B13 | `scripts/e2e.sh` (qa-validator, with api-engineer for the HTTP steps) runs fake sign-in → `POST /me/key` → `POST /me/tokens` with the unlocked token → seeds → the live UI tests pass | UI (live) |
-| B14 | Search cost stays small: `find_notes` over a 2,000-note deck answers in under 1 s in pytest (decrypting every note) | pytest |
-
-### API / MCP changes
-| Call | Shape |
-|---|---|
-| `GET /me` | adds `key: "none" \| "locked" \| "unlocked"` |
-| `POST /me/key` | (empty) → 200 `{access_token, token_type: "Bearer", expires_in, refresh_token, scope, account_key}`; 403 `Use the la-carte app`; 409 `Key already set up` |
-| `POST /me/unlock` | `{account_key}` → 200 the `/token` body; 400 `That key doesn't match`; 409 `No key yet` |
-| `GET /me/agent-requests` | → `[{id, client_name, redirect_host, created_at}]` |
-| `POST /me/agent-requests/{id}/approve`, `…/deny` | → 204; 403 `Locked` (approve); 404; 409 |
-| `GET /oauth/wait?request=` | HTML (public; browser only) |
-| Any content route with a locked token | 403 `{"detail": "Locked"}`; `/mcp` 401 |
-MCP: no new tool (agents must not approve agents or touch keys). iOS: `APIClient` gains `Me.key`, `KeySetup`,
-`AgentRequest` models + `DecodingTests` (032c).
-
----
-
-## 032c — Key setup, recovery key, unlock, approving agents (iOS)
-Owner: ios-engineer; design-lead checks the two screens against the 030c design note (no new components). Files:
-`SignInFeature/**`, `APIClient/**` (`AuthClient`, models, Keychain), `AppFeature/**` (agent alert), `SettingsFeature`
-(one footer line). After 030c and 030f; builds on mock before 032b is deployed.
-
-### Decisions
-1. **After every sign-in** (Google or Apple), the live `AuthClient` finishes the job before reporting success:
-   `GET /me` → `key`:
-   - `none` → `POST /me/key` → store the session from the reply, save `account_key` to the Keychain (decision 2) →
-     outcome `.newKey(String)`;
-   - `locked` → Keychain item for this user id → `POST /me/unlock` → store the session → `.ready`; no item, or 400 →
-     `.needsKey`;
-   - `unlocked` (cannot happen after a fresh sign-in; kept for safety) → `.ready`.
-   `signIn` / `signInWithApple` return `SignInOutcome` (`ready | newKey(String) | needsKey`). New
-   `unlock(_ key: String) async throws(UnlockError)` (`.wrongKey | .failed`), which also saves the key on success.
-2. **Keychain**: generic password, service `la-carte`, account `account-key.<user id>`, **`kSecAttrSynchronizable =
-   true`** (iCloud Keychain), `kSecAttrAccessibleAfterFirstUnlock`, no access group (the widget never needs it).
-   Sign Out keeps it (signing back in is seamless); Delete Account deletes it.
-3. **Recovery key screen** (part of the sign-in full-screen cover, `SignInFeature` status `.showingKey(String)`;
-   same layout as the sign-in screen): title "Your recovery key", the key in monospaced `.body` in groups
-   (`recoveryKey.value`, selectable), "Copy" (`recoveryKey.copy`, "Copied" for 2 s, pasteboard marked
-   `localOnly` and expiring after 2 minutes), the text "Your deck is encrypted with your own key. Your iPhone keeps
-   it in iCloud Keychain. Save this recovery key in a password manager or on paper: if you lose it and every device
-   signed in to your account, your deck can't be recovered, not even by us." and the button "I Saved It"
-   (`recoveryKey.done`) → `delegate(.signedIn)`. Shown once, never again (no "show key" in Settings).
-4. **Unlock screen** (status `.needsKey(error: Bool)`): title "Enter your recovery key", the text "This account's
-   deck is encrypted. Enter the recovery key you saved when you created it.", a text field (`unlock.field`,
-   monospaced, no autocorrection, uppercase), "Unlock" (`unlock.submit`, disabled while empty, spinner while
-   running), error line `unlock.error` "That key doesn't match." (ink, the 030c error slot), and two quiet buttons
-   below: "Sign Out" (`unlock.signOut`) and "Lost your key?" (`unlock.lost`) → alert "Without the recovery key, this
-   deck can't be opened. You can delete the account and start over with an empty deck." with "Delete Account"
-   (destructive, `unlock.lost.delete`, runs 030c's delete flow) and "Cancel".
-5. **Approving agents** (`AppFeature`): on launch and each time the scene becomes active while signed in,
-   `authClient.agentRequests()`; the oldest pending one shows a system alert "Connect “<client_name>”?" message
-   "It will be able to read and change your deck. Requested from <redirect_host>." buttons "Connect"
-   (`agentRequest.approve`) and "Don't Allow" (`agentRequest.deny`, cancel role). The answer is sent; if more are
-   pending, the next alert follows. Failure → alert "Couldn't connect the agent. Start again from your agent." Fetch
-   errors are silent (offline). No polling while active (the user just switched from the browser, which brings the
-   app to the foreground).
-6. **Locked during use**: a 403 `Locked` from any request is handled like `.unauthorized` after refresh (030c decision
-   7): `delegate(.signInRequired)` → sign-in screen (which then unlocks). This covers the legacy `api-token` after the
-   owner's key setup on another device.
-7. **Settings**: the Account section footer adds "Your deck is encrypted with your own key." Nothing else.
-8. **Mock modes** (`LA_CARTE_AUTH`): `signed-out` → sign-in succeeds with `.ready` (unchanged tests);
-   `new-account` → `.newKey("7QK2-…")` (a fixed fake key); `needs-key` → `.needsKey`, `unlock` accepts only the
-   fake key; `LA_CARTE_AGENT_REQUEST=1` → one pending request `{client_name: "Claude", redirect_host: "claude.ai"}`
-   on the first activation.
-
-### Acceptance criteria
-| # | Criterion (observable) | Validated by |
-|---|---|---|
-| C1 | `LA_CARTE_AUTH=new-account`: tapping `signIn.apple` or `signIn.google` shows `recoveryKey.value` with the key; `recoveryKey.done` dismisses the cover and Study shows | both |
-| C2 | `recoveryKey.copy` puts the exact key on the pasteboard (local only) and shows "Copied" | unit |
-| C3 | `LA_CARTE_AUTH=needs-key`: after sign-in the unlock screen shows; a wrong key shows `unlock.error` "That key doesn't match." and stays; the fake key unlocks and shows Study; `unlock.submit` is disabled while the field is empty | both |
-| C4 | `unlock.lost` shows the alert; Delete Account runs the delete flow and returns to the sign-in screen; `unlock.signOut` signs out | both |
-| C5 | Live `AuthClient` (URLProtocol stub): `key: none` → calls `POST /me/key`, stores the returned session (not the pre-setup one) and writes `account-key.<id>` with `kSecAttrSynchronizable`; `locked` + item → `POST /me/unlock` with the item's value, `.ready`; `locked`, no item → `.needsKey`; 400 on unlock → `.needsKey`; the key never appears in logs | unit |
-| C6 | Sign Out leaves `account-key.<id>`; Delete Account removes it | unit |
-| C7 | A 403 `Locked` in Study or Deck → `delegate(.signInRequired)` | unit |
-| C8 | `LA_CARTE_AGENT_REQUEST=1`: on launch the alert "Connect “Claude”?" shows; `agentRequest.approve` sends approve for its id; `agentRequest.deny` sends deny; a failing approve shows "Couldn't connect the agent. Start again from your agent." | both |
-| C9 | `DecodingTests`: `Me` with `key`, the `POST /me/key` reply (`account_key` + token fields), `AgentRequest` | unit |
-| C10 | Screenshots, light + dark: `signin-recovery-key`, `signin-unlock`, `signin-unlock-error`, `agent-approve-alert` | UI |
-| C11 | On the iPhone against the deployed server (manager with the user): the owner signs in, sees the recovery key once, their existing deck is intact; Claude Code reconnects with OAuth and the approval alert; `find_notes` finds a card | manual |
-
-### TCA shape (iOS)
-- **`SignInFeature`**: `Status` gains `.showingKey(String)` and `.needsKey(keyText: String, isUnlocking: Bool,
-  error: Bool)`. Actions add `signInResponse(Result<SignInOutcome, SignInError>)` (replaces `Void`),
-  `keyTextChanged`, `unlockButtonTapped`, `unlockResponse(Result<Void, UnlockError>)`, `copyKeyButtonTapped`,
-  `keySavedButtonTapped`, `signOutButtonTapped`, `lostKeyButtonTapped`, `@Presents alert` (`.confirmDelete`),
-  `deleteResponse`. Delegates: `.signedIn` (unchanged). Dependencies: `authClient`, `pasteboard` (030d's).
-- **`AuthClient`**: `signIn` / `signInWithApple` return `SignInOutcome`; adds `unlock(String)`, `agentRequests()
-  -> [AgentRequest]`, `answerAgentRequest(id, approve: Bool)`.
-- **`AppFeature`**: `@Presents var agentAlert: AlertState<AgentAlertAction>?`, `pendingAgents: [AgentRequest]`;
-  actions `scenePhaseBecameActive`, `agentRequestsResponse`, `agentAlert(.presented(.approve(id) | .deny(id)))`,
-  `agentAnswerResponse`.
-
-### Accessibility identifiers
-`recoveryKey.value`, `recoveryKey.copy`, `recoveryKey.done`, `unlock.field`, `unlock.submit`, `unlock.error`,
-`unlock.signOut`, `unlock.lost`, `unlock.lost.delete`, `agentRequest.approve`, `agentRequest.deny`.
-
----
-
-## Changes to the 030 parts (done in this change, marked "032" in each)
-- **030 (overview)**: principle 12 (encryption), order and blockers, App Privacy notes, rollout step.
-- **030a**: nothing to redo. 032b adds columns to its models and migration 032 after migration 030.
-- **030b**: decision 6 (callback): agent clients go to the approval wait page instead of getting a code; decision 7
-  (`/token`, refresh) and 8 (`POST /me/tokens`) carry key slots; AC 4 and AC 18 gain the approval / key setup step.
-- **030c**: after the token exchange the client runs 032c decision 1; a 403 `Locked` counts as `.unauthorized`;
-  `AuthClient.signIn` returns `SignInOutcome`.
-- **030d**: no UI change; PATs it creates carry the key (032b decision 7), and the app must be unlocked to create
-  one (it always is after sign-in).
-- **030e / 030f**: `/oauth/apple` returns locked tokens; the app unlocks next (032c decision 1).
-- **030g**: the Apple web callback ends in the same approval step (its AC 3 and 5 include approving in the app).
-- **030h**: privacy text (below); the wait page uses the same server-HTML style as the consent page.
-
-## Privacy wording (030h `/privacy`, and marketing's draft on branch `web-030h`, `docs/marketing/web-landing.md`)
-Required changes, wording polish free:
-1. New section **"How your data is protected"**: "Your notes, the text and photo links of your cards, and the
-   comments on your card reports are encrypted with a key that belongs to your account. Your iPhone keeps it in your
-   iCloud Keychain, and you get a recovery key when you create your account. Our server can decrypt your deck only
-   while you, or an AI agent you connected, use la-carte: it is never readable in our database or our backups, and we
-   can't read it. Everything else we store (your email, when cards are due and when you reviewed them, app activity,
-   feedback) is encrypted on our server's disk and in backups with a server key, which the developer holds. This is
-   not end-to-end encryption: the server decrypts your deck in memory to answer your app and your agents, so someone
-   who took control of the running server could read what passes through it. If you lose your recovery key and
-   every device signed in to your account, your deck can't be recovered, by anyone, including us."
-2. "Who can see it": "The developer can read the feedback you send (it is not encrypted with your key, so don't
-   put card content in it) and your related app activity, which never contains card text. The developer can't
-   read your deck."
-3. "Server logs": add "never your searches or card text".
-4. "Delete your account": add "Deleting your account also deletes your key, so copies of your deck left in backups
-   can no longer be decrypted."
-5. pytest (030h AC 4) also checks for "can't read" and "not end-to-end encryption".
-
-## App Store answers
-- **App Privacy**: unchanged categories (Email Address, User ID, Other User Content, Product Interaction, Other
-  Diagnostic Data; linked to the user; app functionality; no tracking). Content is still "collected" in Apple's
-  sense: it is stored on our server and decrypted there to provide the service; we don't claim end-to-end
-  encryption anywhere.
-- **Export compliance**: the app adds no encryption of its own (HTTPS and the Keychain are exempt):
-  `ITSAppUsesNonExemptEncryption` stays `NO`. The server's encryption isn't part of the app binary.
-- App Review notes: "Your deck is encrypted with your own key; the app shows a recovery key once after the first
-  sign-in."
-
-## Order on the `accounts` branch
-```
-api lane:   030a (done) ─► 030b ─► 030e ─► 032b ─► 030g
-            032a in its own worktree on top of accounts, any time after 030a (db.py engine + config only)
-iOS lane:   030c ─► 030f ─► 032c ─► 030d          (on mock; 032c's live part needs 032b's contract only)
-```
-App Store blockers: 030a, 030b, 030c, 030e, 030f, 030h, **032a, 032b, 032c**. Everything ships together with the
-accounts deploy: 032b must be live before any real account other than the owner's exists, so no non-owner deck is
-ever plaintext.
+## Out of scope
+- Per-user or end-to-end encryption (rejected above, backlog #72). Encrypting individual columns.
+- The access-log query-string filter: built in 030b (its decision 12), not here.
 
 ## What the user provides (the manager asks once)
 - **U1** Approve putting a new secret `LA_CARTE_DB_KEY` (`openssl rand -hex 32`) in Dokploy, and keep a copy in their
   password manager: if it is lost, every account's data is lost.
-- **U2** After the deploy, on the iPhone: sign in, save the recovery key, reconnect Claude Code / claude.ai (one
-  approval in the app each).
-- **U3** After checking the deployed deck: delete the plaintext files `*.pre-030-*.bak` and `*.pre-032-*.bak` on the
+- **U2** After checking the deployed deck: delete the plaintext files `*.pre-030-*.bak` and `*.pre-032-*.bak` on the
   server volume (the manager can do it with the user's OK), and accept that Dokploy volume backups taken before the
   deploy hold the plaintext deck until they age out (≤ 30 days).
-
-## Decisions for the user
-- **D1 No toggle.** Encryption is always on: no feature today needs the server to read content outside a request.
-  Future features that would (see "Features affected", last row) come back as their own decision. Recommended: yes.
-- **D2 Connecting an agent needs the iPhone app** (one "Connect" tap in the app while the browser waits). Users
-  without the app at hand can't connect an agent; they can still use a PAT made in the app earlier. Recommended:
-  yes (the alternatives need a long code typed by hand or a key stored where the operator can reach it).
-
-## Out of scope (backlog)
-- #74 End-to-end encryption (the device encrypts; agents would need their own keys; breaks server search).
-- #73 New recovery key / key rotation in the app (`POST /me/key/rotate`: new account key and DEK, re-encrypt, revoke
-  other tokens).
-- #75 Encrypting feedback and activity under the user's key (would remove the owner's access, 030 decision 10).
-- Encrypting `card.due`, ratings or emails per user. Hiding photo URLs from the third-party hosts the app loads them
-  from. A server-side key escrow ("forgot my key" recovery by support): by design there is none.
