@@ -648,6 +648,8 @@ def routes(oauth: LaCarteOAuth) -> list[Route]:
                 user_id = resolve_account(session, who, oauth.settings, oauth.clock())
             except SignInRefused as refused:
                 session.rollback()
+                if who.provider_token and who.provider_client_id:  # don't leave the grant live
+                    await oauth.apple.revoke(who.provider_token, who.provider_client_id)
                 return error("access_denied", refused.reason)
         token = oauth._pair(user_id, IOS, uuid4(), [SCOPE])
         return JSONResponse(token.model_dump(mode="json", exclude_none=True), headers=NO_STORE)

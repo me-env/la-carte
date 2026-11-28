@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 from urllib.parse import urlencode
 
+import anyio
 import httpx
 import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -163,6 +164,7 @@ APPLE_KEYS = f"{APPLE_ISSUER}/auth/keys"
 APPLE_TOKEN = f"{APPLE_ISSUER}/auth/token"
 APPLE_REVOKE = f"{APPLE_ISSUER}/auth/revoke"
 APPLE_KEYS_TTL = 24 * 60 * 60  # seconds the JWKS stays cached
+APPLE_KEYS_MIN_REFETCH = 60  # seconds between two JWKS fetches (`/oauth/apple` is public)
 CLIENT_SECRET_TTL = 5 * 60  # seconds; minted per call (Apple accepts up to 6 months)
 REVOKE_TIMEOUT = 5  # seconds
 
@@ -191,7 +193,7 @@ class AppleProvider:
         self.transport = transport  # tests inject one: no test calls Apple
         self.clock = clock
         self._keys: dict[str, jwt.PyJWK] = {}
-        self._keys_at = float("-inf")
+        self._keys_at = float("-inf")  # when the JWKS was last fetched, or tried
 
     async def verify_native(
         self, identity_token: str, code: str, raw_nonce: str
@@ -210,9 +212,10 @@ class AppleProvider:
         form = {"client_id": client_id, "client_secret": self.client_secret(client_id),
                 "token": refresh_token, "token_type_hint": "refresh_token"}  # fmt: skip
         try:
-            async with httpx.AsyncClient(transport=self.transport, timeout=REVOKE_TIMEOUT) as c:
-                response = await c.post(APPLE_REVOKE, data=form)
-        except httpx.HTTPError as error:
+            with anyio.fail_after(REVOKE_TIMEOUT):
+                async with httpx.AsyncClient(transport=self.transport, timeout=REVOKE_TIMEOUT) as c:
+                    response = await c.post(APPLE_REVOKE, data=form)
+        except (httpx.HTTPError, TimeoutError) as error:
             log.warning("apple revoke failed: %s", type(error).__name__)
             return
         if response.status_code != 200:
@@ -251,14 +254,19 @@ class AppleProvider:
 
     async def _key(self, client: httpx.AsyncClient, kid: object) -> jwt.PyJWK:
         """Apple's public key `kid`, from the cached JWKS; refetched when older than 24 h, or
-        once when `kid` is unknown (Apple rotated its keys)."""
-        if self.clock() - self._keys_at >= APPLE_KEYS_TTL or kid not in self._keys:
+        when `kid` is unknown (Apple rotated its keys), but at most once a minute, failed
+        fetches included: the endpoint is public, so a caller can't make us hammer Apple."""
+        if not isinstance(kid, str):
+            raise jwt.InvalidKeyError("no kid")
+        age = self.clock() - self._keys_at
+        if age >= APPLE_KEYS_TTL or (kid not in self._keys and age >= APPLE_KEYS_MIN_REFETCH):
             await self._fetch_keys(client)
-        if not isinstance(kid, str) or kid not in self._keys:
+        if kid not in self._keys:
             raise jwt.InvalidKeyError("unknown kid")
         return self._keys[kid]
 
     async def _fetch_keys(self, client: httpx.AsyncClient) -> None:
+        self._keys_at = self.clock()  # before the await: parallel or failed fetches count too
         try:
             response = await client.get(APPLE_KEYS)
             response.raise_for_status()
@@ -267,7 +275,6 @@ class AppleProvider:
             log.warning("Apple JWKS fetch failed: %s", type(error).__name__)
             raise IdentityError("sign_in_failed") from error
         self._keys = {key.key_id: key for key in keys if key.key_id}
-        self._keys_at = self.clock()
 
     async def _exchange(self, client: httpx.AsyncClient, code: str, subject: str) -> str:
         """Apple's refresh token for `code`; its `id_token` must be the same user's (it comes

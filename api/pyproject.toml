@@ -9,6 +9,7 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "anyio>=4",
     "fastapi>=0.165.0",
     "fsrs>=6.3.3",
     "httpx>=0.28.1",

@@ -9,6 +9,7 @@ import logging
 import time
 from urllib.parse import parse_qs
 
+import anyio
 import httpx
 import jwt
 import pytest
@@ -28,7 +29,7 @@ from test_oauth import (
     _query,
 )
 
-from la_carte_api import deck
+from la_carte_api import deck, identity
 from la_carte_api.identity import APPLE_ISSUER
 from la_carte_api.models import ApiToken, Identity, NoteCreate, User
 
@@ -75,6 +76,7 @@ class FakeApple:
         self.keys = [_jwk(APPLE_KEY, "k1")]
         self.subject: str | None = None  # the exchanged id_token's `sub`; None: the code's
         self.token_status = 200
+        self.keys_status = 200
         self.revoke: int | type[Exception] = 200
         self.requests: list[httpx.Request] = []
         self.exchanges = 0
@@ -83,7 +85,7 @@ class FakeApple:
         self.requests.append(request)
         assert request.url.host == "appleid.apple.com"
         if request.url.path == "/auth/keys":
-            return httpx.Response(200, json={"keys": self.keys})
+            return httpx.Response(self.keys_status, json={"keys": self.keys})
         if request.url.path == "/auth/token":
             if self.token_status != 200:
                 return httpx.Response(self.token_status, json={"error": "invalid_grant"})
@@ -241,7 +243,7 @@ def test_a_refused_apple_sign_in_writes_nothing(case):  # AC 3
         assert response.json() == {"error": "invalid_grant", "error_description": "sign_in_failed"}
         assert _counts(client) == before
     if case == "unknown kid":
-        assert fake.paths().count("/auth/keys") == 1  # cached, then one refetch
+        assert "/auth/keys" not in fake.paths()  # fetched under a minute ago: no refetch (AC 5)
     if case not in ("exchange 400", "other subject"):
         assert "/auth/token" not in fake.paths()  # no code is spent on a bad identity token
 
@@ -256,32 +258,77 @@ def test_missing_fields_are_an_invalid_request():
 # --- AC 5: the JWKS cache -----------------------------------------------------------------------
 
 
-def test_the_jwks_is_cached_and_refetched_once_for_a_new_kid():  # AC 5
+def _clocked(client) -> list[float]:
+    """Sets Apple's clock to now + `offset[0]` seconds; returns `offset`."""
+    offset = [0.0]
+    client.app.state.oauth.apple.clock = lambda: time.time() + offset[0]
+    return offset
+
+
+def _at(offset: list[float], sub: str, kid: str = "k1", key=APPLE_KEY) -> str:
+    """An identity token, valid at Apple's shifted clock."""
+    exp = int(time.time() + offset[0]) + 600
+    return _identity_token(kid, key, sub=sub, email=f"{sub}@example.com", exp=exp)
+
+
+def test_the_jwks_is_cached_and_refetched_at_most_once_a_minute():  # AC 5
     client, fake = _apple_app()
     with client:
+        offset = _clocked(client)
         for sub in ("a1", "a2", "a3"):
-            assert (
-                _sign_in(client, _identity_token(sub=sub, email=f"{sub}@example.com")).status_code
-                == 200
-            )
+            assert _sign_in(client, _at(offset, sub)).status_code == 200
         assert fake.paths().count("/auth/keys") == 1
         fake.keys.append(_jwk(OTHER_RSA, "k2"))  # Apple rotates
-        assert (
-            _sign_in(
-                client, _identity_token("k2", OTHER_RSA, sub="a4", email="a4@example.com")
-            ).status_code
-            == 200
-        )
+        refused = _sign_in(client, _at(offset, "a4", "k2", OTHER_RSA))  # within the minute
+        assert (refused.status_code, refused.json()["error"]) == (400, "invalid_grant")
+        assert fake.paths().count("/auth/keys") == 1
+        offset[0] = 60
+        assert _sign_in(client, _at(offset, "a4", "k2", OTHER_RSA)).status_code == 200
         assert fake.paths().count("/auth/keys") == 2
-        assert _sign_in(client, _identity_token(sub="a1")).status_code == 200
+        assert _sign_in(client, _at(offset, "a1")).status_code == 200  # known kid: cached
+        assert _sign_in(client, _at(offset, "a5", "k9")).status_code == 400  # unknown, too soon
         assert fake.paths().count("/auth/keys") == 2
-        apple = client.app.state.oauth.apple  # a day later the cache expires
-        apple.clock = lambda: time.time() + 24 * 3600 + 1
-        assert (
-            _sign_in(client, _identity_token(exp=int(time.time()) + 90_000, sub="a1")).status_code
-            == 200
-        )
+        offset[0] = 120
+        assert _sign_in(client, _at(offset, "a5", "k9")).status_code == 400  # still unknown
         assert fake.paths().count("/auth/keys") == 3
+        offset[0] = 120 + 24 * 3600  # a day later the cache expires
+        assert _sign_in(client, _at(offset, "a1")).status_code == 200
+        assert fake.paths().count("/auth/keys") == 4
+
+
+def test_a_failed_jwks_fetch_is_not_retried_within_the_minute():  # AC 5
+    client, fake = _apple_app()
+    with client:
+        offset = _clocked(client)
+        fake.keys_status = 500
+        for _ in range(3):
+            refused = _sign_in(client, _at(offset, "a1"))
+            assert (refused.status_code, refused.json()["error"]) == (400, "invalid_grant")
+        assert fake.paths().count("/auth/keys") == 1
+        offset[0], fake.keys_status = 60, 200
+        assert _sign_in(client, _at(offset, "a1")).status_code == 200
+        assert fake.paths().count("/auth/keys") == 2
+        offset[0], fake.keys_status = 60 + 24 * 3600, 500  # expired, and Apple is down
+        assert _sign_in(client, _at(offset, "a1")).status_code == 400
+        for _ in range(3):  # the stale keys serve until the next fetch is due
+            assert _sign_in(client, _at(offset, "a1")).status_code == 200
+        assert fake.paths().count("/auth/keys") == 3
+
+
+def _b64(part: dict) -> str:
+    return base64.urlsafe_b64encode(json.dumps(part).encode()).rstrip(b"=").decode()
+
+
+@pytest.mark.parametrize("kid", ["missing", 7, None])
+def test_a_token_without_a_string_kid_never_fetches_the_jwks(kid):  # AC 5
+    client, fake = _apple_app()
+    with client:
+        header = {"alg": "RS256", "typ": "JWT"} | ({} if kid == "missing" else {"kid": kid})
+        token = f"{_b64(header)}.{_b64({'sub': 'apple-001'})}.c2ln"
+        for _ in range(3):
+            refused = _sign_in(client, token)
+            assert (refused.status_code, refused.json()["error"]) == (400, "invalid_grant")
+        assert "/auth/keys" not in fake.paths()
 
 
 # --- AC 7-9: accounts ---------------------------------------------------------------------------
@@ -302,7 +349,7 @@ def _google_sign_in(client, email: str) -> httpx.Response:
 
 
 def test_email_collisions_between_apple_and_google():  # AC 7
-    client, _ = _apple_app(**GOOGLE)
+    client, fake = _apple_app(**GOOGLE)
     with client:
         callback, verifier = _google_sign_in(client, "ann@example.com")
         google = _exchange(client, "la-carte-ios", "lacarte://oauth", callback, verifier).json()
@@ -311,17 +358,24 @@ def test_email_collisions_between_apple_and_google():  # AC 7
         assert response.status_code == 400
         assert response.json() == {"error": "access_denied", "error_description": "use_google"}
         assert _counts(client) == before
+        assert fake.form("/auth/revoke")["token"] == "apple-refresh-1"  # the grant is ended
         me = client.get("/me", headers=bearer(google["access_token"])).json()
         assert (me["email"], me["provider"]) == ("ann@example.com", "google")
 
         assert (
             _sign_in(client, _identity_token(sub="a2", email="bob@example.com")).status_code == 200
         )
+        assert fake.paths().count("/auth/revoke") == 1
         callback, _ = _google_sign_in(client, "bob@example.com")
         location = callback.headers["location"]
         assert location.startswith("lacarte://oauth?")
         query = _query(location)
         assert (query["error"], query["error_description"]) == ("access_denied", "use_apple")
+
+        response = _sign_in(client, _identity_token(sub="a3", email="bob@example.com"))
+        assert response.json()["error_description"] == "email_in_use"  # another Apple ID
+        assert fake.form("/auth/revoke")["token"] == "apple-refresh-3"
+        assert fake.paths().count("/auth/revoke") == 2
 
 
 def test_the_owner_claims_the_migrated_deck_with_apple():  # AC 8
@@ -338,13 +392,16 @@ def test_the_owner_claims_the_migrated_deck_with_apple():  # AC 8
 
 
 def test_sign_up_mode_applies_to_apple():  # AC 9
-    client, _ = _apple_app(signup="allowlist", allowed_emails="listed@example.com")
+    client, fake = _apple_app(signup="allowlist", allowed_emails="listed@example.com")
     with client:
         before = _counts(client)
         response = _sign_in(client)
         assert response.json() == {"error": "access_denied", "error_description": "not_allowed"}
         assert _counts(client) == before
+        revoked = fake.form("/auth/revoke")  # the grant is ended
+        assert (revoked["token"], revoked["client_id"]) == ("apple-refresh-1", BUNDLE)
         assert _sign_in(client, _identity_token(email="listed@example.com")).status_code == 200
+        assert fake.paths().count("/auth/revoke") == 1
     client, _ = _apple_app()  # `open`, the default
     with client:
         assert _sign_in(client).status_code == 200
@@ -383,6 +440,22 @@ def test_deleting_a_google_or_pat_account_calls_no_one():  # AC 10
         google = _exchange(client, "la-carte-ios", "lacarte://oauth", callback, verifier).json()
         assert client.delete("/me", headers=bearer(google["access_token"])).status_code == 204
         assert fake.paths() == []
+
+
+def test_a_hanging_apple_revoke_is_cut_off(monkeypatch, caplog):  # AC 10
+    async def hang(request: httpx.Request) -> httpx.Response:
+        await anyio.sleep(10)
+        return httpx.Response(200)
+
+    monkeypatch.setattr(identity, "REVOKE_TIMEOUT", 0.05)
+    client, _ = _apple_app()
+    apple = client.app.state.oauth.apple
+    apple.transport = httpx.MockTransport(hang)
+    started = time.monotonic()
+    with caplog.at_level(logging.WARNING):
+        anyio.run(apple.revoke, "apple-refresh-1", BUNDLE)
+    assert time.monotonic() - started < 2
+    assert "apple revoke failed: TimeoutError" in caplog.text
 
 
 # --- AC 11: configuration and logs --------------------------------------------------------------

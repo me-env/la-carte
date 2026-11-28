@@ -437,6 +437,7 @@ name = "la-carte-api"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "fastapi" },
     { name = "fsrs" },
     { name = "httpx" },
@@ -457,6 +458,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4" },
     { name = "fastapi", specifier = ">=0.165.0" },
     { name = "fsrs", specifier = ">=6.3.3" },
     { name = "httpx", specifier = ">=0.28.1" },
