@@ -19,7 +19,7 @@ final class StudyLengthsUITests: XCTestCase {
 
   // MARK: - AC 5, 6, 7, 9
 
-  /// AC 5 short card centred; AC 6 long question + its short answer leading at the card's leading edge; AC 9 the
+  /// AC 5 short card centred; AC 6/15 long question + its 1-line answer centred (AC 15); AC 9 the
   /// long front doesn't move on reveal; AC 7 short question centred over a leading long answer.
   @MainActor
   func testStudyLengths_alignmentByLength() {
@@ -46,9 +46,9 @@ final class StudyLengthsUITests: XCTestCase {
     XCTAssertEqual(front.frame.minX, before.minX, accuracy: 0.5, "AC 9: front moved on reveal \(before) → \(front.frame)")
     XCTAssertEqual(front.frame.minY, before.minY, accuracy: 0.5, "AC 9: front moved on reveal \(before) → \(front.frame)")
     XCTAssertEqual(front.frame.size, before.size, "AC 9: front resized on reveal \(before) → \(front.frame)")
-    // Layout D: the short answer under a leading question starts at the question's left edge, inside its width.
-    XCTAssertEqual(back.frame.minX, front.frame.minX, accuracy: 1, "short answer not at the long question's left edge: \(back.frame) vs \(front.frame)")
-    XCTAssertLessThanOrEqual(back.frame.maxX, front.frame.maxX + 6, "answer wider than the question: \(back.frame) vs \(front.frame)")
+    // AC 15 (amends 6): the answer aligns on its own lines; a 1-line answer is centred even under a leading question.
+    XCTAssertEqual(back.frame.midX, card.frame.midX, accuracy: 1, "1-line answer not centred under the long question: \(back.frame) in \(card.frame)")
+    XCTAssertGreaterThan(back.frame.minX, front.frame.minX + 10, "1-line answer still at the long question's left edge: \(back.frame) vs \(front.frame)")
     XCTAssertGreaterThanOrEqual(back.frame.minY, front.frame.maxY - 1, "back not below front")
     snapshot("study-lengths-long-back", appearance: .light)
     rateGood(app, next: Self.shortQ)

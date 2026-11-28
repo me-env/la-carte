@@ -89,6 +89,16 @@ struct StudyTextLayoutTests {
     #expect(StudyView.TextMeasure(width: 100, height: 78, twoLines: 52).isMultiline)
   }
 
+  @Test func aSideAlignsOnItsOwnLinesOnly() {
+    let oneLine = StudyView.TextMeasure(width: 200, height: 26, twoLines: 26)
+    let twoLines = StudyView.TextMeasure(width: 340, height: 52, twoLines: 52)
+    let threeLines = StudyView.TextMeasure(width: 340, height: 78, twoLines: 52)
+    // The rule takes no question: under a 3+-line (leading) question, a 1-2-line answer stays centred (#15a, b).
+    #expect(StudyView.alignment(of: oneLine) == .center)
+    #expect(StudyView.alignment(of: twoLines) == .center)
+    #expect(StudyView.alignment(of: threeLines) == .leading)  // a 3+-line answer under any question (#15c, d)
+  }
+
   @Test func layoutCSnapsNearlyEqualBlocksThatStillFit() {
     #expect(StudyView.snap(answer: 300, toQuestion: 280, column: 370) == 10)
     #expect(StudyView.snap(answer: 280, toQuestion: 300, column: 370) == -10)
