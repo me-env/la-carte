@@ -64,7 +64,8 @@ struct ScreenColorTests {
   /// Spec 017: the question depends only on itself, in every candidate layout. Revealing the answer doesn't change a
   /// pixel of it, and short, 2-line and 4-line answers leave it at the same horizontal place (the stack's vertical
   /// centring may differ). In layout D, a leading answer under a wide question (widest line ≥ 85 % of the column)
-  /// stays within its width, and under any other question starts at the column's edge.
+  /// stays within its width, and under any other question starts at the column's edge. #15: the answer aligns on its
+  /// own lines only, so a 1-2 line answer is centred in the column even under a leading question.
   /// Amended by #14 (reveal lift): with a 4-line answer the question sits > 40 pt high, so it starts centred in the
   /// card and rises on reveal into the place it has under Reduce Motion (no lift), which is today's revealed place.
   @Test(arguments: StudyView.TextLayout.allCases, CardLines.questions.map(\.1) + CardLines.singleLines.map(\.1))
@@ -74,7 +75,6 @@ struct ScreenColorTests {
     defer { StudyView.textLayout = defaultLayout }
     var columns: [ClosedRange<CGFloat>] = []
     var cardCentre: CGFloat?
-    let questionLines = (CardLines.questions.first { $0.1 == question })?.0 ?? 1
     for (answerLines, answer) in CardLines.answers {
       let card = CardLines.card(question, answer)
       func screen(revealed: Bool, reduceMotion: Bool = false) throws -> Screen {
@@ -110,7 +110,7 @@ struct ScreenColorTests {
       let bottom = revealed.band(0, 0.85).maxY
       let below = CGRect(x: 0, y: ink.maxY + 1, width: revealed.size.width, height: bottom - ink.maxY - 1)
       let answerInk = try #require(revealed.inkBounds(in: below), "no answer drawn")
-      let leading = questionLines >= 3 || answerLines >= 3
+      let leading = answerLines >= 3
       if leading, !CardLines.wide.contains(question) {
         // Amended 2026-11-22 (user): a question under 85 % of the column, even wrapped, leaves the answer the column.
         #expect(answerInk.minX < 16 + 3 && answerInk.width > ink.width,  // at the column's 16 pt edge
@@ -122,9 +122,10 @@ struct ScreenColorTests {
         #expect(answerInk.minX >= ink.minX - 1 && answerInk.maxX <= ink.maxX + 1,
                 "answer wider than the question: \(answerInk) vs \(ink) (answer: \(answer))")
       } else {
-        // A centred answer (amended 2026-11-22) keeps the full column: it shares the question's centre, and one that
-        // the question's width would wrap stays on its own lines.
-        #expect(abs(answerInk.midX - ink.midX) <= 3, "centred answer off the question's centre: \(answerInk) vs \(ink)")
+        // A centred answer (amended 2026-11-22) keeps the full column: it's centred in the column (a leading question's
+        // ragged ink has no meaningful centre), and one that the question's width would wrap stays on its own lines.
+        let columnCentre = revealed.size.width / 2
+        #expect(abs(answerInk.midX - columnCentre) <= 3, "centred answer off the column's centre: \(answerInk) (answer: \(answer))")
       }
     }
     #expect(Set(columns.map { "\($0)" }).count == 1, "question's columns depend on the answer: \(columns)")
