@@ -40,6 +40,11 @@ if [ "${1:-}" = --on-slot ]; then
 import json, sys
 devices = json.load(sys.stdin)["devices"].get(sys.argv[1], [])
 print(next((d["udid"] for d in devices if d["name"] == sys.argv[2] and d["isAvailable"]), ""))' "$RUNTIME" "$NAME")"
+  if [ -z "$UDID" ] && [ -n "${LA_CARTE_SIM_DEVICES:-}" ] && [ -n "$(LA_CARTE_SIM_DEVICES="$LA_CARTE_SIM_DEVICES" SIM_DEVICES_DIR="$SIM_DEVICES_DIR" \
+      "$ROOT/scripts/_sim-service.sh" --missing)" ]; then
+    echo "❌ not creating $NAME: CoreSimulatorService doesn't list some mounted simulator images yet (it started before they were mounted), so $NAME may exist already. See the warning above; docs/dev-velocity.md" >&2
+    exit 72
+  fi
   if [ -z "$UDID" ]; then
     echo "📱 creating simulator $NAME ($MODEL, $RUNTIME), about 2 GB once used" >&2
     UDID="$(sim_create "$NAME" "$MODEL" "$RUNTIME")"

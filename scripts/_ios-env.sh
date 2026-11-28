@@ -89,6 +89,9 @@ if [ -n "${LA_CARTE_SIM_DEVICES:-}" ]; then
     case "$MOUNTS" in *" on $SIM_DEVICES_DIR/$u ("*) ;; *) sim_attach "$u" || echo "⚠️  could not mount $img" >&2 ;; esac
   done
   unset MOUNTS img u
+  # After a reboot CoreSimulatorService may have started before the images were mounted and list none of them:
+  # restart it once if nothing uses it (scripts/_sim-service.sh).
+  LA_CARTE_SIM_DEVICES="$LA_CARTE_SIM_DEVICES" SIM_DEVICES_DIR="$SIM_DEVICES_DIR" "$ROOT/scripts/_sim-service.sh" || true
 fi
 # Move a device (local folder, or an older symlink to LA_CARTE_SIM_DEVICES/<UDID>) into a new image mounted at its
 # device folder, then erase it: its databases (LaunchServices, containers) hold absolute paths to the old folder, and
