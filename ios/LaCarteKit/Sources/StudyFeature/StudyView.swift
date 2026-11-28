@@ -508,13 +508,14 @@ public struct StudyView: View {
   }
 
   /// The question depends only on itself, so it never moves on reveal.
-  private var promptAlignment: TextAlignment {
-    frontMeasure.isMultiline ? .leading : .center
-  }
+  private var promptAlignment: TextAlignment { Self.alignment(of: frontMeasure) }
 
-  /// Under a leading question the answer is leading too; otherwise it follows its own line count.
-  private var answerAlignment: TextAlignment {
-    promptAlignment == .leading || backMeasure.isMultiline ? .leading : .center
+  /// The answer depends only on its own lines, even under a leading question (spec 017 #15).
+  private var answerAlignment: TextAlignment { Self.alignment(of: backMeasure) }
+
+  /// A side of 1-2 lines is centred, 3+ lines leading.
+  static func alignment(of side: TextMeasure) -> TextAlignment {
+    side.isMultiline ? .leading : .center
   }
 
   private var answerIsBlock: Bool {
