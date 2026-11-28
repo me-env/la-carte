@@ -12,6 +12,11 @@ docker-compose.yml (repo root)
              LA_CARTE_API_TOKEN (optional)  → imported at the first accounts start as the owner's PAT `legacy`
              LA_CARTE_PUBLIC_URL (optional) → https base URL: OAuth issuer, MCP resource <url>/mcp, icon
              LA_CARTE_DB_KEY (required with a public URL) → SQLCipher key of the whole database file (spec 032a)
+             LA_CARTE_DB_KEY_NEW (only to rotate) → the new key; the start rekeys the file (see below)
+             LA_CARTE_GOOGLE_CLIENT_ID, _SECRET (both or neither) → Google sign-in (spec 030b); unset = off
+             LA_CARTE_SIGNUP (default open)  → `open`, or `allowlist`: only LA_CARTE_ALLOWED_EMAILS + the owner
+             LA_CARTE_ALLOWED_EMAILS (allowlist only) → comma-separated emails
+             LA_CARTE_SUPPORT_EMAIL, LA_CARTE_OPERATOR_NAME (optional) → support and privacy pages (spec 030h)
     auth     every request but /health and the icons: Authorization: Bearer <a user's token>
     volume   la-carte-data → /data/la-carte.db
 ```
@@ -37,7 +42,17 @@ docker-compose.yml (repo root)
    LA_CARTE_OWNER_EMAIL=<the email of your Apple or Google account>
    LA_CARTE_API_TOKEN=<the token from step 1>
    LA_CARTE_DB_KEY=<the database key from step 1>
+   LA_CARTE_PUBLIC_URL=https://<your API host>
+   LA_CARTE_GOOGLE_CLIENT_ID=<Google "Web application" client id>   # sign-in (spec 030b)
+   LA_CARTE_GOOGLE_CLIENT_SECRET=<its secret>
+   LA_CARTE_SIGNUP=allowlist                                        # optional, default open
+   LA_CARTE_ALLOWED_EMAILS=<a@example.com,b@example.com>            # allowlist only
+   LA_CARTE_SUPPORT_EMAIL=<contact email>                           # web pages (spec 030h)
+   LA_CARTE_OPERATOR_NAME=<who runs the service>
    ```
+   Without both Google values the API starts with Google sign-in off (personal access tokens only); Google
+   sign-in also needs `LA_CARTE_PUBLIC_URL` with https. Only variables listed in `docker-compose.yml` reach
+   the container: a new setting needs a line there too.
    Dokploy writes them to a `.env` next to the compose file, and the compose file passes them to the
    container. At its first start the API creates the owner's account and stores the token (hashed) as the
    owner's personal access token `legacy`; after that the token variable is ignored and can be removed.

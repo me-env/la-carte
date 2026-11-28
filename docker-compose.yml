@@ -19,6 +19,17 @@ services:
       LA_CARTE_DB_KEY: ${LA_CARTE_DB_KEY:-}
       # Only to rotate the key: set the new one here, deploy, then move it to LA_CARTE_DB_KEY.
       LA_CARTE_DB_KEY_NEW: ${LA_CARTE_DB_KEY_NEW:-}
+      # Spec 030b sign-in: a Google "Web application" client (redirect <public url>/oauth/callback).
+      # Both or neither; neither = Google sign-in off (personal access tokens only).
+      LA_CARTE_GOOGLE_CLIENT_ID: ${LA_CARTE_GOOGLE_CLIENT_ID:-}
+      LA_CARTE_GOOGLE_CLIENT_SECRET: ${LA_CARTE_GOOGLE_CLIENT_SECRET:-}
+      # `open` (any verified account) or `allowlist` (LA_CARTE_ALLOWED_EMAILS + the owner). Defaults
+      # to `open` here: an empty value is not a valid mode and would stop the API from starting.
+      LA_CARTE_SIGNUP: ${LA_CARTE_SIGNUP:-open}
+      LA_CARTE_ALLOWED_EMAILS: ${LA_CARTE_ALLOWED_EMAILS:-}  # comma-separated
+      # Spec 030h web pages (support, privacy): contact email and who runs the service.
+      LA_CARTE_SUPPORT_EMAIL: ${LA_CARTE_SUPPORT_EMAIL:-}
+      LA_CARTE_OPERATOR_NAME: ${LA_CARTE_OPERATOR_NAME:-}
     expose:
       - "8000"
     volumes:

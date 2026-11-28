@@ -200,7 +200,10 @@ Retry a failed deploy: *Actions → CI → Run workflow* on `main` (it runs ever
    `LA_CARTE_API_TOKEN` set and no owner email the API refuses to start, and on a deck with data migration 030
    refuses to run, so the deploy job fails at step 5 and prod stays down until it is set. `/health` stays public
    (no bearer), so `scripts/api-live-check.sh` and the deploy check need no token. CI's image check passes
-   `ci@example.com`.
+   `ci@example.com`. Also set `LA_CARTE_DB_KEY` (spec 032a: with `LA_CARTE_PUBLIC_URL` set the API refuses to
+   start without it) and, for Google sign-in, `LA_CARTE_GOOGLE_CLIENT_ID` + `_SECRET` (without them prod
+   starts with Google sign-in off). The full list is in `docs/deploy.md`; a setting reaches the container
+   only if `docker-compose.yml` lists it. CI's image check uses `docker run`, not the compose file.
 
 ## Rollback
 
