@@ -148,7 +148,13 @@ nothing. `_ios-env.sh` mounts any image that isn't (after a reboot or replug; ~0
 - **Simulator service started before the images** (2026-11-28, after a reboot: `simctl` listed 1 device of 11, runs
   failed with "no simulator for the destination"): `scripts/_sim-service.sh` (run by `_ios-env.sh`, ~0.2 s) restarts
   CoreSimulatorService once when a mounted image isn't listed, only if no simulator is booted and no `xcodebuild` or
-  Simulator app runs (any project); otherwise it warns, and `_sim-pool.sh` refuses to create a duplicate (exit 72).
+  Simulator app runs (any project); otherwise it warns, and `sim_create` refuses to create a device (`_sim-pool.sh`
+  exits 72, `sim-devices.sh` skips it), since it may exist already.
+- **Duplicate devices** (2026-11-28: a second iOS 27 `iPhone 17`, made by the pool at 13:26 while the service didn't
+  list the images, before that guard existed; `name=iPhone 17,OS=latest` then matched two devices and `ios-test.sh`
+  failed with "Unable to find a device"): pool runs target their device by UDID, slot 1 too, and with two devices of
+  one name take the lowest UDID and warn. To remove the extra one, holding that slot's lock:
+  `xcrun simctl delete <udid>`, `hdiutil detach` its folder, then delete its folder and `<udid>.sparsebundle`.
 - Measured, `LaunchUITests` (4 tests) and full `ios-test.sh`, under heavy load from other agents (load 200–600):
   internal disk, warm device: 53.0 s and 5.3 min (283 tests). SSD: 54.2 s and 5.2 min (289 tests); per test
   7.0–7.7 s vs 6.6–6.8 s. The very first UI run after the migration took 114.6 s (one-off: its device had only been
