@@ -7,11 +7,14 @@ provider's callback and the fake provider. Sign-in goes:
 
     /authorize → (agents: /oauth/consent) → identity provider → /oauth/callback → our code → /token
 
-Codes and tokens are ours, opaque and stored hashed (`auth.mint`). No identity provider token is
-kept. Token values, codes and emails are never logged.
+The app also signs in with Apple natively: `POST /oauth/apple` (spec 030e) answers like `/token`.
+Codes and tokens are ours, opaque and stored hashed (`auth.mint`). The only identity provider token
+kept is Apple's refresh token, to revoke it on account deletion. Token values, codes, nonces and
+emails are never logged.
 """
 
 import html
+import logging
 import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -44,6 +47,7 @@ from starlette.routing import Route
 from la_carte_api import auth
 from la_carte_api.config import LOOPBACK, Settings
 from la_carte_api.identity import (
+    AppleProvider,
     FakeProvider,
     IdentityError,
     IdentityProvider,
@@ -61,6 +65,7 @@ from la_carte_api.models import (
     utcnow,
 )
 
+log = logging.getLogger(__name__)
 SCOPE = "deck"
 COOKIE = "lc_auth"  # binds the browser that consented to the request it consented to
 CODE_PREFIX = "lc_ac_"
@@ -152,6 +157,10 @@ def resolve_account(
         assert user is not None  # identity rows cascade with their user
         if holder is None:  # a changed email is taken over unless another account has it
             user.email = who.email
+        if who.provider_token:  # Apple: the newest refresh token replaces the stored one
+            known.provider_token = who.provider_token
+            known.provider_client_id = who.provider_client_id
+            session.add(known)
     else:
         theirs = (
             session.exec(select(Identity).where(Identity.user_id == holder.id)).first()
@@ -168,8 +177,10 @@ def resolve_account(
             user = User(email=who.email, created_at=now)
         session.add(user)
         session.flush()
-        session.add(Identity(provider=who.provider, subject=who.subject, user_id=user.id,
-                             created_at=now))  # fmt: skip
+        session.add(Identity(
+            provider=who.provider, subject=who.subject, user_id=user.id, created_at=now,
+            provider_token=who.provider_token, provider_client_id=who.provider_client_id,
+        ))  # fmt: skip
     user.last_seen_at = now
     session.add(user)
     session.commit()
@@ -182,7 +193,8 @@ def resolve_account(
 class LaCarteOAuth:
     """The MCP SDK's `OAuthAuthorizationServerProvider` over our tables. `identity` is None
     when no identity provider is configured: sign-in answers `temporarily_unavailable`, while
-    tokens (personal access tokens) keep working."""
+    tokens (personal access tokens) keep working. `apple` is None when Sign in with Apple is
+    not configured (`/oauth/apple` answers `temporarily_unavailable`)."""
 
     def __init__(
         self,
@@ -190,10 +202,12 @@ class LaCarteOAuth:
         settings: Settings,
         identity: IdentityProvider | None,
         clock: Callable[[], datetime] = utcnow,
+        apple: AppleProvider | None = None,
     ) -> None:
         self.engine = engine
         self.settings = settings
         self.identity = identity
+        self.apple = apple
         self.clock = clock  # tests move it forward
         self.base = settings.base_url
         self.resource = f"{self.base}/mcp"
@@ -408,6 +422,24 @@ class LaCarteOAuth:
             return f"Unknown resource; use {self.resource}"
         return None
 
+    async def revoke_provider_grants(self, user_id: UUID) -> None:
+        """Before an account deletion (spec 030e decision 5): revokes the user's Sign in with
+        Apple authorization with the stored refresh token. Best effort: never raises."""
+        with Session(self.engine) as session:
+            identities = session.exec(
+                select(Identity)
+                .where(Identity.user_id == user_id)
+                .where(col(Identity.provider_token).is_not(None))
+            ).all()
+        for identity in identities:
+            if identity.provider != "apple" or not identity.provider_token:
+                continue
+            if self.apple is None:
+                log.warning("apple revoke skipped: Sign in with Apple is not configured")
+                continue
+            client_id = identity.provider_client_id or self.apple.bundle_id
+            await self.apple.revoke(identity.provider_token, client_id)
+
     # Metadata
 
     def server_metadata(self) -> dict:
@@ -589,6 +621,37 @@ def routes(oauth: LaCarteOAuth) -> list[Route]:
                 return refuse(error.reason)
             return back(code=oauth.mint_code(session, pending, user_id))
 
+    async def apple(request: Request) -> Response:
+        """Sign in with Apple from the app (spec 030e): Apple's identity token, its authorization
+        code and the raw nonce → our tokens, with the same body as `/token`."""
+        form = await request.form()
+
+        def error(code: str, description: str) -> Response:
+            body = {"error": code, "error_description": description}
+            return JSONResponse(body, status_code=400, headers=NO_STORE)
+
+        if form.get("client_id") != auth.IOS_CLIENT:
+            return error("invalid_client", f"Use client_id {auth.IOS_CLIENT}")
+        if oauth.apple is None:
+            return error("temporarily_unavailable", "Sign in with Apple is not set up")
+        names = ("identity_token", "authorization_code", "nonce")
+        values = [form.get(name) for name in names]
+        if not all(isinstance(value, str) and value for value in values):
+            return error("invalid_request", f"Required: {', '.join(names)}")
+        identity_token, code, nonce = (str(value) for value in values)
+        try:
+            who = await oauth.apple.verify_native(identity_token, code, nonce)
+        except IdentityError as refused:
+            return error("invalid_grant", refused.reason)
+        with Session(oauth.engine) as session:
+            try:
+                user_id = resolve_account(session, who, oauth.settings, oauth.clock())
+            except SignInRefused as refused:
+                session.rollback()
+                return error("access_denied", refused.reason)
+        token = oauth._pair(user_id, IOS, uuid4(), [SCOPE])
+        return JSONResponse(token.model_dump(mode="json", exclude_none=True), headers=NO_STORE)
+
     async def fake_authorize(request: Request) -> Response:
         """The fake provider's "sign-in page": signs its configured email in at once."""
         assert isinstance(oauth.identity, FakeProvider)
@@ -609,6 +672,7 @@ def routes(oauth: LaCarteOAuth) -> list[Route]:
         Route("/revoke", cors_middleware(revoke, ["POST", "OPTIONS"]), methods=["POST", "OPTIONS"]),
         Route("/oauth/consent", consent, methods=["GET", "POST"]),
         Route("/oauth/callback", callback, methods=["GET"]),
+        Route("/oauth/apple", apple, methods=["POST"]),
         Route("/.well-known/oauth-authorization-server", document(oauth.server_metadata)),
         Route("/.well-known/oauth-protected-resource", document(oauth.resource_metadata)),
         Route("/.well-known/oauth-protected-resource/mcp", document(oauth.resource_metadata)),

@@ -4,7 +4,8 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from anyio import from_thread
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 
 from la_carte_api import auth, deck
 from la_carte_api.auth import AppUser, CurrentUser, SessionDep, StatsUser
@@ -143,8 +144,10 @@ def get_me(session: SessionDep, user: CurrentUser):
 
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
-def delete_me(session: SessionDep, user: CurrentUser):
-    """Deletes the account and everything it owns, at once (App Store 5.1.1(v))."""
+def delete_me(request: Request, session: SessionDep, user: CurrentUser):
+    """Deletes the account and everything it owns, at once (App Store 5.1.1(v)), after revoking
+    its Sign in with Apple authorization (best effort: Apple being down never keeps the data)."""
+    from_thread.run(request.app.state.oauth.revoke_provider_grants, user)
     deck.delete_account(session, user)
 
 

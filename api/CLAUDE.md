@@ -7,10 +7,13 @@
 - Config via `LA_CARTE_*` env vars (`config.py`): `DATABASE_URL`, `OWNER_EMAIL`, `API_TOKEN` (imported once as the
   owner's PAT), `PUBLIC_URL` (OAuth issuer, MCP resource, icon URL), `HOST`, `PORT`, and for sign-in (spec 030b)
   `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `SIGNUP` (`open`|`allowlist`), `ALLOWED_EMAILS`,
-  `IDENTITY_PROVIDER` (`fake` for tests/e2e), `FAKE_EMAIL`.
+  `IDENTITY_PROVIDER` (`fake` for tests/e2e), `FAKE_EMAIL`, and Sign in with Apple (spec 030e, all four or none)
+  `APPLE_TEAM_ID`/`APPLE_KEY_ID`/`APPLE_PRIVATE_KEY_B64`/`APPLE_BUNDLE_ID`.
 - OAuth (spec 030b): `oauth.py` is the MCP SDK's provider plus our routes (they shadow the SDK's `/authorize`,
   `/token`, `/revoke`, metadata); `identity.py` the providers. Every token is minted by `auth.mint`. Tests use the
-  fake provider or an `httpx.MockTransport` for Google (`tests/test_oauth.py`); no test calls Google.
+  fake provider or an `httpx.MockTransport` for Google (`tests/test_oauth.py`) and Apple (`tests/test_apple.py`: test
+  RSA/EC keys); no test calls Google or Apple. Apple's refresh token is the only provider token stored (revoked by
+  `DELETE /me`).
 - `DB_KEY` (spec 032a): SQLCipher key of the database file, required with a non-loopback `PUBLIC_URL`;
   unset locally = plain SQLite (`tests/test_encryption.py`).
 - Accounts (spec 030a): every `deck` function takes `user_id` right after the session and filters on it; another

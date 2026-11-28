@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     # `open`: any verified account gets a deck; `allowlist`: only `allowed_emails` + the owner.
     signup: Literal["open", "allowlist"] = "open"
     allowed_emails: str = ""  # comma-separated; read only in `allowlist` mode
+    # Sign in with Apple (spec 030e): all four or none. The key is the `.p8` file, base64 on one
+    # line (secret, never logged); the bundle id is the `aud` of the app's identity tokens.
+    apple_team_id: str = ""
+    apple_key_id: str = ""
+    apple_private_key_b64: SecretStr | None = None
+    apple_bundle_id: str = ""
 
     @field_validator("owner_email")
     @classmethod

@@ -15,7 +15,7 @@ from la_carte_api import auth, deck, oauth
 from la_carte_api.build import source_hash
 from la_carte_api.config import Settings
 from la_carte_api.db import open_database
-from la_carte_api.identity import provider_from
+from la_carte_api.identity import apple_from, provider_from
 from la_carte_api.mcp_server import build_mcp
 from la_carte_api.rest import router
 
@@ -99,6 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings.api_token and not settings.owner_email:  # before touching the database
         raise RuntimeError("LA_CARTE_API_TOKEN is set: set LA_CARTE_OWNER_EMAIL too")
     identity = provider_from(settings)  # refuses a configuration that must not start
+    apple = apple_from(settings)  # likewise
     key, new_key = settings.database_keys()
     engine, first_start = open_database(settings.database_url, settings.owner_email, key, new_key)
     with Session(engine) as session:
@@ -106,7 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session, settings.owner_email, settings.api_token, first_start=first_start
         )
     prune(engine)  # spec 029: at start, then daily (lifespan)
-    authorization = oauth.LaCarteOAuth(engine, settings, identity)
+    authorization = oauth.LaCarteOAuth(engine, settings, identity, apple=apple)
     mcp = build_mcp(engine, settings, authorization)
     mcp_app = mcp.streamable_http_app(
         streamable_http_path="/mcp",

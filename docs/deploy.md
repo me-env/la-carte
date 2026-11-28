@@ -14,6 +14,8 @@ docker-compose.yml (repo root)
              LA_CARTE_DB_KEY (required with a public URL) → SQLCipher key of the whole database file (spec 032a)
              LA_CARTE_DB_KEY_NEW (only to rotate) → the new key; the start rekeys the file (see below)
              LA_CARTE_GOOGLE_CLIENT_ID, _SECRET (both or neither) → Google sign-in (spec 030b); unset = off
+             LA_CARTE_APPLE_TEAM_ID, _KEY_ID, _PRIVATE_KEY_B64, _BUNDLE_ID (all four or none) → Sign in with
+               Apple in the app (spec 030e); unset = off; a partial set or a bad key stops the start
              LA_CARTE_SIGNUP (default open)  → `open`, or `allowlist`: only LA_CARTE_ALLOWED_EMAILS + the owner
              LA_CARTE_ALLOWED_EMAILS (allowlist only) → comma-separated emails
              LA_CARTE_SUPPORT_EMAIL, LA_CARTE_OPERATOR_NAME (optional) → support and privacy pages (spec 030h)
@@ -45,6 +47,10 @@ docker-compose.yml (repo root)
    LA_CARTE_PUBLIC_URL=https://<your API host>
    LA_CARTE_GOOGLE_CLIENT_ID=<Google "Web application" client id>   # sign-in (spec 030b)
    LA_CARTE_GOOGLE_CLIENT_SECRET=<its secret>
+   LA_CARTE_APPLE_TEAM_ID=<Apple team id>                           # Sign in with Apple (spec 030e)
+   LA_CARTE_APPLE_KEY_ID=<the Sign in with Apple key's id>
+   LA_CARTE_APPLE_PRIVATE_KEY_B64=<base64 -i AuthKey_<KEYID>.p8 | tr -d '\n'>
+   LA_CARTE_APPLE_BUNDLE_ID=<the app's bundle id>
    LA_CARTE_SIGNUP=allowlist                                        # optional, default open
    LA_CARTE_ALLOWED_EMAILS=<a@example.com,b@example.com>            # allowlist only
    LA_CARTE_SUPPORT_EMAIL=<contact email>                           # web pages (spec 030h)

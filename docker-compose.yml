@@ -23,6 +23,12 @@ services:
       # Both or neither; neither = Google sign-in off (personal access tokens only).
       LA_CARTE_GOOGLE_CLIENT_ID: ${LA_CARTE_GOOGLE_CLIENT_ID:-}
       LA_CARTE_GOOGLE_CLIENT_SECRET: ${LA_CARTE_GOOGLE_CLIENT_SECRET:-}
+      # Spec 030e Sign in with Apple (the app's native flow): all four or none; none = off.
+      # The key is the .p8 file on one line: base64 -i AuthKey_<KEYID>.p8 | tr -d '\n' (secret).
+      LA_CARTE_APPLE_TEAM_ID: ${LA_CARTE_APPLE_TEAM_ID:-}
+      LA_CARTE_APPLE_KEY_ID: ${LA_CARTE_APPLE_KEY_ID:-}
+      LA_CARTE_APPLE_PRIVATE_KEY_B64: ${LA_CARTE_APPLE_PRIVATE_KEY_B64:-}
+      LA_CARTE_APPLE_BUNDLE_ID: ${LA_CARTE_APPLE_BUNDLE_ID:-}
       # `open` (any verified account) or `allowlist` (LA_CARTE_ALLOWED_EMAILS + the owner). Defaults
       # to `open` here: an empty value is not a valid mode and would stop the API from starting.
       LA_CARTE_SIGNUP: ${LA_CARTE_SIGNUP:-open}
