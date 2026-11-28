@@ -17,7 +17,7 @@ from la_carte_api.mcp_server import build_mcp
 from la_carte_api.rest import router
 
 STATIC = Path(__file__).parent / "static"
-# The la-carte icon (rendered by docs/design/brand/render.py), for clients showing the site icon.
+# The la carte icon (rendered by docs/design/brand/render.py), for clients showing the site icon.
 ICONS = {
     "/favicon.ico": ("favicon.ico", "image/x-icon"),
     "/icon.png": ("icon.png", "image/png"),
@@ -55,7 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async with mcp.session_manager.run():
             yield
 
-    app = FastAPI(title="la-carte", lifespan=lifespan)
+    app = FastAPI(title="la carte", lifespan=lifespan)
     app.state.engine = engine
     build = source_hash()
 
