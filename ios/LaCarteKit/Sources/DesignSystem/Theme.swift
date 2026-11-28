@@ -219,9 +219,12 @@ public enum CardText {
     return isShort(prompt) ? .cardFace : .cardFaceMedium
   }
 
-  /// Always a tier below the question: `.body` once the question is at its smallest.
-  public static func answerFont(_ answer: String, prompt: String) -> CardFont {
-    isShort(answer) && !isLong(prompt) ? .cardAnswer : .body
+  /// A tier below the question, never above it: a short answer under a leading (3+-line) question takes
+  /// `.cardFaceSmall`, as a one-word answer at `.cardAnswer` read as a caption under a paragraph (#16). Under a
+  /// centred question, however long, the answer keeps its own tier.
+  public static func answerFont(_ answer: String, questionLeads: Bool) -> CardFont {
+    guard isShort(answer) else { return .body }
+    return questionLeads ? .cardFaceSmall : .cardAnswer
   }
 
   private static func isShort(_ text: String) -> Bool {
