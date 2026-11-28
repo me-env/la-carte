@@ -402,18 +402,23 @@ final class NotesUITests: XCTestCase {
   /// photo prompt: photo frame unchanged on reveal and `study.back` top = the hint's former top; text prompt: the
   /// prompt group then the revealed group vertically centred in `study.card`, `study.front` kept on the prompt;
   /// order photo, name, description; hint gone; a 3+-line description in a block centred on the photo, ≤ 288 pt.
+  ///
+  /// Spec 017 #17 (b), (c), light, dark and forest: before reveal a text prompt is `ink`; after reveal the prompt row
+  /// is `recededInk` and the other text rows `ink`; a photo prompt's name and description are both `ink`. The photo
+  /// is never dimmed: its mean colour is the same before and after reveal and on every card (same stub image).
   @MainActor
   func testNotesStudy_personTextLayout() throws {
-    for appearance in Self.appearances {
-      XCUIDevice.shared.appearance = appearance
+    var photoRef: RGB?
+    for look in Self.looks {
+      XCUIDevice.shared.appearance = look.appearance
       let server = StubAPIServer()
       try server.start()
       let deck = personDeck(server, Self.personCases)
       server.handler = deck.handle
-      let app = launch(api: .live(server.url))
+      let app = launch(api: .live(server.url), theme: look.theme)
       for c in Self.personCases {
-        XCTContext.runActivity(named: "\(c.tag) \(appearance == .dark ? "dark" : "light")") { _ in
-          checkPersonCard(app, c, appearance: appearance)
+        XCTContext.runActivity(named: "\(c.tag) \(look.name)") { _ in
+          checkPersonCard(app, c, look: look, photoRef: &photoRef)
         }
         el(app, "study.rate.good").tap()
       }
@@ -422,9 +427,37 @@ final class NotesUITests: XCTestCase {
     }
   }
 
+  /// Spec 017 #17: theme argument, device appearance, palette, `recededInk`, name (forest shots get a `-forest` infix).
+  struct Look {
+    var theme: String, appearance: XCUIDevice.Appearance, palette: Palette, receded: RGB, name: String
+    var suffix: String { theme == "forest" ? "-forest" : "" }
+  }
+  static let looks: [Look] = [
+    .init(theme: "system", appearance: .light, palette: .light, receded: RGB(0x6F, 0x6F, 0x6D), name: "light"),
+    .init(theme: "system", appearance: .dark, palette: .dark, receded: RGB(0x8A, 0x8A, 0x88), name: "dark"),
+    .init(theme: "forest", appearance: .light, palette: .forest, receded: RGB(0x83, 0x93, 0x8A), name: "forest"),
+  ]
+
+  /// The most common colour among pixels far from `bg` in `rect` (glyph cores; anti-aliased edges are minor).
+  private func inkColour(_ probe: ColorProbe, _ rect: CGRect, bg: RGB) -> RGB {
+    var counts: [Int: Int] = [:]
+    for c in probe.colors(in: rect, step: 1.0 / 3) where c.distance(to: bg) > 90 {
+      counts[(c.r << 16) | (c.g << 8) | c.b, default: 0] += 1
+    }
+    guard let key = counts.max(by: { $0.value < $1.value })?.key else { return bg }
+    return RGB(key >> 16, (key >> 8) & 0xFF, key & 0xFF)
+  }
+
+  /// Mean colour of the photo (inset 8 pt, clear of the rounded corners).
+  private func meanColour(_ probe: ColorProbe, _ rect: CGRect) -> RGB {
+    let px = probe.colors(in: rect.insetBy(dx: 8, dy: 8), step: 1)
+    let n = max(px.count, 1)
+    return RGB(px.map(\.r).reduce(0, +) / n, px.map(\.g).reduce(0, +) / n, px.map(\.b).reduce(0, +) / n)
+  }
+
   @MainActor
-  private func checkPersonCard(_ app: XCUIApplication, _ c: PersonCase, appearance: XCUIDevice.Appearance) {
-    let ctx = c.tag
+  private func checkPersonCard(_ app: XCUIApplication, _ c: PersonCase, look: Look, photoRef: inout RGB?) {
+    let ctx = "\(c.tag) \(look.name)", appearance = look.appearance
     let hint = el(app, "study.answerHint")
     let front = el(app, "study.front")
     let card = el(app, "study.card")
@@ -454,7 +487,17 @@ final class NotesUITests: XCTestCase {
       XCTAssertEqual(photoBefore.midX, cardF.midX, accuracy: 1, "\(ctx): photo not centred")
       XCTAssertGreaterThan(hintF.minY, photoBefore.maxY, "\(ctx): hint not under the photo")
     }
-    snapshot("study-person-\(c.tag)", appearance: appearance)
+    let probe0 = ColorProbe(screenOf: app)
+    let bg = probe0.color(at: CGPoint(x: cardF.minX - 8, y: cardF.midY))
+    var photoMeanBefore: RGB?
+    if c.prompt == .photo {
+      photoMeanBefore = meanColour(probe0, photoBefore)
+    } else {
+      let before = inkColour(probe0, text(app, promptLabel).frame, bg: bg)
+      XCTContext.runActivity(named: "QA017-17 \(ctx) prompt before \(before) bg \(bg)") { _ in }
+      XCTAssertTrue(before.isClose(to: look.palette.ink, tolerance: 3), "\(ctx): prompt before reveal \(before), not ink")
+    }
+    snapshot("study-person-\(c.tag)\(look.suffix)", appearance: appearance)
 
     el(app, "study.reveal").tap()
     XCTAssertTrue(text(app, c.name).waitFor(timeout: 5), "\(ctx): name not shown after reveal")
@@ -499,7 +542,28 @@ final class NotesUITests: XCTestCase {
       let group = CGRect(x: cardF.minX, y: photoF.minY, width: 1, height: max(back.maxY, frontAfter.frame.maxY) - photoF.minY)
       XCTAssertEqual(group.midY, cardF.midY, accuracy: 1, "\(ctx): revealed group \(group.minY)…\(group.maxY) not vertically centred in \(cardF)")
     }
-    snapshot("study-person-\(c.tag)-revealed", appearance: appearance)
+    // Spec 017 #17 (b), (c): colours after reveal; the photo is never dimmed.
+    let probe = ColorProbe(screenOf: app)
+    let nameC = inkColour(probe, nameF, bg: bg), descC = inkColour(probe, descF, bg: bg)
+    let photoMean = meanColour(probe, photoF)
+    XCTContext.runActivity(named: "QA017-17 \(ctx) after: name \(nameC) description \(descC) photo mean \(photoMean) before \(photoMeanBefore.map(\.description) ?? "-") ref \(photoRef.map(\.description) ?? "-")") { _ in }
+    let ink = look.palette.ink, receded = look.receded
+    let (nameExpected, descExpected) = switch c.prompt {
+    case .photo: (ink, ink)
+    case .name: (receded, ink)
+    case .description: (ink, receded)
+    }
+    XCTAssertTrue(nameC.isClose(to: nameExpected, tolerance: 3), "\(ctx): name \(nameC), expected \(nameExpected)")
+    XCTAssertTrue(descC.isClose(to: descExpected, tolerance: 3), "\(ctx): description \(descC), expected \(descExpected)")
+    if let before = photoMeanBefore {
+      XCTAssertTrue(photoMean.isClose(to: before, tolerance: 2), "\(ctx): photo changed on reveal \(before) → \(photoMean)")
+    }
+    if let ref = photoRef {
+      XCTAssertTrue(photoMean.isClose(to: ref, tolerance: 3), "\(ctx): photo mean \(photoMean) vs first card's \(ref) (dimmed?)")
+    } else {
+      photoRef = photoMean
+    }
+    snapshot("study-person-\(c.tag)\(look.suffix)-revealed", appearance: appearance)
   }
 
   // MARK: - 014d caption alignment and spacing (design 2026-11-25)
@@ -649,6 +713,15 @@ final class NotesUITests: XCTestCase {
                     "\(c.tag): hint still there after reveal: \(el(app, "study.answerHint").frame)")
       XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", prompt)).count, 1,
                      "\(c.tag): the prompt is in the tree twice after reveal: \(frames(app, prompt))")
+      // Spec 017 #17 (e): Reduce Motion ends in the colours of (b).
+      let probe = ColorProbe(screenOf: app)
+      let bg = probe.color(at: CGPoint(x: el(app, "study.card").frame.minX - 8, y: el(app, "study.card").frame.midY))
+      let promptC = inkColour(probe, promptAfter, bg: bg)
+      let other = c.prompt == .name ? c.description : c.name
+      let otherC = inkColour(probe, text(app, other).frame, bg: bg)
+      XCTContext.runActivity(named: "QA017-17 \(c.tag)\(suffix): prompt \(promptC) other \(otherC)") { _ in }
+      XCTAssertTrue(promptC.isClose(to: RGB(0x6F, 0x6F, 0x6D), tolerance: 3), "\(c.tag)\(suffix): prompt \(promptC), not recededInk")
+      XCTAssertTrue(otherC.isClose(to: Palette.light.ink, tolerance: 3), "\(c.tag)\(suffix): \(other) \(otherC), not ink")
       snapshot("study-person-motion-\(c.tag)\(suffix)", appearance: .light)
       el(app, "study.rate.good").tap()
     }

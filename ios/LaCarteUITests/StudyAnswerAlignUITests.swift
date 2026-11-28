@@ -1,21 +1,22 @@
 import XCTest
 
-/// Spec 017 #16 "One axis per card + weight transfer" (amends #2, #6, #7, #10, #13, #15; 2026-11-28), layout D,
-/// light + dark. Supersedes the #15 checks this class held.
-/// (a) Leading question (3+ lines) + 1-line answer (Westphalia, Git): question at the column's 16 pt edge
-///     (`study.card` minX, which is x = 16 on screen), lines leading; answer on the same edge, `.cardFaceSmall`
-///     (the question's line height), `ink`; question `ink` before reveal, `recededInk` after.
-/// (b) Leading question + 2-line answer: answer on the edge, both lines start there, `ink`, `.body`.
+/// Spec 017 #16 "One axis per card" (layout D) as amended by #17 "Weight transfer on every card" (2026-11-28), light,
+/// dark and forest. Alignment and sizes are #16's; colours are #17's: on every basic card the question is `ink` before
+/// reveal and `recededInk` after, the answer `ink`.
+/// (a) Leading question (3+ lines) + 1-line answer (Westphalia, Git): question at the column's 16 pt edge, lines
+///     leading; answer on the same edge, `.cardFaceSmall` (the question's line height).
+/// (b) Leading question + 2-line answer: answer on the edge, both lines start there, `.body`.
 /// (c) Leading question + 3+-line answer: as (b), never wider than the column.
-/// (d) Centred questions unchanged: "la mer" / "the sea" centred, `ink` / `secondaryInk`; "mitochondria" + long
-///     answer: answer leading at the column edge, `secondaryInk`; a 2-line question with a 1-line answer: centred.
-///     Manager amendment (2026-11-28): a long (> 60 chars) but 2-line, centred question keeps `.cardAnswer`
-///     (regular weight, `secondaryInk`) for its short answer.
-/// (e) Motion: a frame sequence of the reveal shows the question's colour between `ink` and `recededInk`;
-///     Reduce Motion (`testStudyAnswerAlign_reduceMotion`): the crossfade stays, the lift is dropped.
-/// (f) The question's frame and ink mask (lines, extents) are unchanged by the reveal; only its colour changes.
-/// (g) Edit: `study.frontField` of a revealed leading question starts at the edge, spans the column, `recededInk`.
-/// (h) Person cards: `NotesUITests.testNotesStudy_personTextLayout` (014d), run alongside.
+/// (d) Centred questions: "la mer" / "the sea" centred; "mitochondria" + long answer: answer leading at the column
+///     edge; a 2-line question with a 1-line answer: centred; a long (> 60 chars) 2-line centred question keeps
+///     `.cardAnswer` for its short answer. #17: same colours as (a)-(c).
+/// (e) #17 (d) Motion, every card: a frame sequence of the reveal (la mer, Westphalia) shows the question's colour
+///     between `ink` and `recededInk`; #17 (e) Reduce Motion (`testStudyAnswerAlign_reduceMotion`): the crossfade
+///     stays on a centred and a leading card, the lift is dropped.
+/// (f) #17 (f) The question's frame and ink mask are unchanged by the reveal on every card; only its colour changes.
+/// (g) #17 (g) Edit: `study.frontField` of a revealed question is `recededInk` (leading: at the edge, spanning the
+///     column), `study.backField` is `ink`.
+/// Person cards (#17 (b), (c)): `NotesUITests.testNotesStudy_personTextLayout`.
 final class StudyAnswerAlignUITests: XCTestCase {
   static let westphalia = "Which treaty, signed in 1648, ended the Thirty Years' War and is often cited as the origin of "
     + "the modern state system?"
@@ -32,40 +33,50 @@ final class StudyAnswerAlignUITests: XCTestCase {
   static let longCentred = ("Which river flows through Paris to the sea at Le Havre, France?", "The Seine")
   static let flute = ("Who composed The Magic Flute?", "Wolfgang Amadeus Mozart")
 
-  static let recededLight = RGB(0x6F, 0x6F, 0x6D), recededDark = RGB(0x8A, 0x8A, 0x88)
+  static let recededLight = RGB(0x6F, 0x6F, 0x6D), recededDark = RGB(0x8A, 0x8A, 0x88),
+             recededForest = RGB(0x83, 0x93, 0x8A)
+
+  /// Theme argument, device appearance, palette, `recededInk`, screenshot suffix.
+  struct Look {
+    var theme: String, appearance: XCUIDevice.Appearance, palette: Palette, receded: RGB, name: String
+    /// Inserted before the snapshot helper's `-light`/`-dark`, so forest shots don't overwrite light ones.
+    var suffix: String { theme == "forest" ? "-forest" : "" }
+  }
+  static let light = Look(theme: "system", appearance: .light, palette: .light, receded: recededLight, name: "light")
+  static let dark = Look(theme: "system", appearance: .dark, palette: .dark, receded: recededDark, name: "dark")
+  static let forest = Look(theme: "forest", appearance: .light, palette: .forest, receded: recededForest, name: "forest")
 
   override func setUp() {
     continueAfterFailure = true
   }
 
-  @MainActor func testStudyAnswerAlign_light() throws { try run(.light) }
-  @MainActor func testStudyAnswerAlign_dark() throws { try run(.dark) }
+  @MainActor func testStudyAnswerAlign_light() throws { try run(Self.light) }
+  @MainActor func testStudyAnswerAlign_dark() throws { try run(Self.dark) }
+  @MainActor func testStudyAnswerAlign_forest() throws { try run(Self.forest) }
 
   @MainActor
-  private func run(_ appearance: XCUIDevice.Appearance) throws {
-    XCUIDevice.shared.appearance = appearance
-    let mode = appearance == .dark ? "dark" : "light"
-    let palette = Palette.of(appearance)
-    let receded = appearance == .dark ? Self.recededDark : Self.recededLight
+  private func run(_ look: Look) throws {
+    XCUIDevice.shared.appearance = look.appearance
+    let mode = look.name, palette = look.palette, receded = look.receded
 
     // mock-lengths: la mer → Westphalia → mitochondria.
-    let app = launch(api: .mockLengths)
+    let app = launch(api: .mockLengths, theme: look.theme)
     var card = el(app, "study.card"), front = el(app, "study.front"), back = el(app, "study.back")
     waitForLabel(front, "la mer")
     Thread.sleep(forTimeInterval: 0.6)
     note("QA017-16 \(mode) card \(card.frame) deck button \(el(app, "study.deck").frame)")
 
-    // (d) la mer: both centred, question ink before and after, answer secondaryInk.
-    var r = revealChecked(app, "the sea", "d-short", mode, leading: false)
+    // (d) la mer: both centred; #17: question ink → recededInk (crossfade captured, (e)), answer ink.
+    var r = revealChecked(app, "the sea", "d-short", look, leading: false, captureMotion: true)
     XCTAssertEqual(r.q.midX, card.frame.midX, accuracy: 1, "(d) la mer not centred \(r.q)")
     XCTAssertEqual(r.a.midX, card.frame.midX, accuracy: 1, "(d) the sea not centred \(r.a)")
     assertColour(r.qBefore, palette.ink, "(d) la mer before reveal")
-    assertColour(r.qAfter, palette.ink, "(d) la mer after reveal")
-    assertColour(r.aColour, palette.secondaryInk, "(d) the sea")
+    assertColour(r.qAfter, receded, "(d) la mer after reveal")
+    assertColour(r.aColour, palette.ink, "(d) the sea")
     rateGood(app, next: Self.westphalia)
 
     // (a) Westphalia + "The Peace of Westphalia": the reveal is captured as a frame sequence (e).
-    r = revealChecked(app, Self.oneLine, "a-westphalia", mode, leading: true, captureMotion: true)
+    r = revealChecked(app, Self.oneLine, "a-westphalia", look, leading: true, captureMotion: true)
     let questionLine = r.lineHeight
     assertLeadingPair(r, card.frame, "(a) Westphalia")
     assertColour(r.qBefore, palette.ink, "(a) Westphalia before reveal")
@@ -85,18 +96,28 @@ final class StudyAnswerAlignUITests: XCTestCase {
     let fieldColour = textColour(ColorProbe(screenOf: app), fieldFrame, bg: r.bg)
     note("QA017-16 \(mode) g: field text colour \(fieldColour)")
     assertColour(fieldColour, receded, "(g) frontField text")
-    snapshot("study-axis-g-editing-front", appearance: appearance)
+    snapshot("study-axis-g-editing-front\(look.suffix)", appearance: look.appearance)
     field.typeText("\n")
     waitForAbsence(field)
     Thread.sleep(forTimeInterval: 0.5)
     rateGood(app, next: "mitochondria")
 
-    // (d) mitochondria: question centred ink, answer leading at the column edge, secondaryInk.
-    r = revealChecked(app, nil, "d-shortq-longa", mode, leading: false)
+    // (d) mitochondria: question centred, answer leading at the column edge; #17: recededInk / ink.
+    r = revealChecked(app, nil, "d-shortq-longa", look, leading: false)
     XCTAssertEqual(r.q.midX, card.frame.midX, accuracy: 1, "(d) mitochondria not centred \(r.q)")
     XCTAssertEqual(r.a.minX, card.frame.minX, accuracy: 1, "(d) long answer not at the column edge \(r.a)")
-    assertColour(r.qAfter, palette.ink, "(d) mitochondria after reveal")
-    assertColour(r.aColour, palette.secondaryInk, "(d) mitochondria answer")
+    assertColour(r.qAfter, receded, "(d) mitochondria after reveal")
+    assertColour(r.aColour, palette.ink, "(d) mitochondria answer")
+    // (g) #17: the revealed answer's field is ink.
+    back.doubleTap()
+    let backField = el(app, "study.backField")
+    XCTAssertTrue(backField.waitFor(timeout: 5), "(g) study.backField missing")
+    Thread.sleep(forTimeInterval: 0.8)
+    let backFieldFrame = backField.frame
+    let backFieldColour = textColour(ColorProbe(screenOf: app), backFieldFrame, bg: r.bg)
+    note("QA017-17 \(mode) g: back field \(backFieldFrame) text colour \(backFieldColour)")
+    assertColour(backFieldColour, palette.ink, "(g) backField text")
+    snapshot("study-axis-g-editing-back\(look.suffix)", appearance: look.appearance)
     app.terminate()
 
     // Stub deck.
@@ -109,13 +130,13 @@ final class StudyAnswerAlignUITests: XCTestCase {
     }
     let server = try startReviewStub(stubCards)
     defer { server.stop() }
-    let stub = launch(api: .live(server.url))
+    let stub = launch(api: .live(server.url), theme: look.theme)
     card = el(stub, "study.card"); front = el(stub, "study.front"); back = el(stub, "study.back")
     waitForLabel(front, Self.git.0)
     Thread.sleep(forTimeInterval: 0.6)
 
     // (a) Git.
-    r = revealChecked(stub, Self.git.1, "a-git", mode, leading: true)
+    r = revealChecked(stub, Self.git.1, "a-git", look, leading: true)
     assertLeadingPair(r, card.frame, "(a) Git")
     assertColour(r.qBefore, palette.ink, "(a) Git before reveal")
     assertColour(r.qAfter, receded, "(a) Git after reveal")
@@ -131,7 +152,7 @@ final class StudyAnswerAlignUITests: XCTestCase {
     attach(next, "study-axis-e-next-\(mode)", every: 1)
 
     // (b) idiom + 2-line answer.
-    r = revealChecked(stub, Self.idiom.1, "b-2lines", mode, leading: true)
+    r = revealChecked(stub, Self.idiom.1, "b-2lines", look, leading: true)
     assertLeadingPair(r, card.frame, "(b)")
     XCTAssertEqual(r.aLines.count, 2, "(b) fixture: answer not 2 lines \(r.aLines)")
     XCTAssertLessThan(r.a.height / CGFloat(max(r.aLines.count, 1)), r.lineHeight - 2, "(b) 2-line answer not .body")
@@ -140,37 +161,38 @@ final class StudyAnswerAlignUITests: XCTestCase {
     rateGood(stub, next: Self.westphalia)
 
     // (c) Westphalia + 3+-line answer.
-    r = revealChecked(stub, Self.threeLines, "c-3lines", mode, leading: true)
+    r = revealChecked(stub, Self.threeLines, "c-3lines", look, leading: true)
     assertLeadingPair(r, card.frame, "(c)")
     XCTAssertGreaterThanOrEqual(r.aLines.count, 3, "(c) fixture: answer not 3+ lines \(r.aLines)")
     assertColour(r.qAfter, receded, "(c) question after reveal")
     assertColour(r.aColour, palette.ink, "(c) answer")
     rateGood(stub, next: Self.longCentred.0)
 
-    // Manager amendment: a long (> 60 chars), 2-line centred question keeps .cardAnswer and today's colours.
-    r = revealChecked(stub, Self.longCentred.1, "d-long2line", mode, leading: false)
+    // Manager amendment: a long (> 60 chars), 2-line centred question keeps .cardAnswer; #17 colours.
+    r = revealChecked(stub, Self.longCentred.1, "d-long2line", look, leading: false)
     XCTAssertEqual(r.qLines.count, 2, "fixture: the 63-char question isn't 2 lines \(r.qLines)")
     XCTAssertEqual(r.q.midX, card.frame.midX, accuracy: 1, "(d) 2-line question not centred \(r.q)")
     XCTAssertEqual(r.a.midX, card.frame.midX, accuracy: 1, "(d) answer under a 2-line question not centred \(r.a)")
-    assertColour(r.qAfter, palette.ink, "(d) 2-line long question after reveal")
-    assertColour(r.aColour, palette.secondaryInk, "(d) The Seine")
+    assertColour(r.qAfter, receded, "(d) 2-line long question after reveal")
+    assertColour(r.aColour, palette.ink, "(d) The Seine")
     rateGood(stub, next: Self.flute.0)
 
     // (d) 2-line centred question + 1-line answer: centred.
-    r = revealChecked(stub, Self.flute.1, "d-2line-short", mode, leading: false)
+    r = revealChecked(stub, Self.flute.1, "d-2line-short", look, leading: false)
     XCTAssertEqual(r.a.midX, card.frame.midX, accuracy: 1, "(d) Mozart not centred \(r.a)")
-    assertColour(r.qAfter, palette.ink, "(d) Magic Flute after reveal")
-    assertColour(r.aColour, palette.secondaryInk, "(d) Mozart")
+    assertColour(r.qAfter, receded, "(d) Magic Flute after reveal")
+    assertColour(r.aColour, palette.ink, "(d) Mozart")
     rateGood(stub, next: Self.westphalia)
 
     // Control for the Reduce Motion test: Westphalia + 5-line answer lifts (lift > 40) with motion on.
-    r = revealChecked(stub, Self.fiveLines, "c-5lines-lift", mode, leading: true)
+    r = revealChecked(stub, Self.fiveLines, "c-5lines-lift", look, leading: true)
     note("QA017-16 \(mode) lift control: question moved \(r.qBeforeFrame.minY - r.q.minY)")
     XCTAssertGreaterThan(r.qBeforeFrame.minY - r.q.minY, 20, "control: no lift with Reduce Motion off")
     assertLeadingPair(r, card.frame, "(c) 5 lines")
   }
 
-  /// (e) with Reduce Motion: the colour crossfade stays, the lift is dropped (the question doesn't move).
+  /// (e) with Reduce Motion: the colour crossfade stays on a centred and a leading card, the lift is dropped (the
+  /// question doesn't move).
   @MainActor
   func testStudyAnswerAlign_reduceMotion() throws {
     XCUIDevice.shared.appearance = .light
@@ -178,14 +200,22 @@ final class StudyAnswerAlignUITests: XCTestCase {
     defer { setReduceMotion(false) }
     let base = Date(timeIntervalSince1970: 1_767_225_600)
     let server = try startReviewStub([
-      StubDeck.Card(id: "A16A16B0-0000-0000-0000-000000000000", front: Self.westphalia, back: Self.fiveLines,
+      StubDeck.Card(id: "A16A16B0-0000-0000-0000-000000000000", front: "la mer", back: "the sea",
                     due: base, createdAt: base),
+      StubDeck.Card(id: "A16A16B1-0000-0000-0000-000000000001", front: Self.westphalia, back: Self.fiveLines,
+                    due: base.addingTimeInterval(60), createdAt: base.addingTimeInterval(60)),
     ])
     defer { server.stop() }
     let app = launch(api: .live(server.url))
-    waitForLabel(el(app, "study.front"), Self.westphalia)
+    waitForLabel(el(app, "study.front"), "la mer")
     Thread.sleep(forTimeInterval: 0.8)
-    let r = revealChecked(app, Self.fiveLines, "e-reduce-motion", "light", leading: true, captureMotion: true,
+    let c = revealChecked(app, "the sea", "e-reduce-motion-centred", Self.light, leading: false, captureMotion: true,
+                          snapshotSuffix: "-reduce-motion")
+    XCTAssertEqual(c.q.minY, c.qBeforeFrame.minY, accuracy: 0.5, "Reduce Motion: la mer moved on reveal")
+    assertColour(c.qAfter, Self.recededLight, "Reduce Motion: la mer after reveal")
+    assertColour(c.aColour, Palette.light.ink, "Reduce Motion: the sea")
+    rateGood(app, next: Self.westphalia)
+    let r = revealChecked(app, Self.fiveLines, "e-reduce-motion", Self.light, leading: true, captureMotion: true,
                           snapshotSuffix: "-reduce-motion")
     XCTAssertEqual(r.q.minY, r.qBeforeFrame.minY, accuracy: 0.5, "Reduce Motion: the question moved on reveal \(r.qBeforeFrame) → \(r.q)")
     assertColour(r.qAfter, Self.recededLight, "Reduce Motion: question after reveal")
@@ -212,9 +242,9 @@ final class StudyAnswerAlignUITests: XCTestCase {
   /// lines are unchanged (only the colour changes). With `captureMotion` the reveal is a frame sequence, attached,
   /// whose question colours must include one strictly between `ink` and `recededInk`.
   @MainActor
-  private func revealChecked(_ app: XCUIApplication, _ answer: String?, _ name: String, _ mode: String, leading: Bool,
+  private func revealChecked(_ app: XCUIApplication, _ answer: String?, _ name: String, _ look: Look, leading: Bool,
                              captureMotion: Bool = false, snapshotSuffix: String = "") -> Revealed {
-    let appearance: XCUIDevice.Appearance = mode == "dark" ? .dark : .light
+    let appearance = look.appearance, mode = look.name, snapshotSuffix = look.suffix + snapshotSuffix
     let card = el(app, "study.card").frame, front = el(app, "study.front"), back = el(app, "study.back")
     Thread.sleep(forTimeInterval: 0.4)
     let q0 = front.frame
@@ -227,7 +257,12 @@ final class StudyAnswerAlignUITests: XCTestCase {
       let colours = frames.map { textColour(ColorProbe(at3x: UIImage(data: $0.png)!.cgImage!), q0, bg: bg) }
       note("QA017-16 \(mode) e \(name): \(zip(frames.map { Int($0.t * 1000) }, colours).map { "\($0)ms \($1)" })")
       attach(frames, "study-axis-e-\(name)-\(mode)", every: 1)
-      let ink = Palette.of(appearance).ink, receded = appearance == .dark ? Self.recededDark : Self.recededLight
+      // #17 (d): the answer appears in ink with an opacity fade; log its colour per frame (judged on the sequence).
+      if let a = frames.last.flatMap({ _ in back.exists ? back.frame : nil }) {
+        let aColours = frames.map { textColour(ColorProbe(at3x: UIImage(data: $0.png)!.cgImage!), a, bg: bg) }
+        note("QA017-17 \(mode) e \(name) answer: \(zip(frames.map { Int($0.t * 1000) }, aColours).map { "\($0)ms \($1)" })")
+      }
+      let ink = look.palette.ink, receded = look.receded
       let between = colours.filter {
         let l = $0.luminance, lo = min(ink.luminance, receded.luminance), hi = max(ink.luminance, receded.luminance)
         return l > lo + 6 && l < hi - 6
@@ -257,7 +292,7 @@ final class StudyAnswerAlignUITests: XCTestCase {
     XCTAssertEqual(q.minX, q0.minX, accuracy: 0.5, "(f) \(name): question moved sideways \(q0) → \(q)")
     XCTAssertEqual(q.width, q0.width, accuracy: 0.5, "(f) \(name): question resized \(q0) → \(q)")
     XCTAssertEqual(q.height, q0.height, accuracy: 0.5, "(f) \(name): question resized \(q0) → \(q)")
-    if leading, abs(q.minY - q0.minY) < 0.5 {
+    if abs(q.minY - q0.minY) < 0.5 {  // #17 (f): every card, centred too
       // (f) Same ink mask: same lines, same extents (± 1/3 pt, anti-aliasing at the new colour).
       XCTAssertEqual(lines.count, lines0.count, "(f) \(name): question line count changed \(lines0) → \(lines)")
       for (b0, b1) in zip(lines0, lines) {
@@ -320,7 +355,7 @@ final class StudyAnswerAlignUITests: XCTestCase {
   }
 
   private func assertColour(_ c: RGB, _ expected: RGB, _ what: String, file: StaticString = #filePath, line: UInt = #line) {
-    XCTAssertTrue(c.isClose(to: expected, tolerance: 6), "\(what): colour \(c), expected \(expected)", file: file, line: line)
+    XCTAssertTrue(c.isClose(to: expected, tolerance: 3), "\(what): colour \(c), expected \(expected)", file: file, line: line)
   }
 
   @MainActor
