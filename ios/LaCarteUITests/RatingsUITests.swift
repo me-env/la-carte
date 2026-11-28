@@ -390,6 +390,13 @@ final class RatingsUITests: XCTestCase {
   /// the end of the drag call, how long until `study.front` shows the next card; Easy (0.6 s reward) must not be
   /// slower than Got it (0.5 s) or than a Forgot release (no reward). The last step drags again right after an Easy
   /// release (reveal + drag while the reward may still play): it must rate normally.
+  ///
+  /// CI-proofing (runs 46093941480, 45071709294): each grade is judged by its median, so the first release's cold
+  /// start (once +0.92 s on a loaded runner, always a Got it) can't decide alone; the margin is 0.3 s because one
+  /// `study.front` query takes ~0.15-0.2 s there (a 0.15 s margin was below what the poll can resolve), and still
+  /// well under the 0.5 s Got it reward that a delayed next card would wait for. A next card not seen within 3 s
+  /// fails outright. A synthesized drag the runner lost (no POST, same card still revealed) is redone once and
+  /// timed from the redo.
   @MainActor
   func testRatings_releaseTiming() throws {
     continueAfterFailure = true
@@ -409,33 +416,52 @@ final class RatingsUITests: XCTestCase {
       waitForLabel(el(app, "study.front"), "front \(i)")
       el(app, "study.card").tap()
       waitForLabel(el(app, "study.back"), "back \(i)")
-      let start = Date()
-      drag(app, dx: step.dx, dy: step.dy)
-      let returned = Date().timeIntervalSince(start)
-      let sincePrevious = i == 0 ? 0 : start.timeIntervalSince(lastRelease)  // previous release → this drag's start
-      lastRelease = Date()
-      var next = -1.0
-      if i + 1 < plan.count {
+      let sincePrevious = i == 0 ? 0 : Date().timeIntervalSince(lastRelease)  // previous release → this drag's start
+      // Drags, then waits up to 3 s for the next card (the POST for the last step); returns the drag call's
+      // duration and the delay from its end to the next card (nil: not seen).
+      func release() -> (returned: Double, next: Double?) {
+        let start = Date()
+        drag(app, dx: step.dx, dy: step.dy)
+        let returned = Date().timeIntervalSince(start)
         let front = el(app, "study.front")
-        if poll(timeout: 3, { front.label == "front \(i + 1)" }) { next = Date().timeIntervalSince(start) - returned }
-        delays[step.rating, default: []].append(next)
+        let seen = i + 1 < plan.count ? poll(timeout: 3) { front.label == "front \(i + 1)" }
+          : poll(timeout: 3) { server.reviewPosts.count > i }
+        return (returned, seen ? Date().timeIntervalSince(start) - returned : nil)
       }
-      lines.append(String(format: "%d %@: drag starts %.2f s after the previous release · drag call %.2f s · next card seen +%.2f s after",
-                          i, step.rating, sincePrevious, returned, next))
+      var (returned, next) = release()
+      var redone = ""
+      if next == nil, server.reviewPosts.count <= i, el(app, "study.back").label == "back \(i)" {
+        redone = " (drag lost: no POST, card unchanged; redone)"
+        print("019 timing: release \(i) (\(step.rating)) sent nothing, card unchanged; dragging once more")
+        (returned, next) = release()
+      }
+      lastRelease = Date()
+      if i + 1 < plan.count {
+        if let next { delays[step.rating, default: []].append(next) }
+        XCTAssertNotNil(next, "next card not shown within 3 s of release \(i) (\(step.rating))")
+      }
+      lines.append(String(format: "%d %@: drag starts %.2f s after the previous release · drag call %.2f s · next card seen %@%@",
+                          i, step.rating, sincePrevious, returned,
+                          next.map { String(format: "+%.2f s after", $0) } ?? "never (3 s)", redone))
     }
     _ = try waitForPost(server, count: plan.count)
     let bodies = server.reviewPosts.map(\.body)
     for (i, step) in plan.enumerated() where i < bodies.count {
       XCTAssertTrue(bodies[i].contains("\"\(step.rating)\""), "release \(i) sent \(bodies[i]), expected \(step.rating)")
     }
-    let avg = { (k: String) in (delays[k] ?? []).reduce(0, +) / Double(max(1, (delays[k] ?? []).count)) }
-    lines.append(String(format: "mean next-card delay: good %.2f · easy %.2f · again %.2f s", avg("good"), avg("easy"), avg("again")))
+    let median = { (k: String) -> Double in
+      let v = (delays[k] ?? []).sorted()
+      guard !v.isEmpty else { return .infinity }
+      return v.count % 2 == 1 ? v[v.count / 2] : (v[v.count / 2 - 1] + v[v.count / 2]) / 2
+    }
+    lines.append(String(format: "median next-card delay: good %.2f · easy %.2f · again %.2f s",
+                        median("good"), median("easy"), median("again")))
     let report = XCTAttachment(string: lines.joined(separator: "\n"))
     report.name = "release-timing"
     report.lifetime = .keepAlways
     add(report)
-    XCTAssertLessThan(avg("easy"), avg("again") + 0.15, "Easy release delays the next card:\n" + lines.joined(separator: "\n"))
-    XCTAssertLessThan(avg("good"), avg("again") + 0.15, "Got it release delays the next card:\n" + lines.joined(separator: "\n"))
+    XCTAssertLessThan(median("easy"), median("again") + 0.3, "Easy release delays the next card:\n" + lines.joined(separator: "\n"))
+    XCTAssertLessThan(median("good"), median("again") + 0.3, "Got it release delays the next card:\n" + lines.joined(separator: "\n"))
     server.stop()
   }
 

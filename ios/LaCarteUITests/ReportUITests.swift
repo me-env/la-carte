@@ -12,6 +12,8 @@ final class ReportUITests: XCTestCase {
   /// Debug-only `-noticeSeconds` (016b #4): notices stay 10 s instead of 2 s, so a slow CI runner still sees them.
   static let noticeSeconds: TimeInterval = 10
   static let longNotices = ["-noticeSeconds", "\(Int(noticeSeconds))"]
+  /// testAsk_copiesCardText makes more slow queries while its notice is up (snapshot, counter, label checks).
+  static let askNoticeSeconds: TimeInterval = 20
   /// Menu order (016a #1): Ask first, then the five reasons of 015b. Ids and the titles the spec gives them.
   static let menu: [(id: String, title: String)] = [
     ("ask", "Ask about this card"), ("wrong", "This is wrong"), ("drop", "I don't want this card"),
@@ -289,7 +291,9 @@ final class ReportUITests: XCTestCase {
               due: Self.base.addingTimeInterval(60)),
       ])
       // Vibe explicitly (the default, checked by SettingsUITests): it opens a plain link, the prompt goes by clipboard.
-      let app = launch(api: .live(server.url), arguments: ["-aiApp", "vibe"] + Self.longNotices)
+      // 20 s notices here: on a loaded runner the queries between the notice's update and the "still up past 2 s"
+      // check once took 14 s, past the 10 s window (run 45939275007), and the notice was gone.
+      let app = launch(api: .live(server.url), arguments: ["-aiApp", "vibe", "-noticeSeconds", "\(Int(Self.askNoticeSeconds))"])
       reveal(app)
       waitForCounter(app, "2 to review")
       let before = server.requests.count
@@ -305,16 +309,20 @@ final class ReportUITests: XCTestCase {
       if notice.label == "Copied" { snapshot("study-ask-copied", appearance: appearance) }
       // 016b #6: default Vibe isn't installed on the simulator; when the open call returns, the notice says so.
       waitForLabel(el(app, "study.reportNotice"), "Copied · Vibe isn't installed", timeout: 90)
+      let notInstalledSeen = Date()  // the notice's expiry restarted at or before this moment
       XCTAssertTrue(el(app, "study.reportNotice").label.hasPrefix("Copied"))
       XCTAssertFalse(el(app, "study.remaining").exists, "counter shown next to the Copied notice")
       Thread.sleep(forTimeInterval: 0.5)  // counter cross-fade (Theme.Motion.standard) settled
       snapshot("study-ask-not-installed", appearance: appearance)
-      Thread.sleep(forTimeInterval: 3)  // past the 2 s default: -noticeSeconds 10 keeps it up
+      // Past the 2 s default: the long -noticeSeconds keeps it up.
+      Thread.sleep(forTimeInterval: max(0, 3.5 - Date().timeIntervalSince(notInstalledSeen)))
+      let shownFor = Date().timeIntervalSince(notInstalledSeen)
       XCTAssertEqual(el(app, "study.reportNotice").label, "Copied · Vibe isn't installed",
-                     "notice gone after ~3.5 s despite -noticeSeconds 10")
+                     String(format: "notice gone %.1f s after it was seen despite -noticeSeconds %.0f", shownFor,
+                            Self.askNoticeSeconds))
       waitForLabel(el(app, "study.back"), Self.back)
       assertRatingsEnabled(app)
-      waitForCounter(app, "2 to review", timeout: Self.noticeSeconds + 5)
+      waitForCounter(app, "2 to review", timeout: Self.askNoticeSeconds + 5)
       XCTAssertTrue(deck.reports.isEmpty, "Ask sent a report")
       let writes = server.requests.dropFirst(before).filter { $0.method != "GET" }
       XCTAssertTrue(writes.isEmpty, "Ask sent a request: \(writes.map { "\($0.method) \($0.path)" })")
