@@ -6,6 +6,8 @@
 - `scripts/api-test.sh` must be green (ruff check, ruff format --check, pytest).
 - Config via `LA_CARTE_*` env vars (`config.py`): `DATABASE_URL`, `OWNER_EMAIL`, `API_TOKEN` (imported once as the
   owner's PAT), `PUBLIC_URL` (OAuth issuer, MCP resource, icon URL), `HOST`, `PORT`.
+- `DB_KEY` (spec 032a): SQLCipher key of the database file, required with a non-loopback `PUBLIC_URL`;
+  unset locally = plain SQLite (`tests/test_encryption.py`).
 - Accounts (spec 030a): every `deck` function takes `user_id` right after the session and filters on it; another
   user's id is "not found". Tests act as `conftest.USER`; `mcp_client(engine, user_id)` runs MCP tools as a user.
 - Local dev: `LA_CARTE_OWNER_EMAIL=dev@example.com LA_CARTE_API_TOKEN=dev-token scripts/api-dev.sh`, then

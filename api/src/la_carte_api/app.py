@@ -59,7 +59,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     if settings.api_token and not settings.owner_email:  # before touching the database
         raise RuntimeError("LA_CARTE_API_TOKEN is set: set LA_CARTE_OWNER_EMAIL too")
-    engine, first_start = open_database(settings.database_url, settings.owner_email)
+    key, new_key = settings.database_keys()
+    engine, first_start = open_database(settings.database_url, settings.owner_email, key, new_key)
     with Session(engine) as session:
         auth.import_owner(
             session, settings.owner_email, settings.api_token, first_start=first_start

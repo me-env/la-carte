@@ -76,8 +76,10 @@ jobs:
       - name: Starts and answers /health
         run: |
           # spec 030a: a token without an owner email refuses to start; /health stays public (no bearer)
+          # spec 032a: production needs LA_CARTE_DB_KEY (a throwaway one here), the file is SQLCipher
           docker run -d --name api -p 8000:8000 -e LA_CARTE_API_TOKEN=ci-token \
-            -e LA_CARTE_OWNER_EMAIL=ci@example.com la-carte-api:ci
+            -e LA_CARTE_OWNER_EMAIL=ci@example.com -e LA_CARTE_PUBLIC_URL=https://ci.example.com \
+            -e LA_CARTE_DB_KEY="$(openssl rand -hex 32)" la-carte-api:ci
           for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/health && exit 0; sleep 1; done
           docker logs api; exit 1
 

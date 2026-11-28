@@ -1,6 +1,8 @@
 # Production image for the la-carte API (REST + MCP on :8000). Deployed with Dokploy (docs/deploy.md).
 #   docker build -t la-carte-api api/
-#   docker run -p 8000:8000 -e LA_CARTE_API_TOKEN=... -v la-carte-data:/data la-carte-api
+#   docker run -p 8000:8000 -e LA_CARTE_OWNER_EMAIL=... -e LA_CARTE_DB_KEY=... -v la-carte-data:/data la-carte-api
+# The SQLCipher binding (sqlcipher3, spec 032a) is a manylinux wheel with SQLCipher and its crypto
+# statically linked: no system package needed.
 
 # --- build: resolve the locked dependencies into /app/.venv ---
 FROM ghcr.io/astral-sh/uv:0.11-python3.13-trixie-slim AS build

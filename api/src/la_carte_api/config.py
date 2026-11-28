@@ -1,4 +1,8 @@
-from pydantic import field_validator
+import re
+from ipaddress import ip_address
+from urllib.parse import urlsplit
+
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +22,11 @@ class Settings(BaseSettings):
     # The API's public base URL (e.g. https://carte.example.com): the OAuth issuer and MCP
     # resource (`<public_url>/mcp`), and where MCP serverInfo lists the icon (/icon.png).
     public_url: str | None = None
+    # The SQLCipher key of the whole database file (spec 032a): 64 hex characters. Required for a
+    # database file on a production server (`public_url` set and not loopback); unset elsewhere =
+    # plain SQLite. `db_key_new` rekeys the file at start (rotation). Never logged.
+    db_key: SecretStr | None = None
+    db_key_new: SecretStr | None = None
     host: str = "127.0.0.1"
     port: int = 8000
 
@@ -30,3 +39,37 @@ class Settings(BaseSettings):
     def base_url(self) -> str:
         """`public_url`, else this server's local address."""
         return (self.public_url or f"http://{self.host}:{self.port}").rstrip("/")
+
+    @property
+    def is_production(self) -> bool:
+        """`public_url` is set and not a loopback address."""
+        host = urlsplit(self.public_url or "").hostname
+        if not host or host == "localhost":
+            return False
+        try:
+            return not ip_address(host).is_loopback
+        except ValueError:  # a domain name
+            return True
+
+    def database_keys(self) -> tuple[str | None, str | None]:
+        """(`db_key`, `db_key_new`), checked (spec 032a): each unset or 64 hex characters, and
+        `db_key` set for a database file in production. Raises `RuntimeError` otherwise (the
+        message never holds a key)."""
+        key, new_key = (_secret(value) for value in (self.db_key, self.db_key_new))
+        file_database = self.database_url != "sqlite://"
+        if any(value and not HEX_KEY.fullmatch(value) for value in (key, new_key)) or (
+            file_database and self.is_production and not key
+        ):
+            raise RuntimeError(DB_KEY_HELP)
+        if new_key and not key:
+            raise RuntimeError("LA_CARTE_DB_KEY_NEW is set: set LA_CARTE_DB_KEY to the current key")
+        return key, new_key
+
+
+HEX_KEY = re.compile(r"[0-9a-fA-F]{64}")
+DB_KEY_HELP = "Set LA_CARTE_DB_KEY: 64 hex characters, e.g. openssl rand -hex 32"
+
+
+def _secret(value: SecretStr | None) -> str | None:
+    """The value, `None` when unset or empty (Docker Compose passes unset variables as "")."""
+    return (value.get_secret_value().strip() if value else "") or None
