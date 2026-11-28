@@ -13,7 +13,7 @@ from starlette.responses import FileResponse
 from la_carte_api import auth, deck
 from la_carte_api.build import source_hash
 from la_carte_api.config import Settings
-from la_carte_api.db import make_engine
+from la_carte_api.db import open_database
 from la_carte_api.mcp_server import build_mcp
 from la_carte_api.rest import router
 
@@ -59,9 +59,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     if settings.api_token and not settings.owner_email:  # before touching the database
         raise RuntimeError("LA_CARTE_API_TOKEN is set: set LA_CARTE_OWNER_EMAIL too")
-    engine = make_engine(settings.database_url, settings.owner_email)
+    engine, first_start = open_database(settings.database_url, settings.owner_email)
     with Session(engine) as session:
-        auth.import_owner(session, settings.owner_email, settings.api_token)
+        auth.import_owner(
+            session, settings.owner_email, settings.api_token, first_start=first_start
+        )
     prune(engine)  # spec 029: at start, then daily (lifespan)
     mcp = build_mcp(engine, settings)
     mcp_app = mcp.streamable_http_app(

@@ -26,6 +26,7 @@ from sqlmodel import Session, case, col, delete, func, select
 
 from la_carte_api.models import (
     ACTIVE_REPORT,
+    OWNED,
     ActivityEvent,
     ActivityEventIn,
     ActivityEventRead,
@@ -1150,16 +1151,13 @@ def ingest_activity(
         ).all()
     )
     taken = sum(event.id in foreign for event in valid)
-    if unique:
-        received_at = now or utcnow()
-        values = [
-            ActivityEvent(
-                **event.model_dump(), user_id=user_id, received_at=received_at
-            ).model_dump()
-            for event in unique.values()
-            if event.id not in foreign
-        ]
-    if unique and values:
+    received_at = now or utcnow()
+    values = [
+        ActivityEvent(**event.model_dump(), user_id=user_id, received_at=received_at).model_dump()
+        for event in unique.values()
+        if event.id not in foreign
+    ]
+    if values:
         statement = insert(ActivityEvent.__table__).values(values)
         result = session.exec(statement.on_conflict_do_nothing(index_elements=["id"]))
         stored = result.rowcount  # rows really inserted: right even under a concurrent retry
@@ -1301,9 +1299,6 @@ def struggling_cards(
 
 # --- Accounts (spec 030a) ----------------------------------------------------------------------
 
-# Every table whose rows belong to one user; `delete_account` empties them for that user.
-OWNED = (ActivityEvent, Feedback, Report, ReviewLog, Card, Note, Settings)
-
 
 class UserNotFound(NotFound):
     def __init__(self) -> None:
@@ -1331,8 +1326,8 @@ def me(session: Session, user_id: UUID) -> MeRead:
 
 def delete_account(session: Session, user_id: UUID) -> None:
     """Deletes, in one transaction, every row the user owns (their review history included), their
-    tokens and identities (cascade) and the user. Other users are untouched."""
-    for table in (*OWNED, ApiToken, Identity):
+    tokens and identities, and the user. Other users are untouched."""
+    for table in (*reversed(OWNED), ApiToken, Identity):
         session.exec(delete(table).where(col(table.user_id) == user_id))
     session.exec(delete(User).where(col(User.id) == user_id))
     session.commit()

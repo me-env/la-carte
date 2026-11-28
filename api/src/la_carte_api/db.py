@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, MetaData, Table, TypeDecorator, event
+from sqlalchemy import DateTime, MetaData, Table, TypeDecorator, event, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.schema import CreateIndex, CreateTable
 from sqlmodel import Session, SQLModel, create_engine
@@ -26,8 +26,6 @@ class UTCDateTime(TypeDecorator[datetime]):
         return value.replace(tzinfo=UTC) if value else None
 
 
-# Spec 030a: tables whose rows belong to one user (`user_id`). `settings` is keyed by it.
-OWNED_TABLES = ("note", "card", "reviewlog", "report", "feedback", "activityevent", "settings")
 NEEDS_OWNER = (
     "This deck has data: set LA_CARTE_OWNER_EMAIL to the Google or Apple email of its owner"
 )
@@ -38,7 +36,14 @@ class MigrationRefused(RuntimeError):
 
 
 def make_engine(database_url: str, owner_email: str | None = None) -> Engine:
-    """The engine, after the startup migrations. `owner_email` (`LA_CARTE_OWNER_EMAIL`) owns the
+    """The engine, after the startup migrations (see `open_database`)."""
+    engine, _ = open_database(database_url, owner_email)
+    return engine
+
+
+def open_database(database_url: str, owner_email: str | None = None) -> tuple[Engine, bool]:
+    """The engine after the startup migrations, and whether this start created the `user` table
+    (migration 030 ran, or the database is new). `owner_email` (`LA_CARTE_OWNER_EMAIL`) owns the
     data of a pre-030 database (migration 030); without it such a database is refused."""
     if database_url == "sqlite://":  # in-memory, used by tests: share one connection
         engine = create_engine(
@@ -53,9 +58,10 @@ def make_engine(database_url: str, owner_email: str | None = None) -> Engine:
 
     from la_carte_api import models  # noqa: F401  (registers the tables)
 
+    first_start = not inspect(engine).has_table("user")
     _migrate(engine, owner_email)  # first, so a backup is an exact copy of the file as it was
     SQLModel.metadata.create_all(engine)  # new tables (every table on a fresh database)
-    return engine
+    return engine, first_start
 
 
 def _migrate(engine: Engine, owner_email: str | None = None) -> None:
@@ -265,9 +271,11 @@ def _needs_owners(db) -> bool:
 
 
 def _has_owned_rows(db) -> bool:
+    from la_carte_api.models import OWNED
+
     return any(
         _columns(db, table) and db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
-        for table in OWNED_TABLES
+        for table in (model.__table__.name for model in OWNED)
     )
 
 
@@ -287,10 +295,9 @@ def _add_owners(db, dialect, owner_email: str | None) -> None:
         )
     metadata = MetaData()  # holds `note`, so card_new's foreign key compiles
     models.Note.__table__.to_metadata(metadata)
-    for model in (
-        models.Note, models.Card, models.ReviewLog, models.Report, models.Feedback,
-        models.ActivityEvent,
-    ):  # fmt: skip
+    for model in models.OWNED:
+        if model is models.Settings:
+            continue  # keyed by `user_id`: rebuilt below
         table = model.__table__
         if not (old_columns := _columns(db, table.name)):
             continue  # created later by create_all

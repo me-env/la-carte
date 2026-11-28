@@ -9,7 +9,7 @@ docker-compose.yml (repo root)
   service "api"  build ./api  (api/Dockerfile: uv, Python 3.13 slim, non-root)
     listens 0.0.0.0:8000, not published on the host, Traefik reaches it on the Docker network
     env      LA_CARTE_OWNER_EMAIL (required with data or a token) → the account that owns the deck (spec 030a)
-             LA_CARTE_API_TOKEN (optional)  → imported once as the owner's personal access token `legacy`
+             LA_CARTE_API_TOKEN (optional)  → imported at the first accounts start as the owner's PAT `legacy`
              LA_CARTE_PUBLIC_URL (optional) → https base URL: OAuth issuer, MCP resource <url>/mcp, icon
     auth     every request but /health and the icons: Authorization: Bearer <a user's token>
     volume   la-carte-data → /data/la-carte.db
@@ -34,6 +34,9 @@ docker-compose.yml (repo root)
    Dokploy writes them to a `.env` next to the compose file, and the compose file passes them to the
    container. At its first start the API creates the owner's account and stores the token (hashed) as the
    owner's personal access token `legacy`; after that the token variable is ignored and can be removed.
+   The import happens only on that first start (the one that creates the accounts tables, or migrates
+   to them): revoking `legacy`, deleting the owner's account (`DELETE /me`) or changing
+   `LA_CARTE_OWNER_EMAIL` later never brings the token back, even if the variable is still set.
    **Order for an existing deck (spec 030a):** set `LA_CARTE_OWNER_EMAIL` *before* deploying the accounts
    version. A database with data refuses to start without it (log: "This deck has data: set
    LA_CARTE_OWNER_EMAIL …") and is left untouched; with it, migration 030 backs the file up

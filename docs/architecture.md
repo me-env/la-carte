@@ -145,7 +145,8 @@ Pieces: `auth.py` (mint/verify tokens, `CurrentUser` dependency, MCP token verif
 `/authorize` → (agents: `/oauth/consent`, Apple or Google) → provider → `/oauth/callback` → our code → client →
 `/token`; the iOS app's Apple path is `POST /oauth/apple` straight to tokens. Public paths: `/health`, icons, the
 site (`/`, `/privacy`, `/support`, `/site/*`), `/.well-known/*`, `/authorize`, `/token`, `/register`, `/revoke`,
-`/oauth/*`. Detail: specs 030, 030a, 030b, 030e, 030g.
+`/oauth/*`, and FastAPI's `/docs`, `/redoc`, `/openapi.json` (the API's schema, deliberately public: it holds
+no data, and the repo is public anyway). Detail: specs 030, 030a, 030b, 030e, 030g.
 
 ### Web pages (spec 030h)
 The API serves a small static site from `api/src/la_carte_api/site/` (no JavaScript, no external resources, no

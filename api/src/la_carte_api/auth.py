@@ -16,7 +16,7 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, Request, status
 from mcp.server.auth.provider import AccessToken
 from sqlalchemy.engine import Engine
-from sqlmodel import Session, col, select
+from sqlmodel import Session, col, or_, select
 
 from la_carte_api.db import sessions
 from la_carte_api.models import (
@@ -112,14 +112,19 @@ class TokenNotFound(LookupError):
         super().__init__(f"No token with id {token_id}")
 
 
-def list_personal_tokens(session: Session, user_id: UUID) -> list[PersonalToken]:
-    """The user's PATs that are not revoked, newest first (never the token or its hash)."""
+def list_personal_tokens(
+    session: Session, user_id: UUID, now: datetime | None = None
+) -> list[PersonalToken]:
+    """The user's live PATs (not revoked, not expired), newest first (never the token or its
+    hash)."""
+    now = now or utcnow()
     tokens = session.exec(
         select(ApiToken)
         .where(
             ApiToken.user_id == user_id,
             ApiToken.kind == TokenKind.pat,
             col(ApiToken.revoked_at).is_(None),
+            or_(col(ApiToken.expires_at).is_(None), col(ApiToken.expires_at) > now),
         )
         .order_by(col(ApiToken.created_at).desc())
     )
@@ -129,7 +134,7 @@ def list_personal_tokens(session: Session, user_id: UUID) -> list[PersonalToken]
 def revoke_personal_token(
     session: Session, user_id: UUID, token_id: UUID, now: datetime | None = None
 ) -> None:
-    """Revokes one of the user's live PATs; anything else is `TokenNotFound`."""
+    """Revokes one of the user's PATs that is not revoked yet; anything else is `TokenNotFound`."""
     token = session.get(ApiToken, token_id)
     if (
         token is None
@@ -146,10 +151,13 @@ def revoke_personal_token(
 # --- Startup: the owner and the legacy token ---------------------------------------------------
 
 
-def import_owner(session: Session, owner_email: str | None, api_token: str | None) -> None:
-    """Creates the owner's user (no identity) when missing, and stores `LA_CARTE_API_TOKEN` once
-    as the owner's PAT `legacy` (spec 030a decision 5). Idempotent: a `legacy` PAT, even revoked,
-    means it was imported, so the variable is then ignored."""
+def import_owner(
+    session: Session, owner_email: str | None, api_token: str | None, *, first_start: bool
+) -> None:
+    """Creates the owner's user (no identity) when missing (spec 030a decision 5). On the
+    `first_start` with accounts only (migration 030 ran, or a fresh database), also stores
+    `LA_CARTE_API_TOKEN` as the owner's PAT `legacy`. Never afterwards: a revoked token, or one
+    whose owner deleted their account, does not come back on a restart."""
     if not owner_email:  # `create_app` refuses LA_CARTE_API_TOKEN without it
         return
     owner = session.exec(select(User).where(User.email == owner_email)).first()
@@ -159,12 +167,8 @@ def import_owner(session: Session, owner_email: str | None, api_token: str | Non
         session.commit()
     if not api_token:
         return
-    imported = session.exec(
-        select(ApiToken.id).where(
-            ApiToken.user_id == owner.id, ApiToken.kind == TokenKind.pat, ApiToken.name == LEGACY
-        )
-    ).first()
-    if imported:
+    hash_ = token_hash(api_token)
+    if not first_start or session.exec(select(ApiToken.id).where(ApiToken.hash == hash_)).first():
         log.info("LA_CARTE_API_TOKEN already imported; you can remove it")
         return
     store(session, owner.id, api_token, TokenKind.pat, TokenScope.deck, name=LEGACY)

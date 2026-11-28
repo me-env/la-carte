@@ -563,6 +563,51 @@ def test_the_legacy_token_becomes_the_owners_pat(tmp_path, caplog):  # AC 9
         assert _mcp(client, "tools/list", token="x").status_code == 401
 
 
+def test_the_legacy_token_is_imported_on_a_fresh_database(tmp_path):  # scripts/e2e.sh
+    url = f"sqlite:///{tmp_path / 'deck.db'}"
+    settings = Settings(database_url=url, owner_email=OWNER_EMAIL, api_token="x", _env_file=None)
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/me", headers=bearer("x")).json()["email"] == OWNER_EMAIL
+
+
+def test_a_deleted_owner_does_not_get_the_legacy_token_back(tmp_path):  # review 030a #2
+    url = _pre_030_db(tmp_path / "deck.db")
+    settings = Settings(database_url=url, owner_email=OWNER_EMAIL, api_token="x", _env_file=None)
+    with TestClient(create_app(settings)) as client:
+        assert client.delete("/me", headers=bearer("x")).status_code == 204
+    with TestClient(create_app(settings)) as client:  # restart, variable still set
+        assert client.get("/me", headers=bearer("x")).status_code == 401
+        engine = client.app.state.engine
+        with Session(engine) as session:
+            [owner] = session.exec(select(User)).all()  # recreated, empty
+            assert owner.email == OWNER_EMAIL
+            assert session.exec(select(ApiToken)).all() == []
+            assert deck.stats(session, owner.id).total == 0
+
+
+def test_a_new_owner_email_does_not_reimport_the_token(tmp_path):  # review 030a #1
+    url = f"sqlite:///{tmp_path / 'deck.db'}"
+    first = Settings(database_url=url, owner_email=OWNER_EMAIL, api_token="x", _env_file=None)
+    with TestClient(create_app(first)) as client:
+        old_owner = client.get("/me", headers=bearer("x")).json()["id"]
+    other = first.model_copy(update={"owner_email": "new-owner@example.com"})
+    with TestClient(create_app(other)) as client:  # starts: no second row with the same hash
+        assert client.get("/me", headers=bearer("x")).json()["id"] == old_owner
+
+
+def test_the_legacy_import_skips_a_hash_that_exists_revoked_or_not():  # review 030a #1
+    engine = make_engine("sqlite://")
+    user = add_user(engine, A_EMAIL)
+    with Session(engine) as session:
+        token = auth.store(session, user, "x", TokenKind.pat, TokenScope.deck, name="old")
+        token.revoked_at = utcnow()
+        session.add(token)
+        session.commit()
+        auth.import_owner(session, OWNER_EMAIL, "x", first_start=True)
+        [stored] = session.exec(select(ApiToken)).all()
+        assert (stored.user_id, stored.name) == (user, "old")
+
+
 # --- AC 10-11: /me and personal tokens ---------------------------------------------------------
 
 
@@ -604,11 +649,17 @@ def test_personal_tokens_are_listed_without_secrets_and_scoped():  # AC 11
         with Session(engine) as session:
             stats = auth.mint(session, user_a, TokenKind.pat, TokenScope.stats, name="widget")
             auth.mint(session, user_a, TokenKind.access, TokenScope.deck, client_id="la-carte-ios")
+        with Session(engine) as session:
+            expired = auth.mint(
+                session, user_a, TokenKind.pat, TokenScope.deck, name="expired",
+                expires_at=utcnow() - timedelta(seconds=1),
+            )  # fmt: skip
         listed = client.get("/me/tokens", headers=bearer(token_a)).json()
-        assert [t["name"] for t in listed] == ["widget", "test"]  # PATs only, newest first
+        assert [t["name"] for t in listed] == ["widget", "test"]  # live PATs only, newest first
         for item in listed:
             assert set(item) == {"id", "name", "scope", "created_at", "expires_at", "last_used_at"}
         assert token_a not in str(listed) and stats not in str(listed)
+        assert client.get("/me", headers=bearer(expired)).status_code == 401
         b_id = client.get("/me/tokens", headers=bearer(token_b)).json()[0]["id"]
         assert client.delete(f"/me/tokens/{b_id}", headers=bearer(token_a)).status_code == 404
         assert client.get("/me", headers=bearer(token_b)).status_code == 200

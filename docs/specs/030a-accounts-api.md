@@ -29,7 +29,7 @@ user's app, widget and agents keep working with no change. No Google yet (030b).
 2. **`user_id` everywhere**: `note`, `card`, `reviewlog`, `report`, `feedback`, `activityevent` get `user_id UUID NOT
    NULL` + an index (`card` gets `(user_id, due)`). `settings` is rebuilt as `{user_id pk, new_cards_per_day}`.
    `card.user_id` always equals its note's (set by `deck`, checked by a test).
-3. **Scoping in `deck`**: every public `deck` function takes `user_id: UUID` (keyword-only, required, right after
+3. **Scoping in `deck`**: every public `deck` function takes `user_id: UUID` (positional, required, right after
    `session`) and every `select` / `get` filters on it (a `session.get` is followed by a `user_id` check). Inserts
    set it. Another user's id is "not found" (`NotFound` → 404 / `ToolError` "… not found"), never "forbidden".
    Duplicate detection, the queue, burying, `stats`, the ladder, streak, load balancing (the due-count query of
@@ -53,9 +53,12 @@ user's app, widget and agents keep working with no change. No Google yet (030b).
      user. Local dev: start once with `LA_CARTE_OWNER_EMAIL` + `LA_CARTE_API_TOKEN` (below).
 5. **Owner + legacy token** (startup, after migrations, idempotent):
    - When `LA_CARTE_OWNER_EMAIL` is set and no user has that email, create it (no identity).
-   - When `LA_CARTE_API_TOKEN` is also set and the owner has **no** PAT named `legacy` (revoked ones count), store
-     it as the owner's PAT `legacy`, scope `deck`, no expiry. Otherwise the variable is ignored, with one log line
-     "LA_CARTE_API_TOKEN already imported; you can remove it". The token value is never logged.
+   - When `LA_CARTE_API_TOKEN` is also set, store it as the owner's PAT `legacy`, scope `deck`, no expiry, **only on
+     the start that creates the `user` table** (migration 030 ran, or a fresh database) and only when no `apitoken`
+     row has its hash (revoked ones count). On every later start the variable is ignored, with one log line
+     "LA_CARTE_API_TOKEN already imported; you can remove it": a revoked legacy token, or one whose owner deleted
+     the account (the owner row is recreated empty), never comes back, and a changed `LA_CARTE_OWNER_EMAIL`
+     doesn't re-import it. The token value is never logged.
    - `LA_CARTE_API_TOKEN` without `LA_CARTE_OWNER_EMAIL` → refuse to start ("set LA_CARTE_OWNER_EMAIL").
 6. **Migration 030** (`db._migrate`, through `_rebuild_if`; condition: `note` exists and has no `user_id`):
    - Backup `<db>.pre-030-<timestamp>.bak`, one transaction (pattern of 014/021).
@@ -73,13 +76,14 @@ user's app, widget and agents keep working with no change. No Google yet (030b).
    deck, not past its owner), its `apitoken`s, `identity` rows and the `user`. Any `deck` scope token can call it.
    No MCP tool for deletion (agents must not delete an account).
 8. **PAT listing and revocation** (REST only): `GET /me/tokens` → `[{id, name, scope, created_at, expires_at,
-   last_used_at}]` (PATs only, not revoked, newest first; never the token or its hash); `DELETE /me/tokens/{id}` →
-   204 (sets `revoked_at`; unknown or another user's → 404). Creating PATs (`POST /me/tokens`) is 030b (it needs
-   the app's OAuth token).
-9. **Owner access to feedback** (030 decision 10; MCP only). `deck.is_owner(session, user_id)`: the user's email
-   equals `LA_CARTE_OWNER_EMAIL` (unset → false). For the owner only:
-   - `list_feedback(status)` returns every user's feedback, newest first. `FeedbackRead` gains
-     `user_email: str` (the sender; for a non-owner it is always their own).
+   last_used_at}]` (live PATs only: not revoked and not expired; newest first; never the token or its hash);
+   `DELETE /me/tokens/{id}` → 204 (sets `revoked_at`; unknown or another user's → 404). Creating PATs
+   (`POST /me/tokens`) is 030b (it needs the app's OAuth token).
+9. **Owner access to feedback** (030 decision 10; MCP only). `deck.is_owner(session, user_id, owner_email)`: the
+   user's email equals `owner_email` (`LA_CARTE_OWNER_EMAIL`, passed in by the caller; unset → false). For the
+   owner only:
+   - `list_feedback(status)` returns every user's feedback, oldest first (like a user's own list). `FeedbackRead`
+     gains `user_email: str` (the sender; for a non-owner it is always their own).
    - `close_feedback(feedback_id, note)` accepts any user's feedback id.
    - `activity_log(..., user: str | None = None)`: `user` is an email; the result is that user's events (same
      filters). Allowed when the user exists and has at least one `feedback` row (any status); else `ToolError`
@@ -113,6 +117,7 @@ user's app, widget and agents keep working with no change. No Google yet (030b).
 ## API / MCP changes
 - New: `GET /me`, `DELETE /me`, `GET /me/tokens`, `DELETE /me/tokens/{id}`. Every route now requires a token and
   is scoped. No response shape changes elsewhere.
+- FastAPI's `/docs`, `/redoc` and `/openapi.json` stay public (the schema only, no data; the repo is public).
 - MCP: same tools, same shapes, scoped to the token's user. Docstrings unchanged except "the user's deck" wording
   where they said "the deck".
 - iOS: no change needed (the stored token keeps working); `MeRead` is added to `APIClient` + `DecodingTests` by

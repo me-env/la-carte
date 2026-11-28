@@ -11,8 +11,9 @@ class Settings(BaseSettings):
     # The email of the owner's account (spec 030a): owns the deck of a pre-030 database, and reads
     # every user's feedback over MCP. Required when the database has pre-030 data or `api_token`.
     owner_email: str | None = None
-    # Legacy static token: imported once as the owner's personal access token `legacy`, then
-    # ignored (spec 030a). Every request needs `Authorization: Bearer <a token of a user>`.
+    # Legacy static token: imported as the owner's personal access token `legacy` on the start
+    # that creates the accounts tables only, then ignored (spec 030a). Every request needs
+    # `Authorization: Bearer <a token of a user>`.
     api_token: str | None = None
     # The API's public base URL (e.g. https://carte.example.com): the OAuth issuer and MCP
     # resource (`<public_url>/mcp`), and where MCP serverInfo lists the icon (/icon.png).

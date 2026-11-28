@@ -277,6 +277,11 @@ class ActivityEvent(SQLModel, table=True):
     received_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)  # server clock
 
 
+# Spec 030a: every table whose rows belong to one user (`user_id`), parents first. Migration 030
+# gives them their owner; `DELETE /me` empties them for the user (children first).
+OWNED = (Note, Card, ReviewLog, Report, Feedback, ActivityEvent, Settings)
+
+
 # --- Public schemas (REST + MCP) ---------------------------------------------------------------
 
 
