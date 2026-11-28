@@ -94,8 +94,22 @@ From accounts (spec 030c) the app has **no server setting**: it talks only to th
 source with `LA_CARTE_DEFAULT_API_URL = https://carte.example.com` in `ios/Config/Signing.local.xcconfig`, and
 register your own Google OAuth client ("Web application", redirect URI
 `https://carte.example.com/oauth/callback`) for the API's `LA_CARTE_GOOGLE_CLIENT_ID` / `_SECRET`. Sign-up is
-open unless `LA_CARTE_ALLOWED_EMAILS` is set. Full steps: `docs/specs/030-accounts-google-login.md`
-("Self-hosting").
+open by default (`LA_CARTE_SIGNUP=open`; `allowlist` + `LA_CARTE_ALLOWED_EMAILS` to restrict it). Full steps:
+`docs/specs/030-accounts-google-login.md` ("Self-hosting").
+
+## Accounts and web env (spec 030; not live yet)
+
+All optional unless noted; secrets only in Dokploy, never in the repo. The full list with notes is in spec 030
+("Secrets and env"); what the user provides and where it comes from is in its "What the user provides".
+- Accounts: `LA_CARTE_OWNER_EMAIL` (required before 030a deploys on a deck with data), `LA_CARTE_PUBLIC_URL`
+  (required, https), `LA_CARTE_GOOGLE_CLIENT_ID`, `LA_CARTE_GOOGLE_CLIENT_SECRET`, `LA_CARTE_SIGNUP`,
+  `LA_CARTE_ALLOWED_EMAILS`.
+- Sign in with Apple (030e, 030g): `LA_CARTE_APPLE_TEAM_ID`, `LA_CARTE_APPLE_KEY_ID`,
+  `LA_CARTE_APPLE_PRIVATE_KEY_B64` (`base64 -i AuthKey_<KEYID>.p8 | tr -d '\n'`), `LA_CARTE_APPLE_BUNDLE_ID`,
+  `LA_CARTE_APPLE_SERVICES_ID`.
+- Web pages (030h): `LA_CARTE_SUPPORT_EMAIL`, `LA_CARTE_OPERATOR_NAME`, `LA_CARTE_APP_STORE_URL`. The landing page
+  is `<PUBLIC>/`, the privacy policy `<PUBLIC>/privacy`, support `<PUBLIC>/support`: served by the same container.
+- Volume backups: keep **30 days or less** (the privacy policy promises it).
 
 ## Run the production image locally
 

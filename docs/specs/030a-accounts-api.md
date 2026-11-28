@@ -19,8 +19,9 @@ user's app, widget and agents keep working with no change. No Google yet (030b).
 ## Decisions
 1. **Tables** (new, created by `create_all`; `user` is quoted in SQL or named `account` if SQLModel needs it):
    - `user {id UUID pk, email str (casefolded, verified; unique), created_at, last_seen_at}`. No name, no picture.
-   - `identity {provider str, subject str, user_id → user.id ON DELETE CASCADE, created_at}`, pk `(provider,
-     subject)`. Empty until 030b.
+   - `identity {provider str, subject str, user_id → user.id ON DELETE CASCADE, created_at, provider_token
+     str|null, provider_client_id str|null}`, pk `(provider, subject)`. Empty until 030b. `provider_token` holds
+     only Apple's refresh token, kept to revoke Sign in with Apple on deletion (030e); always null for Google.
    - `apitoken {id UUID pk, user_id → user.id ON DELETE CASCADE (indexed), kind: access|refresh|pat, hash str
      (SHA-256 hex of the full token; unique), scope: deck|stats, name str|null (PATs), client_id str|null,
      family_id UUID|null (refresh rotation, 030b), expires_at|null, created_at, last_used_at|null,
@@ -65,7 +66,9 @@ user's app, widget and agents keep working with no change. No Google yet (030b).
      needs it), set every row's `user_id` to the owner, rebuild `settings` keyed by `user_id` (row 1 → owner).
      Ids, FSRS state, reviews, reports untouched.
    - A database with no data migrates with no user row.
-7. **`GET /me`** → `{id, email, created_at}` (`MeRead`). **`DELETE /me`** → 204: in one transaction deletes every
+7. **`GET /me`** → `{id, email, provider, created_at}` (`MeRead`; `provider` = the account's identity provider,
+   `"google"` or `"apple"`, `null` for the owner row before it is claimed). **`DELETE /me`** → 204: (030e adds a
+   best-effort provider revocation first) then, in one transaction, deletes every
    row with that `user_id` in every owned table (including `reviewlog`: "history is never deleted" holds within a
    deck, not past its owner), its `apitoken`s, `identity` rows and the `user`. Any `deck` scope token can call it.
    No MCP tool for deletion (agents must not delete an account).
@@ -99,7 +102,7 @@ user's app, widget and agents keep working with no change. No Google yet (030b).
 | 7 | Migration: a pre-030 database file with data + `LA_CARTE_OWNER_EMAIL` starts; a `.pre-030-*.bak` exists and equals the old file; every row belongs to the owner; ids, FSRS fields, review logs, reports and the milestone are unchanged; a second start changes nothing (no new backup) | pytest |
 | 8 | The same database **without** `LA_CARTE_OWNER_EMAIL` refuses to start with the message of decision 6 and is left untouched (no backup, no change) | pytest |
 | 9 | With `LA_CARTE_API_TOKEN=x`, that token works on REST and `/mcp` as the owner after migration; the database holds only its SHA-256; restarting with it still set creates no second PAT; after `DELETE /me/tokens/{legacy id}` it gets 401 and a restart with the variable still set does **not** bring it back | pytest |
-| 10 | `GET /me` returns the caller's `{id, email, created_at}`; `DELETE /me` → 204, then every table holds zero rows with that `user_id`, the caller's tokens get 401, and the other user's data and tokens are untouched | pytest |
+| 10 | `GET /me` returns the caller's `{id, email, provider, created_at}`; `DELETE /me` → 204, then every table holds zero rows with that `user_id`, the caller's tokens get 401, and the other user's data and tokens are untouched | pytest |
 | 11 | `GET /me/tokens` lists the caller's live PATs without `token`/`hash`; `DELETE /me/tokens/{id}` of another user's PAT → 404 | pytest |
 | 12 | No token, token hash or email appears in the log output of a full test run (caplog check on the auth paths) | pytest |
 | 13 | `scripts/e2e.sh` (qa-validator) starts its APIs with `LA_CARTE_OWNER_EMAIL=e2e@example.com` + `LA_CARTE_API_TOKEN=e2e-token` and the existing live UI tests pass unchanged | UI (live) |
@@ -119,4 +122,5 @@ user's app, widget and agents keep working with no change. No Google yet (030b).
 None.
 
 ## Out of scope
-- Google, `/authorize`, `/token`, `POST /me/tokens` (030b). App UI (030c, 030d). Admin roles or UI beyond decision 9. Rate limiting.
+- Google, `/authorize`, `/token`, `POST /me/tokens` (030b). Apple and the revocation on deletion (030e). App UI
+  (030c, 030d, 030f). Admin roles or UI beyond decision 9. Rate limiting.

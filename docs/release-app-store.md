@@ -2,7 +2,8 @@
 
 Owner: `release-engineer`. This is the checklist for going from today's Ad Hoc builds (`docs/release.md`) to
 TestFlight (a small group of friends as **external testers**) and then App Store review. It's an audit, written
-2026-11-25: nothing here has been done in the Apple account yet. Apple requirements were checked that day on
+2026-11-25 and updated 2026-11-28 for the user's App Store decisions: nothing here has been done in the Apple
+account yet. Apple requirements were checked that day on
 developer.apple.com (links next to each item). Out of scope for now: VoiceOver, Dynamic Type, localisation.
 
 Status: **done**, **missing** (an agent can do it), **needs the user** (Apple account, App Store Connect,
@@ -11,21 +12,27 @@ legal answers; the smallest action is given).
 ## User decisions this checklist follows
 
 - **No passwords, ever.** Sign-in is OAuth only.
-- **Google is the only sign-in for now** (spec 030, being written). Sign in with Apple: **not now (user decision)**.
-  See [Guideline 4.8](#guideline-48-sign-in-with-apple) below; it has to be raised again before App Store submission.
+- **Sign in with Apple next to Google** (2026-11-28, guideline 4.8): specs 030e (server), 030f (app), 030g (agents
+  on the web, not a blocker).
+- **Account deletion in the app** deletes everything and revokes the Apple and Google grants (030a, 030c, 030e).
+- **Privacy policy, support page and a minimal landing page** are served by the API on its domain (030h).
+- **Open sign-up by default** (`LA_CARTE_SIGNUP=open`): App Review uses the App Store build with its own Apple ID;
+  no demo account.
+- **App Store Connect setup is the user's job** when the build is ready; this checklist is what they follow.
 
 ## Top blockers, in order
 
-1. **Accounts (spec 030).** Today the app is bring-your-own-server: one deck, one bearer token
-   (`BearerTokenMiddleware`, `api/src/la_carte_api/app.py`), URL and token typed in Settings. A friend or a reviewer
-   can't use that. TestFlight for friends and App Review both need a hosted, multi-user server with Google sign-in,
-   **in-app account deletion**, and a reviewer account.
+1. **Accounts (spec 030: 030a, 030b, 030c, 030e, 030f).** Today the app is bring-your-own-server: one deck, one
+   bearer token (`BearerTokenMiddleware`, `api/src/la_carte_api/app.py`), URL and token typed in Settings. A friend
+   or a reviewer can't use that. TestFlight for friends and App Review both need a hosted, multi-user server with
+   Sign in with Apple and Google, open sign-up, and **in-app account deletion**.
 2. ~~**No privacy manifest** for the app or the widget.~~ Fixed: both have one. App Store Connect has refused uploads without one since
    2024-05-01, so this blocks every upload, internal TestFlight included.
 3. **No App Store Connect app record.** The user creates it, with the Account Holder, Admin or App Manager role.
 4. **CI key role.** Cloud signing for App Store distribution needs an **Admin** key. It's the same issue that broke
    Ad Hoc export in CI on 2026-11-21 (`docs/release.md`, one-time setup step 3).
-5. **No privacy policy or support URL.** Both are needed for App Store review. External TestFlight needs a feedback
+5. **No privacy policy or support URL.** Both are needed for App Store review: specified in 030h
+   (`<PUBLIC>/privacy`, `<PUBLIC>/support`), waiting on the support email. External TestFlight needs a feedback
    email and a beta description.
 
 ## Checklist
@@ -35,6 +42,7 @@ legal answers; the smallest action is given).
 | Item | Status | Notes / smallest action |
 |---|---|---|
 | Team and bundle IDs | **done** | Team and prefix from `ios/Config/Signing.xcconfig` (`docs/release.md`). App `fr.lacarte.app`, widget `fr.lacarte.app.widget`, App Group `group.fr.lacarte.app`. The app ID exists on the team (Ad Hoc build signed and installed on 2026-11-21). The widget ID and the App Group follow the spec 007 one-time steps in `docs/release.md`. |
+| Sign in with Apple capability | **missing** (030f) / **needs the user** | Entitlement `com.apple.developer.applesignin` in the app (release-engineer, 030f). The App ID needs the capability ("Enable as a primary App ID"); automatic signing with an Admin key may add it, otherwise the user does it once, plus a Sign in with Apple **key** (.p8) for the server (spec 030 "What the user provides" 4). Profiles regenerate after the change. |
 | App Store Connect app record | **needs the user** | App Store Connect → Apps → + → New App: platform iOS, name (must be unique on the store; "la carte" may be taken, so have a fallback such as "la carte: flashcards"), primary language English, bundle ID `fr.lacarte.app`, SKU (any string, e.g. `lacarte-ios`), User Access Full. Role: Account Holder, Admin or App Manager. The Account Holder must first accept the latest agreements (Business → Agreements). [Add a new app](https://developer.apple.com/help/app-store-connect/create-an-app-record/add-a-new-app) |
 | Apple Distribution certificate | **done (Mac)** / **needs the user (CI)** | Already exists from the Ad Hoc setup (same certificate for Ad Hoc and App Store). For CI, cloud signing needs an **Admin**-role API key (or a user with "Access to Cloud Managed Distribution Certificate"). Smallest action: App Store Connect → Users and Access → Integrations → change the existing key's role to Admin, or create a new Admin key and update the `prod` secret ([WWDC21 10204](https://developer.apple.com/videos/play/wwdc2021/10204/)). |
 | App Store provisioning profiles (app + widget) | **missing (automatic)** | Nothing to commit. `-allowProvisioningUpdates` with an Admin key or the Xcode account creates "iOS Team Store Provisioning Profile" for both bundle IDs, with the App Group, on the first `app-store-connect` export. |
@@ -56,41 +64,36 @@ legal answers; the smallest action is given).
 |---|---|---|
 | `PrivacyInfo.xcprivacy` for the app | **done** (`ios/LaCarte/PrivacyInfo.xcprivacy`) | "Apps that don't describe their use of required reason API in their privacy manifest file aren't accepted by App Store Connect" (since 2024-05-01). The app uses `UserDefaults` (standard: Settings, Study, `@Shared(.appStorage)`) and the App Group suite (`AppGroup.swift`, `TokenStore.swift`). Declare `NSPrivacyAccessedAPICategoryUserDefaults` with **CA92.1** (app-only defaults) and **1C8F.1** (App Group defaults), `NSPrivacyTracking = false`, and `NSPrivacyCollectedDataTypes` matching the App Privacy answers below. No file-timestamp, boot-time or disk-space APIs found in `ios/LaCarteKit/Sources`. Keychain isn't a required-reason API. TCA and swift-sharing ship their own manifests. Owner: ios-engineer (new resource in `ios/LaCarte/`). [Required reason API](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api), [Privacy manifest files](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files) |
 | `PrivacyInfo.xcprivacy` for the widget | **done** (`ios/LaCarteWidget/PrivacyInfo.xcprivacy`) | The widget is its own executable and reads the App Group defaults (`DeckWidgetProvider`), so it needs its own manifest with **1C8F.1**. Apple says "each executable", not "extensions" by name, so this is our reading; it costs nothing. |
-| App Privacy answers (App Store Connect) | **needs the user** (agent drafts) | "Collected" means sent off the device and kept longer than needed to serve the request. Once accounts exist, everything below goes to the developer's server, so it counts as collected and **linked to the user**. **Not used for tracking** (no ads, no data brokers). Expected answers: **Email Address** only, never a name (Google sign-in asks for openid + email only; App Functionality); **User ID** (App Functionality); **Product Interaction**: card shown, revealed, rated, app foreground (spec 029 activity log, App Functionality, plus Analytics if it's used for debugging feedback); **Other Diagnostic Data**: `api_error`, `photo_failed`, app and OS version (App Functionality); **Other User Content**: the cards and notes themselves (App Functionality). No crash or performance data unless added. Smallest action: the user pastes the agent's draft into App Store Connect → App Privacy. [App privacy details](https://developer.apple.com/app-store/app-privacy-details/) |
-| Activity log (spec 029) | **missing (not built yet)** | The spec is `ready` and there's no iOS code yet. Its rules (no free text, ids/enums/counts only) fit the answers above. It needs a retention period stated in the privacy policy, and its rows must be deleted with the account. |
-| Privacy policy URL | **needs the user** | Required in App Store Connect (App Privacy) and **inside the app**, easy to find (guideline 5.1.1(i)). It must say what's collected (above), how it's used, how long it's kept, and how to delete it or revoke consent. Smallest action: approve a policy page the agent drafts and choose where it's hosted (a page on the API's domain or GitHub Pages). Add a "Privacy policy" link in Settings (ios-engineer). |
-| Support URL | **needs the user** | Required. It "must lead to actual contact information" ([platform version information](https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information)). Smallest action: choose a contact email. The page can be the repo's README section or a GitHub issues link plus that email. |
+| App Privacy answers (App Store Connect) | **needs the user** (agent drafts) | "Collected" means sent off the device and kept longer than needed to serve the request. Once accounts exist, everything below goes to the developer's server, so it counts as collected and **linked to the user**. **Not used for tracking** (no ads, no data brokers). Expected answers: **Email Address** only, never a name (Google asks for openid + email only, Apple for email only, possibly a Hide My Email relay; App Functionality); **User ID** (App Functionality); **Product Interaction**: card shown, revealed, rated, app foreground (spec 029 activity log, App Functionality, plus Analytics if it's used for debugging feedback); **Other Diagnostic Data**: `api_error`, `photo_failed`, app and OS version (App Functionality); **Other User Content**: the cards and notes themselves (App Functionality). No crash or performance data unless added. Smallest action: the user pastes the agent's draft into App Store Connect → App Privacy. [App privacy details](https://developer.apple.com/app-store/app-privacy-details/) |
+| Activity log (spec 029) | **done** (built) | Its rules (no free text, ids/enums/counts only) fit the answers above. The 90-day retention is stated in `/privacy` (030h), and its rows are deleted with the account (030a). |
+| Privacy policy URL | **specified** (030h) / **needs the user** | Required in App Store Connect (App Privacy) and **inside the app**, easy to find (guideline 5.1.1(i)). `<PUBLIC>/privacy`, served by the API; the text is drafted in spec 030h and must match `PrivacyInfo.xcprivacy`. Linked from the sign-in screen and Settings (030c). Smallest action: approve the text and give the support email. |
+| Support URL | **specified** (030h) / **needs the user** | Required. It "must lead to actual contact information" ([platform version information](https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information)). `<PUBLIC>/support` shows `LA_CARTE_SUPPORT_EMAIL`. Smallest action: choose the contact email. |
+| Marketing URL | **specified** (030h) | Optional field: `<PUBLIC>/`, the landing page (screenshots, demo videos, App Store badge once `LA_CARTE_APP_STORE_URL` is set). |
 
 ### Accounts and review access (spec 030)
 
 | Item | Status | Notes / smallest action |
 |---|---|---|
-| Hosted multi-user server | **missing** | The current server has one deck behind one token. Friends and the reviewer need their own decks on the hosted API (spec 030: architect, api-engineer). |
-| Google sign-in, no passwords | **missing** (spec 030) | OAuth only (user decision). The OAuth client ID is an identifier, not a secret; any client secret stays server-side and out of git. |
-| In-app account deletion | **missing (App Store blocker)** | Guideline 5.1.1(v): apps that create accounts "must also let people initiate deletion of their account within the app"; deactivation alone "is insufficient". It must delete the deck, review logs, notes, activity events and feedback, and say how long that takes if it isn't immediate. A link to a web page that finishes the deletion is allowed. Revoking the Google grant is good practice. If Sign in with Apple is added, its tokens must be revoked through the REST API. [Offering account deletion](https://developer.apple.com/support/offering-account-deletion-in-your-app/) |
-| Reviewer demo account | **needs the user** | Guideline 2.1: provide "demo account info (and turn on your back-end service!)"; the account "must not expire". Since sign-in is Google only, **the demo account is a Google account, not a password account on our side**. The reviewer signs in through the normal Google sign-in with its email and password, entered in App Store Connect → App Review Information → Sign-in required. Smallest action: create a dedicated Google account (e.g. "la carte review"), seed a demo deck on it (marketing's demo content), and turn off Google's sign-in challenges for it as far as possible (no 2-Step Verification, recovery email set), because a new-device challenge on Apple's side would block review. Do the same in TestFlight Test Information. A demo mode without sign-in needs Apple's prior approval, so we don't take that route. |
-| Review notes | **missing** (agent drafts) | Up to 4000 bytes: what the app does, that sign-in is Google, the demo account, that the MCP server and "Ask AI" links are optional extras, and that the widget needs a signed-in app. |
+| Hosted multi-user server | **missing** (030a, 030b) | The current server has one deck behind one token. Friends and the reviewer need their own decks on the hosted API. |
+| Sign in with Apple and Google, no passwords | **missing** (030b, 030c, 030e, 030f) | OAuth only (user decision). The Google client secret and the Apple key stay in Dokploy env, out of git. |
+| Open sign-up | **specified** (030b) | `LA_CARTE_SIGNUP=open` is the default; it must stay open for review (a reviewer's Apple ID, often a Hide My Email address, can't be allowlisted). |
+| In-app account deletion | **specified** (030a, 030c, 030e; App Store blocker until built) | Guideline 5.1.1(v): apps that create accounts "must also let people initiate deletion of their account within the app"; deactivation alone "is insufficient". It must delete the deck, review logs, notes, activity events and feedback, and say how long that takes if it isn't immediate. A link to a web page that finishes the deletion is allowed. Revoking the Google grant is good practice. Sign in with Apple tokens are revoked through Apple's REST API on deletion (030e); Google's access token is revoked right after each sign-in, so no Google grant is left. Deletion is immediate; backups age out within 30 days (said in `/privacy`). [Offering account deletion](https://developer.apple.com/support/offering-account-deletion-in-your-app/) |
+| Reviewer demo account | **not needed** | Decision 2026-11-28: the reviewer uses the App Store build and signs in with their own Apple ID (open sign-up), getting an empty deck. In App Store Connect → App Review Information, leave "Sign-in required" unchecked or explain in the notes that Sign in with Apple creates an account. If review asks for a demo account anyway, fall back to a dedicated Google account seeded with marketing's demo deck. |
+| Review notes | **missing** (agent drafts) | Up to 4000 bytes: what the app does; "Sign in with Apple (or Google) creates a free account; there is no demo account"; how to add a first card (Deck → +) and study it; account deletion in Settings → Delete Account; that the MCP server and "Ask AI" are optional extras; that the widget needs a signed-in app. |
 
 ### Guideline 4.8 (Sign in with Apple)
 
-**Status: not now (user decision). Raise it again before App Store submission.**
+**Status: decided 2026-11-28: Sign in with Apple next to Google** (specs 030e, 030f; 030g for agents on the web).
 
 What the guideline says (checked 2026-11-25, [App Review Guidelines 4.8](https://developer.apple.com/app-store/review/guidelines/)):
 an app that uses a third-party login service such as Google to set up or authenticate the user's primary account
-"must also offer as an equivalent option another login service". That service must limit data collection to name
-and email, let users keep their email private, and not collect app interactions for advertising without consent.
-Sign in with Apple meets all three. None of the exceptions fits la-carte: the company's own account system only,
-alternative marketplaces, education or enterprise accounts, government or citizen ID, or clients of a specific
-third-party service.
+"must also offer as an equivalent option another login service" that limits data collection to name and email,
+lets users keep their email private, and doesn't collect app interactions for advertising without consent. Sign in
+with Apple meets all three. None of the exceptions fits la-carte.
 
-- **App Store review: blocker.** Google-only sign-in is expected to be rejected under 4.8.
-- **TestFlight external testing: not a hard blocker, but a risk.** Guideline 2.2 says TestFlight builds "should
-  comply with the App Review Guidelines", and the first build for external testers goes through TestFlight App
-  Review. Apple doesn't say Beta App Review applies 4.8 the same way, so a Google-only beta can probably go out,
-  but a rejection there would be justified. If it happens, either add Sign in with Apple or test with internal
-  testers. Internal testing allows up to 100 App Store Connect users and has no review.
-- When the user decides to add it: the "Sign in with Apple" capability on the app's App ID (automatic signing adds
-  it), server-side token validation, and token revocation on account deletion (5.1.1(v)).
+What it takes: the capability on the App ID and the entitlement (030f, release-engineer), a Sign in with Apple key
+for the server (Dokploy env), server-side identity token validation against Apple's JWKS and token revocation on
+account deletion (030e). Apple's button sits above Google's, same size (030c design note).
 
 ### Store listing and assets
 
@@ -108,7 +111,7 @@ third-party service.
 | Item | Status | Notes / smallest action |
 |---|---|---|
 | Internal group | **needs the user** | An internal group must exist before an external one. The user alone is enough. [Invite external testers](https://developer.apple.com/help/app-store-connect/test-a-beta-version/invite-external-testers) |
-| Test Information | **needs the user** (agent drafts) | Beta App Description (required), feedback email, contact info, and sign-in details (the Google demo account above) for TestFlight App Review. [Provide test information](https://developer.apple.com/help/app-store-connect/test-a-beta-version/provide-test-information) |
+| Test Information | **needs the user** (agent drafts) | Beta App Description (required), feedback email, contact info, and sign-in details (none needed: Sign in with Apple creates an account, see "Reviewer demo account") for TestFlight App Review. [Provide test information](https://developer.apple.com/help/app-store-connect/test-a-beta-version/provide-test-information) |
 | External group and public link | **needs the user** | Up to 10,000 external testers; the public link can be capped (e.g. 20). The first build goes through TestFlight App Review; later builds may not. Builds expire after **90 days**. Testers can't be paid or rewarded (guideline 2.2). |
 | Export compliance answered | **done** | Covered by `ITSAppUsesNonExemptEncryption = NO` (above). Otherwise each build shows "Missing Compliance". |
 
@@ -140,10 +143,13 @@ Proposed (not implemented yet; release-engineer does it once the app record exis
 
 ## User actions, smallest first
 
-1. Decide the contact email (support URL, App Review contact, TestFlight feedback).
-2. Make the CI API key **Admin** (App Store Connect → Users and Access → Integrations). This also fixes Ad Hoc CI.
-3. Accept the agreements and **create the app record** (fields above).
-4. Create the dedicated **Google demo account**, without 2-Step Verification, once spec 030 is live.
-5. Approve the drafted privacy policy, App Privacy answers, age rating and Test Information, and paste them into
-   App Store Connect.
-6. Before App Store submission: **decide on Sign in with Apple** (guideline 4.8).
+The accounts-side values (support email, Google client, Apple key and capability, Dokploy env, repo variable) are
+one consolidated list in spec 030, "What the user provides"; the manager asks for it once. App Store Connect
+actions, when the build is ready:
+
+1. Make the CI API key **Admin** (App Store Connect → Users and Access → Integrations). This also fixes Ad Hoc CI.
+2. Accept the agreements and **create the app record** (fields above).
+3. Approve the drafted App Privacy answers, age rating, review notes and Test Information, and paste them into
+   App Store Connect; Privacy Policy URL `<PUBLIC>/privacy`, Support URL `<PUBLIC>/support`, Marketing URL
+   `<PUBLIC>/`.
+4. Once the app is live: set `LA_CARTE_APP_STORE_URL` in Dokploy so the landing page shows the badge.

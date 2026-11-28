@@ -69,8 +69,9 @@ No Google SDK, no password, no token to type.
 9. **Settings → Account section** (first section): the email from `GET /me` (or "Signed in" while loading /
    offline), "Sign out" (no confirmation; revokes the refresh token via `POST /revoke` best effort, deletes the
    session, widget token and `api-token`), "Delete account" (destructive) → alert "Delete your account? Your deck,
-   reviews and settings are deleted from the server. This can't be undone." with "Delete Account" (destructive) and
-   "Cancel" → `DELETE /me` → on 204 same local cleanup as sign out → sign-in screen; on failure alert "Couldn't
+   reviews, activity and feedback are deleted from the server. This can't be undone." with "Delete Account" (destructive) and
+   "Cancel" → `DELETE /me` → on 204 same local cleanup as sign out, plus the activity log's unsent buffer (spec
+   029 file) is deleted → sign-in screen; on failure alert "Couldn't
    delete your account. Try again." and nothing changes. A "Privacy policy" link. The Server section (URL, Test
    connection, status) is removed: the email row already shows the app reaches its server.
 10. **Mock modes**: `LA_CARTE_API=mock*` starts signed in as `you@example.com` (unchanged screens for existing UI
@@ -91,7 +92,7 @@ No Google SDK, no password, no token to type.
 | 9 | Study `.unauthorized` (after refresh) or no credential → `delegate(.signInRequired)` → `AppFeature` presents `.signIn`; `signIn(.delegate(.signedIn))` dismisses it and sends `study(.deckChanged)` | unit |
 | 10 | Settings shows `settings.account.email` = the mock email; no `settings.token`, `settings.url` or `settings.test` element exists | UI |
 | 11 | Tapping `settings.signOut` calls `authClient.signOut` and shows the sign-in screen | both |
-| 12 | Tapping `settings.deleteAccount` shows the confirmation alert; Cancel changes nothing; "Delete Account" calls `authClient.deleteAccount` and shows the sign-in screen; a failing delete shows "Couldn't delete your account. Try again." and stays signed in | both |
+| 12 | Tapping `settings.deleteAccount` shows the confirmation alert; Cancel changes nothing; "Delete Account" calls `authClient.deleteAccount`, deletes the activity buffer and shows the sign-in screen; a failing delete shows "Couldn't delete your account. Try again." and stays signed in | both |
 | 13 | After sign-in the live client mints a `stats` token and stores it under `widget-token`; sign-out removes it; the widget's token resolution prefers it over `api-token` | unit |
 | 14 | A legacy `api-token` in the Keychain keeps the app signed in (no sign-in screen); signing in deletes it | unit |
 | 15 | `DecodingTests`: `TokenResponse` (`access_token`, `token_type`, `expires_in`, `refresh_token`, `scope`), OAuth error `{error, error_description}`, `Me`, `PersonalToken` from the server's JSON | unit |
@@ -154,7 +155,7 @@ edge, side margins 24 (`Theme.Spacing.l`), no navigation bar, no toolbar:
 2. Appearance, Ask AI: unchanged. (The Server section is gone: no URL, no Test connection.)
 3. Last section: "Privacy Policy" (`settings.privacy`, `Link`, trailing `arrow.up.right` in secondaryInk) and
    "Delete Account" (`settings.deleteAccount`, `Button(role: .destructive)`, system red), footer "Deletes your
-   account, deck and reviews from the server." Delete sits apart from Sign Out so neither is tapped for the other;
+   account and all its data from the server." Delete sits apart from Sign Out so neither is tapped for the other;
    still one scroll away from the top (5.1.1(v): easy to find).
 - Delete confirmation: system `.alert` as in decision 9, buttons "Cancel" (`.cancel`) and "Delete Account"
   (`.destructive`, `settings.deleteAccount.confirm`). While `DELETE /me` runs, the Delete row shows a trailing
@@ -206,6 +207,7 @@ None beyond 030a/030b. `APIClient` adds `Me`, `TokenResponse`, `PersonalToken` m
   earlier draft ids `signIn.server`, `signIn.serverURL`)
 
 ## Out of scope
-- Sign in with Apple (030 App Store note). PAT management UI (030d). Universal-link callback / associated domains.
+- Sign in with Apple ([030f](030f-apple-sign-in-ios.md); it adds its button above Google's). PAT management UI
+  (030d). Universal-link callback / associated domains.
   Any in-app server choice (custom URL, "use your own server"): self-hosters build from source (030
   "Self-hosting"). Account switching. VoiceOver, Dynamic Type, localisation (per the user).

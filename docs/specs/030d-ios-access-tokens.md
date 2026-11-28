@@ -8,8 +8,8 @@ Design reference: docs/design/reference/04-list-dark.jpg (plain list rows), 03-d
 
 ## Goal
 A signed-in user creates a personal access token (PAT) for a script, CI, or an MCP client that has no OAuth, copies
-it once, and can revoke it later. This is the only place PATs are minted: they are API tokens tied to a Google
-sign-in, not passwords.
+it once, and can revoke it later. This is the only place PATs are minted: they are API tokens tied to an Apple or
+Google sign-in, not passwords.
 
 ## User stories
 - As the user, I create a token named "laptop script" that expires in 30 days, copy it, and paste it into my

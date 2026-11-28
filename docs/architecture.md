@@ -116,13 +116,20 @@ Rules:
 Principles (non-negotiable):
 - **Never passwords.** No passwords or password hashes are stored; no password login, reset or magic link, ever.
   Identity is always OAuth / OpenID Connect with an external provider.
-- **Google is the only identity provider for now**, behind `identity.IdentityProvider` (`google`, and `fake` for
-  tests/e2e only) so another one can be added without changing the flow, tables or token endpoints.
-- **Minimum from Google**: scopes `openid email` only (no name, no picture); stored: Google's `sub` + the verified
-  email; unverified emails are refused; no Google token is kept.
-- **Account = (provider, `sub`)**, never the email alone. The only email match: the migrated owner row (no identity
-  yet) is claimed by the first verified sign-in with `LA_CARTE_OWNER_EMAIL`. A future provider links by signing in
-  while already signed in.
+- **Two identity providers, Apple and Google** (App Store guideline 4.8), in `identity.py` (`apple`, `google`, and
+  `fake` for tests/e2e only). Google: browser flow through `/authorize`. Apple: native in the app
+  (`POST /oauth/apple`, identity token checked against Apple's JWKS) and a web flow on the agents' consent page.
+- **Minimum data**: Google `openid email`, Apple `email` only (no name, no picture); stored: the provider's `sub` +
+  the verified email (Apple relay addresses as is); unverified emails are refused. No Google token is kept (the
+  access token is revoked right after sign-in); Apple's refresh token is kept only to revoke Sign in with Apple
+  when the account is deleted.
+- **Account = (provider, `sub`)**, one identity per account, never merged by email: a new identity whose email
+  belongs to another account is refused (`use_google` / `use_apple` / `email_in_use`). The only email match: the
+  migrated owner row (no identity yet) is claimed by the first verified sign-in with `LA_CARTE_OWNER_EMAIL`.
+- **Sign-up mode** `LA_CARTE_SIGNUP`: `open` (default; required for the App Store, App Review uses its own Apple
+  ID) or `allowlist` (`LA_CARTE_ALLOWED_EMAILS` + the owner).
+- **Deletion** (`DELETE /me`): revokes Sign in with Apple (best effort), then deletes every row the user owns in
+  one transaction.
 - **Our tokens, opaque, hashed**: `lc_at_` access (1 h), `lc_rt_` refresh (rotated; reuse revokes the family),
   `lc_pat_` personal access tokens; only SHA-256 stored (`apitoken`), so no signing key. No token passthrough.
 - **OAuth first, PATs second**: agents connect with OAuth; PATs (scripts, CI/e2e, MCP clients without OAuth) are
@@ -133,10 +140,18 @@ Principles (non-negotiable):
 Pieces: `auth.py` (mint/verify tokens, `CurrentUser` dependency, MCP token verification), `oauth.py` (the MCP SDK
 `OAuthAuthorizationServerProvider`: `/authorize`, `/token`, `/register` (DCR), `/revoke`, metadata), `identity.py`
 (providers). Tables `user`, `identity`, `apitoken`, `oauthclient`, `authrequest`, `authcode`; `user_id` on `note`,
-`card`, `reviewlog`, `report`, `feedback`, `activityevent`; `settings` keyed by `user_id`. Sign-up gate:
-`LA_CARTE_ALLOWED_EMAILS` (+ the owner). Flow: client → `/authorize` → (agents: `/oauth/consent`) → Google →
-`/oauth/callback` → our code → client → `/token`. Public paths: `/health`, icons, `/privacy`, `/.well-known/*`,
-`/authorize`, `/token`, `/register`, `/revoke`, `/oauth/*`. Detail: specs 030, 030a, 030b.
+`card`, `reviewlog`, `report`, `feedback`, `activityevent`; `settings` keyed by `user_id`. Flow: client →
+`/authorize` → (agents: `/oauth/consent`, Apple or Google) → provider → `/oauth/callback` → our code → client →
+`/token`; the iOS app's Apple path is `POST /oauth/apple` straight to tokens. Public paths: `/health`, icons, the
+site (`/`, `/privacy`, `/support`, `/site/*`), `/.well-known/*`, `/authorize`, `/token`, `/register`, `/revoke`,
+`/oauth/*`. Detail: specs 030, 030a, 030b, 030e, 030g.
+
+### Web pages (spec 030h)
+The API serves a small static site from `api/src/la_carte_api/site/` (no JavaScript, no external resources, no
+cookies): the landing page `/`, `/privacy`, `/support`, and `/site/*` assets. Placeholders (`{{support_email}}`,
+`{{app_store_url}}`, `{{operator}}`) are filled from env at startup, so no hostname or personal data is committed.
+**`/privacy` must match what is actually collected**: any change to `ios/LaCarte/PrivacyInfo.xcprivacy`, to what the
+server stores, or to retention updates the privacy page in the same change.
 
 ### REST contract
 
@@ -144,7 +159,9 @@ Pieces: `auth.py` (mint/verify tokens, `CurrentUser` dependency, MCP token verif
 |---|---|---|---|
 | GET | `/health` | — | `{status, build}` (no auth); `build` = 12-hex sha256 of the API's `.py` source (`build.py`) |
 | GET | `/favicon.ico`, `/icon.png` (512), `/apple-touch-icon.png` (180), `/icon.svg` | — | The la-carte icon (no auth, cached 1 day), from `docs/design/brand/render.py`; MCP serverInfo `icons` points at it when `LA_CARTE_PUBLIC_URL` is set |
-| GET/DELETE | `/me` | — | `{id, email, created_at}` / 204 (deletes the account and everything it owns — spec 030a) |
+| GET | `/`, `/privacy`, `/support`, `/site/*` | — | The landing page, privacy policy, support page and their assets (HTML, no auth — spec 030h) |
+| POST | `/oauth/apple` | form `client_id=la-carte-ios`, `identity_token`, `authorization_code`, `nonce` | the `/token` body, or 400 `{error, error_description}` (spec 030e) |
+| GET/DELETE | `/me` | — | `{id, email, provider: apple\|google\|null, created_at}` / 204 (revokes Sign in with Apple, deletes the account and everything it owns — specs 030a, 030e) |
 | GET/POST | `/me/tokens` | POST `{name, scope: deck\|stats, expires_in_days?}` (only with an app access token) | `[PersonalToken]` / `PersonalToken` + `token` once (201) — specs 030a/b |
 | DELETE | `/me/tokens/{id}` | — | 204 (revokes) |
 | GET | `/notes` | `?query=&type=basic\|person&limit=` (≤ 500, default 100; `query` = casefolded substring of any field but `photo`) | `[Note]` newest first. Every `Note` (all note responses, REST and MCP) has `next`: `{card_id, ready_at}` = the card Study serves first for it and when (`ready_at` ≤ now: in the queue now), or `null` when every card is held by a report (spec 028) |
@@ -280,7 +297,7 @@ Changes flow up as delegates: `CardEditor.saved` → Deck/App; `Settings.serverC
 | `LA_CARTE_API=mock-notes` | In-memory deck seeded with `[Note].fixtures`: the 3 mock cards as `basic` notes, a `back → front` direction on "la carte", and a made-up person note (generated `data:` image) with 2 cards (spec 014b) |
 | `LA_CARTE_API_URL` | API base URL; overrides the build-time `LaCarteDefaultAPIURL` (development, UI tests). Before 030c: no default, a stored URL from Settings |
 | `LA_CARTE_API_TOKEN` | Bearer token (a PAT; skips sign-in) |
-| `LA_CARTE_AUTH=signed-out` / `not-allowed` | Mock modes: start signed out; mock sign-in succeeds / is refused (spec 030c) |
+| `LA_CARTE_AUTH=signed-out` / `not-allowed` / `use-google` | Mock modes: start signed out; mock sign-in (Apple or Google) succeeds / is refused / Apple is refused with "use Google" (specs 030c, 030f) |
 | `LA_CARTE_ACTIVITY=off` | Activity log disabled (`log` is a no-op; QA baseline, spec 029) |
 | `LA_CARTE_ACTIVITY_URL` | Where activity is sent instead of the API URL; in `mock*` modes activity is sent only when this is set (spec 029) |
 
