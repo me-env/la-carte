@@ -154,7 +154,9 @@ nothing. `_ios-env.sh` mounts any image that isn't (after a reboot or replug; ~0
   list the images, before that guard existed; `name=iPhone 17,OS=latest` then matched two devices and `ios-test.sh`
   failed with "Unable to find a device"): pool runs target their device by UDID, slot 1 too, and with two devices of
   one name take the lowest UDID and warn. To remove the extra one, holding that slot's lock:
-  `xcrun simctl delete <udid>`, `hdiutil detach` its folder, then delete its folder and `<udid>.sparsebundle`.
+  `xcrun simctl shutdown <udid>`, `hdiutil detach` its folder, `xcrun simctl delete <udid>`, then delete
+  `<udid>.sparsebundle`. In that order: `simctl delete` on a still-mounted device fails (it can't move the mount
+  point) and leaves an empty `Deleting-*` folder.
 - Measured, `LaunchUITests` (4 tests) and full `ios-test.sh`, under heavy load from other agents (load 200–600):
   internal disk, warm device: 53.0 s and 5.3 min (283 tests). SSD: 54.2 s and 5.2 min (289 tests); per test
   7.0–7.7 s vs 6.6–6.8 s. The very first UI run after the migration took 114.6 s (one-off: its device had only been
