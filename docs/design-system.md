@@ -175,5 +175,5 @@ Study screen catalogue: `scripts/ios-test.sh --render -only-testing:ScreenColorT
 - Background is `Theme.background` edge to edge, light **and** dark.
 - Nothing competes with the centered text; no default iOS blue tint (button tint = ink). Pink appears only in the 5 accent places.
 - Buttons are the circle style, 44pt hit area, aligned to the same top margin.
-- Card text never truncates. Size and alignment follow its length (`CardText`, spec 017): a word or a short question is big and centred, a paragraph is smaller and leading-aligned, and the answer is always one tier below the question. Anything longer scrolls.
+- Card text never truncates. Size and alignment follow its length (`CardText`, spec 017): a word or a short question is big and centred, a paragraph is smaller and leading-aligned, and the answer is always one tier below the question. Each side aligns on its own rendered lines: 1-2 lines centred, 3+ leading, so a short answer stays centred even under a leading question (user, 2026-11-28). Anything longer scrolls.
 - Dynamic Type at XL doesn't break layout.

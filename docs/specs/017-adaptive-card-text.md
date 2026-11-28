@@ -34,8 +34,9 @@ Measure the length of a side: the characters of its shown text fields after trim
 follows the lines the text actually wraps to at the current width and text size:
 - A side of **1 or 2 lines** is centred, line by line.
 - A side of **3 or more lines** is leading-aligned.
-- The question depends only on itself. The answer is leading when the question is leading (so the two never mix
-  axes that way), otherwise by its own line count.
+- The question depends only on itself, and the answer depends only on itself: each side follows its own line
+  count (amended 2026-11-28 per user, see "Answer alignment" below; it used to force the answer leading under a
+  leading question).
 
 How it's measured: in the card's column, a hidden copy of each side's **saved** text is laid out cut to two lines
 (`lineLimit(2)`), with the full text over it. If the full text is taller, the side has 3+ lines. The probe is
@@ -78,9 +79,9 @@ Rules and why:
    answer drops to 17, so the two never read as equal blocks.
 3. **Centre a few lines, align paragraphs to the leading edge.** Centred ragged paragraphs are hard to read.
    Apple centres only short display text and aligns body text to the leading edge (Notes, Translate,
-   Dictionary). "A few" is two rendered lines (see the amendment above). A short answer under a leading
-   paragraph follows its left edge, so the card never mixes axes that way. A short centred question over a long leading answer is fine: it reads like a Dictionary headword
-   over its definition.
+   Dictionary). "A few" is two rendered lines (see the amendment above). Each side picks its own axis: a short
+   centred answer under a leading paragraph question reads as the punchline under it (user, blind A/B 2026-11-28),
+   and a short centred question over a long leading answer reads like a Dictionary headword over its definition.
 4. **The size thresholds are character counts, not measured lines.** They are deterministic and
    unit-testable, and stay the same while the text is being edited (alignment uses measured lines: see above).
    The sizes are system text styles, so Dynamic Type still scales them, and the Study cap stays at
@@ -196,6 +197,7 @@ and one long sample to `DesignSystemGalleryContent`.
 | 12 | Accessibility identifiers unchanged. VoiceOver reads the same labels as before. | UI |
 | 13 | In layouts A to D, for 1-, 2-, 3- and 5-line questions and single lines filling 74, 89, 92 and 98 % of the column, with 1-, 2- and 4-line answers, revealing doesn't change a pixel of the question, and the question's columns are the same whatever the answer. In D, under a wide question (widest line ≥ 85 %) a leading answer's ink stays within the question's (3 pt left, 6 pt right for the break space), under any other (the 1-line, the 68 % 2-line and the 74 % questions) it starts at the column's edge, wider than the question, and a centred one shares its centre (`ScreenColorTests.questionStaysPut`); a 1-line answer wider than a 2-line question stays on one line (`ScreenColorTests.centredAnswerIgnoresTheQuestionWidth`; amended 2026-11-22 per user). On device (layout D, iPhone 17 Pro): `study.front`'s frame is identical before and after reveal for wide (≥ 85 %) and narrow (under 85 %, one line or wrapped) questions with 1- and 3+-line answers, and the question's pixels don't move (`screen-sample.py compare`). | render + UI |
 | 14 | *Amends #9 and #13 (2026-11-25).* "Revealing doesn't change a pixel of the question" holds when `lift ≤ 40 pt` (1- and 2-line answers). When `lift > 40` (e.g. 4-line answers), the question is vertically centred in `study.card` before reveal (± 1 pt) and after reveal its pixels are identical to today's revealed render; its horizontal place and columns never change. Reduce Motion: no lift (as #13). | render + UI |
+| 15 | *Amends #6, #7 and #13 (2026-11-28, "Answer alignment").* Basic card, revealed, layout D, light **and** dark: the answer's alignment depends only on its own rendered lines. (a) A question of 3+ lines (leading) with a 1-line answer (mock-lengths "Which treaty, signed in 1648…" / "The Peace of Westphalia"): `study.back` is centred in `study.card` (midX within 1 pt) and does **not** start at the question's left edge. (b) The same question with a 2-line answer: `study.back` centred (midX within 1 pt), its two lines each centred. (c) The same question with a 3+-line answer: `study.back` leading, starting at `study.front`'s left edge (within 1 pt), within its width (+6 pt), as before. (d) A 1-line centred question with a 3+-line answer: `study.back` leading at the column's edge, as before. (e) The question's frame and pixels on reveal are unaffected (#13, #14). (f) Person cards unchanged (014d). Unit: `answerAlignment`'s rule is `.center` for a 1-2-line answer under a 3+-line question, `.leading` for 3+ lines under any question (`StudyTextLayoutTests`). | unit + render + UI |
 
 Mock data: add `LA_CARTE_API=mock-lengths` (`InMemoryAPIClient`, English sample cards). It is the existing
 deck with these four cards first, in this order:
@@ -211,6 +213,34 @@ Design renders (mock layout via `ImageRenderer`, light, 402 × 874 pt). Top row 
 The columns are short / medium / long / very long / short question + long answer / ~470 chars:
 - `docs/design/renders/017/sheet-back.png` (revealed)
 - `docs/design/renders/017/sheet-front.png` (before reveal)
+
+## Answer alignment (design note, per user 2026-11-28)
+User, after a blind A/B of real `StudyView` renders (light + dark, five revealed basic cards): "I prefer A.png
+answered centered even if question was left". A was this rule; B was the rule above it (answer forced leading under a
+leading question).
+
+**Rule** (basic cards; person cards keep 014d, always centred):
+- `answerAlignment = backMeasure.isMultiline ? .leading : .center`. The question's alignment no longer enters it.
+- "Multiline" is the existing probe, unchanged: the answer's saved text laid out in the card's column at the
+  current Dynamic Type size, full height vs. the same text cut to `lineLimit(2)`; taller than the two-line copy by
+  more than 1 pt = 3+ lines = leading. So **1-2 rendered lines: centred; 3+: leading**, whatever the question.
+- The question's rule is unchanged (`frontMeasure.isMultiline ? .leading : .center`).
+- Everything else follows from the existing layout D rules, unchanged: a centred answer always keeps the full
+  column, centred on `study.card` (never held to the question's width); a leading answer under a wide question
+  (widest line ≥ 85 % of the column) takes the question's width and left edge; under a narrow one, the column's
+  edge. The centred answer's edit field spans the column (#10). The reveal lift (#14) and the spacing between the
+  two sides (`Theme.Spacing.m`) are unchanged.
+- Code: one line in `StudyView.answerAlignment` (drop `promptAlignment == .leading ||`) and its doc comment. No new
+  token, no state.
+
+Seen in A (light and dark): long question (leading) + "Mitochondria", "The Peace of Westphalia", and a 2-line "To
+feel down, to have the blues, to be in low spirits for a while": answer centred. Long question + 5-line answer:
+both leading, answer at the question's left edge. "Speed of light" (centred) + 4-line answer: answer leading at the
+column's edge.
+
+*Dropped:* the later 3-option balance experiment (branch `design-lead/answer-balance-exp`: separated spacing,
+shared edge, centred axis with an 85 % measure and a bigger answer font) is superseded by this decision and won't
+ship.
 
 ## TCA shape / API
 No state, action or API change. The view changes are in `StudyView` (`prompt`, `answer`, `side`, `field`,
